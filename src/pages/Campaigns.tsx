@@ -1,11 +1,12 @@
-import { useState } from 'react';
+ import { useState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { mockCampaigns } from '@/data/mockData';
-import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3 } from 'lucide-react';
+ import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { CampaignStatus, CampaignType, ChannelType } from '@/types';
+ import { CampaignBuilder } from '@/components/campaigns/CampaignBuilder';
+ import type { Campaign, CampaignStatus, CampaignType, ChannelType } from '@/types';
 
 const statusColors: Record<CampaignStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -34,12 +35,55 @@ const channelIcons: Record<ChannelType, React.ReactNode> = {
 const Campaigns = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<CampaignStatus | 'all'>('all');
+   const [builderOpen, setBuilderOpen] = useState(false);
+   const [editingCampaign, setEditingCampaign] = useState<Campaign | undefined>(undefined);
+   const [campaigns, setCampaigns] = useState(mockCampaigns);
 
-  const filteredCampaigns = mockCampaigns.filter((campaign) => {
+   const filteredCampaigns = useMemo(() => campaigns.filter((campaign) => {
     const matchesSearch = campaign.name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFilter = filter === 'all' || campaign.status === filter;
     return matchesSearch && matchesFilter;
-  });
+   }), [campaigns, searchQuery, filter]);
+ 
+   const handleNewCampaign = () => {
+     setEditingCampaign(undefined);
+     setBuilderOpen(true);
+   };
+ 
+   const handleEditCampaign = (campaign: Campaign) => {
+     setEditingCampaign(campaign);
+     setBuilderOpen(true);
+   };
+ 
+   const handleSaveCampaign = (campaignData: Omit<Campaign, 'id' | 'createdAt' | 'updatedAt' | 'enrolledCount' | 'responseRate'>) => {
+     if (editingCampaign) {
+       // Update existing
+       setCampaigns(campaigns.map((c) =>
+         c.id === editingCampaign.id
+           ? { ...c, ...campaignData, updatedAt: new Date() }
+           : c
+       ));
+     } else {
+       // Create new
+       const newCampaign: Campaign = {
+         ...campaignData,
+         id: `campaign-${Date.now()}`,
+         enrolledCount: 0,
+         responseRate: 0,
+         createdAt: new Date(),
+         updatedAt: new Date(),
+       };
+       setCampaigns([newCampaign, ...campaigns]);
+     }
+   };
+ 
+   const toggleCampaignStatus = (campaign: Campaign) => {
+     setCampaigns(campaigns.map((c) =>
+       c.id === campaign.id
+         ? { ...c, status: c.status === 'active' ? 'paused' : 'active', updatedAt: new Date() }
+         : c
+     ));
+   };
 
   return (
     <MainLayout>
@@ -47,7 +91,7 @@ const Campaigns = () => {
         title="Campaigns" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
-          <Button variant="gold">
+           <Button variant="gold" onClick={handleNewCampaign}>
             <Plus className="h-4 w-4" />
             New Campaign
           </Button>
@@ -100,12 +144,39 @@ const Campaigns = () => {
                   <span className={cn('stage-badge border', statusColors[campaign.status])}>
                     {campaign.status}
                   </span>
-                  {campaign.status === 'active' ? (
-                    <Button size="icon" variant="ghost" className="h-8 w-8">
+                   <Button
+                     size="icon"
+                     variant="ghost"
+                     className="h-8 w-8"
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       handleEditCampaign(campaign);
+                     }}
+                   >
+                     <Pencil className="h-4 w-4" />
+                   </Button>
+                   {campaign.status === 'active' ? (
+                     <Button
+                       size="icon"
+                       variant="ghost"
+                       className="h-8 w-8"
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         toggleCampaignStatus(campaign);
+                       }}
+                     >
                       <Pause className="h-4 w-4" />
                     </Button>
                   ) : (
-                    <Button size="icon" variant="ghost" className="h-8 w-8">
+                     <Button
+                       size="icon"
+                       variant="ghost"
+                       className="h-8 w-8"
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         toggleCampaignStatus(campaign);
+                       }}
+                     >
                       <Play className="h-4 w-4" />
                     </Button>
                   )}
@@ -148,6 +219,14 @@ const Campaigns = () => {
           ))}
         </div>
       </div>
+
+       {/* Campaign Builder Dialog */}
+       <CampaignBuilder
+         open={builderOpen}
+         onOpenChange={setBuilderOpen}
+         campaign={editingCampaign}
+         onSave={handleSaveCampaign}
+       />
     </MainLayout>
   );
 };
