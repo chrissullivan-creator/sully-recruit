@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ const stageColors: Record<CandidateStage, string> = {
 };
 
 const Candidates = () => {
+  const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -115,7 +117,7 @@ const Candidates = () => {
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredCandidates.map((candidate) => (
-                  <tr key={candidate.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={candidate.id} className="hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
