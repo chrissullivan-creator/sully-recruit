@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { mockCandidates } from '@/data/mockData';
 import { PipelineColumn, candidateStageColors } from './PipelineColumn';
 import { CandidateCard } from './CandidateCard';
@@ -12,6 +13,7 @@ const stages: { key: CandidateStage; label: string }[] = [
 ];
 
 export function CandidatePipeline() {
+  const navigate = useNavigate();
   const getCandidatesByStage = (stage: CandidateStage) => 
     mockCandidates.filter((candidate) => candidate.stage === stage);
 
@@ -26,7 +28,9 @@ export function CandidatePipeline() {
             count={candidates.length}
             items={candidates}
             stageColor={candidateStageColors[stage.key]}
-            renderItem={(candidate) => <CandidateCard candidate={candidate} />}
+            renderItem={(candidate) => (
+              <CandidateCard candidate={candidate} onClick={() => navigate(`/candidates/${candidate.id}`)} />
+            )}
           />
         );
       })}
