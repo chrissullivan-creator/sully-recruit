@@ -1,5 +1,6 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard,
   Users,
@@ -10,6 +11,7 @@ import {
   Settings,
   Target,
   Phone,
+  LogOut,
 } from 'lucide-react';
 
 const navigation = [
