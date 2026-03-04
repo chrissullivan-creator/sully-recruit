@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Jobs from "./pages/Jobs";
 import Candidates from "./pages/Candidates";
+import CandidateDetail from "./pages/CandidateDetail";
 import Companies from "./pages/Companies";
 import Contacts from "./pages/Contacts";
 import Campaigns from "./pages/Campaigns";
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/leads" element={<Leads />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/candidates" element={<Candidates />} />
+          <Route path="/candidates/:id" element={<CandidateDetail />} />
           <Route path="/companies" element={<Companies />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/campaigns" element={<Campaigns />} />
