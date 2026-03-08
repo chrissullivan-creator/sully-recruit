@@ -123,9 +123,9 @@ const Settings = () => {
             setUnipileConfig((prev) => ({ ...prev, ...cfg }));
             setUnipileActive(row.is_active);
             break;
-          case 'openai':
-            setOpenaiConfig((prev) => ({ ...prev, ...cfg }));
-            setOpenaiActive(row.is_active);
+          case 'ringcentral':
+            setRingcentralConfig((prev) => ({ ...prev, ...cfg }));
+            setRingcentralActive(row.is_active);
             break;
           case 'email_signature':
             setSignatureConfig((prev) => ({ ...prev, ...cfg }));
