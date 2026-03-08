@@ -80,7 +80,7 @@ const SequenceDetail = () => {
   const [saving, setSaving] = useState(false);
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
-
+  const [executions, setExecutions] = useState<any[]>([]);
   // Editable state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
