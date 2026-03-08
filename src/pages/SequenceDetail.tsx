@@ -105,9 +105,10 @@ const SequenceDetail = () => {
   const loadSequence = async () => {
     setLoading(true);
     try {
-      const [seqRes, enrollRes] = await Promise.all([
+      const [seqRes, enrollRes, execRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
         supabase.from('sequence_enrollments').select('*, candidates(first_name, last_name, full_name, email, current_title), contacts(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
+        supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
 
       if (seqRes.error) throw seqRes.error;
