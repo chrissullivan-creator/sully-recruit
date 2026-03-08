@@ -100,7 +100,7 @@ const Leads = () => {
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
             </Button>
-            <Button variant="gold">
+            <Button variant="gold" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
               Add Prospect
             </Button>
