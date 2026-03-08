@@ -355,9 +355,9 @@ export const mockCampaigns: Campaign[] = [
     type: 'candidate_outreach',
     status: 'active',
     steps: [
-      { id: 'step-1', order: 1, channel: 'linkedin_connection', content: 'Connection request with personalized note', delayDays: 0, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
-      { id: 'step-2', order: 2, channel: 'linkedin_message', content: 'Initial outreach about opportunities', delayDays: 2, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: true, minHoursAfterConnection: 4 },
-      { id: 'step-3', order: 3, channel: 'email', subject: 'Quick question', content: 'Follow-up email', delayDays: 3, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
+      { id: 'step-1', order: 1, channel: 'linkedin_connection', content: 'Connection request with personalized note', delayDays: 0, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4, isReply: false, useSignature: false },
+      { id: 'step-2', order: 2, channel: 'linkedin_message', content: 'Initial outreach about opportunities', delayDays: 2, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: true, minHoursAfterConnection: 4, isReply: false, useSignature: false },
+      { id: 'step-3', order: 3, channel: 'email', subject: 'Quick question', content: 'Follow-up email', delayDays: 3, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4, isReply: false, useSignature: true },
     ],
     enrolledCount: 45,
     responseRate: 0.32,
