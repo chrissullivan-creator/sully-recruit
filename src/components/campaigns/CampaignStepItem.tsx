@@ -47,6 +47,9 @@ interface CampaignStepItemProps {
 const isLinkedInChannel = (ch: ChannelType) =>
   ['linkedin_recruiter', 'sales_nav', 'linkedin_message', 'linkedin_connection'].includes(ch);
 
+const needsSubject = (ch: ChannelType) =>
+  ['linkedin_recruiter', 'sales_nav', 'email'].includes(ch);
+
 export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: CampaignStepItemProps) => {
   const {
     attributes,
