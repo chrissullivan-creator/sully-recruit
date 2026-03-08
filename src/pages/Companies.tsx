@@ -26,7 +26,7 @@ const Companies = () => {
         title="Companies" 
         description="Manage your client companies and target accounts."
         actions={
-          <Button variant="gold">
+          <Button variant="gold" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" />
             Add Company
           </Button>
