@@ -1,1 +1,4 @@
 project_id = "xlobevmhzimxjtpiontf"
+
+[functions.suggest-campaign-steps]
+verify_jwt = false
