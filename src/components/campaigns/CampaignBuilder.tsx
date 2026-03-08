@@ -227,6 +227,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
     setName('');
     setDescription('');
     setChannel('linkedin');
+    setStopOnReply(true);
     setSteps([]);
     onOpenChange(false);
   };
