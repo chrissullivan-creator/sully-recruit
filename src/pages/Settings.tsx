@@ -469,22 +469,22 @@ Senior Recruiter | Your Company
                       </div>
                     </div>
 
-                    {/* OpenAI / ChatGPT */}
+                    {/* RingCentral */}
                     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
                           'flex h-10 w-10 items-center justify-center rounded-lg',
-                          openaiActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
+                          ringcentralActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
-                          <Brain className="h-5 w-5" />
+                          <PhoneCall className="h-5 w-5" />
                         </div>
                         <div className="flex-1">
-                          <h3 className="text-sm font-semibold text-foreground">OpenAI / ChatGPT</h3>
+                          <h3 className="text-sm font-semibold text-foreground">RingCentral</h3>
                           <p className="text-xs text-muted-foreground">
-                            Powers Ask Joe AI assistant and sequence step generation.
+                            Send SMS, make calls, and manage communications via RingCentral.
                           </p>
                         </div>
-                        {openaiActive && (
+                        {ringcentralActive && (
                           <span className="flex items-center gap-1 text-xs text-success">
                             <Check className="h-3.5 w-3.5" /> Connected
                           </span>
@@ -492,30 +492,64 @@ Senior Recruiter | Your Company
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5 col-span-2">
-                          <Label className="text-xs">API Key</Label>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Client ID</Label>
+                          <Input
+                            placeholder="Your RingCentral Client ID"
+                            value={ringcentralConfig.client_id}
+                            onChange={(e) => setRingcentralConfig((c) => ({ ...c, client_id: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Client Secret</Label>
                           <div className="relative">
                             <Input
-                              type={showPasswords.openai_key ? 'text' : 'password'}
-                              placeholder="sk-..."
-                              value={openaiConfig.api_key}
-                              onChange={(e) => setOpenaiConfig((c) => ({ ...c, api_key: e.target.value }))}
+                              type={showPasswords.rc_secret ? 'text' : 'password'}
+                              placeholder="••••••••"
+                              value={ringcentralConfig.client_secret}
+                              onChange={(e) => setRingcentralConfig((c) => ({ ...c, client_secret: e.target.value }))}
                             />
                             <button
                               type="button"
-                              onClick={() => togglePassword('openai_key')}
+                              onClick={() => togglePassword('rc_secret')}
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                             >
-                              {showPasswords.openai_key ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              {showPasswords.rc_secret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 col-span-2">
+                          <Label className="text-xs">JWT Token</Label>
+                          <div className="relative">
+                            <Input
+                              type={showPasswords.rc_jwt ? 'text' : 'password'}
+                              placeholder="Your JWT credential token"
+                              value={ringcentralConfig.jwt_token}
+                              onChange={(e) => setRingcentralConfig((c) => ({ ...c, jwt_token: e.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => togglePassword('rc_jwt')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            >
+                              {showPasswords.rc_jwt ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                             </button>
                           </div>
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Model</Label>
+                          <Label className="text-xs">Server URL</Label>
                           <Input
-                            placeholder="gpt-4o"
-                            value={openaiConfig.model}
-                            onChange={(e) => setOpenaiConfig((c) => ({ ...c, model: e.target.value }))}
+                            placeholder="https://platform.ringcentral.com"
+                            value={ringcentralConfig.server_url}
+                            onChange={(e) => setRingcentralConfig((c) => ({ ...c, server_url: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">SMS Phone Number</Label>
+                          <Input
+                            placeholder="+15551234567"
+                            value={ringcentralConfig.phone_number}
+                            onChange={(e) => setRingcentralConfig((c) => ({ ...c, phone_number: e.target.value }))}
                           />
                         </div>
                       </div>
@@ -524,13 +558,13 @@ Senior Recruiter | Your Company
                         <Button
                           variant="gold"
                           size="sm"
-                          disabled={isSaving('openai')}
-                          onClick={() => saveIntegration('openai', openaiConfig, true)}
+                          disabled={isSaving('ringcentral')}
+                          onClick={() => saveIntegration('ringcentral', ringcentralConfig, true)}
                         >
-                          {isSaving('openai') ? (
+                          {isSaving('ringcentral') ? (
                             <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
                           ) : (
-                            'Save OpenAI Settings'
+                            'Save RingCentral Settings'
                           )}
                         </Button>
                       </div>
