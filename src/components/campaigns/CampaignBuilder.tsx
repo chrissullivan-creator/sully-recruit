@@ -14,7 +14,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus, Wand2 } from 'lucide-react';
+import { Plus, Wand2, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,6 @@ interface CampaignBuilderProps {
 
 const generateId = () => `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-// Map from CampaignStep ChannelType to DB step_type
 const channelToStepType = (channel: ChannelType): string => {
   const map: Record<ChannelType, string> = {
     linkedin_recruiter: 'linkedin_inmail',
@@ -54,7 +53,6 @@ const channelToStepType = (channel: ChannelType): string => {
   return map[channel] || channel;
 };
 
-// Map from ChannelType to DB channel value
 const channelToDbChannel = (channel: ChannelType): string => {
   if (channel.startsWith('linkedin') || channel === 'sales_nav') return 'linkedin';
   return channel;
@@ -66,6 +64,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   const [channel, setChannel] = useState('linkedin');
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const queryClient = useQueryClient();
 
   const sensors = useSensors(
@@ -112,12 +111,58 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
     );
   };
 
+  const handleAiSuggest = async () => {
+    if (!name.trim()) {
+      toast.error('Enter a campaign name first so AI can generate relevant steps.');
+      return;
+    }
+
+    setSuggesting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('suggest-campaign-steps', {
+        body: {
+          campaignName: name,
+          campaignChannel: channel,
+          campaignDescription: description,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+
+      const aiSteps: CampaignStep[] = (data?.steps ?? []).map((s: any, i: number) => ({
+        id: generateId(),
+        order: i + 1,
+        channel: (s.channel ?? 'email') as ChannelType,
+        subject: s.subject ?? undefined,
+        content: s.content ?? '',
+        delayDays: s.delayDays ?? (i === 0 ? 0 : 2),
+      }));
+
+      if (aiSteps.length === 0) {
+        toast.error('AI returned no steps. Try a more descriptive campaign name.');
+        return;
+      }
+
+      setSteps(aiSteps);
+      toast.success(`AI generated ${aiSteps.length} steps`);
+    } catch (err: any) {
+      console.error('AI suggest error:', err);
+      toast.error(err.message || 'Failed to generate steps');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
 
     try {
-      // 1. Insert sequence
       const { data: seq, error: seqError } = await supabase
         .from('sequences')
         .insert({
@@ -131,7 +176,6 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
 
       if (seqError) throw seqError;
 
-      // 2. Insert steps
       if (steps.length > 0) {
         const stepRows = steps.map((step) => ({
           sequence_id: seq.id,
@@ -175,12 +219,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
         <DialogHeader>
           <DialogTitle className="text-xl">Create New Campaign</DialogTitle>
           <DialogDescription>
-            Build your multi-channel outreach sequence. Drag steps to reorder.
+            Build your multi-channel outreach sequence. Use AI to auto-generate steps or add them manually.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden flex flex-col gap-6 py-4">
-          {/* Campaign Details */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="campaign-name">Campaign Name</Label>
@@ -218,16 +261,23 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             />
           </div>
 
-          {/* Steps Section */}
           <div className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-foreground">
                 Sequence Steps ({steps.length})
               </h3>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" disabled>
-                  <Wand2 className="h-4 w-4 mr-1" />
-                  AI Suggest
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleAiSuggest}
+                  disabled={suggesting || !name.trim()}
+                >
+                  {suggesting ? (
+                    <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating...</>
+                  ) : (
+                    <><Wand2 className="h-4 w-4 mr-1" /> AI Suggest</>
+                  )}
                 </Button>
                 <Button variant="gold-outline" size="sm" onClick={addStep}>
                   <Plus className="h-4 w-4 mr-1" />
@@ -240,11 +290,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
               {steps.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Plus className="h-8 w-8 text-muted-foreground" />
+                    <Wand2 className="h-8 w-8 text-muted-foreground" />
                   </div>
                   <p className="text-muted-foreground mb-2">No steps yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Click "Add Step" to start building your sequence
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Click "AI Suggest" to auto-generate a sequence, or add steps manually.
                   </p>
                 </div>
               ) : (

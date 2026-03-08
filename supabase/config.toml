@@ -1,1 +1,7 @@
 project_id = "xlobevmhzimxjtpiontf"
+
+[functions.suggest-campaign-steps]
+verify_jwt = false
+
+[functions.ask-joe]
+verify_jwt = false
