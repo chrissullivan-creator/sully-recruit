@@ -321,17 +321,6 @@ const SequenceDetail = () => {
                     <Input value={name} onChange={(e) => setName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Primary Channel</Label>
-                    <Select value={channel} onValueChange={setChannel}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {channelOptions.map((c) => (
-                          <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
                     <Label>Tagged Job</Label>
                     <Select value={jobId ?? 'none'} onValueChange={(v) => setJobId(v === 'none' ? null : v)}>
                       <SelectTrigger><SelectValue placeholder="No job tagged" /></SelectTrigger>
