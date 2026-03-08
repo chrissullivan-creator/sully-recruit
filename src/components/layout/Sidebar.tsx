@@ -2,15 +2,15 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Send, Settings } from 'lucide-react';
+import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings } from 'lucide-react';
 
 const navigation = [
   { name: 'Inbox', href: '/calls', icon: Inbox },
-  { name: 'Jobs', href: '/jobs', icon: Send },
+  { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Prospects', href: '/leads', icon: Target },
   { name: 'Candidates', href: '/candidates', icon: UserCheck },
   { name: 'Contacts', href: '/contacts', icon: Users },
-  { name: 'Companies', href: '/companies', icon: Megaphone },
+  { name: 'Companies', href: '/companies', icon: Building2 },
   { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
