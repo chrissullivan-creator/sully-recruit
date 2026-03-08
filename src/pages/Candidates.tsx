@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -7,22 +7,70 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Building, Play } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
+type SortDir = 'asc' | 'desc';
+
+const statusFilters = ['all', 'active', 'inactive', 'placed', 'do_not_contact'] as const;
+const statusColors: Record<string, string> = {
+  active: 'bg-success/10 text-success border-success/20',
+  inactive: 'bg-muted text-muted-foreground border-border',
+  placed: 'bg-info/10 text-info border-info/20',
+  do_not_contact: 'bg-destructive/10 text-destructive border-destructive/20',
+};
 
 const Candidates = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { data: candidates = [], isLoading } = useCandidates();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
 
-  const filteredCandidates = candidates.filter((c) =>
-    (c.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCandidates = useMemo(() => {
+    let list = candidates.filter((c) => {
+      const matchesSearch =
+        (c.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+
+    list.sort((a, b) => {
+      let aVal = '', bVal = '';
+      switch (sortField) {
+        case 'name': aVal = a.full_name ?? ''; bVal = b.full_name ?? ''; break;
+        case 'title': aVal = a.current_title ?? ''; bVal = b.current_title ?? ''; break;
+        case 'company': aVal = a.current_company ?? ''; bVal = b.current_company ?? ''; break;
+        case 'status': aVal = a.status; bVal = b.status; break;
+        case 'created': aVal = a.created_at; bVal = b.created_at; break;
+      }
+      const cmp = aVal.localeCompare(bVal);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return list;
+  }, [candidates, searchQuery, statusFilter, sortField, sortDir]);
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
+  };
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -78,7 +126,7 @@ const Candidates = () => {
       />
       
       <div className="p-8">
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
@@ -89,6 +137,15 @@ const Candidates = () => {
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
+
+          <div className="flex items-center gap-1.5">
+            {statusFilters.map((s) => (
+              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="capitalize text-xs">
+                {s === 'all' ? 'All' : s.replace('_', ' ')}
+              </Button>
+            ))}
+          </div>
+
           {selectedIds.length > 0 && (
             <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}>
               <Play className="h-3.5 w-3.5" />
@@ -112,10 +169,18 @@ const Candidates = () => {
                       onCheckedChange={toggleAll}
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                    <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
+                    <span className="flex items-center gap-1">Title <SortIcon field="title" /></span>
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
+                    <span className="flex items-center gap-1">Company <SortIcon field="company" /></span>
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
+                    <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Email</th>
                 </tr>
               </thead>
@@ -146,13 +211,16 @@ const Candidates = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
-                      <span className="stage-badge bg-info/10 text-info border border-info/20">
-                        {candidate.status}
+                      <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-info/10 text-info border-info/20')}>
+                        {candidate.status.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.email ?? '-'}</td>
                   </tr>
                 ))}
+                {filteredCandidates.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
