@@ -31,6 +31,7 @@ const Candidates = () => {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
