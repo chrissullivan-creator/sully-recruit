@@ -370,9 +370,9 @@ export const mockCampaigns: Campaign[] = [
     type: 'account_based',
     status: 'active',
     steps: [
-      { id: 'step-4', order: 1, channel: 'linkedin_recruiter', content: 'InMail to decision makers', delayDays: 0, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
-      { id: 'step-5', order: 2, channel: 'email', subject: 'Partnership opportunity', content: 'Formal introduction', delayDays: 2, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
-      { id: 'step-6', order: 3, channel: 'phone', content: 'Warm call follow-up', delayDays: 4, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
+      { id: 'step-4', order: 1, channel: 'linkedin_recruiter', content: 'InMail to decision makers', delayDays: 0, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4, isReply: false, useSignature: false },
+      { id: 'step-5', order: 2, channel: 'email', subject: 'Partnership opportunity', content: 'Formal introduction', delayDays: 2, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4, isReply: false, useSignature: true },
+      { id: 'step-6', order: 3, channel: 'phone', content: 'Warm call follow-up', delayDays: 4, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4, isReply: false, useSignature: false },
     ],
     enrolledCount: 20,
     responseRate: 0.25,
