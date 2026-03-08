@@ -253,7 +253,7 @@ const Calls = () => {
         .order('created_at', { ascending: false })
         .limit(100);
       if (error) throw error;
-      return (data ?? []) as CallLog[];
+      return (data ?? []) as unknown as CallLog[];
     },
   });
 
