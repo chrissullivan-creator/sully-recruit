@@ -385,8 +385,8 @@ export const mockCampaigns: Campaign[] = [
     type: 'opportunity_based',
     status: 'active',
     steps: [
-      { id: 'step-7', order: 1, channel: 'linkedin_recruiter', content: 'Targeted outreach for VP role', delayDays: 0 },
-      { id: 'step-8', order: 2, channel: 'email', subject: 'VP Engineering at TechCorp', content: 'Detailed job pitch', delayDays: 1 },
+      { id: 'step-7', order: 1, channel: 'linkedin_recruiter', content: 'Targeted outreach for VP role', delayDays: 0, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
+      { id: 'step-8', order: 2, channel: 'email', subject: 'VP Engineering at TechCorp', content: 'Detailed job pitch', delayDays: 1, delayHours: 0, sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false, minHoursAfterConnection: 4 },
     ],
     enrolledCount: 30,
     responseRate: 0.40,
