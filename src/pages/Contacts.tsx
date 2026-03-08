@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 const Contacts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [importOpen, setImportOpen] = useState(false);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
