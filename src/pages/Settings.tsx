@@ -75,6 +75,8 @@ const Settings = () => {
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
     signature_html: '',
+    signature_text: '',
+    signature_mode: 'text', // 'text' or 'html'
   });
 
   // LinkedIn safety limits
@@ -176,7 +178,8 @@ const Settings = () => {
   };
 
   const loadSignatureTemplate = () => {
-    const template = `<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">
+    if (signatureConfig.signature_mode === 'html') {
+      const template = `<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">
   <tr>
     <td style="padding-right: 16px; border-right: 2px solid #b8860b;">
       <strong style="font-size: 15px; color: #1a3a1a;">Your Name</strong><br/>
@@ -190,7 +193,29 @@ const Settings = () => {
     </td>
   </tr>
 </table>`;
-    setSignatureConfig({ signature_html: template });
+      setSignatureConfig(c => ({ ...c, signature_html: template }));
+    } else {
+      const template = `Your Name
+Senior Recruiter | Your Company
+📞 (555) 123-4567
+✉️ you@company.com
+🔗 linkedin.com/in/yourprofile`;
+      setSignatureConfig(c => ({ ...c, signature_text: template }));
+    }
+  };
+
+  /** Convert plain text signature to simple HTML for sending */
+  const textToHtml = (text: string): string => {
+    return text
+      .split('\n')
+      .map(line => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+      .join('<br/>');
+  };
+
+  /** Get the final HTML signature (from either mode) for saving */
+  const getFinalSignatureHtml = (): string => {
+    if (signatureConfig.signature_mode === 'html') return signatureConfig.signature_html;
+    return textToHtml(signatureConfig.signature_text);
   };
 
   const tabs = [
@@ -521,30 +546,67 @@ const Settings = () => {
                     </div>
 
                     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      {/* Mode toggle */}
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs font-medium">Signature (HTML supported)</Label>
+                        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-1">
+                          <button
+                            onClick={() => setSignatureConfig(c => ({ ...c, signature_mode: 'text' }))}
+                            className={cn(
+                              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                              signatureConfig.signature_mode === 'text'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            Plain Text
+                          </button>
+                          <button
+                            onClick={() => setSignatureConfig(c => ({ ...c, signature_mode: 'html' }))}
+                            className={cn(
+                              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                              signatureConfig.signature_mode === 'html'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            HTML
+                          </button>
+                        </div>
                         <Button variant="ghost" size="sm" onClick={loadSignatureTemplate}>
                           <PenLine className="h-3.5 w-3.5 mr-1" />
-                          Load recruiter template
+                          Load template
                         </Button>
                       </div>
 
-                      <Textarea
-                        rows={10}
-                        placeholder={`<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">\n  <tr>\n    <td>\n      <strong>Your Name</strong><br/>\n      Senior Recruiter | Your Company<br/>\n      📞 (555) 123-4567<br/>\n      <a href="https://linkedin.com/in/you">LinkedIn</a>\n    </td>\n  </tr>\n</table>`}
-                        value={signatureConfig.signature_html}
-                        onChange={(e) =>
-                          setSignatureConfig((c) => ({ ...c, signature_html: e.target.value }))
-                        }
-                        className="font-mono text-xs"
-                      />
+                      {signatureConfig.signature_mode === 'html' ? (
+                        <Textarea
+                          rows={10}
+                          placeholder={`<table cellpadding="0" cellspacing="0">\n  <tr>\n    <td>\n      <strong>Your Name</strong><br/>\n      Senior Recruiter | Your Company\n    </td>\n  </tr>\n</table>`}
+                          value={signatureConfig.signature_html}
+                          onChange={(e) =>
+                            setSignatureConfig((c) => ({ ...c, signature_html: e.target.value }))
+                          }
+                          className="font-mono text-xs"
+                        />
+                      ) : (
+                        <Textarea
+                          rows={8}
+                          placeholder={`Your Name\nSenior Recruiter | Your Company\n📞 (555) 123-4567\n✉️ you@company.com\n🔗 linkedin.com/in/yourprofile`}
+                          value={signatureConfig.signature_text}
+                          onChange={(e) =>
+                            setSignatureConfig((c) => ({ ...c, signature_text: e.target.value }))
+                          }
+                          className="text-sm"
+                        />
+                      )}
 
-                      {signatureConfig.signature_html && (
+                      {/* Preview */}
+                      {(signatureConfig.signature_mode === 'html' ? signatureConfig.signature_html : signatureConfig.signature_text) && (
                         <div className="space-y-1.5">
                           <Label className="text-xs">Preview</Label>
                           <div
-                            className="rounded-md border border-border bg-background p-4 text-sm text-foreground prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: signatureConfig.signature_html }}
+                            className="rounded-md border border-border bg-background p-4 text-sm text-foreground"
+                            dangerouslySetInnerHTML={{ __html: getFinalSignatureHtml() }}
                           />
                         </div>
                       )}
@@ -558,7 +620,9 @@ const Settings = () => {
                               <li>Include your direct phone number — candidates prefer real people</li>
                               <li>Add your LinkedIn profile link for credibility</li>
                               <li>Keep it clean — 4-5 lines max</li>
-                              <li>Add your company logo as a hosted image URL for brand trust</li>
+                              {signatureConfig.signature_mode === 'html' && (
+                                <li>Add your company logo as a hosted image URL for brand trust</li>
+                              )}
                               <li>Include a calendar link (e.g. Calendly) to reduce friction</li>
                             </ul>
                           </div>
@@ -570,7 +634,13 @@ const Settings = () => {
                           variant="gold"
                           size="sm"
                           disabled={isSaving('email_signature')}
-                          onClick={() => saveIntegration('email_signature', signatureConfig, true)}
+                          onClick={() => {
+                            const configToSave = {
+                              ...signatureConfig,
+                              signature_html: getFinalSignatureHtml(),
+                            };
+                            saveIntegration('email_signature', configToSave, true);
+                          }}
                         >
                           {isSaving('email_signature') ? (
                             <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
