@@ -65,12 +65,15 @@ const Settings = () => {
   });
   const [unipileActive, setUnipileActive] = useState(false);
 
-  // OpenAI state
-  const [openaiConfig, setOpenaiConfig] = useState<IntegrationConfig>({
-    api_key: '',
-    model: 'gpt-4o',
+  // RingCentral state
+  const [ringcentralConfig, setRingcentralConfig] = useState<IntegrationConfig>({
+    client_id: '',
+    client_secret: '',
+    jwt_token: '',
+    server_url: 'https://platform.ringcentral.com',
+    phone_number: '',
   });
-  const [openaiActive, setOpenaiActive] = useState(false);
+  const [ringcentralActive, setRingcentralActive] = useState(false);
 
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
