@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      call_logs: {
+        Row: {
+          audio_url: string | null
+          created_at: string
+          direction: string
+          duration_seconds: number | null
+          ended_at: string | null
+          external_call_id: string | null
+          id: string
+          linked_entity_id: string | null
+          linked_entity_name: string | null
+          linked_entity_type: string | null
+          notes: string | null
+          owner_id: string | null
+          phone_number: string
+          started_at: string
+          status: string
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          audio_url?: string | null
+          created_at?: string
+          direction?: string
+          duration_seconds?: number | null
+          ended_at?: string | null
+          external_call_id?: string | null
+          id?: string
+          linked_entity_id?: string | null
+          linked_entity_name?: string | null
+          linked_entity_type?: string | null
+          notes?: string | null
+          owner_id?: string | null
+          phone_number: string
+          started_at?: string
+          status?: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          audio_url?: string | null
+          created_at?: string
+          direction?: string
+          duration_seconds?: number | null
+          ended_at?: string | null
+          external_call_id?: string | null
+          id?: string
+          linked_entity_id?: string | null
+          linked_entity_name?: string | null
+          linked_entity_type?: string | null
+          notes?: string | null
+          owner_id?: string | null
+          phone_number?: string
+          started_at?: string
+          status?: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       candidate_channels: {
         Row: {
           account_id: string | null
@@ -1290,6 +1350,14 @@ export type Database = {
       }
     }
     Functions: {
+      complete_call_with_notes: {
+        Args: { p_call_id: string; p_notes: string; p_summary?: string }
+        Returns: Json
+      }
+      match_phone_and_link_call: {
+        Args: { p_call_id: string; p_phone_number: string }
+        Returns: Json
+      }
       promote_prospect_to_candidate: {
         Args: { p_prospect_id: string }
         Returns: {
