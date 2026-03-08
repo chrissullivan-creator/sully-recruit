@@ -89,6 +89,10 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   };
 
   const addStep = () => {
+    // Determine if this is a follow-up email (reply to previous email)
+    const prevEmailStep = [...steps].reverse().find(s => s.channel === 'email');
+    const isFollowUpEmail = !!prevEmailStep;
+
     const newStep: CampaignStep = {
       id: generateId(),
       order: steps.length + 1,
@@ -100,6 +104,8 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
       sendWindowEnd: 23,
       waitForConnection: false,
       minHoursAfterConnection: 4,
+      isReply: isFollowUpEmail,
+      useSignature: true,
     };
     setSteps([...steps, newStep]);
   };
@@ -141,19 +147,30 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
         return;
       }
 
-      const aiSteps: CampaignStep[] = (data?.steps ?? []).map((s: any, i: number) => ({
-        id: generateId(),
-        order: i + 1,
-        channel: (s.channel ?? 'email') as ChannelType,
-        subject: s.subject ?? undefined,
-        content: s.content ?? '',
-        delayDays: s.delayDays ?? (i === 0 ? 0 : 2),
-        delayHours: 0,
-        sendWindowStart: 6,
-        sendWindowEnd: 23,
-        waitForConnection: false,
-        minHoursAfterConnection: 4,
-      }));
+      // Track previous email for reply detection
+      let seenFirstEmail = false;
+      const aiSteps: CampaignStep[] = (data?.steps ?? []).map((s: any, i: number) => {
+        const ch = (s.channel ?? 'email') as ChannelType;
+        const isEmail = ch === 'email';
+        const isReply = isEmail && seenFirstEmail && !s.subject;
+        if (isEmail) seenFirstEmail = true;
+
+        return {
+          id: generateId(),
+          order: i + 1,
+          channel: ch,
+          subject: s.subject ?? undefined,
+          content: s.content ?? '',
+          delayDays: s.delayDays ?? (i === 0 ? 0 : 2),
+          delayHours: 0,
+          sendWindowStart: 6,
+          sendWindowEnd: 23,
+          waitForConnection: false,
+          minHoursAfterConnection: 4,
+          isReply,
+          useSignature: isEmail,
+        };
+      });
 
       if (aiSteps.length === 0) {
         toast.error('AI returned no steps. Try a more descriptive campaign name.');
@@ -344,6 +361,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
                           key={step.id}
                           step={step}
                           index={index}
+                          allSteps={steps}
                           onUpdate={updateStep}
                           onDelete={deleteStep}
                         />
