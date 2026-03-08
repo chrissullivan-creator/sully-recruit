@@ -168,34 +168,32 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // ── 5. Check daily email cap (180/day per enrolled_by user) ─────
-      if (step.step_type === "email" || step.channel === "email") {
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
+      // ── 5. Check daily sequence cap (40/day) ───────────────────────
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
 
-        const { count: todayCount } = await supabase
-          .from("sequence_step_executions")
-          .select("id", { count: "exact", head: true })
-          .gte("executed_at", todayStart.toISOString())
-          .eq("status", "sent");
+      const { count: todayCount } = await supabase
+        .from("sequence_step_executions")
+        .select("id", { count: "exact", head: true })
+        .gte("executed_at", todayStart.toISOString())
+        .in("status", ["sent", "scheduled"]);
 
-        if ((todayCount ?? 0) >= 180) {
-          const tomorrow = new Date(now);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+      if ((todayCount ?? 0) >= 40) {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
 
-          await supabase
-            .from("sequence_enrollments")
-            .update({ next_step_at: tomorrow.toISOString() } as any)
-            .eq("id", enrollment.id);
+        await supabase
+          .from("sequence_enrollments")
+          .update({ next_step_at: tomorrow.toISOString() } as any)
+          .eq("id", enrollment.id);
 
-          skipped++;
-          continue;
-        }
+        skipped++;
+        continue;
       }
 
-      // ── 6. Random delay (3–9 minutes) for human-like sending ────────
-      const randomDelayMinutes = 3 + Math.floor(Math.random() * 7);
+      // ── 6. Random delay (2–9 minutes) for human-like sending ────────
+      const randomDelayMinutes = 2 + Math.floor(Math.random() * 8);
       const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
 
       // ── 7. Create execution record ──────────────────────────────────
