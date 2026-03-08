@@ -290,7 +290,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
               {steps.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Wand2 className="h-8 w-8 text-muted-foreground" />
+                    <Martini className="h-8 w-8 text-muted-foreground" />
                   </div>
                   <p className="text-muted-foreground mb-2">No steps yet</p>
                   <p className="text-sm text-muted-foreground mb-4">
