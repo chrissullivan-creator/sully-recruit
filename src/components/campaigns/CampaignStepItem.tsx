@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine, Send } from 'lucide-react';
+import { StepAttachments, type Attachment } from './StepAttachments';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
