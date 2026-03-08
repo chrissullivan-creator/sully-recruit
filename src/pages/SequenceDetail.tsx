@@ -138,6 +138,7 @@ const SequenceDetail = () => {
       });
       setSteps(loadedSteps);
       setEnrollments(enrollRes.data ?? []);
+      setExecutions(execRes.data ?? []);
     } catch (err: any) {
       toast.error('Failed to load sequence');
       console.error(err);
