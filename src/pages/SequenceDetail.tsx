@@ -299,25 +299,12 @@ const SequenceDetail = () => {
           <ScrollArea className="flex-1">
             {/* General / Stats */}
             <TabsContent value="general" className="px-8 py-6 mt-0 space-y-6">
-              {/* Stats cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-foreground">{enrollments.length}</p>
-                  <p className="text-xs text-muted-foreground">Total Enrolled</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-success">{activeEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Active</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-info">{completedEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Completed</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-destructive">{stoppedEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Stopped</p>
-                </div>
-              </div>
+              {/* Analytics */}
+              <SequenceAnalytics
+                steps={steps.map(s => ({ id: s.id, order: s.order, channel: s.channel }))}
+                enrollments={enrollments.map(e => ({ id: e.id, status: e.status, current_step_order: e.current_step_order }))}
+                executions={executions}
+              />
 
               {/* Edit settings */}
               <div className="space-y-4">
