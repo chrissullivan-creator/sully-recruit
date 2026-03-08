@@ -328,6 +328,18 @@ const SequenceDetail = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <Label>Tagged Job</Label>
+                    <Select value={jobId ?? 'none'} onValueChange={(v) => setJobId(v === 'none' ? null : v)}>
+                      <SelectTrigger><SelectValue placeholder="No job tagged" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No job tagged</SelectItem>
+                        {jobs.map((j: any) => (
+                          <SelectItem key={j.id} value={j.id}>{j.title}{j.company_name ? ` — ${j.company_name}` : ''}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
