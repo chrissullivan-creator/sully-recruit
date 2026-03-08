@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import logo from '@/assets/emerald_gold.png';
 import {
   LayoutDashboard,
   Users,
@@ -46,12 +47,10 @@ export function Sidebar() {
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 px-6 border-b border-sidebar-border">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent">
-          <span className="text-lg font-bold text-accent-foreground">S</span>
-        </div>
+        <img src={logo} alt="Emerald Recruiting Group" className="h-9 w-9 object-contain" />
         <div>
-          <h1 className="text-lg font-semibold text-sidebar-foreground">Sully Recruit</h1>
-          <p className="text-xs text-muted-foreground">Recruiting CRM</p>
+          <h1 className="text-lg font-semibold text-sidebar-foreground">Emerald</h1>
+          <p className="text-xs text-muted-foreground">Recruiting Group</p>
         </div>
       </div>
 
