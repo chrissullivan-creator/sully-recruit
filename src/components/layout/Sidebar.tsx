@@ -58,6 +58,7 @@ export function Sidebar() {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
               >
+                <item.icon className="h-4 w-4" />
                 {item.name}
               {isActive && (
                 <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
