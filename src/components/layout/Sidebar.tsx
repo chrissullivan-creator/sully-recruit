@@ -2,29 +2,18 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import logo from '@/assets/emerald_gold.png';
-import {
-  LayoutDashboard,
-  Users,
-  Briefcase,
-  Building2,
-  UserCheck,
-  Mail,
-  Settings,
-  Target,
-  Phone,
-  LogOut,
-} from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Leads', href: '/leads', icon: Target },
-  { name: 'Jobs', href: '/jobs', icon: Briefcase },
-  { name: 'Candidates', href: '/candidates', icon: UserCheck },
-  { name: 'Companies', href: '/companies', icon: Building2 },
-  { name: 'Contacts', href: '/contacts', icon: Users },
-  { name: 'Campaigns', href: '/campaigns', icon: Mail },
-  { name: 'Calls', href: '/calls', icon: Phone },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Dashboard', href: '/' },
+  { name: 'Leads', href: '/leads' },
+  { name: 'Jobs', href: '/jobs' },
+  { name: 'Candidates', href: '/candidates' },
+  { name: 'Companies', href: '/companies' },
+  { name: 'Contacts', href: '/contacts' },
+  { name: 'Campaigns', href: '/campaigns' },
+  { name: 'Calls', href: '/calls' },
+  { name: 'Settings', href: '/settings' },
 ];
 
 export function Sidebar() {
