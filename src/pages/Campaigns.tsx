@@ -82,16 +82,11 @@ const Campaigns = () => {
         title="Sequences" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
-          <Button variant="gold" onClick={() => { setEditingSequenceId(null); setBuilderOpen(true); }}>
-            <Plus className="h-4 w-4" />
+          <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             New Sequence
           </Button>
         }
-      />
-      <CampaignBuilder
-        open={builderOpen}
-        onOpenChange={handleBuilderClose}
-        editSequenceId={editingSequenceId}
       />
       
       <div className="p-8">
