@@ -4,8 +4,9 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
@@ -27,6 +28,7 @@ const Leads = () => {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { data: prospects = [], isLoading } = useProspects();
 
   const filteredProspects = useMemo(() => {
@@ -91,10 +93,16 @@ const Leads = () => {
         title="Prospects" 
         description="Manage your pipeline of prospects."
         actions={
-          <Button variant="gold">
-            <Plus className="h-4 w-4" />
-            Add Prospect
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
+            <Button variant="gold">
+              <Plus className="h-4 w-4" />
+              Add Prospect
+            </Button>
+          </div>
         }
       />
       
@@ -212,6 +220,7 @@ const Leads = () => {
         prospectIds={selectedIds}
         candidateNames={selectedNames}
       />
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
     </MainLayout>
   );
 };

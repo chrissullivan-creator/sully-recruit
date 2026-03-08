@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
+import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { useContacts } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Phone, Mail, Linkedin } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Contacts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [importOpen, setImportOpen] = useState(false);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
@@ -26,10 +28,16 @@ const Contacts = () => {
         title="Contacts" 
         description="Your network of hiring managers, HR leaders, and decision makers."
         actions={
-          <Button variant="gold">
-            <Plus className="h-4 w-4" />
-            Add Contact
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
+            <Button variant="gold">
+              <Plus className="h-4 w-4" />
+              Add Contact
+            </Button>
+          </div>
         }
       />
       
@@ -123,6 +131,7 @@ const Contacts = () => {
           </div>
         )}
       </div>
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
     </MainLayout>
   );
 };

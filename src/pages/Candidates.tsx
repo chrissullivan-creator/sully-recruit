@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
@@ -28,6 +29,7 @@ const Candidates = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [importOpen, setImportOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
@@ -117,6 +119,10 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
             <Button variant="gold">
               <Plus className="h-4 w-4" />
               Add Candidate
@@ -233,6 +239,7 @@ const Candidates = () => {
         candidateIds={selectedIds}
         candidateNames={selectedNames}
       />
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
     </MainLayout>
   );
 };
