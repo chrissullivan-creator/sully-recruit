@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
