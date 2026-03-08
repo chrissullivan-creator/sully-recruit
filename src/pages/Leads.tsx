@@ -30,6 +30,7 @@ const Leads = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const { data: prospects = [], isLoading } = useProspects();
 
   const filteredProspects = useMemo(() => {
