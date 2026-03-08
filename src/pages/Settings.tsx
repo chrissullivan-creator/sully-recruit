@@ -178,7 +178,8 @@ const Settings = () => {
   };
 
   const loadSignatureTemplate = () => {
-    const template = `<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">
+    if (signatureConfig.signature_mode === 'html') {
+      const template = `<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">
   <tr>
     <td style="padding-right: 16px; border-right: 2px solid #b8860b;">
       <strong style="font-size: 15px; color: #1a3a1a;">Your Name</strong><br/>
@@ -192,7 +193,29 @@ const Settings = () => {
     </td>
   </tr>
 </table>`;
-    setSignatureConfig({ signature_html: template });
+      setSignatureConfig(c => ({ ...c, signature_html: template }));
+    } else {
+      const template = `Your Name
+Senior Recruiter | Your Company
+📞 (555) 123-4567
+✉️ you@company.com
+🔗 linkedin.com/in/yourprofile`;
+      setSignatureConfig(c => ({ ...c, signature_text: template }));
+    }
+  };
+
+  /** Convert plain text signature to simple HTML for sending */
+  const textToHtml = (text: string): string => {
+    return text
+      .split('\n')
+      .map(line => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+      .join('<br/>');
+  };
+
+  /** Get the final HTML signature (from either mode) for saving */
+  const getFinalSignatureHtml = (): string => {
+    if (signatureConfig.signature_mode === 'html') return signatureConfig.signature_html;
+    return textToHtml(signatureConfig.signature_text);
   };
 
   const tabs = [
