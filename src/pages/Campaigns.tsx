@@ -25,10 +25,10 @@ const channelIcons: Record<string, React.ReactNode> = {
 };
 
 const Campaigns = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<string>('all');
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [editingSequenceId, setEditingSequenceId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { data: sequences = [], isLoading } = useSequences();
   const queryClient = useQueryClient();
 
@@ -39,15 +39,25 @@ const Campaigns = () => {
   }), [sequences, searchQuery, filter]);
 
   const handleCardClick = (seqId: string) => {
-    setEditingSequenceId(seqId);
-    setBuilderOpen(true);
+    navigate(`/campaigns/${seqId}`);
   };
 
-  const handleBuilderClose = (open: boolean) => {
-    if (!open) {
-      setEditingSequenceId(null);
+  const handleCreateNew = async () => {
+    setCreating(true);
+    try {
+      const { data: seq, error } = await supabase
+        .from('sequences')
+        .insert({ name: 'Untitled Sequence', channel: 'email', status: 'draft', stop_on_reply: true } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      navigate(`/campaigns/${seq.id}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create sequence');
+    } finally {
+      setCreating(false);
     }
-    setBuilderOpen(open);
   };
 
   const toggleStatus = async (e: React.MouseEvent, seqId: string, currentStatus: string) => {
