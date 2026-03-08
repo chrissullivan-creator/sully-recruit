@@ -24,6 +24,7 @@ const channelIcons: Record<string, React.ReactNode> = {
 const Campaigns = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<string>('all');
+  const [builderOpen, setBuilderOpen] = useState(false);
   const { data: sequences = [], isLoading } = useSequences();
 
   const filteredSequences = useMemo(() => sequences.filter((seq) => {
@@ -38,12 +39,13 @@ const Campaigns = () => {
         title="Campaigns" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
-          <Button variant="gold">
+          <Button variant="gold" onClick={() => setBuilderOpen(true)}>
             <Plus className="h-4 w-4" />
             New Campaign
           </Button>
         }
       />
+      <CampaignBuilder open={builderOpen} onOpenChange={setBuilderOpen} />
       
       <div className="p-8">
         <div className="flex flex-wrap items-center gap-4 mb-6">
