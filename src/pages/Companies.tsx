@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Globe, MapPin, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 
 const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
