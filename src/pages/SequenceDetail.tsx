@@ -27,6 +27,7 @@ import {
   ArrowLeft, Play, Pause, Plus, Save, Users, UserPlus, Mail, Linkedin, MessageSquare,
   Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle,
 } from 'lucide-react';
+import { SequenceAnalytics } from '@/components/campaigns/SequenceAnalytics';
 import type { CampaignStep, ChannelType } from '@/types';
 
 const statusColors: Record<string, string> = {
@@ -79,7 +80,7 @@ const SequenceDetail = () => {
   const [saving, setSaving] = useState(false);
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
-
+  const [executions, setExecutions] = useState<any[]>([]);
   // Editable state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -104,9 +105,10 @@ const SequenceDetail = () => {
   const loadSequence = async () => {
     setLoading(true);
     try {
-      const [seqRes, enrollRes] = await Promise.all([
+      const [seqRes, enrollRes, execRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
         supabase.from('sequence_enrollments').select('*, candidates(first_name, last_name, full_name, email, current_title), contacts(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
+        supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
 
       if (seqRes.error) throw seqRes.error;
@@ -136,6 +138,7 @@ const SequenceDetail = () => {
       });
       setSteps(loadedSteps);
       setEnrollments(enrollRes.data ?? []);
+      setExecutions(execRes.data ?? []);
     } catch (err: any) {
       toast.error('Failed to load sequence');
       console.error(err);
@@ -296,25 +299,12 @@ const SequenceDetail = () => {
           <ScrollArea className="flex-1">
             {/* General / Stats */}
             <TabsContent value="general" className="px-8 py-6 mt-0 space-y-6">
-              {/* Stats cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-foreground">{enrollments.length}</p>
-                  <p className="text-xs text-muted-foreground">Total Enrolled</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-success">{activeEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Active</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-info">{completedEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Completed</p>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-2xl font-bold text-destructive">{stoppedEnrollments}</p>
-                  <p className="text-xs text-muted-foreground">Stopped</p>
-                </div>
-              </div>
+              {/* Analytics */}
+              <SequenceAnalytics
+                steps={steps.map(s => ({ id: s.id, order: s.order, channel: s.channel }))}
+                enrollments={enrollments.map(e => ({ id: e.id, status: e.status, current_step_order: e.current_step_order }))}
+                executions={executions}
+              />
 
               {/* Edit settings */}
               <div className="space-y-4">
