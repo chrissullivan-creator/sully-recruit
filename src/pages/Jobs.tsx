@@ -2,14 +2,18 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
+import { AddJobDialog } from '@/components/jobs/AddJobDialog';
+import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { useJobs } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const Jobs = () => {
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [searchQuery, setSearchQuery] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { data: jobs = [], isLoading } = useJobs();
 
   const filteredJobs = jobs.filter((job) =>
@@ -44,7 +48,11 @@ const Jobs = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
-            <Button variant="gold">
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
+            <Button variant="gold" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
               Add Job
             </Button>
@@ -99,6 +107,9 @@ const Jobs = () => {
           </div>
         )}
       </div>
+
+      <AddJobDialog open={addOpen} onOpenChange={setAddOpen} />
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="jobs" />
     </MainLayout>
   );
 };
