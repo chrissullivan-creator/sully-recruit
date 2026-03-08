@@ -1061,6 +1061,7 @@ export type Database = {
           created_by: string | null
           description: string | null
           id: string
+          job_id: string | null
           name: string
           status: string
           stop_on_reply: boolean
@@ -1072,6 +1073,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          job_id?: string | null
           name: string
           status?: string
           stop_on_reply?: boolean
@@ -1083,12 +1085,21 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          job_id?: string | null
           name?: string
           status?: string
           stop_on_reply?: boolean
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sequences_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_integrations: {
         Row: {
