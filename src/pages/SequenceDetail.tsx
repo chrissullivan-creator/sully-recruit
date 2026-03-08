@@ -75,6 +75,7 @@ const SequenceDetail = () => {
   const { data: accounts = [] } = useIntegrationAccounts();
   const { data: allCandidates = [] } = useCandidates();
   const { data: allContacts = [] } = useContacts();
+  const { data: jobs = [] } = useJobs();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
