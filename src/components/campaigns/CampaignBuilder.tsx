@@ -14,7 +14,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus, Wand2, Loader2 } from 'lucide-react';
+import { Plus, Wand2, Loader2, Martini } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -217,7 +217,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
     <Dialog open={open} onOpenChange={resetAndClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="text-xl">Create New Campaign</DialogTitle>
+          <DialogTitle className="text-xl">Create New Sequence</DialogTitle>
           <DialogDescription>
             Build your multi-channel outreach sequence. Use AI to auto-generate steps or add them manually.
           </DialogDescription>
@@ -276,7 +276,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
                   {suggesting ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating...</>
                   ) : (
-                    <><Wand2 className="h-4 w-4 mr-1" /> AI Suggest</>
+                    <><Martini className="h-4 w-4 mr-1" /> Ask Joe</>
                   )}
                 </Button>
                 <Button variant="gold-outline" size="sm" onClick={addStep}>
@@ -290,7 +290,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
               {steps.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Wand2 className="h-8 w-8 text-muted-foreground" />
+                    <Martini className="h-8 w-8 text-muted-foreground" />
                   </div>
                   <p className="text-muted-foreground mb-2">No steps yet</p>
                   <p className="text-sm text-muted-foreground mb-4">
@@ -330,7 +330,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             Cancel
           </Button>
           <Button variant="gold" onClick={handleSave} disabled={!name.trim() || saving}>
-            {saving ? 'Creating...' : 'Create Campaign'}
+            {saving ? 'Creating...' : 'Create Sequence'}
           </Button>
         </DialogFooter>
       </DialogContent>

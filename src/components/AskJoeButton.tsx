@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Loader2 } from 'lucide-react';
+import { X, Send, Martini, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -118,7 +118,7 @@ export function AskJoeButton() {
           isOpen && 'scale-0 opacity-0'
         )}
       >
-        <Sparkles className="h-6 w-6 text-accent-foreground" />
+        <Martini className="h-6 w-6 text-accent-foreground" />
       </button>
 
       <div
@@ -130,7 +130,7 @@ export function AskJoeButton() {
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent">
-              <Sparkles className="h-4 w-4 text-accent-foreground" />
+              <Martini className="h-4 w-4 text-accent-foreground" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">Ask Joe</h3>

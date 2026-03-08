@@ -36,12 +36,12 @@ const Campaigns = () => {
   return (
     <MainLayout>
       <PageHeader 
-        title="Campaigns" 
+        title="Sequences" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
           <Button variant="gold" onClick={() => setBuilderOpen(true)}>
             <Plus className="h-4 w-4" />
-            New Campaign
+            New Sequence
           </Button>
         }
       />
@@ -53,7 +53,7 @@ const Campaigns = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search campaigns..."
+              placeholder="Search sequences..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -69,7 +69,7 @@ const Campaigns = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading campaigns...</p>
+          <p className="text-muted-foreground text-sm">Loading sequences...</p>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filteredSequences.map((seq) => {
