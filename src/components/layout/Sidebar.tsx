@@ -2,29 +2,18 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import logo from '@/assets/emerald_gold.png';
-import {
-  LayoutDashboard,
-  Users,
-  Briefcase,
-  Building2,
-  UserCheck,
-  Mail,
-  Settings,
-  Target,
-  Phone,
-  LogOut,
-} from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Leads', href: '/leads', icon: Target },
-  { name: 'Jobs', href: '/jobs', icon: Briefcase },
-  { name: 'Candidates', href: '/candidates', icon: UserCheck },
-  { name: 'Companies', href: '/companies', icon: Building2 },
-  { name: 'Contacts', href: '/contacts', icon: Users },
-  { name: 'Campaigns', href: '/campaigns', icon: Mail },
-  { name: 'Calls', href: '/calls', icon: Phone },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Dashboard', href: '/' },
+  { name: 'Leads', href: '/leads' },
+  { name: 'Jobs', href: '/jobs' },
+  { name: 'Candidates', href: '/candidates' },
+  { name: 'Companies', href: '/companies' },
+  { name: 'Contacts', href: '/contacts' },
+  { name: 'Campaigns', href: '/campaigns' },
+  { name: 'Calls', href: '/calls' },
+  { name: 'Settings', href: '/settings' },
 ];
 
 export function Sidebar() {
@@ -61,23 +50,17 @@ export function Sidebar() {
             (item.href !== '/' && location.pathname.startsWith(item.href));
           
           return (
-            <Link
-              key={item.name}
-              to={item.href}
-              className={cn(
-                'group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-primary'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              )}
-            >
-              <item.icon
+              <Link
+                key={item.name}
+                to={item.href}
                 className={cn(
-                  'h-5 w-5 shrink-0',
-                  isActive ? 'text-sidebar-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'
+                  'group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-sidebar-accent text-sidebar-primary'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
-              />
-              {item.name}
+              >
+                {item.name}
               {isActive && (
                 <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
               )}
