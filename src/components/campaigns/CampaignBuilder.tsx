@@ -146,6 +146,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
         subject: s.subject ?? undefined,
         content: s.content ?? '',
         delayDays: s.delayDays ?? (i === 0 ? 0 : 2),
+        delayHours: 0,
+        sendWindowStart: 6,
+        sendWindowEnd: 23,
+        waitForConnection: false,
+        minHoursAfterConnection: 4,
       }));
 
       if (aiSteps.length === 0) {
