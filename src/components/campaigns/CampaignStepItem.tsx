@@ -47,6 +47,9 @@ interface CampaignStepItemProps {
 const isLinkedInChannel = (ch: ChannelType) =>
   ['linkedin_recruiter', 'sales_nav', 'linkedin_message', 'linkedin_connection'].includes(ch);
 
+const needsSubject = (ch: ChannelType) =>
+  ['linkedin_recruiter', 'sales_nav', 'email'].includes(ch);
+
 export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: CampaignStepItemProps) => {
   const {
     attributes,
@@ -300,6 +303,15 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
             </div>
           )}
 
+          {/* LinkedIn InMail subject line */}
+          {needsSubject(step.channel) && !isEmail && (
+            <Input
+              placeholder="InMail subject line..."
+              value={step.subject || ''}
+              onChange={(e) => onUpdate(step.id, { subject: e.target.value })}
+            />
+          )}
+
           {/* Content */}
           <Textarea
             placeholder={channelPlaceholders[step.channel] || 'Message content...'}
@@ -307,6 +319,16 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
             onChange={(e) => onUpdate(step.id, { content: e.target.value })}
             className="min-h-[80px] resize-none"
           />
+
+          {/* SMS character counter */}
+          {step.channel === 'sms' && (
+            <p className={cn(
+              'text-xs text-right',
+              step.content.length > 160 ? 'text-destructive' : 'text-muted-foreground'
+            )}>
+              {step.content.length}/160 characters {step.content.length > 160 ? `(${Math.ceil(step.content.length / 160)} segments)` : ''}
+            </p>
+          )}
         </div>
       </div>
     </div>
