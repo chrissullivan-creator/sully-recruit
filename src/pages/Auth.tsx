@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import sullyLogo from '@/assets/sully-recruit-logo.png';
 
 const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -43,10 +44,7 @@ const Auth = () => {
       <div className="w-full max-w-md space-y-8 p-8">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent">
-            <span className="text-2xl font-bold text-accent-foreground">S</span>
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">Sully Recruit</h1>
+          <img src={sullyLogo} alt="Sully Recruit" className="h-24 w-auto" />
           <p className="text-sm text-muted-foreground">
             {isSignUp ? 'Create your account' : 'Sign in to your account'}
           </p>
