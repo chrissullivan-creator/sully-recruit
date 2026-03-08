@@ -131,6 +131,7 @@ const Contacts = () => {
           </div>
         )}
       </div>
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
     </MainLayout>
   );
 };

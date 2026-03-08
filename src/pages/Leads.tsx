@@ -220,6 +220,7 @@ const Leads = () => {
         prospectIds={selectedIds}
         candidateNames={selectedNames}
       />
+      <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
     </MainLayout>
   );
 };
