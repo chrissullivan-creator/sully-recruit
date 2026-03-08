@@ -137,7 +137,10 @@ const Campaigns = () => {
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-semibold text-foreground truncate">{seq.name}</h3>
                       </div>
-                      <span className="text-xs text-muted-foreground">{seq.channel} • {seq.description ?? ''}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {seq.channel} • {seq.description ?? ''}
+                        {(seq as any).jobs && <> • <span className="text-gold font-medium">{(seq as any).jobs.title}</span></>}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-3">
                       {(seq.status === 'active' || seq.status === 'paused') && (

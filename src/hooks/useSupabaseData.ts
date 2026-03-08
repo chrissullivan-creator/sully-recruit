@@ -154,7 +154,7 @@ export function useSequences() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sequences')
-        .select('*, sequence_steps(*), sequence_enrollments(id)')
+        .select('*, sequence_steps(*), sequence_enrollments(id), jobs(id, title, company_name)')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
