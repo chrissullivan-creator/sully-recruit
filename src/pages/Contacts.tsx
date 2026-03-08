@@ -3,6 +3,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { useContacts } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
