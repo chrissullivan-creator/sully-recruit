@@ -92,6 +92,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
 
     setEnrolling(true);
     try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
       const candidateIdSet = new Set(candidates.map(c => c.id));
       const prospectIdSet = new Set(prospects.map(p => p.id));
 
@@ -103,6 +104,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
           ...(isCand ? { candidate_id: personId } : isProspect ? { prospect_id: personId } : { contact_id: personId }),
           status: 'active',
           current_step_order: 1,
+          enrolled_by: userId,
         };
       });
 
