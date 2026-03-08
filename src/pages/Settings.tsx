@@ -463,7 +463,7 @@ const Settings = () => {
                     <div className="mb-6">
                       <h2 className="text-lg font-semibold text-foreground mb-1">Email Signature</h2>
                       <p className="text-sm text-muted-foreground">
-                        This signature will be appended to all outbound emails from campaigns.
+                        This signature will be appended to all outbound emails from sequences.
                       </p>
                     </div>
 
