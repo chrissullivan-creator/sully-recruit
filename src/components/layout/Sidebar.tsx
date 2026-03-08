@@ -35,10 +35,9 @@ export function Sidebar() {
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 px-6 border-b border-sidebar-border">
-        <img src={logo} alt="Emerald Recruit" className="h-9 w-9 object-contain" />
+        <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
         <div>
-          <h1 className="text-lg font-semibold text-sidebar-foreground">Emerald Recruit</h1>
-          <p className="text-xs text-muted-foreground">Recruiting CRM</p>
+          <h1 className="text-lg font-semibold text-sidebar-foreground">Sully Recruit</h1>
         </div>
       </div>
 
@@ -76,7 +75,7 @@ export function Sidebar() {
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">{displayName}</p>
+            <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.user_metadata?.display_name || 'User'}</p>
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
           <button onClick={handleSignOut} className="text-muted-foreground hover:text-foreground transition-colors" title="Sign out">
