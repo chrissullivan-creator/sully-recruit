@@ -2,18 +2,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut } from 'lucide-react';
+import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Send, Settings } from 'lucide-react';
 
 const navigation = [
-  { name: 'Dashboard', href: '/' },
-  { name: 'Leads', href: '/leads' },
-  { name: 'Jobs', href: '/jobs' },
-  { name: 'Candidates', href: '/candidates' },
-  { name: 'Companies', href: '/companies' },
-  { name: 'Contacts', href: '/contacts' },
-  { name: 'Campaigns', href: '/campaigns' },
-  { name: 'Calls', href: '/calls' },
-  { name: 'Settings', href: '/settings' },
+  { name: 'Prospects', href: '/leads', icon: Target },
+  { name: 'Contacts', href: '/contacts', icon: Users },
+  { name: 'Candidates', href: '/candidates', icon: UserCheck },
+  { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
+  { name: 'Inbox', href: '/calls', icon: Inbox },
+  { name: 'Send Outs', href: '/jobs', icon: Send },
+  { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -60,6 +58,7 @@ export function Sidebar() {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
               >
+                <item.icon className="h-4 w-4" />
                 {item.name}
               {isActive && (
                 <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
