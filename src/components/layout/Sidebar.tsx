@@ -2,9 +2,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings } from 'lucide-react';
+import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard } from 'lucide-react';
 
 const navigation = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Inbox', href: '/calls', icon: Inbox },
   { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Prospects', href: '/leads', icon: Target },
@@ -45,8 +46,9 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navigation.map((item) => {
-          const isActive = location.pathname === item.href || 
-            (item.href !== '/' && location.pathname.startsWith(item.href));
+          const isActive = item.href === '/'
+            ? location.pathname === '/'
+            : location.pathname === item.href || location.pathname.startsWith(item.href);
           
           return (
               <Link
