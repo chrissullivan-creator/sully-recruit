@@ -1,0 +1,2 @@
+ALTER TABLE public.sequences DROP CONSTRAINT sequences_status_check;
+ALTER TABLE public.sequences ADD CONSTRAINT sequences_status_check CHECK (status = ANY (ARRAY['active'::text, 'paused'::text, 'archived'::text, 'draft'::text, 'completed'::text]));
