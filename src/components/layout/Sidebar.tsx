@@ -5,6 +5,7 @@ import logo from '@/assets/emerald_gold.png';
 import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings } from 'lucide-react';
 
 const navigation = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Inbox', href: '/calls', icon: Inbox },
   { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Prospects', href: '/leads', icon: Target },
