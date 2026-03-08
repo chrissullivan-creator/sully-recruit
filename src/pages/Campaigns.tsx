@@ -36,12 +36,12 @@ const Campaigns = () => {
   return (
     <MainLayout>
       <PageHeader 
-        title="Campaigns" 
+        title="Sequences" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
           <Button variant="gold" onClick={() => setBuilderOpen(true)}>
             <Plus className="h-4 w-4" />
-            New Campaign
+            New Sequence
           </Button>
         }
       />
