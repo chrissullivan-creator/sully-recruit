@@ -168,32 +168,57 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // ── 5. Check daily sequence cap (40/day) ───────────────────────
-      const todayStart = new Date(now);
-      todayStart.setHours(0, 0, 0, 0);
+      // ── 5. Determine channel type for rate limiting ─────────────────
+      const stepChannel = step.channel || step.step_type || sequence.channel || "";
+      const isConnection = stepChannel === "linkedin_connection";
+      const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav";
 
-      const { count: todayCount } = await supabase
-        .from("sequence_step_executions")
-        .select("id", { count: "exact", head: true })
-        .gte("executed_at", todayStart.toISOString())
-        .in("status", ["sent", "scheduled"]);
+      // ── 5a. Daily cap: 40/day for connections, no cap for InMails ──
+      if (!isInMail) {
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
 
-      if ((todayCount ?? 0) >= 40) {
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+        // For connections, count only connection executions; otherwise count all non-inmail
+        const { data: todayExecs } = await supabase
+          .from("sequence_step_executions")
+          .select("id, sequence_step_id")
+          .gte("executed_at", todayStart.toISOString())
+          .in("status", ["sent", "scheduled"]);
 
-        await supabase
-          .from("sequence_enrollments")
-          .update({ next_step_at: tomorrow.toISOString() } as any)
-          .eq("id", enrollment.id);
+        let relevantCount = 0;
+        if (isConnection && todayExecs) {
+          // Count connection-type executions by joining step info
+          const stepIds = todayExecs.map((e: any) => e.sequence_step_id);
+          if (stepIds.length > 0) {
+            const { data: steps } = await supabase
+              .from("sequence_steps")
+              .select("id, channel, step_type")
+              .in("id", stepIds);
+            relevantCount = (steps ?? []).filter((s: any) =>
+              s.channel === "linkedin_connection" || s.step_type === "linkedin_connection"
+            ).length;
+          }
+        } else {
+          relevantCount = (todayExecs ?? []).length;
+        }
 
-        skipped++;
-        continue;
+        if (relevantCount >= 40) {
+          const tomorrow = new Date(now);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+
+          await supabase
+            .from("sequence_enrollments")
+            .update({ next_step_at: tomorrow.toISOString() } as any)
+            .eq("id", enrollment.id);
+
+          skipped++;
+          continue;
+        }
       }
 
-      // ── 6. Random delay (2–9 minutes) for human-like sending ────────
-      const randomDelayMinutes = 2 + Math.floor(Math.random() * 8);
+      // ── 6. Delay: 2–9 min for connections/messages, instant for InMails
+      const randomDelayMinutes = isInMail ? 0 : 2 + Math.floor(Math.random() * 8);
       const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
 
       // ── 7. Create execution record ──────────────────────────────────
