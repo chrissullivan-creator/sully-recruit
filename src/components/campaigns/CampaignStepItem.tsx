@@ -378,6 +378,15 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
             className="min-h-[80px] resize-none"
           />
 
+          {/* Attachments */}
+          {(step.channel === 'email' || step.channel === 'linkedin_recruiter' || step.channel === 'sales_nav') && (
+            <StepAttachments
+              stepId={step.id}
+              attachments={step.attachments ?? []}
+              onAttachmentsChange={(attachments) => onUpdate(step.id, { attachments })}
+            />
+          )}
+
           {/* SMS character counter */}
           {step.channel === 'sms' && (
             <p className={cn(
