@@ -136,7 +136,6 @@ const Campaigns = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-semibold text-foreground truncate">{seq.name}</h3>
-                        <Pencil className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                       </div>
                       <span className="text-xs text-muted-foreground">{seq.channel} • {seq.description ?? ''}</span>
                     </div>
