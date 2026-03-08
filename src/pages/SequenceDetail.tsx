@@ -27,6 +27,7 @@ import {
   ArrowLeft, Play, Pause, Plus, Save, Users, UserPlus, Mail, Linkedin, MessageSquare,
   Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle,
 } from 'lucide-react';
+import { SequenceAnalytics } from '@/components/campaigns/SequenceAnalytics';
 import type { CampaignStep, ChannelType } from '@/types';
 
 const statusColors: Record<string, string> = {
