@@ -47,10 +47,10 @@ export function Sidebar() {
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 px-6 border-b border-sidebar-border">
-        <img src={logo} alt="Emerald Recruiting Group" className="h-9 w-9 object-contain" />
+        <img src={logo} alt="Emerald Recruit" className="h-9 w-9 object-contain" />
         <div>
-          <h1 className="text-lg font-semibold text-sidebar-foreground">Emerald</h1>
-          <p className="text-xs text-muted-foreground">Recruiting Group</p>
+          <h1 className="text-lg font-semibold text-sidebar-foreground">Emerald Recruit</h1>
+          <p className="text-xs text-muted-foreground">Recruiting CRM</p>
         </div>
       </div>
 
