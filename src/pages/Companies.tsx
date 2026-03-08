@@ -10,6 +10,7 @@ import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const { data: companies = [], isLoading } = useCompanies();
 
   const filteredCompanies = companies.filter((company) => {
