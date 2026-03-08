@@ -93,10 +93,16 @@ const Leads = () => {
         title="Prospects" 
         description="Manage your pipeline of prospects."
         actions={
-          <Button variant="gold">
-            <Plus className="h-4 w-4" />
-            Add Prospect
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
+            <Button variant="gold">
+              <Plus className="h-4 w-4" />
+              Add Prospect
+            </Button>
+          </div>
         }
       />
       
