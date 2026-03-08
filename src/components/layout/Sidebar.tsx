@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import logo from '@/assets/emerald_gold.png';
 import {
   LayoutDashboard,
   Users,
