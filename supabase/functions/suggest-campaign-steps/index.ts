@@ -62,21 +62,21 @@ ${campaignDescription ? `Description: ${campaignDescription}` : ""}`;
       apiUrl = "https://api.openai.com/v1/chat/completions";
       apiKey = openaiConfig.api_key;
       model = openaiConfig.model || "gpt-4o";
-      headers = {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      };
+    } else if (Deno.env.get("OPENAI_API_KEY")) {
+      apiUrl = "https://api.openai.com/v1/chat/completions";
+      apiKey = Deno.env.get("OPENAI_API_KEY")!;
+      model = "gpt-4o";
     } else {
       const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-      if (!LOVABLE_API_KEY) throw new Error("No AI API key configured. Add your OpenAI key in Settings.");
+      if (!LOVABLE_API_KEY) throw new Error("No AI API key configured.");
       apiUrl = "https://ai.gateway.lovable.dev/v1/chat/completions";
       apiKey = LOVABLE_API_KEY;
       model = "google/gemini-3-flash-preview";
-      headers = {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      };
     }
+    headers = {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    };
 
     const response = await fetch(apiUrl, {
       method: "POST",
