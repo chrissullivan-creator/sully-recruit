@@ -155,7 +155,7 @@ const SequenceDetail = () => {
     setSaving(true);
     try {
       const { error: seqError } = await supabase.from('sequences').update({
-        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply,
+        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply, job_id: jobId,
       } as any).eq('id', id);
       if (seqError) throw seqError;
 
