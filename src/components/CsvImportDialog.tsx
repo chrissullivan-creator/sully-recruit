@@ -162,6 +162,10 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
     const activeMappings = mappings.filter(m => m.dbColumn !== 'skip');
     if (activeMappings.length === 0) { toast.error('Map at least one column'); return; }
 
+    const ownerTables: EntityType[] = ['prospects', 'candidates', 'contacts'];
+    const needsOwner = ownerTables.includes(entityType);
+    const userId = needsOwner ? (await supabase.auth.getUser()).data.user?.id : undefined;
+
     setStep('importing');
     let success = 0;
     let errors = 0;
@@ -170,14 +174,17 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
     for (let i = 0; i < rows.length; i += batchSize) {
       const batch = rows.slice(i, i + batchSize);
       const records = batch.map(row => {
-        const record: Record<string, string> = {};
+        const record: Record<string, string | undefined> = {};
         mappings.forEach((m, idx) => {
           if (m.dbColumn !== 'skip' && row[idx] !== undefined) {
             record[m.dbColumn] = row[idx];
           }
         });
+        if (needsOwner && userId) {
+          record['owner_id'] = userId;
+        }
         return record;
-      }).filter(r => Object.keys(r).length > 0);
+      }).filter(r => Object.keys(r).length > (needsOwner ? 1 : 0));
 
       if (records.length === 0) continue;
 
