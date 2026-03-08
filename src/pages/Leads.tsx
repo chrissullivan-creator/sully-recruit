@@ -4,8 +4,9 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
