@@ -50,23 +50,17 @@ export function Sidebar() {
             (item.href !== '/' && location.pathname.startsWith(item.href));
           
           return (
-            <Link
-              key={item.name}
-              to={item.href}
-              className={cn(
-                'group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-primary'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              )}
-            >
-              <item.icon
+              <Link
+                key={item.name}
+                to={item.href}
                 className={cn(
-                  'h-5 w-5 shrink-0',
-                  isActive ? 'text-sidebar-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'
+                  'group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-sidebar-accent text-sidebar-primary'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
-              />
-              {item.name}
+              >
+                {item.name}
               {isActive && (
                 <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
               )}
