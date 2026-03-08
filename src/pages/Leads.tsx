@@ -197,7 +197,7 @@ const Leads = () => {
                   </tr>
                 ))}
                 {filteredProspects.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No leads match your filters.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No prospects match your filters.</td></tr>
                 )}
               </tbody>
             </table>
