@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import type { Tables } from '@/integrations/supabase/types';
 
 // Candidates
 export function useCandidates() {
@@ -11,6 +10,74 @@ export function useCandidates() {
         .from('candidates')
         .select('*')
         .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Single candidate by ID
+export function useCandidate(id: string | undefined) {
+  return useQuery({
+    queryKey: ['candidate', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('*')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Notes for an entity
+export function useNotes(entityId: string | undefined, entityType: string) {
+  return useQuery({
+    queryKey: ['notes', entityType, entityId],
+    enabled: !!entityId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('notes')
+        .select('*')
+        .eq('entity_id', entityId!)
+        .eq('entity_type', entityType)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Conversations & messages for a candidate
+export function useCandidateConversations(candidateId: string | undefined) {
+  return useQuery({
+    queryKey: ['conversations', candidateId],
+    enabled: !!candidateId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*, messages(*)')
+        .eq('candidate_id', candidateId!)
+        .order('last_message_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Send outs for a candidate
+export function useCandidateSendOuts(candidateId: string | undefined) {
+  return useQuery({
+    queryKey: ['send_outs', candidateId],
+    enabled: !!candidateId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_out_board')
+        .select('*')
+        .eq('candidate_id', candidateId!);
       if (error) throw error;
       return data;
     },
@@ -104,6 +171,26 @@ export function useSendOutBoard() {
         .from('send_out_board')
         .select('*')
         .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Messages (for Calls page - filter call type messages)
+export function useMessages(channel?: string) {
+  return useQuery({
+    queryKey: ['messages', channel],
+    queryFn: async () => {
+      let query = supabase
+        .from('messages')
+        .select('*, candidates(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (channel) {
+        query = query.eq('channel', channel);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
