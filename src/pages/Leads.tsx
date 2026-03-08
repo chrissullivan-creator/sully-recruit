@@ -88,12 +88,12 @@ const Leads = () => {
   return (
     <MainLayout>
       <PageHeader 
-        title="Leads" 
-        description="Manage your pipeline of prospects and leads."
+        title="Prospects" 
+        description="Manage your pipeline of prospects."
         actions={
           <Button variant="gold">
             <Plus className="h-4 w-4" />
-            Add Lead
+            Add Prospect
           </Button>
         }
       />
@@ -104,7 +104,7 @@ const Leads = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search leads..."
+              placeholder="Search prospects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -128,7 +128,7 @@ const Leads = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading leads...</p>
+          <p className="text-muted-foreground text-sm">Loading prospects...</p>
         ) : (
           <div className="rounded-lg border border-border overflow-hidden">
             <table className="w-full">
@@ -197,7 +197,7 @@ const Leads = () => {
                   </tr>
                 ))}
                 {filteredProspects.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No leads match your filters.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No prospects match your filters.</td></tr>
                 )}
               </tbody>
             </table>
