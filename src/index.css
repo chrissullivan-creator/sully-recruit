@@ -24,8 +24,8 @@
     --primary-foreground: 40 33% 94%;
 
     /* Slightly lighter green for secondary surfaces */
-    --secondary: 150 25% 14%;
-    --secondary-foreground: 40 33% 94%;
+    --secondary: 0 0% 100%;
+    --secondary-foreground: 150 25% 14%;
 
     /* Muted dark green tones */
     --muted: 150 18% 18%;
