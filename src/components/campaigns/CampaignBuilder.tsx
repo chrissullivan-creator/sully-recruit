@@ -330,7 +330,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             Cancel
           </Button>
           <Button variant="gold" onClick={handleSave} disabled={!name.trim() || saving}>
-            {saving ? 'Creating...' : 'Create Campaign'}
+            {saving ? 'Creating...' : 'Create Sequence'}
           </Button>
         </DialogFooter>
       </DialogContent>
