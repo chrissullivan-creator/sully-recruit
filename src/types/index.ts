@@ -124,6 +124,8 @@ export interface CampaignStep {
   sendWindowEnd: number;
   waitForConnection: boolean;
   minHoursAfterConnection: number;
+  isReply: boolean;
+  useSignature: boolean;
   condition?: string;
 }
 
