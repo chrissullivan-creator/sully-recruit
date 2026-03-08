@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ const Leads = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const { data: prospects = [], isLoading } = useProspects();
 
   const filteredProspects = useMemo(() => {
@@ -98,7 +100,7 @@ const Leads = () => {
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
             </Button>
-            <Button variant="gold">
+            <Button variant="gold" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
               Add Prospect
             </Button>
@@ -221,6 +223,7 @@ const Leads = () => {
         candidateNames={selectedNames}
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
+      <AddProspectDialog open={addOpen} onOpenChange={setAddOpen} />
     </MainLayout>
   );
 };

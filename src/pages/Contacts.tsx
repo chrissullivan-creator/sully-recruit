@@ -3,6 +3,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { useContacts } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,7 @@ const Contacts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
@@ -33,7 +35,7 @@ const Contacts = () => {
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
             </Button>
-            <Button variant="gold">
+            <Button variant="gold" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
               Add Contact
             </Button>
@@ -132,6 +134,7 @@ const Contacts = () => {
         )}
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
+      <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
     </MainLayout>
   );
 };
