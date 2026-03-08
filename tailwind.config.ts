@@ -84,7 +84,6 @@ export default {
   		},
   		fontFamily: {
   			sans: [
-  				'Inter',
   				'ui-sans-serif',
   				'system-ui',
   				'sans-serif',
@@ -94,7 +93,6 @@ export default {
   				'Noto Color Emoji'
   			],
   			mono: [
-  				'JetBrains Mono',
   				'ui-monospace',
   				'SFMono-Regular',
   				'Menlo',
