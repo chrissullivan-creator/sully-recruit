@@ -88,12 +88,12 @@ const Leads = () => {
   return (
     <MainLayout>
       <PageHeader 
-        title="Leads" 
-        description="Manage your pipeline of prospects and leads."
+        title="Prospects" 
+        description="Manage your pipeline of prospects."
         actions={
           <Button variant="gold">
             <Plus className="h-4 w-4" />
-            Add Lead
+            Add Prospect
           </Button>
         }
       />
