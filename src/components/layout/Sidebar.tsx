@@ -37,7 +37,8 @@ export function Sidebar() {
       <div className="flex h-16 items-center gap-3 px-6 border-b border-sidebar-border">
         <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
         <div>
-          <h1 className="text-lg font-semibold text-sidebar-foreground">Sully Recruit</h1>
+          <h1 className="text-lg font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
+          <p className="text-[10px] tracking-widest text-sidebar-foreground/60 uppercase -mt-0.5">Sully Recruit</p>
         </div>
       </div>
 
