@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useSequences, useCandidates, useContacts } from '@/hooks/useSupabaseData';
+import { useSequences, useCandidates, useContacts, useProspects } from '@/hooks/useSupabaseData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -17,11 +17,12 @@ interface EnrollInSequenceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   candidateIds: string[];
+  prospectIds?: string[];
   candidateNames?: string[];
   preselectedSequenceId?: string;
 }
 
-export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
+export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prospectIds = [], candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
   const [enrolling, setEnrolling] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,15 +30,13 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
   const { data: sequences = [], isLoading } = useSequences();
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
+  const { data: prospects = [] } = useProspects();
   const queryClient = useQueryClient();
 
-  // If we have a preselected sequence, use it and show the people picker
-  const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0;
+  const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0 && prospectIds.length === 0;
 
   useEffect(() => {
-    if (preselectedSequenceId) {
-      setSelectedSequenceId(preselectedSequenceId);
-    }
+    if (preselectedSequenceId) setSelectedSequenceId(preselectedSequenceId);
   }, [preselectedSequenceId, open]);
 
   useEffect(() => {
@@ -52,12 +51,16 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
   const steps = (selectedSequence?.sequence_steps as any[]) ?? [];
 
-  // Combined people list for the picker
   const people = [
     ...candidates.map(c => ({
       id: c.id, type: 'candidate' as const,
       name: c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
       detail: c.current_title || c.email || '',
+    })),
+    ...prospects.map(p => ({
+      id: p.id, type: 'prospect' as const,
+      name: p.full_name || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
+      detail: p.current_title || p.email || '',
     })),
     ...contacts.map(c => ({
       id: c.id, type: 'contact' as const,
@@ -72,27 +75,32 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
 
   const channelIcon = (channel: string) => {
     if (channel === 'linkedin') return <Linkedin className="h-3.5 w-3.5" />;
-    if (channel === 'email') return <Mail className="h-3.5 w-3.5" />;
     return <Mail className="h-3.5 w-3.5" />;
   };
 
   const handleEnroll = async () => {
     if (!selectedSequenceId) return;
 
-    const idsToEnroll = isPeoplePicker ? selectedPeople : candidateIds;
+    // Combine all IDs: from candidateIds, prospectIds, or people picker
+    let idsToEnroll: string[];
+    if (isPeoplePicker) {
+      idsToEnroll = selectedPeople;
+    } else {
+      idsToEnroll = [...candidateIds, ...prospectIds];
+    }
     if (idsToEnroll.length === 0) return;
 
     setEnrolling(true);
     try {
-      // Determine which are candidates vs contacts
       const candidateIdSet = new Set(candidates.map(c => c.id));
-      const contactIdSet = new Set(contacts.map(c => c.id));
+      const prospectIdSet = new Set(prospects.map(p => p.id));
 
       const enrollments = idsToEnroll.map((personId) => {
         const isCand = candidateIdSet.has(personId);
+        const isProspect = prospectIdSet.has(personId);
         return {
           sequence_id: selectedSequenceId,
-          ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
+          ...(isCand ? { candidate_id: personId } : isProspect ? { prospect_id: personId } : { contact_id: personId }),
           status: 'active',
           current_step_order: 1,
         };
@@ -112,7 +120,8 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     }
   };
 
-  const enrollCount = isPeoplePicker ? selectedPeople.length : candidateIds.length;
+  const enrollCount = isPeoplePicker ? selectedPeople.length : candidateIds.length + prospectIds.length;
+  const totalSelected = isPeoplePicker ? selectedPeople.length : candidateIds.length + prospectIds.length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -121,22 +130,21 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           <DialogTitle>{isPeoplePicker ? 'Add People to Sequence' : 'Enroll in Sequence'}</DialogTitle>
           <DialogDescription>
             {isPeoplePicker
-              ? 'Search and select candidates or contacts to enroll.'
-              : candidateIds.length === 1 && candidateNames[0]
+              ? 'Search and select candidates, prospects, or contacts to enroll.'
+              : totalSelected === 1 && candidateNames[0]
                 ? `Enroll ${candidateNames[0]} in an outreach sequence.`
-                : `Enroll ${candidateIds.length} candidates in an outreach sequence.`}
+                : `Enroll ${totalSelected} people in an outreach sequence.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {!isPeoplePicker && candidateIds.length > 1 && (
+          {!isPeoplePicker && totalSelected > 1 && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="h-4 w-4" />
-              <span>{candidateIds.length} candidates selected</span>
+              <span>{totalSelected} people selected</span>
             </div>
           )}
 
-          {/* Sequence picker (hidden if preselected) */}
           {!preselectedSequenceId && (
             <div className="space-y-2">
               <Label>Select Sequence</Label>
@@ -162,14 +170,13 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             </div>
           )}
 
-          {/* People picker for sequence detail page */}
           {isPeoplePicker && (
             <div className="space-y-2">
               <Label>Search People</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search candidates or contacts..."
+                  placeholder="Search candidates, prospects, or contacts..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -179,7 +186,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 <div className="p-2 space-y-1">
                   {people.slice(0, 50).map((person) => (
                     <label
-                      key={person.id}
+                      key={`${person.type}-${person.id}`}
                       className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer"
                     >
                       <Checkbox
@@ -204,7 +211,6 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             </div>
           )}
 
-          {/* Sequence preview (only when not in people picker mode) */}
           {!isPeoplePicker && selectedSequence && (
             <div className="rounded-lg border border-border bg-secondary/50 p-4 space-y-3">
               <div className="flex items-center justify-between">
