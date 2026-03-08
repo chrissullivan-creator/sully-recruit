@@ -274,7 +274,10 @@ const SequenceDetail = () => {
         </Button>
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold text-foreground truncate">{sequence.name}</h1>
-          <p className="text-sm text-muted-foreground">{sequence.channel} • {steps.length} steps • {enrollments.length} enrolled</p>
+          <p className="text-sm text-muted-foreground">
+            {sequence.channel} • {steps.length} steps • {enrollments.length} enrolled
+            {jobId && jobs.find((j: any) => j.id === jobId) && <> • <span className="text-gold font-medium">{jobs.find((j: any) => j.id === jobId)?.title}</span></>}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={toggleStatus}>
