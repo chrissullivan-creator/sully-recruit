@@ -89,6 +89,10 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   };
 
   const addStep = () => {
+    // Determine if this is a follow-up email (reply to previous email)
+    const prevEmailStep = [...steps].reverse().find(s => s.channel === 'email');
+    const isFollowUpEmail = !!prevEmailStep;
+
     const newStep: CampaignStep = {
       id: generateId(),
       order: steps.length + 1,
@@ -100,6 +104,8 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
       sendWindowEnd: 23,
       waitForConnection: false,
       minHoursAfterConnection: 4,
+      isReply: isFollowUpEmail,
+      useSignature: true,
     };
     setSteps([...steps, newStep]);
   };
