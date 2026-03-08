@@ -302,8 +302,8 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-muted-foreground" />
               <div>
-                <Label className="text-sm font-medium">Stop sequence on reply</Label>
-                <p className="text-xs text-muted-foreground">Automatically stop the sequence when a candidate responds</p>
+              <Label className="text-sm font-medium">Stop sequence on any reply</Label>
+                <p className="text-xs text-muted-foreground">Automatically stop if the candidate responds on any channel (email, LinkedIn, SMS, etc.)</p>
               </div>
             </div>
             <Switch checked={stopOnReply} onCheckedChange={setStopOnReply} />
