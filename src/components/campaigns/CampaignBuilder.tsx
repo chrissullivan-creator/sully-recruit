@@ -63,6 +63,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [channel, setChannel] = useState('linkedin');
+  const [stopOnReply, setStopOnReply] = useState(true);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
