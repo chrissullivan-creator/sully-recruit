@@ -14,17 +14,17 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus, Wand2, Loader2, Martini, ShieldAlert } from 'lucide-react';
+import { Plus, Loader2, Martini, ShieldAlert } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { CampaignStepItem } from './CampaignStepItem';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
+import { useIntegrationAccounts } from '@/hooks/useSupabaseData';
 import { toast } from 'sonner';
 import type { CampaignStep, ChannelType } from '@/types';
 
@@ -68,6 +68,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const queryClient = useQueryClient();
+  const { data: accounts = [] } = useIntegrationAccounts();
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -89,7 +90,6 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   };
 
   const addStep = () => {
-    // Determine if this is a follow-up email (reply to previous email)
     const prevEmailStep = [...steps].reverse().find(s => s.channel === 'email');
     const isFollowUpEmail = !!prevEmailStep;
 
@@ -147,7 +147,6 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
         return;
       }
 
-      // Track previous email for reply detection
       let seenFirstEmail = false;
       const aiSteps: CampaignStep[] = (data?.steps ?? []).map((s: any, i: number) => {
         const ch = (s.channel ?? 'email') as ChannelType;
@@ -251,15 +250,15 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
 
   return (
     <Dialog open={open} onOpenChange={resetAndClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl h-[90vh] flex flex-col overflow-hidden p-0">
+        <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
           <DialogTitle className="text-xl">Create New Sequence</DialogTitle>
           <DialogDescription>
             Build your multi-channel outreach sequence. Use AI to auto-generate steps or add them manually.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col gap-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="campaign-name">Campaign Name</Label>
@@ -302,14 +301,15 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-muted-foreground" />
               <div>
-              <Label className="text-sm font-medium">Stop sequence on any reply</Label>
+                <Label className="text-sm font-medium">Stop sequence on any reply</Label>
                 <p className="text-xs text-muted-foreground">Automatically stop if the candidate responds on any channel (email, LinkedIn, SMS, etc.)</p>
               </div>
             </div>
             <Switch checked={stopOnReply} onCheckedChange={setStopOnReply} />
           </div>
 
-          <div className="flex-1 flex flex-col min-h-0">
+          {/* Steps */}
+          <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-foreground">
                 Sequence Steps ({steps.length})
@@ -334,47 +334,46 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
               </div>
             </div>
 
-            <ScrollArea className="flex-1 pr-4">
-              {steps.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Martini className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <p className="text-muted-foreground mb-2">No steps yet</p>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Click "AI Suggest" to auto-generate a sequence, or add steps manually.
-                  </p>
+            {steps.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <Martini className="h-8 w-8 text-muted-foreground" />
                 </div>
-              ) : (
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleDragEnd}
+                <p className="text-muted-foreground mb-2">No steps yet</p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Click "AI Suggest" to auto-generate a sequence, or add steps manually.
+                </p>
+              </div>
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={steps.map((s) => s.id)}
+                  strategy={verticalListSortingStrategy}
                 >
-                  <SortableContext
-                    items={steps.map((s) => s.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="space-y-3">
-                      {steps.map((step, index) => (
-                        <CampaignStepItem
-                          key={step.id}
-                          step={step}
-                          index={index}
-                          allSteps={steps}
-                          onUpdate={updateStep}
-                          onDelete={deleteStep}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              )}
-            </ScrollArea>
+                  <div className="space-y-3">
+                    {steps.map((step, index) => (
+                      <CampaignStepItem
+                        key={step.id}
+                        step={step}
+                        index={index}
+                        allSteps={steps}
+                        accounts={accounts}
+                        onUpdate={updateStep}
+                        onDelete={deleteStep}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
           </div>
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="px-6 py-4 border-t border-border shrink-0 gap-2">
           <Button variant="outline" onClick={resetAndClose}>
             Cancel
           </Button>
