@@ -387,6 +387,73 @@ const Settings = () => {
                         </Button>
                       </div>
                     </div>
+
+                    {/* OpenAI / ChatGPT */}
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          openaiActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
+                        )}>
+                          <Brain className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-sm font-semibold text-foreground">OpenAI / ChatGPT</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Powers Ask Joe AI assistant and sequence step generation.
+                          </p>
+                        </div>
+                        {openaiActive && (
+                          <span className="flex items-center gap-1 text-xs text-success">
+                            <Check className="h-3.5 w-3.5" /> Connected
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5 col-span-2">
+                          <Label className="text-xs">API Key</Label>
+                          <div className="relative">
+                            <Input
+                              type={showPasswords.openai_key ? 'text' : 'password'}
+                              placeholder="sk-..."
+                              value={openaiConfig.api_key}
+                              onChange={(e) => setOpenaiConfig((c) => ({ ...c, api_key: e.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => togglePassword('openai_key')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            >
+                              {showPasswords.openai_key ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Model</Label>
+                          <Input
+                            placeholder="gpt-4o"
+                            value={openaiConfig.model}
+                            onChange={(e) => setOpenaiConfig((c) => ({ ...c, model: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          variant="gold"
+                          size="sm"
+                          disabled={isSaving('openai')}
+                          onClick={() => saveIntegration('openai', openaiConfig, true)}
+                        >
+                          {isSaving('openai') ? (
+                            <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
+                          ) : (
+                            'Save OpenAI Settings'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
