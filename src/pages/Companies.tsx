@@ -110,6 +110,7 @@ const Companies = () => {
           </div>
         )}
       </div>
+      <AddCompanyDialog open={addOpen} onOpenChange={setAddOpen} />
     </MainLayout>
   );
 };
