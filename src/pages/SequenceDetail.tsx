@@ -87,6 +87,7 @@ const SequenceDetail = () => {
   const [description, setDescription] = useState('');
   const [channel, setChannel] = useState('linkedin');
   const [stopOnReply, setStopOnReply] = useState(true);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
 
   // Enroll dialog
