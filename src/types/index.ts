@@ -126,6 +126,7 @@ export interface CampaignStep {
   minHoursAfterConnection: number;
   isReply: boolean;
   useSignature: boolean;
+  accountId?: string;
   condition?: string;
 }
 
