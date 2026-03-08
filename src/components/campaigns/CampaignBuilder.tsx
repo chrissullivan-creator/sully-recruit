@@ -312,6 +312,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
         toast.success('Sequence updated successfully');
       } else {
         // Create new sequence
+        const userId = (await supabase.auth.getUser()).data.user?.id;
         const { data: seq, error: seqError } = await supabase
           .from('sequences')
           .insert({
@@ -320,6 +321,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
             channel,
             status: 'draft',
             stop_on_reply: stopOnReply,
+            created_by: userId,
           } as any)
           .select('id')
           .single();

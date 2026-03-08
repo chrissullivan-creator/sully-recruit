@@ -45,9 +45,10 @@ const Campaigns = () => {
   const handleCreateNew = async () => {
     setCreating(true);
     try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
       const { data: seq, error } = await supabase
         .from('sequences')
-        .insert({ name: 'Untitled Sequence', channel: 'email', status: 'draft', stop_on_reply: true } as any)
+        .insert({ name: 'Untitled Sequence', channel: 'email', status: 'draft', stop_on_reply: true, created_by: userId } as any)
         .select('id')
         .single();
       if (error) throw error;
