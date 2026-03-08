@@ -1,145 +1,235 @@
- import { useSortable } from '@dnd-kit/sortable';
- import { CSS } from '@dnd-kit/utilities';
- import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock } from 'lucide-react';
- import { Button } from '@/components/ui/button';
- import { Input } from '@/components/ui/input';
- import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
- import { Textarea } from '@/components/ui/textarea';
- import { cn } from '@/lib/utils';
- import type { CampaignStep, ChannelType } from '@/types';
- 
- const channelOptions: { value: ChannelType; label: string; icon: React.ReactNode }[] = [
-   { value: 'linkedin_recruiter', label: 'LinkedIn Recruiter InMail', icon: <Linkedin className="h-4 w-4" /> },
-   { value: 'sales_nav', label: 'Sales Nav InMail', icon: <Linkedin className="h-4 w-4" /> },
-   { value: 'linkedin_message', label: 'LinkedIn Message', icon: <MessageSquare className="h-4 w-4" /> },
-   { value: 'linkedin_connection', label: 'Connection Request', icon: <Users className="h-4 w-4" /> },
-   { value: 'email', label: 'Email', icon: <Mail className="h-4 w-4" /> },
-   { value: 'sms', label: 'SMS', icon: <MessageSquare className="h-4 w-4" /> },
-   { value: 'phone', label: 'Phone Call', icon: <Phone className="h-4 w-4" /> },
- ];
- 
- interface CampaignStepItemProps {
-   step: CampaignStep;
-   index: number;
-   onUpdate: (id: string, updates: Partial<CampaignStep>) => void;
-   onDelete: (id: string) => void;
- }
- 
- export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignStepItemProps) => {
-   const {
-     attributes,
-     listeners,
-     setNodeRef,
-     transform,
-     transition,
-     isDragging,
-   } = useSortable({ id: step.id });
- 
-   const style = {
-     transform: CSS.Transform.toString(transform),
-     transition,
-   };
- 
-   const channelInfo = channelOptions.find(c => c.value === step.channel);
- 
-   return (
-     <div
-       ref={setNodeRef}
-       style={style}
-       className={cn(
-         'rounded-lg border border-border bg-card p-4 transition-all',
-         isDragging && 'opacity-50 shadow-lg ring-2 ring-accent'
-       )}
-     >
-       <div className="flex items-start gap-3">
-         {/* Drag Handle */}
-         <button
-           {...attributes}
-           {...listeners}
-           className="mt-1 cursor-grab touch-none p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
-         >
-           <GripVertical className="h-5 w-5" />
-         </button>
- 
-         {/* Step Number */}
-         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground text-sm font-semibold">
-           {index + 1}
-         </div>
- 
-         {/* Step Content */}
-         <div className="flex-1 space-y-3">
-           <div className="flex items-center gap-3">
-             {/* Channel Select */}
-             <Select
-               value={step.channel}
-               onValueChange={(value: ChannelType) => onUpdate(step.id, { channel: value })}
-             >
-               <SelectTrigger className="w-[220px]">
-                 <SelectValue>
-                   <div className="flex items-center gap-2">
-                     {channelInfo?.icon}
-                     <span>{channelInfo?.label}</span>
-                   </div>
-                 </SelectValue>
-               </SelectTrigger>
-               <SelectContent>
-                 {channelOptions.map((option) => (
-                   <SelectItem key={option.value} value={option.value}>
-                     <div className="flex items-center gap-2">
-                       {option.icon}
-                       <span>{option.label}</span>
-                     </div>
-                   </SelectItem>
-                 ))}
-               </SelectContent>
-             </Select>
- 
-             {/* Delay */}
-             <div className="flex items-center gap-2">
-               <Clock className="h-4 w-4 text-muted-foreground" />
-               <Input
-                 type="number"
-                 min={0}
-                 value={step.delayDays}
-                 onChange={(e) => onUpdate(step.id, { delayDays: parseInt(e.target.value) || 0 })}
-                 className="w-20"
-               />
-               <span className="text-sm text-muted-foreground">days wait</span>
-             </div>
- 
-             {/* Delete Button */}
-             <Button
-               variant="ghost"
-               size="icon"
-               onClick={() => onDelete(step.id)}
-               className="ml-auto text-muted-foreground hover:text-destructive"
-             >
-               <Trash2 className="h-4 w-4" />
-             </Button>
-           </div>
- 
-           {/* Subject (for email) */}
-           {(step.channel === 'email') && (
-             <Input
-               placeholder="Email subject line..."
-               value={step.subject || ''}
-               onChange={(e) => onUpdate(step.id, { subject: e.target.value })}
-             />
-           )}
- 
-           {/* Content */}
-           <Textarea
-             placeholder={
-               step.channel === 'phone'
-                 ? 'Call script or talking points...'
-                 : 'Message content...'
-             }
-             value={step.content}
-             onChange={(e) => onUpdate(step.id, { content: e.target.value })}
-             className="min-h-[80px] resize-none"
-           />
-         </div>
-       </div>
-     </div>
-   );
- };
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
+import type { CampaignStep, ChannelType } from '@/types';
+
+const channelOptions: { value: ChannelType; label: string; icon: React.ReactNode }[] = [
+  { value: 'linkedin_recruiter', label: 'LinkedIn Recruiter InMail', icon: <Linkedin className="h-4 w-4" /> },
+  { value: 'sales_nav', label: 'Sales Nav InMail', icon: <Linkedin className="h-4 w-4" /> },
+  { value: 'linkedin_message', label: 'LinkedIn Message', icon: <MessageSquare className="h-4 w-4" /> },
+  { value: 'linkedin_connection', label: 'Connection Request', icon: <Users className="h-4 w-4" /> },
+  { value: 'email', label: 'Email', icon: <Mail className="h-4 w-4" /> },
+  { value: 'sms', label: 'SMS', icon: <MessageSquare className="h-4 w-4" /> },
+  { value: 'phone', label: 'Phone Call', icon: <Phone className="h-4 w-4" /> },
+];
+
+const hourOptions = Array.from({ length: 24 }, (_, i) => ({
+  value: String(i),
+  label: i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`,
+}));
+
+interface CampaignStepItemProps {
+  step: CampaignStep;
+  index: number;
+  onUpdate: (id: string, updates: Partial<CampaignStep>) => void;
+  onDelete: (id: string) => void;
+}
+
+const isLinkedInChannel = (ch: ChannelType) =>
+  ['linkedin_recruiter', 'sales_nav', 'linkedin_message', 'linkedin_connection'].includes(ch);
+
+export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignStepItemProps) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: step.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const channelInfo = channelOptions.find(c => c.value === step.channel);
+  const showConnectionWait = isLinkedInChannel(step.channel) && step.channel !== 'linkedin_connection';
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'rounded-lg border border-border bg-card p-4 transition-all',
+        isDragging && 'opacity-50 shadow-lg ring-2 ring-accent'
+      )}
+    >
+      <div className="flex items-start gap-3">
+        {/* Drag Handle */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="mt-1 cursor-grab touch-none p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+        >
+          <GripVertical className="h-5 w-5" />
+        </button>
+
+        {/* Step Number */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground text-sm font-semibold">
+          {index + 1}
+        </div>
+
+        {/* Step Content */}
+        <div className="flex-1 space-y-3">
+          {/* Row 1: Channel + Delete */}
+          <div className="flex items-center gap-3">
+            <Select
+              value={step.channel}
+              onValueChange={(value: ChannelType) => onUpdate(step.id, { channel: value })}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue>
+                  <div className="flex items-center gap-2">
+                    {channelInfo?.icon}
+                    <span>{channelInfo?.label}</span>
+                  </div>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {channelOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <div className="flex items-center gap-2">
+                      {option.icon}
+                      <span>{option.label}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDelete(step.id)}
+              className="ml-auto text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Row 2: Timing controls */}
+          <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Wait</Label>
+              <Input
+                type="number"
+                min={0}
+                value={step.delayDays}
+                onChange={(e) => onUpdate(step.id, { delayDays: parseInt(e.target.value) || 0 })}
+                className="w-16 h-8 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">days</span>
+              <Input
+                type="number"
+                min={0}
+                max={23}
+                value={step.delayHours}
+                onChange={(e) => {
+                  const val = Math.min(23, Math.max(0, parseInt(e.target.value) || 0));
+                  onUpdate(step.id, { delayHours: val });
+                }}
+                className="w-16 h-8 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">hrs</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Sun className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Send between</Label>
+              <Select
+                value={String(step.sendWindowStart)}
+                onValueChange={(v) => {
+                  const start = parseInt(v);
+                  onUpdate(step.id, {
+                    sendWindowStart: start,
+                    sendWindowEnd: Math.max(start + 1, step.sendWindowEnd),
+                  });
+                }}
+              >
+                <SelectTrigger className="w-[90px] h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {hourOptions.filter(h => parseInt(h.value) < 23).map((h) => (
+                    <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">–</span>
+              <Select
+                value={String(step.sendWindowEnd)}
+                onValueChange={(v) => onUpdate(step.id, { sendWindowEnd: parseInt(v) })}
+              >
+                <SelectTrigger className="w-[90px] h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {hourOptions.filter(h => parseInt(h.value) > step.sendWindowStart).map((h) => (
+                    <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Row 3: LinkedIn connection wait */}
+          {showConnectionWait && (
+            <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 p-3">
+              <Timer className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex items-center gap-2 flex-1">
+                <Switch
+                  checked={step.waitForConnection}
+                  onCheckedChange={(checked) => onUpdate(step.id, { waitForConnection: checked })}
+                />
+                <Label className="text-xs text-muted-foreground">Wait for connection acceptance</Label>
+              </div>
+              {step.waitForConnection && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap">Min wait</Label>
+                  <Input
+                    type="number"
+                    min={4}
+                    value={step.minHoursAfterConnection}
+                    onChange={(e) => onUpdate(step.id, { minHoursAfterConnection: Math.max(4, parseInt(e.target.value) || 4) })}
+                    className="w-16 h-8 text-sm"
+                  />
+                  <span className="text-xs text-muted-foreground">hrs</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Subject (for email) */}
+          {step.channel === 'email' && (
+            <Input
+              placeholder="Email subject line..."
+              value={step.subject || ''}
+              onChange={(e) => onUpdate(step.id, { subject: e.target.value })}
+            />
+          )}
+
+          {/* Content */}
+          <Textarea
+            placeholder={
+              step.channel === 'phone'
+                ? 'Call script or talking points...'
+                : 'Message content...'
+            }
+            value={step.content}
+            onChange={(e) => onUpdate(step.id, { content: e.target.value })}
+            className="min-h-[80px] resize-none"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};

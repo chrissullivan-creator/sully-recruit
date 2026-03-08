@@ -14,12 +14,13 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus, Wand2, Loader2, Martini } from 'lucide-react';
+import { Plus, Wand2, Loader2, Martini, ShieldAlert } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CampaignStepItem } from './CampaignStepItem';
 import { supabase } from '@/integrations/supabase/client';
@@ -62,6 +63,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [channel, setChannel] = useState('linkedin');
+  const [stopOnReply, setStopOnReply] = useState(true);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -93,6 +95,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
       channel: 'email',
       content: '',
       delayDays: steps.length === 0 ? 0 : 2,
+      delayHours: 0,
+      sendWindowStart: 6,
+      sendWindowEnd: 23,
+      waitForConnection: false,
+      minHoursAfterConnection: 4,
     };
     setSteps([...steps, newStep]);
   };
@@ -141,6 +148,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
         subject: s.subject ?? undefined,
         content: s.content ?? '',
         delayDays: s.delayDays ?? (i === 0 ? 0 : 2),
+        delayHours: 0,
+        sendWindowStart: 6,
+        sendWindowEnd: 23,
+        waitForConnection: false,
+        minHoursAfterConnection: 4,
       }));
 
       if (aiSteps.length === 0) {
@@ -170,7 +182,8 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
           description: description.trim() || null,
           channel,
           status: 'draft',
-        })
+          stop_on_reply: stopOnReply,
+        } as any)
         .select('id')
         .single();
 
@@ -183,9 +196,14 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
           step_type: channelToStepType(step.channel),
           channel: channelToDbChannel(step.channel),
           delay_days: step.delayDays,
+          delay_hours: step.delayHours,
+          send_window_start: step.sendWindowStart,
+          send_window_end: step.sendWindowEnd,
+          wait_for_connection: step.waitForConnection,
+          min_hours_after_connection: step.minHoursAfterConnection,
           subject: step.subject || null,
           body: step.content || null,
-        }));
+        } as any));
 
         const { error: stepsError } = await supabase
           .from('sequence_steps')
@@ -209,6 +227,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
     setName('');
     setDescription('');
     setChannel('linkedin');
+    setStopOnReply(true);
     setSteps([]);
     onOpenChange(false);
   };
@@ -259,6 +278,18 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          {/* Stop on Reply toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <Label className="text-sm font-medium">Stop sequence on reply</Label>
+                <p className="text-xs text-muted-foreground">Automatically stop the sequence when a candidate responds</p>
+              </div>
+            </div>
+            <Switch checked={stopOnReply} onCheckedChange={setStopOnReply} />
           </div>
 
           <div className="flex-1 flex flex-col min-h-0">

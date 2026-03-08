@@ -119,6 +119,11 @@ export interface CampaignStep {
   subject?: string;
   content: string;
   delayDays: number;
+  delayHours: number;
+  sendWindowStart: number;
+  sendWindowEnd: number;
+  waitForConnection: boolean;
+  minHoursAfterConnection: number;
   condition?: string;
 }
 

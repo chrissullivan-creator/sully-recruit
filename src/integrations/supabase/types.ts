@@ -992,42 +992,57 @@ export type Database = {
           channel: string | null
           created_at: string
           delay_days: number
+          delay_hours: number
           id: string
           is_active: boolean
+          min_hours_after_connection: number
           require_connection: boolean
+          send_window_end: number
+          send_window_start: number
           sequence_id: string
           step_order: number
           step_type: string
           subject: string | null
           updated_at: string
+          wait_for_connection: boolean
         }
         Insert: {
           body?: string | null
           channel?: string | null
           created_at?: string
           delay_days?: number
+          delay_hours?: number
           id?: string
           is_active?: boolean
+          min_hours_after_connection?: number
           require_connection?: boolean
+          send_window_end?: number
+          send_window_start?: number
           sequence_id: string
           step_order: number
           step_type: string
           subject?: string | null
           updated_at?: string
+          wait_for_connection?: boolean
         }
         Update: {
           body?: string | null
           channel?: string | null
           created_at?: string
           delay_days?: number
+          delay_hours?: number
           id?: string
           is_active?: boolean
+          min_hours_after_connection?: number
           require_connection?: boolean
+          send_window_end?: number
+          send_window_start?: number
           sequence_id?: string
           step_order?: number
           step_type?: string
           subject?: string | null
           updated_at?: string
+          wait_for_connection?: boolean
         }
         Relationships: [
           {
@@ -1048,6 +1063,7 @@ export type Database = {
           id: string
           name: string
           status: string
+          stop_on_reply: boolean
           updated_at: string
         }
         Insert: {
@@ -1058,6 +1074,7 @@ export type Database = {
           id?: string
           name: string
           status?: string
+          stop_on_reply?: boolean
           updated_at?: string
         }
         Update: {
@@ -1068,6 +1085,7 @@ export type Database = {
           id?: string
           name?: string
           status?: string
+          stop_on_reply?: boolean
           updated_at?: string
         }
         Relationships: []
