@@ -116,8 +116,8 @@ const Campaigns = () => {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-muted-foreground mb-2">No sequences found</p>
             <p className="text-sm text-muted-foreground mb-4">Create your first outreach sequence to get started.</p>
-            <Button variant="gold" onClick={() => { setEditingSequenceId(null); setBuilderOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" />
+            <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
+              {creating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
               New Sequence
             </Button>
           </div>
