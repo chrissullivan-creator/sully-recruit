@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine } from 'lucide-react';
+import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,10 +36,19 @@ const channelPlaceholders: Partial<Record<ChannelType, string>> = {
   phone: 'Call script / talking points:\n\n1. Introduction\n2. Value proposition\n3. Ask / next steps',
 };
 
+interface IntegrationAccount {
+  id: string;
+  account_type: string;
+  provider: string;
+  account_label: string | null;
+  is_active: boolean;
+}
+
 interface CampaignStepItemProps {
   step: CampaignStep;
   index: number;
   allSteps: CampaignStep[];
+  accounts: IntegrationAccount[];
   onUpdate: (id: string, updates: Partial<CampaignStep>) => void;
   onDelete: (id: string) => void;
 }
@@ -50,7 +59,16 @@ const isLinkedInChannel = (ch: ChannelType) =>
 const needsSubject = (ch: ChannelType) =>
   ['linkedin_recruiter', 'sales_nav', 'email'].includes(ch);
 
-export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: CampaignStepItemProps) => {
+/** Map step channel to relevant account_type values */
+const channelToAccountTypes = (ch: ChannelType): string[] => {
+  if (isLinkedInChannel(ch)) return ['linkedin', 'linkedin_recruiter', 'sales_navigator'];
+  if (ch === 'email') return ['email', 'smtp', 'gmail', 'outlook'];
+  if (ch === 'sms') return ['sms', 'twilio'];
+  if (ch === 'phone') return ['phone', 'voip', 'twilio'];
+  return [];
+};
+
+export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete }: CampaignStepItemProps) => {
   const {
     attributes,
     listeners,
@@ -68,6 +86,12 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
   const channelInfo = channelOptions.find(c => c.value === step.channel);
   const showConnectionWait = isLinkedInChannel(step.channel) && step.channel !== 'linkedin_connection';
   const isEmail = step.channel === 'email';
+
+  // Filter accounts relevant to this step's channel
+  const relevantAccountTypes = channelToAccountTypes(step.channel);
+  const relevantAccounts = accounts.filter(
+    a => a.is_active && relevantAccountTypes.some(t => a.account_type.toLowerCase().includes(t) || a.provider.toLowerCase().includes(t))
+  );
 
   // Find previous email step's subject for reply context
   const prevEmailStep = allSteps
@@ -102,16 +126,14 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
 
         {/* Step Content */}
         <div className="flex-1 space-y-3">
-          {/* Row 1: Channel + Delete */}
-          <div className="flex items-center gap-3">
+          {/* Row 1: Channel + Sender + Delete */}
+          <div className="flex items-center gap-3 flex-wrap">
             <Select
               value={step.channel}
               onValueChange={(value: ChannelType) => {
-                const updates: Partial<CampaignStep> = { channel: value };
-                // Auto-set defaults when switching to email
+                const updates: Partial<CampaignStep> = { channel: value, accountId: undefined };
                 if (value === 'email') {
                   updates.useSignature = true;
-                  // Check if there's a previous email step
                   const hasPrevEmail = allSteps.slice(0, index).some(s => s.channel === 'email');
                   updates.isReply = hasPrevEmail;
                 } else {
@@ -138,6 +160,43 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
                     </div>
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            {/* Sender / Account picker */}
+            <Select
+              value={step.accountId || '_none'}
+              onValueChange={(v) => onUpdate(step.id, { accountId: v === '_none' ? undefined : v })}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Send className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>
+                      {step.accountId
+                        ? accounts.find(a => a.id === step.accountId)?.account_label || 'Selected account'
+                        : 'Select sender'}
+                    </span>
+                  </div>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">
+                  <span className="text-muted-foreground">Auto (default account)</span>
+                </SelectItem>
+                {relevantAccounts.length > 0 ? (
+                  relevantAccounts.map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.account_label || `${acc.provider} – ${acc.account_type}`}
+                    </SelectItem>
+                  ))
+                ) : (
+                  accounts.filter(a => a.is_active).map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.account_label || `${acc.provider} – ${acc.account_type}`}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
 
@@ -261,7 +320,6 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
           {/* Email-specific controls */}
           {isEmail && (
             <div className="space-y-3">
-              {/* Reply / Signature toggles */}
               <div className="flex items-center gap-6 rounded-md border border-border bg-muted/30 p-3">
                 {prevEmailStep && (
                   <div className="flex items-center gap-2">
@@ -287,7 +345,6 @@ export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: 
                 </div>
               </div>
 
-              {/* Subject line */}
               {step.isReply ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 border border-border rounded-md px-3 py-2">
                   <Reply className="h-3.5 w-3.5 shrink-0" />
