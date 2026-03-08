@@ -1,12 +1,13 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun } from 'lucide-react';
+import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import type { CampaignStep, ChannelType } from '@/types';
 
@@ -25,9 +26,20 @@ const hourOptions = Array.from({ length: 24 }, (_, i) => ({
   label: i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`,
 }));
 
+const channelPlaceholders: Partial<Record<ChannelType, string>> = {
+  linkedin_recruiter: 'InMail message body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
+  sales_nav: 'Sales Navigator InMail body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
+  linkedin_message: 'LinkedIn message...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
+  linkedin_connection: 'Connection request note (max 300 chars)...',
+  email: 'Email body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.\n\nSignature will be appended automatically.',
+  sms: 'SMS text (keep under 160 chars for single message)...',
+  phone: 'Call script / talking points:\n\n1. Introduction\n2. Value proposition\n3. Ask / next steps',
+};
+
 interface CampaignStepItemProps {
   step: CampaignStep;
   index: number;
+  allSteps: CampaignStep[];
   onUpdate: (id: string, updates: Partial<CampaignStep>) => void;
   onDelete: (id: string) => void;
 }
@@ -35,7 +47,7 @@ interface CampaignStepItemProps {
 const isLinkedInChannel = (ch: ChannelType) =>
   ['linkedin_recruiter', 'sales_nav', 'linkedin_message', 'linkedin_connection'].includes(ch);
 
-export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignStepItemProps) => {
+export const CampaignStepItem = ({ step, index, allSteps, onUpdate, onDelete }: CampaignStepItemProps) => {
   const {
     attributes,
     listeners,
@@ -52,6 +64,14 @@ export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignSt
 
   const channelInfo = channelOptions.find(c => c.value === step.channel);
   const showConnectionWait = isLinkedInChannel(step.channel) && step.channel !== 'linkedin_connection';
+  const isEmail = step.channel === 'email';
+
+  // Find previous email step's subject for reply context
+  const prevEmailStep = allSteps
+    .slice(0, index)
+    .reverse()
+    .find(s => s.channel === 'email');
+  const replySubject = prevEmailStep?.subject ? `Re: ${prevEmailStep.subject}` : 'Re: (previous email)';
 
   return (
     <div
@@ -83,7 +103,20 @@ export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignSt
           <div className="flex items-center gap-3">
             <Select
               value={step.channel}
-              onValueChange={(value: ChannelType) => onUpdate(step.id, { channel: value })}
+              onValueChange={(value: ChannelType) => {
+                const updates: Partial<CampaignStep> = { channel: value };
+                // Auto-set defaults when switching to email
+                if (value === 'email') {
+                  updates.useSignature = true;
+                  // Check if there's a previous email step
+                  const hasPrevEmail = allSteps.slice(0, index).some(s => s.channel === 'email');
+                  updates.isReply = hasPrevEmail;
+                } else {
+                  updates.useSignature = false;
+                  updates.isReply = false;
+                }
+                onUpdate(step.id, updates);
+              }}
             >
               <SelectTrigger className="w-[220px]">
                 <SelectValue>
@@ -104,6 +137,20 @@ export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignSt
                 ))}
               </SelectContent>
             </Select>
+
+            {/* Channel-specific badges */}
+            {isEmail && step.isReply && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                <Reply className="h-3 w-3" />
+                Reply
+              </span>
+            )}
+            {isEmail && step.useSignature && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                <PenLine className="h-3 w-3" />
+                Signature
+              </span>
+            )}
 
             <Button
               variant="ghost"
@@ -208,22 +255,54 @@ export const CampaignStepItem = ({ step, index, onUpdate, onDelete }: CampaignSt
             </div>
           )}
 
-          {/* Subject (for email) */}
-          {step.channel === 'email' && (
-            <Input
-              placeholder="Email subject line..."
-              value={step.subject || ''}
-              onChange={(e) => onUpdate(step.id, { subject: e.target.value })}
-            />
+          {/* Email-specific controls */}
+          {isEmail && (
+            <div className="space-y-3">
+              {/* Reply / Signature toggles */}
+              <div className="flex items-center gap-6 rounded-md border border-border bg-muted/30 p-3">
+                {prevEmailStep && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`reply-${step.id}`}
+                      checked={step.isReply}
+                      onCheckedChange={(checked) => onUpdate(step.id, { isReply: !!checked })}
+                    />
+                    <Label htmlFor={`reply-${step.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                      Reply to previous email
+                    </Label>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id={`sig-${step.id}`}
+                    checked={step.useSignature}
+                    onCheckedChange={(checked) => onUpdate(step.id, { useSignature: !!checked })}
+                  />
+                  <Label htmlFor={`sig-${step.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                    Include email signature
+                  </Label>
+                </div>
+              </div>
+
+              {/* Subject line */}
+              {step.isReply ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 border border-border rounded-md px-3 py-2">
+                  <Reply className="h-3.5 w-3.5 shrink-0" />
+                  <span>Subject: <span className="font-medium text-foreground">{replySubject}</span></span>
+                </div>
+              ) : (
+                <Input
+                  placeholder="Email subject line..."
+                  value={step.subject || ''}
+                  onChange={(e) => onUpdate(step.id, { subject: e.target.value })}
+                />
+              )}
+            </div>
           )}
 
           {/* Content */}
           <Textarea
-            placeholder={
-              step.channel === 'phone'
-                ? 'Call script or talking points...'
-                : 'Message content...'
-            }
+            placeholder={channelPlaceholders[step.channel] || 'Message content...'}
             value={step.content}
             onChange={(e) => onUpdate(step.id, { content: e.target.value })}
             className="min-h-[80px] resize-none"

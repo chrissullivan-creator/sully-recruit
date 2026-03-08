@@ -361,6 +361,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
                           key={step.id}
                           step={step}
                           index={index}
+                          allSteps={steps}
                           onUpdate={updateStep}
                           onDelete={deleteStep}
                         />
