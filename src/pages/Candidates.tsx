@@ -119,6 +119,10 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
             <Button variant="gold">
               <Plus className="h-4 w-4" />
               Add Candidate
