@@ -128,7 +128,7 @@ const Leads = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading leads...</p>
+          <p className="text-muted-foreground text-sm">Loading prospects...</p>
         ) : (
           <div className="rounded-lg border border-border overflow-hidden">
             <table className="w-full">
