@@ -75,6 +75,8 @@ const Settings = () => {
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
     signature_html: '',
+    signature_text: '',
+    signature_mode: 'text', // 'text' or 'html'
   });
 
   // LinkedIn safety limits
