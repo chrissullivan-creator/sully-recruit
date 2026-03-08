@@ -182,7 +182,8 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
           description: description.trim() || null,
           channel,
           status: 'draft',
-        })
+          stop_on_reply: stopOnReply,
+        } as any)
         .select('id')
         .single();
 
@@ -195,9 +196,14 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
           step_type: channelToStepType(step.channel),
           channel: channelToDbChannel(step.channel),
           delay_days: step.delayDays,
+          delay_hours: step.delayHours,
+          send_window_start: step.sendWindowStart,
+          send_window_end: step.sendWindowEnd,
+          wait_for_connection: step.waitForConnection,
+          min_hours_after_connection: step.minHoursAfterConnection,
           subject: step.subject || null,
           body: step.content || null,
-        }));
+        } as any));
 
         const { error: stepsError } = await supabase
           .from('sequence_steps')
