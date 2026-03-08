@@ -5,7 +5,7 @@ import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { Button } from '@/components/ui/button';
-import { mockDashboardMetrics } from '@/data/mockData';
+import { useDashboardMetrics } from '@/hooks/useSupabaseData';
 import { 
   Briefcase, 
   Users, 
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 const Dashboard = () => {
-  const metrics = mockDashboardMetrics;
+  const { data: metrics, isLoading } = useDashboardMetrics();
 
   return (
     <MainLayout>
@@ -39,25 +39,22 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard
             label="Active Jobs"
-            value={metrics.activeJobs}
-            change={{ value: 12, isPositive: true }}
+            value={isLoading ? '...' : (metrics?.activeJobs ?? 0)}
             icon={<Briefcase className="h-5 w-5" />}
           />
           <MetricCard
             label="Active Candidates"
-            value={metrics.activeCandidates}
-            change={{ value: 8, isPositive: true }}
+            value={isLoading ? '...' : (metrics?.activeCandidates ?? 0)}
             icon={<Users className="h-5 w-5" />}
           />
           <MetricCard
-            label="Interviews This Week"
-            value={metrics.interviewsThisWeek}
-            change={{ value: 25, isPositive: true }}
+            label="Interviews"
+            value={isLoading ? '...' : (metrics?.interviewsThisWeek ?? 0)}
             icon={<Calendar className="h-5 w-5" />}
           />
           <MetricCard
             label="Offers Out"
-            value={metrics.offersOut}
+            value={isLoading ? '...' : (metrics?.offersOut ?? 0)}
             icon={<FileText className="h-5 w-5" />}
           />
         </div>
@@ -66,23 +63,22 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard
             label="Leads to Follow"
-            value={metrics.leadsToFollow}
+            value={isLoading ? '...' : (metrics?.leadsToFollow ?? 0)}
             icon={<Target className="h-5 w-5" />}
           />
           <MetricCard
             label="Calls Today"
-            value={metrics.callsToday}
+            value={isLoading ? '...' : (metrics?.callsToday ?? 0)}
             icon={<Phone className="h-5 w-5" />}
           />
           <MetricCard
             label="Emails Sent"
-            value={metrics.emailsSent}
+            value={isLoading ? '...' : (metrics?.emailsSent ?? 0)}
             icon={<Mail className="h-5 w-5" />}
           />
           <MetricCard
             label="Response Rate"
-            value={`${(metrics.responseRate * 100).toFixed(0)}%`}
-            change={{ value: 5, isPositive: true }}
+            value={isLoading ? '...' : `${((metrics?.responseRate ?? 0) * 100).toFixed(0)}%`}
             icon={<TrendingUp className="h-5 w-5" />}
           />
         </div>

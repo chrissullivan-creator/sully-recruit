@@ -2,31 +2,19 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
-import { mockJobs } from '@/data/mockData';
+import { useJobs } from '@/hooks/useSupabaseData';
 import { Plus, LayoutGrid, List, Search } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { JobCard } from '@/components/pipeline/JobCard';
-import type { JobStage } from '@/types';
-
-const stageLabels: Record<JobStage, string> = {
-  warm: 'Warm',
-  hot: 'Hot',
-  interviewing: 'Interviewing',
-  offer: 'Offer',
-  accepted: 'Accepted',
-  declined: 'Declined',
-  lost: 'Lost',
-  on_hold: 'On Hold',
-};
 
 const Jobs = () => {
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [searchQuery, setSearchQuery] = useState('');
+  const { data: jobs = [], isLoading } = useJobs();
 
-  const filteredJobs = mockJobs.filter((job) =>
+  const filteredJobs = jobs.filter((job) =>
     job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    job.company.toLowerCase().includes(searchQuery.toLowerCase())
+    (job.company_name ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -65,7 +53,6 @@ const Jobs = () => {
       />
       
       <div className="p-8">
-        {/* Search */}
         <div className="relative max-w-md mb-6">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
@@ -77,7 +64,9 @@ const Jobs = () => {
           />
         </div>
 
-        {view === 'pipeline' ? (
+        {isLoading ? (
+          <p className="text-muted-foreground text-sm">Loading jobs...</p>
+        ) : view === 'pipeline' ? (
           <JobPipeline />
         ) : (
           <div className="rounded-lg border border-border overflow-hidden">
@@ -87,9 +76,7 @@ const Jobs = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Salary</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Candidates</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -98,13 +85,13 @@ const Jobs = () => {
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{job.company}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{job.location}</td>
-                    <td className="px-4 py-3">
-                      <span className="stage-badge stage-warm">{stageLabels[job.stage]}</span>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {job.company_name ?? (job.companies as any)?.name ?? '-'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-accent font-medium">{job.salary || '-'}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{job.candidateCount}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className="stage-badge stage-warm">{job.status}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
