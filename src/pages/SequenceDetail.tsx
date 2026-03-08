@@ -13,7 +13,7 @@ import { CampaignStepItem } from '@/components/campaigns/CampaignStepItem';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useIntegrationAccounts, useCandidates, useContacts } from '@/hooks/useSupabaseData';
+import { useIntegrationAccounts, useCandidates, useContacts, useJobs } from '@/hooks/useSupabaseData';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -75,6 +75,7 @@ const SequenceDetail = () => {
   const { data: accounts = [] } = useIntegrationAccounts();
   const { data: allCandidates = [] } = useCandidates();
   const { data: allContacts = [] } = useContacts();
+  const { data: jobs = [] } = useJobs();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,6 +87,7 @@ const SequenceDetail = () => {
   const [description, setDescription] = useState('');
   const [channel, setChannel] = useState('linkedin');
   const [stopOnReply, setStopOnReply] = useState(true);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
 
   // Enroll dialog
@@ -118,6 +120,7 @@ const SequenceDetail = () => {
       setDescription(seq.description || '');
       setChannel(seq.channel);
       setStopOnReply(seq.stop_on_reply ?? true);
+      setJobId(seq.job_id ?? null);
 
       const dbSteps = ((seq.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
       let seenFirstEmail = false;
@@ -152,7 +155,7 @@ const SequenceDetail = () => {
     setSaving(true);
     try {
       const { error: seqError } = await supabase.from('sequences').update({
-        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply,
+        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply, job_id: jobId,
       } as any).eq('id', id);
       if (seqError) throw seqError;
 
@@ -271,7 +274,10 @@ const SequenceDetail = () => {
         </Button>
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold text-foreground truncate">{sequence.name}</h1>
-          <p className="text-sm text-muted-foreground">{sequence.channel} • {steps.length} steps • {enrollments.length} enrolled</p>
+          <p className="text-sm text-muted-foreground">
+            {sequence.channel} • {steps.length} steps • {enrollments.length} enrolled
+            {jobId && jobs.find((j: any) => j.id === jobId) && <> • <span className="text-gold font-medium">{jobs.find((j: any) => j.id === jobId)?.title}</span></>}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={toggleStatus}>
@@ -321,6 +327,18 @@ const SequenceDetail = () => {
                       <SelectContent>
                         {channelOptions.map((c) => (
                           <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tagged Job</Label>
+                    <Select value={jobId ?? 'none'} onValueChange={(v) => setJobId(v === 'none' ? null : v)}>
+                      <SelectTrigger><SelectValue placeholder="No job tagged" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No job tagged</SelectItem>
+                        {jobs.map((j: any) => (
+                          <SelectItem key={j.id} value={j.id}>{j.title}{j.company_name ? ` — ${j.company_name}` : ''}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
