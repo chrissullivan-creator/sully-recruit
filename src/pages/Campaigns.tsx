@@ -69,7 +69,7 @@ const Campaigns = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading campaigns...</p>
+          <p className="text-muted-foreground text-sm">Loading sequences...</p>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filteredSequences.map((seq) => {

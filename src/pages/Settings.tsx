@@ -19,6 +19,8 @@ import {
   PenLine,
   Eye,
   EyeOff,
+  Martini,
+  Brain,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
