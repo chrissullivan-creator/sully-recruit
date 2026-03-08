@@ -276,7 +276,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
                   {suggesting ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating...</>
                   ) : (
-                    <><Wand2 className="h-4 w-4 mr-1" /> AI Suggest</>
+                    <><Martini className="h-4 w-4 mr-1" /> Ask Joe</>
                   )}
                 </Button>
                 <Button variant="gold-outline" size="sm" onClick={addStep}>
