@@ -280,6 +280,18 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
             />
           </div>
 
+          {/* Stop on Reply toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <Label className="text-sm font-medium">Stop sequence on reply</Label>
+                <p className="text-xs text-muted-foreground">Automatically stop the sequence when a candidate responds</p>
+              </div>
+            </div>
+            <Switch checked={stopOnReply} onCheckedChange={setStopOnReply} />
+          </div>
+
           <div className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-foreground">
