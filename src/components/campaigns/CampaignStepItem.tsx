@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine, Send } from 'lucide-react';
+import { StepAttachments, type Attachment } from './StepAttachments';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -376,6 +377,15 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
             onChange={(e) => onUpdate(step.id, { content: e.target.value })}
             className="min-h-[80px] resize-none"
           />
+
+          {/* Attachments */}
+          {(step.channel === 'email' || step.channel === 'linkedin_recruiter' || step.channel === 'sales_nav') && (
+            <StepAttachments
+              stepId={step.id}
+              attachments={step.attachments ?? []}
+              onAttachmentsChange={(attachments) => onUpdate(step.id, { attachments })}
+            />
+          )}
 
           {/* SMS character counter */}
           {step.channel === 'sms' && (

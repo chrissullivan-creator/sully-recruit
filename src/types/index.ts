@@ -128,6 +128,7 @@ export interface CampaignStep {
   useSignature: boolean;
   accountId?: string;
   condition?: string;
+  attachments?: { name: string; path: string; size: number; type: string }[];
 }
 
 export interface Campaign {

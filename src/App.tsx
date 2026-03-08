@@ -13,6 +13,7 @@ import CandidateDetail from "./pages/CandidateDetail";
 import Companies from "./pages/Companies";
 import Contacts from "./pages/Contacts";
 import Campaigns from "./pages/Campaigns";
+import SequenceDetail from "./pages/SequenceDetail";
 import Calls from "./pages/Calls";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/companies" element={<ProtectedRoute><Companies /></ProtectedRoute>} />
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
+            <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />

@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useSequences } from '@/hooks/useSupabaseData';
-import { CampaignBuilder } from '@/components/campaigns/CampaignBuilder';
-import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Pencil } from 'lucide-react';
+import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -25,10 +25,10 @@ const channelIcons: Record<string, React.ReactNode> = {
 };
 
 const Campaigns = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<string>('all');
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [editingSequenceId, setEditingSequenceId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { data: sequences = [], isLoading } = useSequences();
   const queryClient = useQueryClient();
 
@@ -39,15 +39,25 @@ const Campaigns = () => {
   }), [sequences, searchQuery, filter]);
 
   const handleCardClick = (seqId: string) => {
-    setEditingSequenceId(seqId);
-    setBuilderOpen(true);
+    navigate(`/campaigns/${seqId}`);
   };
 
-  const handleBuilderClose = (open: boolean) => {
-    if (!open) {
-      setEditingSequenceId(null);
+  const handleCreateNew = async () => {
+    setCreating(true);
+    try {
+      const { data: seq, error } = await supabase
+        .from('sequences')
+        .insert({ name: 'Untitled Sequence', channel: 'email', status: 'draft', stop_on_reply: true } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      navigate(`/campaigns/${seq.id}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create sequence');
+    } finally {
+      setCreating(false);
     }
-    setBuilderOpen(open);
   };
 
   const toggleStatus = async (e: React.MouseEvent, seqId: string, currentStatus: string) => {
@@ -72,16 +82,11 @@ const Campaigns = () => {
         title="Sequences" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
-          <Button variant="gold" onClick={() => { setEditingSequenceId(null); setBuilderOpen(true); }}>
-            <Plus className="h-4 w-4" />
+          <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             New Sequence
           </Button>
         }
-      />
-      <CampaignBuilder
-        open={builderOpen}
-        onOpenChange={handleBuilderClose}
-        editSequenceId={editingSequenceId}
       />
       
       <div className="p-8">
@@ -111,8 +116,8 @@ const Campaigns = () => {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-muted-foreground mb-2">No sequences found</p>
             <p className="text-sm text-muted-foreground mb-4">Create your first outreach sequence to get started.</p>
-            <Button variant="gold" onClick={() => { setEditingSequenceId(null); setBuilderOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" />
+            <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
+              {creating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
               New Sequence
             </Button>
           </div>
@@ -131,7 +136,6 @@ const Campaigns = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-semibold text-foreground truncate">{seq.name}</h3>
-                        <Pencil className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                       </div>
                       <span className="text-xs text-muted-foreground">{seq.channel} • {seq.description ?? ''}</span>
                     </div>
