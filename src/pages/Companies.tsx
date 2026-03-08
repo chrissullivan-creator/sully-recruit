@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useSupabaseData';
 import { Plus, Search, Building, Globe, MapPin, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 
 const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const { data: companies = [], isLoading } = useCompanies();
 
   const filteredCompanies = companies.filter((company) => {
@@ -24,7 +26,7 @@ const Companies = () => {
         title="Companies" 
         description="Manage your client companies and target accounts."
         actions={
-          <Button variant="gold">
+          <Button variant="gold" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" />
             Add Company
           </Button>
@@ -108,6 +110,7 @@ const Companies = () => {
           </div>
         )}
       </div>
+      <AddCompanyDialog open={addOpen} onOpenChange={setAddOpen} />
     </MainLayout>
   );
 };
