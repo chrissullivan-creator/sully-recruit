@@ -217,7 +217,7 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
     <Dialog open={open} onOpenChange={resetAndClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="text-xl">Create New Campaign</DialogTitle>
+          <DialogTitle className="text-xl">Create New Sequence</DialogTitle>
           <DialogDescription>
             Build your multi-channel outreach sequence. Use AI to auto-generate steps or add them manually.
           </DialogDescription>
