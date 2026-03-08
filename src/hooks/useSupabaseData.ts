@@ -226,3 +226,19 @@ export function useDashboardMetrics() {
     },
   });
 }
+
+// Integration accounts (sender accounts)
+export function useIntegrationAccounts() {
+  return useQuery({
+    queryKey: ['integration_accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('integration_accounts')
+        .select('*')
+        .eq('is_active', true)
+        .order('account_label');
+      if (error) throw error;
+      return data;
+    },
+  });
+}
