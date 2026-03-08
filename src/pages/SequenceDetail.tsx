@@ -120,6 +120,7 @@ const SequenceDetail = () => {
       setDescription(seq.description || '');
       setChannel(seq.channel);
       setStopOnReply(seq.stop_on_reply ?? true);
+      setJobId(seq.job_id ?? null);
 
       const dbSteps = ((seq.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
       let seenFirstEmail = false;
