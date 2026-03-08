@@ -118,7 +118,7 @@ export function AskJoeButton() {
           isOpen && 'scale-0 opacity-0'
         )}
       >
-        <Sparkles className="h-6 w-6 text-accent-foreground" />
+        <Martini className="h-6 w-6 text-accent-foreground" />
       </button>
 
       <div
