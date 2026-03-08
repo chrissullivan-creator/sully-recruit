@@ -93,6 +93,11 @@ export const CampaignBuilder = ({ open, onOpenChange }: CampaignBuilderProps) =>
       channel: 'email',
       content: '',
       delayDays: steps.length === 0 ? 0 : 2,
+      delayHours: 0,
+      sendWindowStart: 6,
+      sendWindowEnd: 23,
+      waitForConnection: false,
+      minHoursAfterConnection: 4,
     };
     setSteps([...steps, newStep]);
   };
