@@ -59,6 +59,13 @@ const Settings = () => {
   });
   const [unipileActive, setUnipileActive] = useState(false);
 
+  // OpenAI state
+  const [openaiConfig, setOpenaiConfig] = useState<IntegrationConfig>({
+    api_key: '',
+    model: 'gpt-4o',
+  });
+  const [openaiActive, setOpenaiActive] = useState(false);
+
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
     signature_html: '',
