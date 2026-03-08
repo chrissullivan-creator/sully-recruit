@@ -5,12 +5,13 @@ import logo from '@/assets/emerald_gold.png';
 import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Send, Settings } from 'lucide-react';
 
 const navigation = [
-  { name: 'Prospects', href: '/leads', icon: Target },
-  { name: 'Contacts', href: '/contacts', icon: Users },
-  { name: 'Candidates', href: '/candidates', icon: UserCheck },
-  { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { name: 'Inbox', href: '/calls', icon: Inbox },
-  { name: 'Send Outs', href: '/jobs', icon: Send },
+  { name: 'Jobs', href: '/jobs', icon: Send },
+  { name: 'Prospects', href: '/leads', icon: Target },
+  { name: 'Candidates', href: '/candidates', icon: UserCheck },
+  { name: 'Contacts', href: '/contacts', icon: Users },
+  { name: 'Companies', href: '/companies', icon: Megaphone },
+  { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
