@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
 import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
