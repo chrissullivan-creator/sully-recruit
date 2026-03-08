@@ -32,7 +32,7 @@ const channelPlaceholders: Partial<Record<ChannelType, string>> = {
   sales_nav: 'Sales Navigator InMail body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
   linkedin_message: 'LinkedIn message...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
   linkedin_connection: 'Connection request note (max 300 chars)...',
-  email: 'Email body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.\n\nSignature will be appended automatically.',
+  email: 'Type your email here in plain text...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.\n\nYour signature will be added automatically if enabled.',
   sms: 'SMS text (keep under 160 chars for single message)...',
   phone: 'Call script / talking points:\n\n1. Introduction\n2. Value proposition\n3. Ask / next steps',
 };
