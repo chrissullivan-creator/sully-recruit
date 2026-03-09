@@ -94,6 +94,11 @@ const Settings = () => {
     warmup_days_completed: '0',
   });
 
+  // Outlook preferences
+  const [outlookPrefs, setOutlookPrefs] = useState<IntegrationConfig>({
+    default_method: 'default', // 'desktop' | 'web' | 'default'
+  });
+
   // Password visibility
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
 
