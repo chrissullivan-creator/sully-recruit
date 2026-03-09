@@ -11,7 +11,7 @@ import { useCreateTask } from '@/hooks/useTasks';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, CalendarIcon, Search } from 'lucide-react';
+import { Loader2, CalendarIcon, Search, X, User, Briefcase, Building } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +20,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   defaultLinks?: { entity_type: string; entity_id: string }[];
 }
+
+type EntityType = 'candidate' | 'job' | 'contact';
+
+const ENTITY_CONFIG: Record<EntityType, { label: string; plural: string; icon: React.ElementType; emoji: string }> = {
+  candidate: { label: 'Candidate', plural: 'candidates', icon: User, emoji: '👤' },
+  job: { label: 'Job', plural: 'jobs', icon: Briefcase, emoji: '💼' },
+  contact: { label: 'Contact', plural: 'contacts', icon: Building, emoji: '🤝' },
+};
 
 export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
   const { user } = useAuth();
@@ -33,7 +41,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
   });
   const [links, setLinks] = useState<{ entity_type: string; entity_id: string; label: string }[]>([]);
   const [entitySearch, setEntitySearch] = useState('');
-  const [entityType, setEntityType] = useState<'candidate' | 'job'>('candidate');
+  const [entityType, setEntityType] = useState<EntityType>('candidate');
   const [searchResults, setSearchResults] = useState<{ id: string; label: string }[]>([]);
   const [searching, setSearching] = useState(false);
 
@@ -46,7 +54,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
     }
   }, [open, defaultLinks]);
 
-  // Search candidates or jobs
+  // Search entities with debounce
   useEffect(() => {
     if (!entitySearch.trim()) { setSearchResults([]); return; }
     const timeout = setTimeout(async () => {
@@ -54,9 +62,13 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
       if (entityType === 'candidate') {
         const { data } = await supabase.from('candidates').select('id, full_name').ilike('full_name', `%${entitySearch}%`).limit(8);
         setSearchResults((data || []).map(c => ({ id: c.id, label: c.full_name || 'Unnamed' })));
-      } else {
-        const { data } = await supabase.from('jobs').select('id, title, company_name').ilike('title', `%${entitySearch}%`).limit(8);
+      } else if (entityType === 'job') {
+        // Only show non-closed jobs
+        const { data } = await supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${entitySearch}%`).neq('status', 'closed').limit(8);
         setSearchResults((data || []).map(j => ({ id: j.id, label: `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}` })));
+      } else if (entityType === 'contact') {
+        const { data } = await supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${entitySearch}%`).limit(8);
+        setSearchResults((data || []).map(c => ({ id: c.id, label: `${c.full_name || 'Unnamed'}${c.title ? ` · ${c.title}` : ''}` })));
       }
       setSearching(false);
     }, 300);
@@ -88,6 +100,11 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
       }
     );
   };
+
+  // Group linked items by type
+  const candidateLinks = links.filter(l => l.entity_type === 'candidate');
+  const jobLinks = links.filter(l => l.entity_type === 'job');
+  const contactLinks = links.filter(l => l.entity_type === 'contact');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -139,25 +156,63 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
             </div>
           </div>
 
-          {/* Tag candidates / jobs */}
-          <div className="space-y-2">
-            <Label>Tag Candidates & Jobs</Label>
-            {links.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {links.map(l => (
-                  <span key={l.entity_id} className="inline-flex items-center gap-1 bg-accent/10 text-accent text-xs px-2 py-1 rounded-full">
-                    {l.entity_type === 'candidate' ? '👤' : '💼'} {l.label || l.entity_type}
-                    <button onClick={() => removeLink(l.entity_id)} className="hover:text-destructive ml-0.5">×</button>
+          {/* Tagged fields - shown per entity type */}
+          {candidateLinks.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                <User className="h-3 w-3" /> Candidates
+              </Label>
+              <div className="flex flex-wrap gap-1.5">
+                {candidateLinks.map(l => (
+                  <span key={l.entity_id} className="inline-flex items-center gap-1 bg-accent/10 text-accent text-xs px-2.5 py-1 rounded-full border border-accent/20">
+                    👤 {l.label || 'Candidate'}
+                    <button onClick={() => removeLink(l.entity_id)} className="hover:text-destructive ml-0.5"><X className="h-3 w-3" /></button>
                   </span>
                 ))}
               </div>
-            )}
+            </div>
+          )}
+          {jobLinks.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Briefcase className="h-3 w-3" /> Jobs
+              </Label>
+              <div className="flex flex-wrap gap-1.5">
+                {jobLinks.map(l => (
+                  <span key={l.entity_id} className="inline-flex items-center gap-1 bg-info/10 text-info text-xs px-2.5 py-1 rounded-full border border-info/20">
+                    💼 {l.label || 'Job'}
+                    <button onClick={() => removeLink(l.entity_id)} className="hover:text-destructive ml-0.5"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {contactLinks.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Building className="h-3 w-3" /> Contacts
+              </Label>
+              <div className="flex flex-wrap gap-1.5">
+                {contactLinks.map(l => (
+                  <span key={l.entity_id} className="inline-flex items-center gap-1 bg-warning/10 text-warning text-xs px-2.5 py-1 rounded-full border border-warning/20">
+                    🤝 {l.label || 'Contact'}
+                    <button onClick={() => removeLink(l.entity_id)} className="hover:text-destructive ml-0.5"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tag search */}
+          <div className="space-y-2">
+            <Label>Tag Candidates, Jobs & Contacts</Label>
             <div className="flex gap-2">
-              <Select value={entityType} onValueChange={(v) => { setEntityType(v as any); setEntitySearch(''); setSearchResults([]); }}>
-                <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+              <Select value={entityType} onValueChange={(v) => { setEntityType(v as EntityType); setEntitySearch(''); setSearchResults([]); }}>
+                <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="candidate">Candidate</SelectItem>
                   <SelectItem value="job">Job</SelectItem>
+                  <SelectItem value="contact">Contact</SelectItem>
                 </SelectContent>
               </Select>
               <div className="relative flex-1">
@@ -165,16 +220,23 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
                 <Input
                   value={entitySearch}
                   onChange={(e) => setEntitySearch(e.target.value)}
-                  placeholder={`Search ${entityType}s...`}
+                  placeholder={`Search ${ENTITY_CONFIG[entityType].plural}...`}
                   className="pl-7 h-9 text-sm"
                 />
+                {searching && (
+                  <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                )}
                 {searchResults.length > 0 && (
                   <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-40 overflow-y-auto">
-                    {searchResults.map(r => (
-                      <button key={r.id} onClick={() => addLink(r.id, r.label)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 text-foreground">
-                        {r.label}
-                      </button>
-                    ))}
+                    {searchResults.map(r => {
+                      const cfg = ENTITY_CONFIG[entityType];
+                      return (
+                        <button key={r.id} onClick={() => addLink(r.id, r.label)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 text-foreground flex items-center gap-2">
+                          <cfg.icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          {r.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
