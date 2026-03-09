@@ -37,12 +37,14 @@ async function fetchCRMContext(authHeader: string | null): Promise<string> {
     const [candidatesRes, prospectsRes, jobsRes, sequencesRes, contactsRes] = await Promise.all([
       sb.from("candidates").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
       sb.from("prospects").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
-      sb.from("jobs").select("title, company_name, status, location, compensation").neq("status", "closed").order("created_at", { ascending: false }).limit(20),
-      sb.from("sequences").select("name, channel, status, description").order("created_at", { ascending: false }).limit(15),
+      sb.from("jobs").select("id, title, company_name, status, location, compensation, description").neq("status", "closed").order("created_at", { ascending: false }).limit(20),
+      sb.from("sequences").select("id, name, channel, status, description, job_id, sequence_steps(step_order, step_type, channel, subject, body, delay_days)").order("created_at", { ascending: false }).limit(15),
       sb.from("contacts").select("full_name, title, email").order("created_at", { ascending: false }).limit(20),
     ]);
 
     const sections: string[] = [];
+    const jobs = jobsRes.data ?? [];
+    const jobMap = new Map(jobs.map((j: any) => [j.id, j]));
 
     const candidates = candidatesRes.data ?? [];
     if (candidates.length > 0) {
@@ -58,18 +60,31 @@ async function fetchCRMContext(authHeader: string | null): Promise<string> {
       ).join("\n"));
     }
 
-    const jobs = jobsRes.data ?? [];
     if (jobs.length > 0) {
-      sections.push(`OPEN JOBS (${jobs.length}):\n` + jobs.map(j =>
-        `- ${j.title}${j.company_name ? ` @ ${j.company_name}` : ""}${j.location ? ` (${j.location})` : ""}${j.compensation ? ` — ${j.compensation}` : ""} [${j.status}]`
+      sections.push(`OPEN JOBS (${jobs.length}):\n` + jobs.map((j: any) =>
+        `- [${j.id.slice(0,8)}] ${j.title}${j.company_name ? ` @ ${j.company_name}` : ""}${j.location ? ` (${j.location})` : ""}${j.compensation ? ` — ${j.compensation}` : ""} [${j.status}]${j.description ? `\n  Description: ${j.description.slice(0, 300)}` : ""}`
       ).join("\n"));
     }
 
     const sequences = sequencesRes.data ?? [];
     if (sequences.length > 0) {
-      sections.push(`OUTREACH SEQUENCES (${sequences.length}):\n` + sequences.map(s =>
-        `- "${s.name}" — Channel: ${s.channel}, Status: ${s.status}${s.description ? `, ${s.description}` : ""}`
-      ).join("\n"));
+      sections.push(`OUTREACH SEQUENCES (${sequences.length}):\n` + sequences.map((s: any) => {
+        const taggedJob = s.job_id ? jobMap.get(s.job_id) : null;
+        const stepsArr = ((s.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
+        let entry = `- "${s.name}" — Channel: ${s.channel}, Status: ${s.status}${s.description ? `, ${s.description}` : ""}`;
+        if (taggedJob) {
+          entry += `\n  Tagged Job: ${taggedJob.title}${taggedJob.company_name ? ` @ ${taggedJob.company_name}` : ""}${taggedJob.location ? ` (${taggedJob.location})` : ""}${taggedJob.compensation ? `, ${taggedJob.compensation}` : ""}`;
+        }
+        if (stepsArr.length > 0) {
+          entry += `\n  Steps (${stepsArr.length}):`;
+          stepsArr.forEach((st: any) => {
+            const stepChannel = st.step_type || st.channel || "unknown";
+            entry += `\n    Step ${st.step_order}: [${stepChannel}]${st.delay_days > 0 ? ` wait ${st.delay_days}d` : ""}${st.subject ? ` Subject: "${st.subject}"` : ""}`;
+            if (st.body) entry += `\n      Content: ${st.body.slice(0, 500)}`;
+          });
+        }
+        return entry;
+      }).join("\n\n"));
     }
 
     const contacts = contactsRes.data ?? [];
@@ -170,6 +185,7 @@ RESUME DATABASE:\n${resumeContext}`;
 You can:
 - Answer questions about people, jobs, and sequences in the CRM
 - Draft outreach messages (LinkedIn, email, SMS) with a direct, professional tone
+- Write individual sequence steps — when asked, consider the job the sequence is tagged to (role, company, location, comp), the channel of each step, and the tone/content of prior steps so messages flow naturally and don't repeat themselves
 - Suggest next steps for specific candidates or roles
 - Advise on recruiting strategy and best practices
 
@@ -177,6 +193,7 @@ Rules:
 - Be concise, specific, and actionable — no fluff
 - NEVER mention Supabase, databases, APIs, UUIDs, table names, technical systems, or internal IDs
 - When drafting messages, use {{first_name}}, {{company}}, {{title}} as personalization placeholders
+- When writing sequence steps, maintain a natural progression: first touch should introduce, follow-ups should add value or change angle, later steps should create urgency or offer a final touchpoint
 - Refer to data naturally, as if you know the team's pipeline
 
 CURRENT CRM DATA:
