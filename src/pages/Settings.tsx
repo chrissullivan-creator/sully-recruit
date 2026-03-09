@@ -138,6 +138,9 @@ const Settings = () => {
           case 'linkedin_limits':
             setLinkedinLimits((prev) => ({ ...prev, ...cfg }));
             break;
+          case 'outlook_preferences':
+            setOutlookPrefs((prev) => ({ ...prev, ...cfg }));
+            break;
         }
       });
     } catch (err: any) {
