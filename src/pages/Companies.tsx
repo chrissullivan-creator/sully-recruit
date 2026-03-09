@@ -3,9 +3,10 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Globe, MapPin, Briefcase } from 'lucide-react';
+import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 
 const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
