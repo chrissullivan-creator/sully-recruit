@@ -216,8 +216,12 @@ const Leads = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{prospect.location ?? '-'}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: prospect.id, name: prospect.full_name ?? `${prospect.first_name ?? ''} ${prospect.last_name ?? ''}` }); }}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                   </tr>
-                ))}
                 {filteredProspects.length === 0 && (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No prospects match your filters.</td></tr>
                 )}
