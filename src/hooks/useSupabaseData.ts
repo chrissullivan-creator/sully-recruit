@@ -85,14 +85,35 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
 }
 
 // Jobs with company info
-export function useJobs() {
+export function useJobs(includesClosed = false) {
   return useQuery({
-    queryKey: ['jobs'],
+    queryKey: ['jobs', includesClosed],
+    queryFn: async () => {
+      let query = supabase
+        .from('jobs')
+        .select('*, companies(name)')
+        .order('created_at', { ascending: false });
+      if (!includesClosed) {
+        query = query.neq('status', 'closed');
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Single job by ID
+export function useJob(id: string | undefined) {
+  return useQuery({
+    queryKey: ['job', id],
+    enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
         .select('*, companies(name)')
-        .order('created_at', { ascending: false });
+        .eq('id', id!)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },

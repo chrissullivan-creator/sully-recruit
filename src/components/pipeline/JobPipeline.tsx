@@ -28,7 +28,7 @@ export function JobPipeline() {
             items={stageJobs}
             stageColor={jobStageColors[stage.key as keyof typeof jobStageColors] ?? 'bg-muted text-muted-foreground'}
             renderItem={(job) => (
-              <div className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md">
+              <div onClick={() => navigate(`/jobs/${job.id}`)} className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md">
                 <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">
                   {job.title}
                 </h4>
