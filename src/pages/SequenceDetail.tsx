@@ -168,6 +168,9 @@ const SequenceDetail = () => {
           send_window_start: step.sendWindowStart, send_window_end: step.sendWindowEnd,
           wait_for_connection: step.waitForConnection, min_hours_after_connection: step.minHoursAfterConnection,
           subject: step.subject || null, body: step.content || null,
+          account_id: step.accountId || null,
+          is_reply: step.isReply ?? false,
+          use_signature: step.useSignature ?? false,
         } as any));
         const { error: stepsError } = await supabase.from('sequence_steps').insert(rows);
         if (stepsError) throw stepsError;
