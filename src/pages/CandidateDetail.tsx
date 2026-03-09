@@ -251,6 +251,13 @@ const CandidateDetail = () => {
             </ScrollArea>
           </Tabs>
         </div>
+        
+        {/* Right sidebar: Tasks */}
+        {id && (
+          <div className="w-80 shrink-0 border-l border-border p-4 overflow-y-auto">
+            <TaskSidebar entityType="candidate" entityId={id} />
+          </div>
+        )}
       </div>
 
       <EnrollInSequenceDialog
