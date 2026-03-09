@@ -10,8 +10,9 @@ import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
@@ -37,6 +38,7 @@ const Candidates = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
+  const [resumeDropOpen, setResumeDropOpen] = useState(false);
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
@@ -126,6 +128,10 @@ const Candidates = () => {
             <Button variant="ghost" size="sm" onClick={() => setResumeSearchOpen(true)}>
               <FileSearch className="h-4 w-4 mr-1" />
               AI Resume Search
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
+              <FileUp className="h-4 w-4 mr-1" />
+              Resume Drop
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
@@ -250,6 +256,7 @@ const Candidates = () => {
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
       <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
+      <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
     </MainLayout>
   );
 };

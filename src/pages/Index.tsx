@@ -4,6 +4,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
 import { useDashboardMetrics } from '@/hooks/useSupabaseData';
 import { useAuth } from '@/contexts/AuthContext';
@@ -106,9 +107,10 @@ const Dashboard = () => {
           <CandidatePipeline />
         </section>
 
-        {/* Activity Feed */}
+        {/* Tasks + Activity Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-8">
+            <DashboardTasks />
             <div className="rounded-lg border border-border bg-card p-6">
               <h2 className="text-lg font-semibold text-foreground mb-4">Recent Activity</h2>
               <ActivityFeed />

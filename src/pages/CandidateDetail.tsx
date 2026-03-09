@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { useCandidate, useNotes, useCandidateConversations } from '@/hooks/useSupabaseData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -250,6 +251,13 @@ const CandidateDetail = () => {
             </ScrollArea>
           </Tabs>
         </div>
+        
+        {/* Right sidebar: Tasks */}
+        {id && (
+          <div className="w-80 shrink-0 border-l border-border p-4 overflow-y-auto">
+            <TaskSidebar entityType="candidate" entityId={id} />
+          </div>
+        )}
       </div>
 
       <EnrollInSequenceDialog

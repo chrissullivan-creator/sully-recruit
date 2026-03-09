@@ -7,8 +7,9 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
 type SortDir = 'asc' | 'desc';
@@ -31,6 +32,7 @@ const Leads = () => {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [resumeDropOpen, setResumeDropOpen] = useState(false);
   const { data: prospects = [], isLoading } = useProspects();
 
   const filteredProspects = useMemo(() => {
@@ -96,6 +98,10 @@ const Leads = () => {
         description="Manage your pipeline of prospects."
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
+              <FileUp className="h-4 w-4 mr-1" />
+              Resume Drop
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
@@ -224,6 +230,7 @@ const Leads = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
       <AddProspectDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ResumeDropZone entityType="prospect" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
     </MainLayout>
   );
 };

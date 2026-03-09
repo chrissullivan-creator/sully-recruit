@@ -74,6 +74,8 @@ const Contacts = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact Info</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Reached Out</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Response</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                 </tr>
               </thead>
@@ -115,6 +117,16 @@ const Contacts = () => {
                           </a>
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {(contact as any).last_reached_out_at
+                        ? new Date((contact as any).last_reached_out_at).toLocaleDateString()
+                        : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {(contact as any).last_responded_at
+                        ? new Date((contact as any).last_responded_at).toLocaleDateString()
+                        : '-'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn(
