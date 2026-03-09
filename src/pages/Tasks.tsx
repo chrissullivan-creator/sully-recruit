@@ -58,11 +58,11 @@ export default function Tasks() {
 
   return (
     <MainLayout>
-      <PageHeader title="Tasks" subtitle={`${filtered.length} task${filtered.length !== 1 ? 's' : ''}`}>
+      <PageHeader title="Tasks" description={`${filtered.length} task${filtered.length !== 1 ? 's' : ''}`} actions={
         <Button variant="gold" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> New Task
         </Button>
-      </PageHeader>
+      } />
 
       <div className="p-6 space-y-4">
         {/* Filters */}
