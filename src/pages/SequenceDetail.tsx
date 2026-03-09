@@ -212,7 +212,42 @@ const SequenceDetail = () => {
     }
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDuplicate = async () => {
+    if (!sequence || !id) return;
+    setDuplicating(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const { data: newSeq, error: seqError } = await supabase.from('sequences').insert({
+        name: `${name.trim()} (Copy)`,
+        description: description.trim() || null,
+        channel, stop_on_reply: stopOnReply, job_id: jobId,
+        status: 'draft', created_by: userId,
+      } as any).select('id').single();
+      if (seqError) throw seqError;
+
+      if (steps.length > 0) {
+        const rows = steps.map((step) => ({
+          sequence_id: newSeq.id, step_order: step.order,
+          step_type: channelToStepType(step.channel), channel: channelToDbChannel(step.channel),
+          delay_days: step.delayDays, delay_hours: step.delayHours,
+          send_window_start: step.sendWindowStart, send_window_end: step.sendWindowEnd,
+          wait_for_connection: step.waitForConnection, min_hours_after_connection: step.minHoursAfterConnection,
+          subject: step.subject || null, body: step.content || null,
+          account_id: step.accountId || null,
+          is_reply: step.isReply ?? false, use_signature: step.useSignature ?? false,
+        } as any));
+        const { error: stepsError } = await supabase.from('sequence_steps').insert(rows);
+        if (stepsError) throw stepsError;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      toast.success('Sequence duplicated');
+      navigate(`/campaigns/${newSeq.id}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to duplicate');
+    } finally {
+      setDuplicating(false);
+    }
     const { active, over } = event;
     if (over && active.id !== over.id) {
       setSteps((items) => {
