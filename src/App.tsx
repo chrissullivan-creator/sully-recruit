@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
+import Inbox from "./pages/Inbox";
 import Leads from "./pages/Leads";
 import Jobs from "./pages/Jobs";
 import Candidates from "./pages/Candidates";
