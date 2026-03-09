@@ -272,6 +272,9 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
       min_hours_after_connection: step.minHoursAfterConnection,
       subject: step.subject || null,
       body: step.content || null,
+      account_id: step.accountId || null,
+      is_reply: step.isReply ?? false,
+      use_signature: step.useSignature ?? false,
     } as any));
 
   const handleSave = async () => {
