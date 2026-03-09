@@ -178,6 +178,7 @@ const Leads = () => {
                     <span className="flex items-center gap-1">Location <SortIcon field="location" /></span>
                   </th>
                   <th className="w-10 px-4 py-3"></th>
+                </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredProspects.map((prospect) => (
