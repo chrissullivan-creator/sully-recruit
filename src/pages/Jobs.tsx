@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Upload } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
