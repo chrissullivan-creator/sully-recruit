@@ -12,6 +12,7 @@ const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: companies = [], isLoading } = useCompanies();
 
   const filteredCompanies = companies.filter((company) => {
