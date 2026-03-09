@@ -405,10 +405,54 @@ function MessagePane({ threadId }: { threadId: string | null }) {
     if (!replyText.trim() || !threadId || !thread) return;
     setSending(true);
     try {
-      toast.info(`Reply via ${CHANNEL_LABELS[thread.channel] || thread.channel} - integration required to send`);
+      // Determine recipient address based on channel
+      let toAddress = '';
+      const lastInbound = messages.find((m) => m.direction === 'inbound');
+      
+      if (thread.channel === 'email') {
+        toAddress = lastInbound?.sender_address || '';
+      } else if (thread.channel === 'sms') {
+        toAddress = lastInbound?.sender_address || '';
+      } else if (thread.channel === 'linkedin') {
+        // For LinkedIn, use the provider_id from candidate_channels
+        const { data: channelData } = await supabase
+          .from('candidate_channels')
+          .select('provider_id, unipile_id')
+          .eq('candidate_id', thread.candidate_id)
+          .eq('channel', 'linkedin')
+          .maybeSingle();
+        toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+      }
+
+      if (!toAddress) {
+        toast.error(`No recipient address found for ${thread.channel}`);
+        setSending(false);
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('send-message', {
+        body: {
+          channel: thread.channel,
+          conversation_id: threadId,
+          candidate_id: thread.candidate_id,
+          contact_id: thread.contact_id,
+          to: toAddress,
+          subject: thread.subject || undefined,
+          body: replyText.trim(),
+          account_id: thread.account_id,
+        },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Send failed');
+
+      toast.success(`Message sent via ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
       setReplyText('');
-    } catch {
-      toast.error('Failed to send reply');
+      queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+    } catch (err: any) {
+      console.error('Send error:', err);
+      toast.error(err.message || 'Failed to send reply');
     } finally {
       setSending(false);
     }
