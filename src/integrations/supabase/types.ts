@@ -1135,6 +1135,7 @@ export type Database = {
       }
       sequence_steps: {
         Row: {
+          account_id: string | null
           body: string | null
           channel: string | null
           created_at: string
@@ -1142,6 +1143,7 @@ export type Database = {
           delay_hours: number
           id: string
           is_active: boolean
+          is_reply: boolean
           min_hours_after_connection: number
           require_connection: boolean
           send_window_end: number
@@ -1151,9 +1153,11 @@ export type Database = {
           step_type: string
           subject: string | null
           updated_at: string
+          use_signature: boolean
           wait_for_connection: boolean
         }
         Insert: {
+          account_id?: string | null
           body?: string | null
           channel?: string | null
           created_at?: string
@@ -1161,6 +1165,7 @@ export type Database = {
           delay_hours?: number
           id?: string
           is_active?: boolean
+          is_reply?: boolean
           min_hours_after_connection?: number
           require_connection?: boolean
           send_window_end?: number
@@ -1170,9 +1175,11 @@ export type Database = {
           step_type: string
           subject?: string | null
           updated_at?: string
+          use_signature?: boolean
           wait_for_connection?: boolean
         }
         Update: {
+          account_id?: string | null
           body?: string | null
           channel?: string | null
           created_at?: string
@@ -1180,6 +1187,7 @@ export type Database = {
           delay_hours?: number
           id?: string
           is_active?: boolean
+          is_reply?: boolean
           min_hours_after_connection?: number
           require_connection?: boolean
           send_window_end?: number
@@ -1189,6 +1197,7 @@ export type Database = {
           step_type?: string
           subject?: string | null
           updated_at?: string
+          use_signature?: boolean
           wait_for_connection?: boolean
         }
         Relationships: [
