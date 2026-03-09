@@ -230,6 +230,7 @@ const Leads = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
       <AddProspectDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ResumeDropZone entityType="prospect" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
     </MainLayout>
   );
 };

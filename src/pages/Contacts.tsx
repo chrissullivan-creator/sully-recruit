@@ -118,6 +118,16 @@ const Contacts = () => {
                         )}
                       </div>
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {(contact as any).last_reached_out_at
+                        ? new Date((contact as any).last_reached_out_at).toLocaleDateString()
+                        : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {(contact as any).last_responded_at
+                        ? new Date((contact as any).last_responded_at).toLocaleDateString()
+                        : '-'}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={cn(
                         'stage-badge border',
