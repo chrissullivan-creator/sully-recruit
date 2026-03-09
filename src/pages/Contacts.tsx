@@ -140,7 +140,11 @@ const Contacts = () => {
                         {contact.status}
                       </span>
                     </td>
-                  </tr>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                 ))}
               </tbody>
             </table>
