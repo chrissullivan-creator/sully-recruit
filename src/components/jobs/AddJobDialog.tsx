@@ -55,13 +55,14 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         company_id: form.company_id || null,
         location: form.location.trim() || null,
         description: form.description.trim() || null,
+        compensation: form.compensation.trim() || null,
         status: form.status,
       };
       const { error } = await supabase.from('jobs').insert(insert);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       toast.success('Job created');
-      setForm({ title: '', company_id: '', company_name: '', location: '', description: '', status: 'open' });
+      setForm({ title: '', company_id: '', company_name: '', location: '', description: '', compensation: '', status: 'open' });
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create job');
