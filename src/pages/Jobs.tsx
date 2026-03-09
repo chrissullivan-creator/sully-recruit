@@ -90,7 +90,7 @@ const Jobs = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredJobs.map((job) => (
+                 {filteredJobs.map((job) => (
                   <tr key={job.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
@@ -101,6 +101,11 @@ const Jobs = () => {
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
                     <td className="px-4 py-3">
                       <span className="stage-badge stage-warm">{job.status}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTaskPanel({ id: job.id, name: job.title })}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
                     </td>
                   </tr>
                 ))}
