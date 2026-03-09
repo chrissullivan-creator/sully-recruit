@@ -122,6 +122,11 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
           </div>
 
           <div className="space-y-2">
+            <Label>Compensation</Label>
+            <Input value={form.compensation} onChange={(e) => update('compensation', e.target.value)} placeholder="e.g. $120,000 - $150,000" />
+          </div>
+
+          <div className="space-y-2">
             <Label>Description</Label>
             <Textarea value={form.description} onChange={(e) => update('description', e.target.value)} placeholder="Job description..." rows={4} />
           </div>
