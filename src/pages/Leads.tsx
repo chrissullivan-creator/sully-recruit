@@ -133,8 +133,8 @@ const Leads = () => {
           
           <div className="flex items-center gap-1.5">
             {statusFilters.map((s) => (
-              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="capitalize text-xs">
-                {s === 'all' ? 'All' : s.replace('_', ' ')}
+              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="text-xs">
+                {statusLabels[s]}
               </Button>
             ))}
           </div>
