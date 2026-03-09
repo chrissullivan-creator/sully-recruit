@@ -16,8 +16,10 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
+  PenSquare,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 
 // ---------- Types ----------
 interface InboxThread {
@@ -622,6 +624,7 @@ export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState('all');
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads'],
@@ -665,12 +668,14 @@ export default function Inbox() {
         description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
       />
 
+      <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
+
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
         {/* Left: Thread List */}
         <div className="w-96 border-r border-border flex flex-col bg-background">
-          {/* Search */}
-          <div className="p-3 border-b border-border/60">
-            <div className="relative">
+          {/* Search + Compose */}
+          <div className="p-3 border-b border-border/60 flex gap-2">
+            <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search messages, names..."
@@ -679,6 +684,15 @@ export default function Inbox() {
                 className="pl-8 h-8 text-xs"
               />
             </div>
+            <Button
+              variant="gold"
+              size="icon"
+              onClick={() => setComposeOpen(true)}
+              className="h-8 w-8 shrink-0"
+              title="Compose new message"
+            >
+              <PenSquare className="h-3.5 w-3.5" />
+            </Button>
           </div>
 
           {/* Record type filters */}
