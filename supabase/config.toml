@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.process-sequence-emails]
 verify_jwt = false
+
+[functions.test-smtp]
+verify_jwt = false
+
+[functions.match-entity]
+verify_jwt = false

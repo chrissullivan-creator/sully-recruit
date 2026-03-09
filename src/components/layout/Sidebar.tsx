@@ -6,7 +6,7 @@ import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Inbox', href: '/calls', icon: Inbox },
+  { name: 'Inbox', href: '/inbox', icon: Inbox },
   { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Prospects', href: '/leads', icon: Target },
   { name: 'Candidates', href: '/candidates', icon: UserCheck },
