@@ -181,6 +181,40 @@ export function useUpdateTaskStatus() {
   });
 }
 
+export function useBulkUpdateTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskIds, updates }: { taskIds: string[]; updates: Record<string, any> }) => {
+      if (updates.status === 'completed') updates.completed_at = new Date().toISOString();
+      const { error } = await supabase.from('tasks').update(updates).in('id', taskIds);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+    },
+  });
+}
+
+export function useBulkDeleteTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskIds: string[]) => {
+      // Delete links and comments first, then tasks
+      await supabase.from('task_comments').delete().in('task_id', taskIds);
+      await supabase.from('task_links').delete().in('task_id', taskIds);
+      const { error } = await supabase.from('tasks').delete().in('id', taskIds);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      toast.success('Tasks deleted');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to delete tasks'),
+  });
+}
+
 export function useAddTaskComment() {
   const qc = useQueryClient();
   return useMutation({
