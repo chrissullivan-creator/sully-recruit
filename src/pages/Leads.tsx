@@ -15,6 +15,10 @@ type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
 type SortDir = 'asc' | 'desc';
 
 const statusFilters = ['all', 'new', 'reached_out_to', 'converted', 'not_interested', 'no_answer'] as const;
+const statusLabels: Record<string, string> = {
+  all: 'All', new: 'New', reached_out_to: 'Reached Out To',
+  converted: 'Converted', not_interested: 'Not Interested', no_answer: 'No Answer',
+};
 const statusColors: Record<string, string> = {
   new: 'bg-info/10 text-info border-info/20',
   reached_out_to: 'bg-warning/10 text-warning border-warning/20',
