@@ -4,6 +4,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
 import { useDashboardMetrics } from '@/hooks/useSupabaseData';
 import { useAuth } from '@/contexts/AuthContext';
