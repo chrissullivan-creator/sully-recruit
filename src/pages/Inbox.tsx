@@ -668,12 +668,14 @@ export default function Inbox() {
         description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
       />
 
+      <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
+
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
         {/* Left: Thread List */}
         <div className="w-96 border-r border-border flex flex-col bg-background">
-          {/* Search */}
-          <div className="p-3 border-b border-border/60">
-            <div className="relative">
+          {/* Search + Compose */}
+          <div className="p-3 border-b border-border/60 flex gap-2">
+            <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search messages, names..."
