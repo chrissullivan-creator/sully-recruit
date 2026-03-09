@@ -13,13 +13,13 @@ import { cn } from '@/lib/utils';
 type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
 type SortDir = 'asc' | 'desc';
 
-const statusFilters = ['all', 'new', 'reached_out', 'qualified', 'converted', 'disqualified'] as const;
+const statusFilters = ['all', 'new', 'reached_out_to', 'converted', 'not_interested', 'no_answer'] as const;
 const statusColors: Record<string, string> = {
   new: 'bg-info/10 text-info border-info/20',
-  reached_out: 'bg-warning/10 text-warning border-warning/20',
-  qualified: 'bg-success/10 text-success border-success/20',
-  converted: 'bg-accent/10 text-accent border-accent/20',
-  disqualified: 'bg-destructive/10 text-destructive border-destructive/20',
+  reached_out_to: 'bg-warning/10 text-warning border-warning/20',
+  converted: 'bg-success/10 text-success border-success/20',
+  not_interested: 'bg-destructive/10 text-destructive border-destructive/20',
+  no_answer: 'bg-muted text-muted-foreground border-border',
 };
 
 const Leads = () => {

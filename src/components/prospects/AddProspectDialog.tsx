@@ -100,10 +100,10 @@ export function AddProspectDialog({ open, onOpenChange }: Props) {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">New</SelectItem>
-                  <SelectItem value="reached_out">Reached Out</SelectItem>
-                  <SelectItem value="qualified">Qualified</SelectItem>
+                  <SelectItem value="reached_out_to">Reached Out To</SelectItem>
                   <SelectItem value="converted">Converted</SelectItem>
-                  <SelectItem value="disqualified">Disqualified</SelectItem>
+                  <SelectItem value="not_interested">Not Interested</SelectItem>
+                  <SelectItem value="no_answer">No Answer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
