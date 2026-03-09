@@ -51,23 +51,33 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
   const steps = (selectedSequence?.sequence_steps as any[]) ?? [];
 
+  // Build people list — data hooks already sort newest-first (created_at desc)
   const people = [
     ...candidates.map(c => ({
       id: c.id, type: 'candidate' as const,
       name: c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
-      detail: c.current_title || c.email || '',
+      detail: [c.current_title, c.current_company].filter(Boolean).join(' · ') || c.email || '',
+      sortDate: c.created_at,
     })),
     ...prospects.map(p => ({
       id: p.id, type: 'prospect' as const,
       name: p.full_name || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-      detail: p.current_title || p.email || '',
+      detail: [p.current_title, p.current_company].filter(Boolean).join(' · ') || p.email || '',
+      sortDate: p.created_at,
     })),
     ...contacts.map(c => ({
       id: c.id, type: 'contact' as const,
       name: (c as any).full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
-      detail: (c as any).title || c.email || '',
+      detail: [(c as any).title, (c as any).companies?.name].filter(Boolean).join(' · ') || c.email || '',
+      sortDate: c.created_at,
     })),
-  ].filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.detail.toLowerCase().includes(searchQuery.toLowerCase()));
+  ]
+    .sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime())
+    .filter(p => {
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      return p.name.toLowerCase().includes(q) || p.detail.toLowerCase().includes(q);
+    });
 
   const togglePerson = (personId: string) => {
     setSelectedPeople(prev => prev.includes(personId) ? prev.filter(p => p !== personId) : [...prev, personId]);
