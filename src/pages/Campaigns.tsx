@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useSequences } from '@/hooks/useSupabaseData';
-import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2 } from 'lucide-react';
+import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -29,6 +30,8 @@ const Campaigns = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<string>('all');
   const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
   const { data: sequences = [], isLoading } = useSequences();
   const queryClient = useQueryClient();
 
@@ -38,7 +41,32 @@ const Campaigns = () => {
     return matchesSearch && matchesFilter;
   }), [sequences, searchQuery, filter]);
 
+  const allSelected = filteredSequences.length > 0 && filteredSequences.every(s => selected.has(s.id));
+
+  const toggleSelect = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filteredSequences.map(s => s.id)));
+    }
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
   const handleCardClick = (seqId: string) => {
+    if (selected.size > 0) {
+      toggleSelect(seqId);
+      return;
+    }
     navigate(`/campaigns/${seqId}`);
   };
 
@@ -77,6 +105,36 @@ const Campaigns = () => {
     }
   };
 
+  const bulkAction = async (action: 'activate' | 'pause' | 'delete') => {
+    if (selected.size === 0) return;
+    setBulkLoading(true);
+    const ids = Array.from(selected);
+    try {
+      if (action === 'delete') {
+        // Delete steps first, then enrollments, then sequences
+        await supabase.from('sequence_steps').delete().in('sequence_id', ids);
+        await supabase.from('sequence_enrollments').delete().in('sequence_id', ids);
+        const { error } = await supabase.from('sequences').delete().in('id', ids);
+        if (error) throw error;
+        toast.success(`Deleted ${ids.length} sequence${ids.length > 1 ? 's' : ''}`);
+      } else {
+        const newStatus = action === 'activate' ? 'active' : 'paused';
+        const { error } = await supabase
+          .from('sequences')
+          .update({ status: newStatus } as any)
+          .in('id', ids);
+        if (error) throw error;
+        toast.success(`${action === 'activate' ? 'Activated' : 'Paused'} ${ids.length} sequence${ids.length > 1 ? 's' : ''}`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      setSelected(new Set());
+    } catch (err: any) {
+      toast.error(err.message || `Failed to ${action} sequences`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   return (
     <MainLayout>
       <PageHeader 
@@ -91,6 +149,30 @@ const Campaigns = () => {
       />
       
       <div className="p-8">
+        {/* Bulk action bar */}
+        {selected.size > 0 && (
+          <div className="flex items-center gap-3 mb-4 rounded-lg border border-accent/50 bg-accent/5 px-4 py-3 animate-in fade-in slide-in-from-top-2 duration-200">
+            <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} />
+            <span className="text-sm font-medium text-foreground">
+              {selected.size} selected
+            </span>
+            <div className="h-4 w-px bg-border" />
+            <Button variant="ghost" size="sm" onClick={() => bulkAction('activate')} disabled={bulkLoading}>
+              <Play className="h-3.5 w-3.5 text-success mr-1" /> Activate
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => bulkAction('pause')} disabled={bulkLoading}>
+              <Pause className="h-3.5 w-3.5 text-warning mr-1" /> Pause
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => bulkAction('delete')} disabled={bulkLoading} className="text-destructive hover:text-destructive">
+              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+            </Button>
+            {bulkLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <Button variant="ghost" size="icon" className="ml-auto h-7 w-7" onClick={clearSelection}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -127,13 +209,31 @@ const Campaigns = () => {
             {filteredSequences.map((seq) => {
               const steps = (seq.sequence_steps as any[]) ?? [];
               const enrollments = (seq.sequence_enrollments as any[]) ?? [];
+              const isSelected = selected.has(seq.id);
               return (
                 <div
                   key={seq.id}
                   onClick={() => handleCardClick(seq.id)}
-                  className="rounded-lg border border-border bg-card p-5 hover:border-accent/50 transition-all duration-150 cursor-pointer hover-lift group"
+                  className={cn(
+                    'rounded-lg border bg-card p-5 transition-all duration-150 cursor-pointer hover-lift group relative',
+                    isSelected ? 'border-accent ring-1 ring-accent/50' : 'border-border hover:border-accent/50'
+                  )}
                 >
-                  <div className="flex items-start justify-between mb-4">
+                  {/* Checkbox */}
+                  <div
+                    className={cn(
+                      'absolute top-3 left-3 transition-opacity',
+                      selected.size > 0 || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    )}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleSelect(seq.id)}
+                    />
+                  </div>
+
+                  <div className={cn('flex items-start justify-between mb-4', selected.size > 0 || isSelected ? 'pl-8' : 'group-hover:pl-8 transition-all')}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-semibold text-foreground truncate">{seq.name}</h3>
@@ -164,7 +264,7 @@ const Campaigns = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1 mb-4">
+                  <div className={cn('flex items-center gap-1 mb-4', selected.size > 0 || isSelected ? 'pl-8' : 'group-hover:pl-8 transition-all')}>
                     {steps.sort((a: any, b: any) => a.step_order - b.step_order).map((step: any, index: number) => (
                       <div key={step.id} className="flex items-center">
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
