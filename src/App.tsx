@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Inbox from "./pages/Inbox";
 import Leads from "./pages/Leads";
 import Jobs from "./pages/Jobs";
+import JobDetail from "./pages/JobDetail";
 import Candidates from "./pages/Candidates";
 import CandidateDetail from "./pages/CandidateDetail";
 import Companies from "./pages/Companies";
