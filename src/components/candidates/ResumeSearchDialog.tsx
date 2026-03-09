@@ -112,7 +112,7 @@ export function ResumeSearchDialog({ open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-accent" />
-            AI Resume Search
+            Ask Joe — Resume Search
           </DialogTitle>
         </DialogHeader>
 
