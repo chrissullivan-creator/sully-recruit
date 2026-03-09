@@ -16,6 +16,9 @@ export interface Task {
   updated_at: string;
   task_links?: TaskLink[];
   task_comments?: TaskComment[];
+  // joined profile names
+  creator_name?: string;
+  assignee_name?: string;
 }
 
 export interface TaskLink {
@@ -62,7 +65,27 @@ export function useTasks(filter?: { status?: string; assigned_to?: string }) {
       }
       const { data, error } = await query;
       if (error) throw error;
-      return (data || []) as Task[];
+
+      // Fetch profile names for creator/assignee
+      const tasks = (data || []) as Task[];
+      const userIds = new Set<string>();
+      tasks.forEach(t => {
+        if (t.created_by) userIds.add(t.created_by);
+        if (t.assigned_to) userIds.add(t.assigned_to);
+      });
+      if (userIds.size > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', Array.from(userIds));
+        const nameMap = new Map<string, string>();
+        (profiles || []).forEach((p: any) => nameMap.set(p.id, p.full_name || p.email || 'Unknown'));
+        tasks.forEach(t => {
+          if (t.created_by) t.creator_name = nameMap.get(t.created_by);
+          if (t.assigned_to) t.assignee_name = nameMap.get(t.assigned_to);
+        });
+      }
+      return tasks;
     },
   });
 }
@@ -113,7 +136,6 @@ export function useCreateTask() {
     mutationFn: async (payload: {
       title: string;
       description?: string;
-      priority?: string;
       due_date?: string;
       assigned_to?: string;
       links?: { entity_type: string; entity_id: string }[];
@@ -124,8 +146,8 @@ export function useCreateTask() {
         .insert({
           title: payload.title,
           description: payload.description || null,
-          priority: payload.priority || 'medium',
-          due_date: payload.due_date || null,
+          priority: 'medium',
+          due_date: payload.due_date || new Date().toISOString().split('T')[0],
           assigned_to: payload.assigned_to || null,
           created_by: userId,
         } as any)
@@ -165,6 +187,85 @@ export function useCreateTask() {
   });
 }
 
+export function useCompleteTaskWithNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, note }: { taskId: string; note: string }) => {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+
+      // Get the task to find creator
+      const { data: task, error: taskErr } = await supabase
+        .from('tasks')
+        .select('*, task_links(*)')
+        .eq('id', taskId)
+        .single();
+      if (taskErr) throw taskErr;
+
+      // Mark completed
+      const { error: updateErr } = await supabase
+        .from('tasks')
+        .update({ status: 'completed', completed_at: new Date().toISOString() } as any)
+        .eq('id', taskId);
+      if (updateErr) throw updateErr;
+
+      // Add note as comment
+      if (note.trim()) {
+        await supabase.from('task_comments').insert({
+          task_id: taskId,
+          user_id: userId,
+          body: note.trim(),
+        } as any);
+      }
+
+      // Auto-create follow-up task for the creator if different from completer
+      if (task.created_by && task.created_by !== userId) {
+        const { data: followUp, error: followErr } = await supabase
+          .from('tasks')
+          .insert({
+            title: `Follow-up: ${task.title}`,
+            description: note.trim() ? `Completed note: ${note.trim()}` : `Task "${task.title}" was completed. Review and take next steps.`,
+            priority: 'medium',
+            due_date: new Date().toISOString().split('T')[0],
+            assigned_to: task.created_by,
+            created_by: userId,
+          } as any)
+          .select()
+          .single();
+        if (!followErr && followUp) {
+          // Copy task links to follow-up
+          const taskLinks = task.task_links || [];
+          if (taskLinks.length > 0) {
+            const linkRows = taskLinks.map((l: any) => ({
+              task_id: followUp.id,
+              entity_type: l.entity_type,
+              entity_id: l.entity_id,
+            }));
+            await supabase.from('task_links').insert(linkRows as any);
+          }
+
+          // Notify original creator
+          await supabase.from('notifications').insert({
+            user_id: task.created_by,
+            type: 'task_completed',
+            title: 'Task completed with notes',
+            body: note.trim() || `"${task.title}" has been completed`,
+            entity_type: 'task',
+            entity_id: followUp.id,
+          } as any);
+        }
+      }
+
+      return task;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      toast.success('Task completed');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to complete task'),
+  });
+}
+
 export function useUpdateTaskStatus() {
   const qc = useQueryClient();
   return useMutation({
@@ -200,7 +301,6 @@ export function useBulkDeleteTasks() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (taskIds: string[]) => {
-      // Delete links and comments first, then tasks
       await supabase.from('task_comments').delete().in('task_id', taskIds);
       await supabase.from('task_links').delete().in('task_id', taskIds);
       const { error } = await supabase.from('tasks').delete().in('id', taskIds);

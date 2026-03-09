@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, ArrowUpCircle } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isPast } from 'date-fns';
 import { toast } from 'sonner';
@@ -21,12 +21,6 @@ const statusFilters = [
   { value: 'overdue', label: 'Overdue' },
 ];
 
-const priorityFilters = [
-  { value: 'all', label: 'All Priorities' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
-];
 
 const assignmentFilters = [
   { value: 'all', label: 'All Tasks' },
@@ -42,7 +36,7 @@ export default function Tasks() {
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  
   const [assignmentFilter, setAssignmentFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -51,7 +45,7 @@ export default function Tasks() {
     if (statusFilter === 'overdue') {
       if (t.status === 'completed' || !t.due_date || !isPast(new Date(t.due_date))) return false;
     } else if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-    if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
+    
     if (assignmentFilter === 'assigned_to_me' && t.assigned_to !== user?.id) return false;
     if (assignmentFilter === 'created_by_me' && t.created_by !== user?.id) return false;
     return true;
@@ -76,12 +70,6 @@ export default function Tasks() {
     );
   };
 
-  const handleBulkPriority = (priority: string) => {
-    bulkUpdate.mutate(
-      { taskIds: selectedIds, updates: { priority } },
-      { onSuccess: () => { toast.success(`Priority updated for ${selectedIds.length} tasks`); setSelectedIds([]); } }
-    );
-  };
 
   const handleBulkDelete = () => {
     bulkDelete.mutate(selectedIds, {
@@ -112,12 +100,6 @@ export default function Tasks() {
               {statusFilters.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {priorityFilters.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
           <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
             <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -134,16 +116,6 @@ export default function Tasks() {
             <Button variant="ghost" size="sm" onClick={handleBulkComplete} disabled={isBusy}>
               <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark Complete
             </Button>
-            <Select onValueChange={handleBulkPriority}>
-              <SelectTrigger className="w-[140px] h-8 text-xs">
-                <span className="flex items-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5" /> Set Priority</span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleBulkDelete} disabled={isBusy}>
               <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
             </Button>
