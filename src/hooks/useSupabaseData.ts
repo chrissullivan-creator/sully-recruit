@@ -227,7 +227,7 @@ export function useDashboardMetrics() {
   });
 }
 
-// Integration accounts (sender accounts)
+// Integration accounts (sender accounts — all team accounts visible)
 export function useIntegrationAccounts() {
   return useQuery({
     queryKey: ['integration_accounts'],
