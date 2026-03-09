@@ -684,6 +684,15 @@ export default function Inbox() {
                 className="pl-8 h-8 text-xs"
               />
             </div>
+            <Button
+              variant="gold"
+              size="icon"
+              onClick={() => setComposeOpen(true)}
+              className="h-8 w-8 shrink-0"
+              title="Compose new message"
+            >
+              <PenSquare className="h-3.5 w-3.5" />
+            </Button>
           </div>
 
           {/* Record type filters */}
