@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const Jobs = () => {
+  const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
