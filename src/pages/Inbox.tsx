@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
   UserCheck, UserPlus, Target, Send, Loader2, MoreVertical,
