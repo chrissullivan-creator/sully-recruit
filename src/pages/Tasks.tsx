@@ -21,12 +21,6 @@ const statusFilters = [
   { value: 'overdue', label: 'Overdue' },
 ];
 
-const priorityFilters = [
-  { value: 'all', label: 'All Priorities' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
-];
 
 const assignmentFilters = [
   { value: 'all', label: 'All Tasks' },
