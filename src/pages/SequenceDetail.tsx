@@ -79,6 +79,7 @@ const SequenceDetail = () => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [executions, setExecutions] = useState<any[]>([]);
