@@ -70,12 +70,6 @@ export default function Tasks() {
     );
   };
 
-  const handleBulkPriority = (priority: string) => {
-    bulkUpdate.mutate(
-      { taskIds: selectedIds, updates: { priority } },
-      { onSuccess: () => { toast.success(`Priority updated for ${selectedIds.length} tasks`); setSelectedIds([]); } }
-    );
-  };
 
   const handleBulkDelete = () => {
     bulkDelete.mutate(selectedIds, {
