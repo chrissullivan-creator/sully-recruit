@@ -16,8 +16,10 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
+  PenSquare,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 
 // ---------- Types ----------
 interface InboxThread {
