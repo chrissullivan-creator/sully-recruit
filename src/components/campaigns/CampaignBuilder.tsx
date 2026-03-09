@@ -113,12 +113,9 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
         const dbSteps = ((seq.sequence_steps as any[]) ?? [])
           .sort((a: any, b: any) => a.step_order - b.step_order);
 
-        let seenFirstEmail = false;
         const loadedSteps: CampaignStep[] = dbSteps.map((s: any) => {
           const ch = dbChannelToChannel(s.step_type, s.channel);
           const isEmail = ch === 'email';
-          const isReply = isEmail && seenFirstEmail && !s.subject;
-          if (isEmail) seenFirstEmail = true;
 
           return {
             id: s.id,
@@ -132,8 +129,9 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
             sendWindowEnd: s.send_window_end ?? 23,
             waitForConnection: s.wait_for_connection ?? false,
             minHoursAfterConnection: s.min_hours_after_connection ?? 4,
-            isReply,
-            useSignature: isEmail,
+            isReply: s.is_reply ?? false,
+            useSignature: s.use_signature ?? isEmail,
+            accountId: s.account_id || undefined,
           };
         });
 
@@ -272,6 +270,9 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
       min_hours_after_connection: step.minHoursAfterConnection,
       subject: step.subject || null,
       body: step.content || null,
+      account_id: step.accountId || null,
+      is_reply: step.isReply ?? false,
+      use_signature: step.useSignature ?? false,
     } as any));
 
   const handleSave = async () => {
