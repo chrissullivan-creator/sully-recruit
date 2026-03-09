@@ -116,6 +116,15 @@ const Companies = () => {
         )}
       </div>
       <AddCompanyDialog open={addOpen} onOpenChange={setAddOpen} />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="company"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };

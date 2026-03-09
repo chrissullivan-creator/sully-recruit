@@ -241,6 +241,15 @@ const Leads = () => {
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
       <AddProspectDialog open={addOpen} onOpenChange={setAddOpen} />
       <ResumeDropZone entityType="prospect" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="prospect"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };

@@ -117,6 +117,15 @@ const Jobs = () => {
 
       <AddJobDialog open={addOpen} onOpenChange={setAddOpen} />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="jobs" />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="job"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };
