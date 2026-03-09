@@ -116,16 +116,6 @@ export default function Tasks() {
             <Button variant="ghost" size="sm" onClick={handleBulkComplete} disabled={isBusy}>
               <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark Complete
             </Button>
-            <Select onValueChange={handleBulkPriority}>
-              <SelectTrigger className="w-[140px] h-8 text-xs">
-                <span className="flex items-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5" /> Set Priority</span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleBulkDelete} disabled={isBusy}>
               <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
             </Button>
