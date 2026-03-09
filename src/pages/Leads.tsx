@@ -15,6 +15,10 @@ type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
 type SortDir = 'asc' | 'desc';
 
 const statusFilters = ['all', 'new', 'reached_out_to', 'converted', 'not_interested', 'no_answer'] as const;
+const statusLabels: Record<string, string> = {
+  all: 'All', new: 'New', reached_out_to: 'Reached Out To',
+  converted: 'Converted', not_interested: 'Not Interested', no_answer: 'No Answer',
+};
 const statusColors: Record<string, string> = {
   new: 'bg-info/10 text-info border-info/20',
   reached_out_to: 'bg-warning/10 text-warning border-warning/20',
@@ -129,8 +133,8 @@ const Leads = () => {
           
           <div className="flex items-center gap-1.5">
             {statusFilters.map((s) => (
-              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="capitalize text-xs">
-                {s === 'all' ? 'All' : s.replace('_', ' ')}
+              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="text-xs">
+                {statusLabels[s]}
               </Button>
             ))}
           </div>
@@ -206,7 +210,7 @@ const Leads = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn('stage-badge border', statusColors[prospect.status] ?? 'bg-muted text-muted-foreground border-border')}>
-                        {prospect.status.replace('_', ' ')}
+                        {statusLabels[prospect.status] ?? prospect.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{prospect.location ?? '-'}</td>

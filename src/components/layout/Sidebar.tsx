@@ -1,8 +1,9 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard } from 'lucide-react';
+import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -13,6 +14,7 @@ const navigation = [
   { name: 'Contacts', href: '/contacts', icon: Users },
   { name: 'Companies', href: '/companies', icon: Building2 },
   { name: 'Sequences', href: '/campaigns', icon: Megaphone },
+  { name: 'Calls', href: '/calls', icon: Phone },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -35,12 +37,15 @@ export function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 px-6 border-b border-sidebar-border">
-        <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
-        <div>
-          <h1 className="text-base font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
-          <p className="text-[9px] tracking-widest text-gold uppercase -mt-0.5">Sully Recruit</p>
+      <div className="flex h-16 items-center justify-between px-6 border-b border-sidebar-border">
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
+          <div>
+            <h1 className="text-base font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
+            <p className="text-[9px] tracking-widest text-gold uppercase -mt-0.5">Sully Recruit</p>
+          </div>
         </div>
+        <NotificationBell />
       </div>
 
       {/* Navigation */}
