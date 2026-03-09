@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { useTasks } from '@/hooks/useTasks';
+import { useTasks, useBulkUpdateTasks, useBulkDeleteTasks } from '@/hooks/useTasks';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, ListTodo } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, ArrowUpCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isPast } from 'date-fns';
+import { toast } from 'sonner';
 
 const statusFilters = [
   { value: 'all', label: 'All' },
@@ -35,26 +37,59 @@ const assignmentFilters = [
 export default function Tasks() {
   const { user } = useAuth();
   const { data: allTasks = [], isLoading } = useTasks();
+  const bulkUpdate = useBulkUpdateTasks();
+  const bulkDelete = useBulkDeleteTasks();
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const filtered = allTasks.filter((t) => {
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.description?.toLowerCase().includes(search.toLowerCase())) return false;
-
     if (statusFilter === 'overdue') {
       if (t.status === 'completed' || !t.due_date || !isPast(new Date(t.due_date))) return false;
     } else if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
-
     if (assignmentFilter === 'assigned_to_me' && t.assigned_to !== user?.id) return false;
     if (assignmentFilter === 'created_by_me' && t.created_by !== user?.id) return false;
-
     return true;
   });
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.length === filtered.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map((t) => t.id));
+    }
+  };
+
+  const handleBulkComplete = () => {
+    bulkUpdate.mutate(
+      { taskIds: selectedIds, updates: { status: 'completed' } },
+      { onSuccess: () => { toast.success(`${selectedIds.length} tasks marked complete`); setSelectedIds([]); } }
+    );
+  };
+
+  const handleBulkPriority = (priority: string) => {
+    bulkUpdate.mutate(
+      { taskIds: selectedIds, updates: { priority } },
+      { onSuccess: () => { toast.success(`Priority updated for ${selectedIds.length} tasks`); setSelectedIds([]); } }
+    );
+  };
+
+  const handleBulkDelete = () => {
+    bulkDelete.mutate(selectedIds, {
+      onSuccess: () => setSelectedIds([]),
+    });
+  };
+
+  const isBusy = bulkUpdate.isPending || bulkDelete.isPending;
 
   return (
     <MainLayout>
@@ -69,38 +104,53 @@ export default function Tasks() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search tasks..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+            <Input placeholder="Search tasks..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {statusFilters.map((s) => (
-                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-              ))}
+              {statusFilters.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
             <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {priorityFilters.map((p) => (
-                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-              ))}
+              {priorityFilters.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
             <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {assignmentFilters.map((a) => (
-                <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
-              ))}
+              {assignmentFilters.map((a) => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
+
+        {/* Bulk actions bar */}
+        {selectedIds.length > 0 && (
+          <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+            <span className="text-sm font-medium text-foreground">{selectedIds.length} selected</span>
+            <div className="h-4 w-px bg-border" />
+            <Button variant="ghost" size="sm" onClick={handleBulkComplete} disabled={isBusy}>
+              <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark Complete
+            </Button>
+            <Select onValueChange={handleBulkPriority}>
+              <SelectTrigger className="w-[140px] h-8 text-xs">
+                <span className="flex items-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5" /> Set Priority</span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleBulkDelete} disabled={isBusy}>
+              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+            </Button>
+            <div className="flex-1" />
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>Clear</Button>
+          </div>
+        )}
 
         {/* Task list */}
         {isLoading ? (
@@ -112,8 +162,25 @@ export default function Tasks() {
           </div>
         ) : (
           <div className="space-y-2 max-w-3xl">
+            {/* Select all */}
+            <div className="flex items-center gap-2 px-3 py-1">
+              <Checkbox
+                checked={selectedIds.length === filtered.length && filtered.length > 0}
+                onCheckedChange={toggleAll}
+              />
+              <span className="text-xs text-muted-foreground">Select all</span>
+            </div>
             {filtered.map((task) => (
-              <TaskCard key={task.id} task={task} />
+              <div key={task.id} className="flex items-start gap-2">
+                <Checkbox
+                  checked={selectedIds.includes(task.id)}
+                  onCheckedChange={() => toggleSelect(task.id)}
+                  className="mt-3.5"
+                />
+                <div className="flex-1">
+                  <TaskCard task={task} />
+                </div>
+              </div>
             ))}
           </div>
         )}
