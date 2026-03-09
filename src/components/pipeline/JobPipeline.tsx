@@ -11,6 +11,7 @@ const stages = [
 ];
 
 export function JobPipeline() {
+  const navigate = useNavigate();
   const { data: jobs = [] } = useJobs();
 
   const getJobsByStage = (stage: string) => jobs.filter((job) => job.status === stage);
