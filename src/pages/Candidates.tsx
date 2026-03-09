@@ -8,8 +8,9 @@ import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
+import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
