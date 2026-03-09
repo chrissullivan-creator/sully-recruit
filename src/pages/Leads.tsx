@@ -7,8 +7,9 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'location';
 type SortDir = 'asc' | 'desc';
