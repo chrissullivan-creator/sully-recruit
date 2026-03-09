@@ -87,7 +87,7 @@ const Jobs = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
-                </tr>
+                  <th className="w-10 px-4 py-3"></th>
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
