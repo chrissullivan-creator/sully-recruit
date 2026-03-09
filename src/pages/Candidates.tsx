@@ -127,7 +127,7 @@ const Candidates = () => {
             </div>
             <Button variant="ghost" size="sm" onClick={() => setResumeSearchOpen(true)}>
               <FileSearch className="h-4 w-4 mr-1" />
-              AI Resume Search
+              Ask Joe — Resume Search
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
               <FileUp className="h-4 w-4 mr-1" />

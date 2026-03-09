@@ -112,12 +112,12 @@ export function ResumeSearchDialog({ open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-accent" />
-            AI Resume Search
+            Ask Joe — Resume Search
           </DialogTitle>
         </DialogHeader>
 
         <p className="text-sm text-muted-foreground">
-          Search across all candidate resumes using natural language. Try: "Find candidates with Python and AWS experience" or "Who has 5+ years in healthcare?"
+          Ask Joe to search across all candidate resumes using natural language. Try: "Find candidates with Python and AWS experience"
         </p>
 
         <div ref={scrollRef} className="flex-1 min-h-[200px] max-h-[400px] overflow-y-auto space-y-3 py-2">

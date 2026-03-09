@@ -29,7 +29,7 @@ interface ParsedData {
   file_path: string;
 }
 
-const PARSE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ask-joe`;
+const PARSE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
 
 export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   const qc = useQueryClient();
@@ -49,85 +49,52 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setParsing(true);
 
     try {
-      // Upload to storage
-      const userId = (await supabase.auth.getUser()).data.user?.id;
-      const filePath = `${userId}/${Date.now()}_${file.name}`;
-      const { error: uploadErr } = await supabase.storage.from('resumes').upload(filePath, file);
-      if (uploadErr) throw uploadErr;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('entity_type', entityType);
 
-      // Read text from file
-      const text = await file.text();
-
-      // Use AI to parse resume into structured fields
       const resp = await fetch(PARSE_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: 'user',
-              content: `Parse this resume and extract structured data. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. Here is the resume text:\n\n${text.slice(0, 4000)}`,
-            },
-          ],
-          mode: 'general',
-        }),
+        body: formData,
       });
 
-      if (!resp.ok || !resp.body) throw new Error('AI parsing failed');
-
-      // Read streaming response
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let full = '';
-      let done = false;
-      while (!done) {
-        const { done: d, value } = await reader.read();
-        if (d) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('data: ') || line.includes('[DONE]')) continue;
-          try {
-            const p = JSON.parse(line.slice(6));
-            full += p.choices?.[0]?.delta?.content || '';
-          } catch { /* skip */ }
-        }
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => null);
+        throw new Error(errData?.error || 'Ask Joe failed to parse resume');
       }
 
-      // Extract JSON from response
-      const jsonMatch = full.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[0]);
-        setParsed({
-          first_name: data.first_name || '',
-          last_name: data.last_name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          current_company: data.current_company || '',
-          current_title: data.current_title || '',
-          location: data.location || '',
-          linkedin_url: data.linkedin_url || '',
-          raw_text: text,
-          file_name: file.name,
-          file_path: filePath,
-        });
+      const result = await resp.json();
+      const data = result.parsed;
+      const source = result.source;
+
+      setParsed({
+        first_name: data.first_name || '',
+        last_name: data.last_name || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        current_company: data.current_company || '',
+        current_title: data.current_title || '',
+        location: data.location || '',
+        linkedin_url: data.linkedin_url || '',
+        raw_text: data.raw_text || '',
+        file_name: result.file_name || file.name,
+        file_path: result.file_path || '',
+      });
+
+      if (data.first_name || data.last_name || data.email) {
+        toast.success(`Ask Joe parsed resume via ${source === 'eden_ai' ? 'Eden AI' : 'AI'}`);
       } else {
-        setParsed({
-          first_name: '', last_name: '', email: '', phone: '',
-          current_company: '', current_title: '', location: '', linkedin_url: '',
-          raw_text: text, file_name: file.name, file_path: filePath,
-        });
-        toast.info('Could not auto-parse resume. Please fill in the fields manually.');
+        toast.info('Ask Joe couldn\'t auto-fill all fields. Please review manually.');
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to process resume');
     } finally {
       setParsing(false);
     }
-  }, []);
+  }, [entityType]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -198,7 +165,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-accent" />
-            {entityType === 'candidate' ? 'New Candidate' : 'New Prospect'} via Resume
+            Ask Joe — {entityType === 'candidate' ? 'New Candidate' : 'New Prospect'} via Resume
           </DialogTitle>
         </DialogHeader>
 
@@ -225,19 +192,19 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             {parsing ? (
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="h-8 w-8 animate-spin text-accent" />
-                <p className="text-sm text-muted-foreground">Parsing resume with AI...</p>
+                <p className="text-sm text-muted-foreground">Ask Joe is parsing resume...</p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2">
                 <Upload className="h-8 w-8 text-muted-foreground" />
                 <p className="text-sm font-medium text-foreground">Drop a resume here or click to upload</p>
-                <p className="text-xs text-muted-foreground">PDF, DOC, or TXT files</p>
+                <p className="text-xs text-muted-foreground">PDF, DOC, or TXT — Ask Joe will parse it</p>
               </div>
             )}
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Review parsed data and edit before saving:</p>
+            <p className="text-xs text-muted-foreground">Ask Joe extracted this data. Review and edit before saving:</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">First Name</Label>

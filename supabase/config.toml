@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.match-entity]
 verify_jwt = false
+
+[functions.parse-resume]
+verify_jwt = false
