@@ -210,7 +210,7 @@ const Leads = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn('stage-badge border', statusColors[prospect.status] ?? 'bg-muted text-muted-foreground border-border')}>
-                        {prospect.status.replace('_', ' ')}
+                        {statusLabels[prospect.status] ?? prospect.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{prospect.location ?? '-'}</td>
