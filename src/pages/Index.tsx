@@ -2,7 +2,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
-import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
+// CandidatePipeline removed from dashboard per user request
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
@@ -89,24 +89,6 @@ const Dashboard = () => {
           <MetricCard label="Response Rate" value={isLoading ? '...' : `${((metrics?.responseRate ?? 0) * 100).toFixed(0)}%`} icon={<TrendingUp className="h-5 w-5" />} />
         </div>
 
-        {/* Job Pipeline */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Job Pipeline</h2>
-            <Button variant="ghost" size="sm">View All Jobs</Button>
-          </div>
-          <JobPipeline />
-        </section>
-
-        {/* Candidate Pipeline */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Candidate Pipeline</h2>
-            <Button variant="ghost" size="sm">View All Candidates</Button>
-          </div>
-          <CandidatePipeline />
-        </section>
-
         {/* Tasks + Activity Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
@@ -128,6 +110,15 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        {/* Job Pipeline */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">Job Pipeline</h2>
+            <Button variant="ghost" size="sm">View All Jobs</Button>
+          </div>
+          <JobPipeline />
+        </section>
       </div>
     </MainLayout>
   );
