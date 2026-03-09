@@ -248,6 +248,9 @@ const SequenceDetail = () => {
     } finally {
       setDuplicating(false);
     }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
       setSteps((items) => {
