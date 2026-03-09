@@ -95,7 +95,7 @@ export function TaskCard({ task }: { task: Task }) {
               )}
               {linkedEntities.length > 0 && (
                 <span className="text-[10px] text-accent">
-                  {linkedEntities.map(l => l.entity_type === 'candidate' ? '👤' : l.entity_type === 'job' ? '💼' : '🔗').join(' ')}
+                  {linkedEntities.map(l => l.entity_type === 'candidate' ? '👤' : l.entity_type === 'job' ? '💼' : l.entity_type === 'contact' ? '🤝' : '🔗').join(' ')}
                   {' '}{linkedEntities.length} linked
                 </span>
               )}
