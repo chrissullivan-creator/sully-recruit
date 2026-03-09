@@ -45,7 +45,7 @@ export default function Tasks() {
     if (statusFilter === 'overdue') {
       if (t.status === 'completed' || !t.due_date || !isPast(new Date(t.due_date))) return false;
     } else if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-    if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
+    
     if (assignmentFilter === 'assigned_to_me' && t.assigned_to !== user?.id) return false;
     if (assignmentFilter === 'created_by_me' && t.created_by !== user?.id) return false;
     return true;
