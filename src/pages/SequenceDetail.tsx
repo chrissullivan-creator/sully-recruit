@@ -320,6 +320,10 @@ const SequenceDetail = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={handleDuplicate} disabled={duplicating}>
+            {duplicating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+            Duplicate
+          </Button>
           <Button variant="ghost" size="sm" onClick={toggleStatus}>
             {sequence.status === 'active' ? <Pause className="h-3.5 w-3.5 text-warning" /> : <Play className="h-3.5 w-3.5 text-success" />}
             {sequence.status === 'active' ? 'Pause' : 'Activate'}
