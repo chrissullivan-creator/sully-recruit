@@ -38,6 +38,7 @@ const Candidates = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
+  const [resumeDropOpen, setResumeDropOpen] = useState(false);
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
