@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, ArrowUpCircle } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isPast } from 'date-fns';
 import { toast } from 'sonner';
