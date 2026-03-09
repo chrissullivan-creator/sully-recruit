@@ -16,6 +16,7 @@ import Contacts from "./pages/Contacts";
 import Campaigns from "./pages/Campaigns";
 import SequenceDetail from "./pages/SequenceDetail";
 import Calls from "./pages/Calls";
+import Tasks from "./pages/Tasks";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
