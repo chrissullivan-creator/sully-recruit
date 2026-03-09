@@ -8,8 +8,9 @@ import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
+import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { useCandidates } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
@@ -35,6 +36,7 @@ const Candidates = () => {
   const { data: candidates = [], isLoading } = useCandidates();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
@@ -121,6 +123,10 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setResumeSearchOpen(true)}>
+              <FileSearch className="h-4 w-4 mr-1" />
+              AI Resume Search
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
@@ -243,6 +249,7 @@ const Candidates = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
     </MainLayout>
   );
 };

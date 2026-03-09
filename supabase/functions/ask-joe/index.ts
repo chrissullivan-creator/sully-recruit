@@ -26,6 +26,24 @@ async function getUserOpenAIConfig(authHeader: string | null) {
   return null;
 }
 
+async function searchResumes(authHeader: string | null, query: string) {
+  if (!authHeader) return [];
+  try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    // Fetch resumes with raw_text and join candidate info
+    const { data: resumes } = await supabase
+      .from("candidate_resumes")
+      .select("id, file_name, raw_text, ai_summary, candidate_id, candidates(id, full_name, email, current_title, current_company)")
+      .not("raw_text", "is", null)
+      .limit(50);
+    return resumes || [];
+  } catch { return []; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -35,7 +53,7 @@ serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     const openaiConfig = await getUserOpenAIConfig(authHeader);
 
-    const { messages } = await req.json();
+    const { messages, mode } = await req.json();
 
     let apiUrl: string;
     let apiKey: string;
@@ -63,20 +81,50 @@ serve(async (req) => {
       "Content-Type": "application/json",
     };
 
+    let systemPrompt = `You are Joe, an AI recruiting assistant inside Emerald Recruit CRM. You help recruiters with:
+- Drafting outreach messages (LinkedIn, email) with a sharp, professional tone
+- Answering questions about recruiting best practices
+- Suggesting next steps in the pipeline
+Keep responses concise and actionable. Use {{first_name}}, {{company}}, {{title}} as placeholders when drafting messages.`;
+
+    // Resume search mode: inject resume data into context
+    if (mode === "resume_search") {
+      const userQuery = messages[messages.length - 1]?.content || "";
+      const resumes = await searchResumes(authHeader, userQuery);
+      
+      if (resumes.length > 0) {
+        const resumeContext = resumes.map((r: any, i: number) => {
+          const candidate = r.candidates;
+          const name = candidate?.full_name || "Unknown";
+          const title = candidate?.current_title || "";
+          const company = candidate?.current_company || "";
+          const text = (r.raw_text || "").slice(0, 2000); // Limit per resume
+          return `--- Resume ${i + 1}: ${name} (${title} at ${company}) [candidate_id: ${candidate?.id}] ---\n${text}`;
+        }).join("\n\n");
+
+        systemPrompt = `You are Joe, an AI recruiting assistant specializing in resume search. You have access to ${resumes.length} candidate resumes below.
+
+When the user asks to find candidates, search through these resumes and return:
+1. The matching candidates with their names, titles, and companies
+2. Why they match (relevant skills, experience)
+3. A brief relevance score (Strong Match / Good Match / Partial Match)
+
+Format results clearly. If no good matches, say so honestly.
+
+RESUME DATABASE:
+${resumeContext}`;
+      } else {
+        systemPrompt = `You are Joe, an AI recruiting assistant. The user asked to search resumes but no resumes with parsed text are available in the database. Let them know they need to upload resumes to candidates first before search will work.`;
+      }
+    }
+
     const response = await fetch(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
         model,
         messages: [
-          {
-            role: "system",
-            content: `You are Joe, an AI recruiting assistant inside Emerald Recruit CRM. You help recruiters with:
-- Drafting outreach messages (LinkedIn, email) with a sharp, professional tone
-- Answering questions about recruiting best practices
-- Suggesting next steps in the pipeline
-Keep responses concise and actionable. Use {{first_name}}, {{company}}, {{title}} as placeholders when drafting messages.`,
-          },
+          { role: "system", content: systemPrompt },
           ...messages,
         ],
         stream: true,
