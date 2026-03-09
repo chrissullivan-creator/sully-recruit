@@ -249,6 +249,7 @@ const Candidates = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
     </MainLayout>
   );
 };
