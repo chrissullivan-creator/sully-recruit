@@ -1,8 +1,9 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard } from 'lucide-react';
+import { LogOut, Users, UserCheck, Target, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
