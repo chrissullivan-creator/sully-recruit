@@ -94,7 +94,7 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
