@@ -101,11 +101,14 @@ const Companies = () => {
                   )}
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-border flex items-center text-xs">
+                <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1">
                     <Briefcase className="h-3 w-3" />
                     {company.job_count} active {company.job_count === 1 ? 'job' : 'jobs'}
                   </span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: company.id, name: company.name }); }}>
+                    <ListTodo className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
