@@ -6,8 +6,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
