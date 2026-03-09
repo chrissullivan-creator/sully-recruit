@@ -15,6 +15,7 @@ const Jobs = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: jobs = [], isLoading } = useJobs();
 
   const filteredJobs = jobs.filter((job) =>
