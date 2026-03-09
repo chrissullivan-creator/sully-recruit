@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const Jobs = () => {
+  const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
@@ -92,7 +94,7 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
