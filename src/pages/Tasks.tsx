@@ -36,7 +36,7 @@ export default function Tasks() {
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  
   const [assignmentFilter, setAssignmentFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
