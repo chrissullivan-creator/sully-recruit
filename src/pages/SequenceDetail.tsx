@@ -123,19 +123,17 @@ const SequenceDetail = () => {
       setJobId(seq.job_id ?? null);
 
       const dbSteps = ((seq.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
-      let seenFirstEmail = false;
       const loadedSteps: CampaignStep[] = dbSteps.map((s: any) => {
         const ch = dbChannelToChannel(s.step_type, s.channel);
         const isEmail = ch === 'email';
-        const isReply = isEmail && seenFirstEmail && !s.subject;
-        if (isEmail) seenFirstEmail = true;
         return {
           id: s.id, order: s.step_order, channel: ch,
           subject: s.subject || undefined, content: s.body || '',
           delayDays: s.delay_days ?? 0, delayHours: s.delay_hours ?? 0,
           sendWindowStart: s.send_window_start ?? 6, sendWindowEnd: s.send_window_end ?? 23,
           waitForConnection: s.wait_for_connection ?? false, minHoursAfterConnection: s.min_hours_after_connection ?? 4,
-          isReply, useSignature: isEmail,
+          isReply: s.is_reply ?? false, useSignature: s.use_signature ?? isEmail,
+          accountId: s.account_id || undefined,
           attachments: s.attachments ?? [],
         };
       });
