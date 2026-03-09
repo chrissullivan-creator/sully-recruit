@@ -624,6 +624,7 @@ export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState('all');
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads'],
