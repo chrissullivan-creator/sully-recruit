@@ -585,42 +585,88 @@ Senior Recruiter | Your Company
                       </div>
                     </div>
 
-                    {/* Outlook Prefilled Email */}
+                    {/* Outlook */}
                     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info">
+                        <div className={cn(
+                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          outlookActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
+                        )}>
                           <Mail className="h-5 w-5" />
                         </div>
                         <div className="flex-1">
-                          <h3 className="text-sm font-semibold text-foreground">Outlook / Email Client</h3>
+                          <h3 className="text-sm font-semibold text-foreground">Outlook / Microsoft 365</h3>
                           <p className="text-xs text-muted-foreground">
-                            Choose how prefilled emails open when you click "Email" on a candidate or contact.
+                            Send emails directly from your Outlook/Microsoft 365 account.
                           </p>
                         </div>
+                        {outlookActive && (
+                          <span className="flex items-center gap-1 text-xs text-success">
+                            <Check className="h-3.5 w-3.5" /> Connected
+                          </span>
+                        )}
                       </div>
 
-                      <div className="space-y-3">
-                        <Label className="text-xs">Default Email Method</Label>
-                        <div className="grid grid-cols-3 gap-3">
-                          {([
-                            { value: 'default', label: 'System Default', desc: 'Uses your OS default mail app' },
-                            { value: 'web', label: 'Outlook Web', desc: 'Opens Outlook 365 in browser' },
-                            { value: 'desktop', label: 'Outlook Desktop', desc: 'Opens Outlook desktop app' },
-                          ] as const).map((option) => (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5 col-span-2">
+                          <Label className="text-xs">Email Address</Label>
+                          <Input
+                            type="email"
+                            placeholder="you@outlook.com or you@company.com"
+                            value={outlookConfig.smtp_user}
+                            onChange={(e) => {
+                              setOutlookConfig((c) => ({
+                                ...c,
+                                smtp_user: e.target.value,
+                                from_email: e.target.value,
+                              }));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1.5 col-span-2">
+                          <Label className="text-xs">Password / App Password</Label>
+                          <div className="relative">
+                            <Input
+                              type={showPasswords.outlook_pass ? 'text' : 'password'}
+                              placeholder="••••••••"
+                              value={outlookConfig.smtp_pass}
+                              onChange={(e) => setOutlookConfig((c) => ({ ...c, smtp_pass: e.target.value }))}
+                            />
                             <button
-                              key={option.value}
-                              onClick={() => setOutlookPrefs((c) => ({ ...c, default_method: option.value }))}
-                              className={cn(
-                                'rounded-lg border p-3 text-left transition-colors',
-                                outlookPrefs.default_method === option.value
-                                  ? 'border-primary bg-primary/5'
-                                  : 'border-border hover:border-muted-foreground/30'
-                              )}
+                              type="button"
+                              onClick={() => togglePassword('outlook_pass')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                             >
-                              <p className="text-sm font-medium text-foreground">{option.label}</p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{option.desc}</p>
+                              {showPasswords.outlook_pass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                             </button>
-                          ))}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Use an app password if you have 2FA enabled.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">From Name (Optional)</Label>
+                          <Input
+                            placeholder="John Doe"
+                            value={outlookConfig.from_name}
+                            onChange={(e) => setOutlookConfig((c) => ({ ...c, from_name: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">SMTP Server</Label>
+                          <Input
+                            value={outlookConfig.smtp_host}
+                            disabled
+                            className="bg-muted/50 cursor-not-allowed"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">SMTP Port</Label>
+                          <Input
+                            value={outlookConfig.smtp_port}
+                            disabled
+                            className="bg-muted/50 cursor-not-allowed"
+                          />
                         </div>
                       </div>
 
@@ -628,13 +674,13 @@ Senior Recruiter | Your Company
                         <Button
                           variant="gold"
                           size="sm"
-                          disabled={isSaving('outlook_preferences')}
-                          onClick={() => saveIntegration('outlook_preferences', outlookPrefs, true)}
+                          disabled={isSaving('outlook')}
+                          onClick={() => saveIntegration('outlook', outlookConfig, true)}
                         >
-                          {isSaving('outlook_preferences') ? (
+                          {isSaving('outlook') ? (
                             <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
                           ) : (
-                            'Save Outlook Preference'
+                            'Save Outlook Settings'
                           )}
                         </Button>
                       </div>
