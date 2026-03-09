@@ -26,6 +26,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     company_name: '',
     location: '',
     description: '',
+    compensation: '',
     status: 'open',
   });
 
