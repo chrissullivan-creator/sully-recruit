@@ -129,6 +129,10 @@ const Candidates = () => {
               <FileSearch className="h-4 w-4 mr-1" />
               AI Resume Search
             </Button>
+            <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
+              <FileUp className="h-4 w-4 mr-1" />
+              Resume Drop
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
