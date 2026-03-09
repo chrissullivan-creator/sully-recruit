@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useSupabaseData';
-import { Plus, LayoutGrid, List, Search, Upload } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +15,7 @@ const Jobs = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: jobs = [], isLoading } = useJobs();
 
   const filteredJobs = jobs.filter((job) =>
@@ -85,10 +87,11 @@ const Jobs = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                  <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredJobs.map((job) => (
+                 {filteredJobs.map((job) => (
                   <tr key={job.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
@@ -100,6 +103,11 @@ const Jobs = () => {
                     <td className="px-4 py-3">
                       <span className="stage-badge stage-warm">{job.status}</span>
                     </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTaskPanel({ id: job.id, name: job.title })}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -110,6 +118,15 @@ const Jobs = () => {
 
       <AddJobDialog open={addOpen} onOpenChange={setAddOpen} />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="jobs" />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="job"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };

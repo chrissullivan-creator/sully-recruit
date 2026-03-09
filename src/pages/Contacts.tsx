@@ -4,8 +4,9 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Contacts = () => {
@@ -13,6 +14,7 @@ const Contacts = () => {
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
@@ -77,6 +79,7 @@ const Contacts = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Reached Out</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Response</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                  <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -138,6 +141,11 @@ const Contacts = () => {
                         {contact.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -147,6 +155,15 @@ const Contacts = () => {
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="contact"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };

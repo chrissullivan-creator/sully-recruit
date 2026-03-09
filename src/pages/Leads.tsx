@@ -6,8 +6,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useProspects } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp } from 'lucide-react';
+import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
@@ -37,6 +38,7 @@ const Leads = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: prospects = [], isLoading } = useProspects();
 
   const filteredProspects = useMemo(() => {
@@ -175,6 +177,7 @@ const Leads = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('location')}>
                     <span className="flex items-center gap-1">Location <SortIcon field="location" /></span>
                   </th>
+                  <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -214,6 +217,11 @@ const Leads = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{prospect.location ?? '-'}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: prospect.id, name: prospect.full_name ?? `${prospect.first_name ?? ''} ${prospect.last_name ?? ''}` }); }}>
+                        <ListTodo className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
                 {filteredProspects.length === 0 && (
@@ -235,6 +243,15 @@ const Leads = () => {
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="prospects" />
       <AddProspectDialog open={addOpen} onOpenChange={setAddOpen} />
       <ResumeDropZone entityType="prospect" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="prospect"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };

@@ -3,14 +3,16 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useSupabaseData';
-import { Plus, Search, Building, Globe, MapPin, Briefcase } from 'lucide-react';
+import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
+import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 
 const Companies = () => {
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: companies = [], isLoading } = useCompanies();
 
   const filteredCompanies = companies.filter((company) => {
@@ -99,11 +101,14 @@ const Companies = () => {
                   )}
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-border flex items-center text-xs">
+                <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1">
                     <Briefcase className="h-3 w-3" />
                     {company.job_count} active {company.job_count === 1 ? 'job' : 'jobs'}
                   </span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: company.id, name: company.name }); }}>
+                    <ListTodo className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
@@ -111,6 +116,15 @@ const Companies = () => {
         )}
       </div>
       <AddCompanyDialog open={addOpen} onOpenChange={setAddOpen} />
+      {taskPanel && (
+        <TaskSlidePanel
+          open={!!taskPanel}
+          onOpenChange={(open) => !open && setTaskPanel(null)}
+          entityType="company"
+          entityId={taskPanel.id}
+          entityName={taskPanel.name}
+        />
+      )}
     </MainLayout>
   );
 };
