@@ -98,6 +98,10 @@ const Leads = () => {
         description="Manage your pipeline of prospects."
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
+              <FileUp className="h-4 w-4 mr-1" />
+              Resume Drop
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
