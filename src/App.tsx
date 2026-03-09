@@ -16,6 +16,7 @@ import Contacts from "./pages/Contacts";
 import Campaigns from "./pages/Campaigns";
 import SequenceDetail from "./pages/SequenceDetail";
 import Calls from "./pages/Calls";
+import Tasks from "./pages/Tasks";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
             <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
+            <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
