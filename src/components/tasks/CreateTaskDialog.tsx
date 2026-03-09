@@ -1,12 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { useCreateTask } from '@/hooks/useTasks';
-import { Loader2 } from 'lucide-react';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { Loader2, CalendarIcon, Search } from 'lucide-react';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 interface Props {
   open: boolean;
@@ -15,15 +22,56 @@ interface Props {
 }
 
 export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
+  const { user } = useAuth();
   const createTask = useCreateTask();
+  const { data: profiles = [] } = useProfiles();
   const [form, setForm] = useState({
     title: '',
     description: '',
-    priority: 'medium',
-    due_date: '',
+    due_date: new Date(),
+    assigned_to: '',
   });
+  const [links, setLinks] = useState<{ entity_type: string; entity_id: string; label: string }[]>([]);
+  const [entitySearch, setEntitySearch] = useState('');
+  const [entityType, setEntityType] = useState<'candidate' | 'job'>('candidate');
+  const [searchResults, setSearchResults] = useState<{ id: string; label: string }[]>([]);
+  const [searching, setSearching] = useState(false);
 
-  const update = (field: string, value: string) => setForm((prev) => ({ ...prev, [field]: value }));
+  useEffect(() => {
+    if (open) {
+      setForm({ title: '', description: '', due_date: new Date(), assigned_to: '' });
+      setLinks(defaultLinks?.map(l => ({ ...l, label: '' })) || []);
+      setEntitySearch('');
+      setSearchResults([]);
+    }
+  }, [open, defaultLinks]);
+
+  // Search candidates or jobs
+  useEffect(() => {
+    if (!entitySearch.trim()) { setSearchResults([]); return; }
+    const timeout = setTimeout(async () => {
+      setSearching(true);
+      if (entityType === 'candidate') {
+        const { data } = await supabase.from('candidates').select('id, full_name').ilike('full_name', `%${entitySearch}%`).limit(8);
+        setSearchResults((data || []).map(c => ({ id: c.id, label: c.full_name || 'Unnamed' })));
+      } else {
+        const { data } = await supabase.from('jobs').select('id, title, company_name').ilike('title', `%${entitySearch}%`).limit(8);
+        setSearchResults((data || []).map(j => ({ id: j.id, label: `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}` })));
+      }
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [entitySearch, entityType]);
+
+  const addLink = (id: string, label: string) => {
+    if (!links.find(l => l.entity_id === id)) {
+      setLinks(prev => [...prev, { entity_type: entityType, entity_id: id, label }]);
+    }
+    setEntitySearch('');
+    setSearchResults([]);
+  };
+
+  const removeLink = (id: string) => setLinks(prev => prev.filter(l => l.entity_id !== id));
 
   const handleCreate = () => {
     if (!form.title.trim()) return;
@@ -31,15 +79,12 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
       {
         title: form.title.trim(),
         description: form.description.trim() || undefined,
-        priority: form.priority,
-        due_date: form.due_date || undefined,
-        links: defaultLinks,
+        due_date: format(form.due_date, 'yyyy-MM-dd'),
+        assigned_to: form.assigned_to || undefined,
+        links: links.map(l => ({ entity_type: l.entity_type, entity_id: l.entity_id })),
       },
       {
-        onSuccess: () => {
-          setForm({ title: '', description: '', priority: 'medium', due_date: '' });
-          onOpenChange(false);
-        },
+        onSuccess: () => onOpenChange(false),
       }
     );
   };
@@ -53,27 +98,86 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Title *</Label>
-            <Input value={form.title} onChange={(e) => update('title', e.target.value)} placeholder="e.g. Follow up with candidate" />
+            <Input value={form.title} onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Pitch candidate for Senior Dev role" />
           </div>
           <div className="space-y-2">
             <Label>Description</Label>
-            <Textarea value={form.description} onChange={(e) => update('description', e.target.value)} rows={3} />
+            <Textarea value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Add details, instructions, notes..." />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={form.priority} onValueChange={(v) => update('priority', v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label>Due Date *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal")}>
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    {format(form.due_date, 'MMM d, yyyy')}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={form.due_date}
+                    onSelect={(d) => d && setForm(f => ({ ...f, due_date: d }))}
+                    className={cn("p-3 pointer-events-auto")}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="space-y-2">
+              <Label>Assign To</Label>
+              <Select value={form.assigned_to} onValueChange={(v) => setForm(f => ({ ...f, assigned_to: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
+                  {profiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.full_name || p.email || 'Unknown'}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Due Date</Label>
-              <Input type="date" value={form.due_date} onChange={(e) => update('due_date', e.target.value)} />
+          </div>
+
+          {/* Tag candidates / jobs */}
+          <div className="space-y-2">
+            <Label>Tag Candidates & Jobs</Label>
+            {links.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {links.map(l => (
+                  <span key={l.entity_id} className="inline-flex items-center gap-1 bg-accent/10 text-accent text-xs px-2 py-1 rounded-full">
+                    {l.entity_type === 'candidate' ? '👤' : '💼'} {l.label || l.entity_type}
+                    <button onClick={() => removeLink(l.entity_id)} className="hover:text-destructive ml-0.5">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Select value={entityType} onValueChange={(v) => { setEntityType(v as any); setEntitySearch(''); setSearchResults([]); }}>
+                <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="candidate">Candidate</SelectItem>
+                  <SelectItem value="job">Job</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="relative flex-1">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={entitySearch}
+                  onChange={(e) => setEntitySearch(e.target.value)}
+                  placeholder={`Search ${entityType}s...`}
+                  className="pl-7 h-9 text-sm"
+                />
+                {searchResults.length > 0 && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-40 overflow-y-auto">
+                    {searchResults.map(r => (
+                      <button key={r.id} onClick={() => addLink(r.id, r.label)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 text-foreground">
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
