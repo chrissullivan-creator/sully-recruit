@@ -215,20 +215,6 @@ export function useSendOutBoard() {
   });
 }
 
-// Send out board view
-export function useSendOutBoard() {
-  return useQuery({
-    queryKey: ['send_out_board'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('send_out_board')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
-}
 
 // Messages (for Calls page - filter call type messages)
 export function useMessages(channel?: string) {
