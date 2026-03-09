@@ -14,6 +14,7 @@ const Contacts = () => {
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
