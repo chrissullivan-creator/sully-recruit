@@ -438,6 +438,7 @@ export type Database = {
           is_read: boolean
           last_message_at: string | null
           last_message_preview: string | null
+          owner_id: string | null
           send_out_id: string | null
           subject: string | null
           updated_at: string
@@ -454,6 +455,7 @@ export type Database = {
           is_read?: boolean
           last_message_at?: string | null
           last_message_preview?: string | null
+          owner_id?: string | null
           send_out_id?: string | null
           subject?: string | null
           updated_at?: string
@@ -470,6 +472,7 @@ export type Database = {
           is_read?: boolean
           last_message_at?: string | null
           last_message_preview?: string | null
+          owner_id?: string | null
           send_out_id?: string | null
           subject?: string | null
           updated_at?: string
@@ -555,6 +558,7 @@ export type Database = {
         Row: {
           company_id: string | null
           company_name: string | null
+          compensation: string | null
           contact_id: string | null
           created_at: string
           description: string | null
@@ -567,6 +571,7 @@ export type Database = {
         Insert: {
           company_id?: string | null
           company_name?: string | null
+          compensation?: string | null
           contact_id?: string | null
           created_at?: string
           description?: string | null
@@ -579,6 +584,7 @@ export type Database = {
         Update: {
           company_id?: string | null
           company_name?: string | null
+          compensation?: string | null
           contact_id?: string | null
           created_at?: string
           description?: string | null
@@ -618,6 +624,7 @@ export type Database = {
           external_message_id: string | null
           id: string
           message_type: string | null
+          owner_id: string | null
           provider: string | null
           raw_payload: Json | null
           received_at: string | null
@@ -640,6 +647,7 @@ export type Database = {
           external_message_id?: string | null
           id?: string
           message_type?: string | null
+          owner_id?: string | null
           provider?: string | null
           raw_payload?: Json | null
           received_at?: string | null
@@ -662,6 +670,7 @@ export type Database = {
           external_message_id?: string | null
           id?: string
           message_type?: string | null
+          owner_id?: string | null
           provider?: string | null
           raw_payload?: Json | null
           received_at?: string | null
