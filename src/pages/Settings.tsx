@@ -94,10 +94,16 @@ const Settings = () => {
     warmup_days_completed: '0',
   });
 
-  // Outlook preferences
-  const [outlookPrefs, setOutlookPrefs] = useState<IntegrationConfig>({
-    default_method: 'default', // 'desktop' | 'web' | 'default'
+  // Outlook state - fixed SMTP settings, user only provides email/password
+  const [outlookConfig, setOutlookConfig] = useState<IntegrationConfig>({
+    smtp_host: 'smtp-mail.outlook.com',
+    smtp_port: '587',
+    smtp_user: '',
+    smtp_pass: '',
+    from_name: '',
+    from_email: '',
   });
+  const [outlookActive, setOutlookActive] = useState(false);
 
   // Password visibility
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
