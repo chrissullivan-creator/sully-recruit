@@ -7,15 +7,18 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function makeSupabase(authHeader: string | null) {
+  return createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    authHeader ? { global: { headers: { Authorization: authHeader } } } : {}
+  );
+}
+
 async function getUserOpenAIConfig(authHeader: string | null) {
   if (!authHeader) return null;
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data } = await supabase
+    const { data } = await makeSupabase(authHeader)
       .from("user_integrations")
       .select("config, is_active")
       .eq("integration_type", "openai")
@@ -26,18 +29,69 @@ async function getUserOpenAIConfig(authHeader: string | null) {
   return null;
 }
 
-async function searchResumes(authHeader: string | null, query: string) {
+async function fetchCRMContext(authHeader: string | null): Promise<string> {
+  if (!authHeader) return "";
+  const sb = makeSupabase(authHeader);
+
+  try {
+    const [candidatesRes, prospectsRes, jobsRes, sequencesRes, contactsRes] = await Promise.all([
+      sb.from("candidates").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
+      sb.from("prospects").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
+      sb.from("jobs").select("title, company_name, status, location, compensation").neq("status", "closed").order("created_at", { ascending: false }).limit(20),
+      sb.from("sequences").select("name, channel, status, description").order("created_at", { ascending: false }).limit(15),
+      sb.from("contacts").select("full_name, title, email").order("created_at", { ascending: false }).limit(20),
+    ]);
+
+    const sections: string[] = [];
+
+    const candidates = candidatesRes.data ?? [];
+    if (candidates.length > 0) {
+      sections.push(`CANDIDATES IN PIPELINE (${candidates.length}):\n` + candidates.map(c =>
+        `- ${c.full_name || "Unknown"}${c.current_title ? `, ${c.current_title}` : ""}${c.current_company ? ` @ ${c.current_company}` : ""}${c.location ? ` (${c.location})` : ""} — Status: ${c.status}`
+      ).join("\n"));
+    }
+
+    const prospects = prospectsRes.data ?? [];
+    if (prospects.length > 0) {
+      sections.push(`PROSPECTS (${prospects.length}):\n` + prospects.map(p =>
+        `- ${p.full_name || "Unknown"}${p.current_title ? `, ${p.current_title}` : ""}${p.current_company ? ` @ ${p.current_company}` : ""} — Status: ${p.status}`
+      ).join("\n"));
+    }
+
+    const jobs = jobsRes.data ?? [];
+    if (jobs.length > 0) {
+      sections.push(`OPEN JOBS (${jobs.length}):\n` + jobs.map(j =>
+        `- ${j.title}${j.company_name ? ` @ ${j.company_name}` : ""}${j.location ? ` (${j.location})` : ""}${j.compensation ? ` — ${j.compensation}` : ""} [${j.status}]`
+      ).join("\n"));
+    }
+
+    const sequences = sequencesRes.data ?? [];
+    if (sequences.length > 0) {
+      sections.push(`OUTREACH SEQUENCES (${sequences.length}):\n` + sequences.map(s =>
+        `- "${s.name}" — Channel: ${s.channel}, Status: ${s.status}${s.description ? `, ${s.description}` : ""}`
+      ).join("\n"));
+    }
+
+    const contacts = contactsRes.data ?? [];
+    if (contacts.length > 0) {
+      sections.push(`CONTACTS (${contacts.length}):\n` + contacts.map(c =>
+        `- ${c.full_name || "Unknown"}${c.title ? `, ${c.title}` : ""}${c.email ? ` <${c.email}>` : ""}`
+      ).join("\n"));
+    }
+
+    return sections.length > 0 ? sections.join("\n\n") : "No data found in the CRM yet.";
+  } catch (e) {
+    console.error("CRM context fetch error:", e);
+    return "";
+  }
+}
+
+async function searchResumes(authHeader: string | null) {
   if (!authHeader) return [];
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    // Fetch resumes with raw_text and join candidate info
-    const { data: resumes } = await supabase
+    const { data: resumes } = await makeSupabase(authHeader)
       .from("candidate_resumes")
-      .select("id, file_name, raw_text, ai_summary, candidate_id, candidates(id, full_name, email, current_title, current_company)")
+      .select("file_name, raw_text, ai_summary, candidates(full_name, current_title, current_company, email)")
       .not("raw_text", "is", null)
       .limit(50);
     return resumes || [];
@@ -58,9 +112,7 @@ serve(async (req) => {
     let apiUrl: string;
     let apiKey: string;
     let model: string;
-    let headers: Record<string, string>;
 
-    // Priority: user's personal key > OPENAI_API_KEY secret > Lovable AI fallback
     if (openaiConfig) {
       apiUrl = "https://api.openai.com/v1/chat/completions";
       apiKey = openaiConfig.api_key;
@@ -76,46 +128,59 @@ serve(async (req) => {
       apiKey = LOVABLE_API_KEY;
       model = "google/gemini-3-flash-preview";
     }
-    headers = {
+
+    const headers: Record<string, string> = {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     };
 
-    let systemPrompt = `You are Joe, an AI recruiting assistant inside Emerald Recruit CRM. You help recruiters with:
-- Drafting outreach messages (LinkedIn, email) with a sharp, professional tone
-- Answering questions about recruiting best practices
-- Suggesting next steps in the pipeline
-Keep responses concise and actionable. Use {{first_name}}, {{company}}, {{title}} as placeholders when drafting messages.`;
+    let systemPrompt: string;
 
-    // Resume search mode: inject resume data into context
     if (mode === "resume_search") {
-      const userQuery = messages[messages.length - 1]?.content || "";
-      const resumes = await searchResumes(authHeader, userQuery);
-      
+      const resumes = await searchResumes(authHeader);
       if (resumes.length > 0) {
         const resumeContext = resumes.map((r: any, i: number) => {
-          const candidate = r.candidates;
-          const name = candidate?.full_name || "Unknown";
-          const title = candidate?.current_title || "";
-          const company = candidate?.current_company || "";
-          const text = (r.raw_text || "").slice(0, 2000); // Limit per resume
-          return `--- Resume ${i + 1}: ${name} (${title} at ${company}) [candidate_id: ${candidate?.id}] ---\n${text}`;
+          const c = r.candidates;
+          const name = c?.full_name || "Unknown";
+          const title = c?.current_title || "";
+          const company = c?.current_company || "";
+          const text = (r.raw_text || "").slice(0, 2000);
+          return `--- Candidate ${i + 1}: ${name}${title ? ` (${title}` : ""}${company ? ` at ${company})` : title ? ")" : ""} ---\n${text}`;
         }).join("\n\n");
 
-        systemPrompt = `You are Joe, an AI recruiting assistant specializing in resume search. You have access to ${resumes.length} candidate resumes below.
+        systemPrompt = `You are Joe, an expert recruiting assistant inside Emerald Recruit. You have access to ${resumes.length} candidate resumes.
 
-When the user asks to find candidates, search through these resumes and return:
-1. The matching candidates with their names, titles, and companies
-2. Why they match (relevant skills, experience)
-3. A brief relevance score (Strong Match / Good Match / Partial Match)
+When searching for candidates, identify matches and explain:
+1. Name, title, company
+2. Why they match (skills, experience, background)
+3. Fit level: Strong Match / Good Match / Partial Match
 
-Format results clearly. If no good matches, say so honestly.
+Be concise and direct. If no matches, say so honestly. Never mention databases, Supabase, IDs, or technical systems.
 
-RESUME DATABASE:
-${resumeContext}`;
+RESUME DATABASE:\n${resumeContext}`;
       } else {
-        systemPrompt = `You are Joe, an AI recruiting assistant. The user asked to search resumes but no resumes with parsed text are available in the database. Let them know they need to upload resumes to candidates first before search will work.`;
+        systemPrompt = `You are Joe, a recruiting assistant. No resumes with parsed text are available yet — let the user know they need to upload resumes to candidates first.`;
       }
+    } else {
+      // General mode — always inject live CRM context
+      const crmContext = await fetchCRMContext(authHeader);
+
+      systemPrompt = `You are Joe, a sharp recruiting assistant embedded in Emerald Recruit CRM. You help recruiters work faster and smarter.
+
+You can:
+- Answer questions about people, jobs, and sequences in the CRM
+- Draft outreach messages (LinkedIn, email, SMS) with a direct, professional tone
+- Suggest next steps for specific candidates or roles
+- Advise on recruiting strategy and best practices
+
+Rules:
+- Be concise, specific, and actionable — no fluff
+- NEVER mention Supabase, databases, APIs, UUIDs, table names, technical systems, or internal IDs
+- When drafting messages, use {{first_name}}, {{company}}, {{title}} as personalization placeholders
+- Refer to data naturally, as if you know the team's pipeline
+
+CURRENT CRM DATA:
+${crmContext}`;
     }
 
     const response = await fetch(apiUrl, {
@@ -146,7 +211,7 @@ ${resumeContext}`;
       }
       if (response.status === 401) {
         return new Response(
-          JSON.stringify({ error: "Invalid OpenAI API key. Check your key in Settings." }),
+          JSON.stringify({ error: "Invalid API key. Check your key in Settings." }),
           { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
