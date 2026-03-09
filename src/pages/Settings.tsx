@@ -332,29 +332,20 @@ Senior Recruiter | Your Company
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-1.5">
-                          <Label className="text-xs">SMTP Host</Label>
+                          <Label className="text-xs">Email Address</Label>
                           <Input
-                            placeholder="smtp.gmail.com"
-                            value={emailConfig.smtp_host}
-                            onChange={(e) => setEmailConfig((c) => ({ ...c, smtp_host: e.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">SMTP Port</Label>
-                          <Input
-                            placeholder="587"
-                            value={emailConfig.smtp_port}
-                            onChange={(e) => setEmailConfig((c) => ({ ...c, smtp_port: e.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Username / Email</Label>
-                          <Input
+                            type="email"
                             placeholder="you@domain.com"
                             value={emailConfig.smtp_user}
-                            onChange={(e) => setEmailConfig((c) => ({ ...c, smtp_user: e.target.value }))}
+                            onChange={(e) => {
+                              setEmailConfig((c) => ({
+                                ...c,
+                                smtp_user: e.target.value,
+                                from_email: e.target.value,
+                              }));
+                            }}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -374,22 +365,9 @@ Senior Recruiter | Your Company
                               {showPasswords.smtp_pass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                             </button>
                           </div>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">From Name</Label>
-                          <Input
-                            placeholder="John Doe"
-                            value={emailConfig.from_name}
-                            onChange={(e) => setEmailConfig((c) => ({ ...c, from_name: e.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">From Email</Label>
-                          <Input
-                            placeholder="john@company.com"
-                            value={emailConfig.from_email}
-                            onChange={(e) => setEmailConfig((c) => ({ ...c, from_email: e.target.value }))}
-                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Use an app password if you have 2FA enabled. Configure SMTP settings in Supabase.
+                          </p>
                         </div>
                       </div>
 
