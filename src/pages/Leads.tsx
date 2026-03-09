@@ -177,7 +177,7 @@ const Leads = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('location')}>
                     <span className="flex items-center gap-1">Location <SortIcon field="location" /></span>
                   </th>
-                </tr>
+                  <th className="w-10 px-4 py-3"></th>
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredProspects.map((prospect) => (
