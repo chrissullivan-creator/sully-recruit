@@ -25,7 +25,7 @@ import {
 } from '@dnd-kit/sortable';
 import {
   ArrowLeft, Play, Pause, Plus, Save, Users, UserPlus, Mail, Linkedin, MessageSquare,
-  Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle,
+  Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle, Copy,
 } from 'lucide-react';
 import { SequenceAnalytics } from '@/components/campaigns/SequenceAnalytics';
 import type { CampaignStep, ChannelType } from '@/types';
@@ -79,6 +79,7 @@ const SequenceDetail = () => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [executions, setExecutions] = useState<any[]>([]);
@@ -123,19 +124,17 @@ const SequenceDetail = () => {
       setJobId(seq.job_id ?? null);
 
       const dbSteps = ((seq.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
-      let seenFirstEmail = false;
       const loadedSteps: CampaignStep[] = dbSteps.map((s: any) => {
         const ch = dbChannelToChannel(s.step_type, s.channel);
         const isEmail = ch === 'email';
-        const isReply = isEmail && seenFirstEmail && !s.subject;
-        if (isEmail) seenFirstEmail = true;
         return {
           id: s.id, order: s.step_order, channel: ch,
           subject: s.subject || undefined, content: s.body || '',
           delayDays: s.delay_days ?? 0, delayHours: s.delay_hours ?? 0,
           sendWindowStart: s.send_window_start ?? 6, sendWindowEnd: s.send_window_end ?? 23,
           waitForConnection: s.wait_for_connection ?? false, minHoursAfterConnection: s.min_hours_after_connection ?? 4,
-          isReply, useSignature: isEmail,
+          isReply: s.is_reply ?? false, useSignature: s.use_signature ?? isEmail,
+          accountId: s.account_id || undefined,
           attachments: s.attachments ?? [],
         };
       });
@@ -170,6 +169,9 @@ const SequenceDetail = () => {
           send_window_start: step.sendWindowStart, send_window_end: step.sendWindowEnd,
           wait_for_connection: step.waitForConnection, min_hours_after_connection: step.minHoursAfterConnection,
           subject: step.subject || null, body: step.content || null,
+          account_id: step.accountId || null,
+          is_reply: step.isReply ?? false,
+          use_signature: step.useSignature ?? false,
         } as any));
         const { error: stepsError } = await supabase.from('sequence_steps').insert(rows);
         if (stepsError) throw stepsError;
@@ -207,6 +209,44 @@ const SequenceDetail = () => {
       toast.success('Enrollment removed');
     } catch (err: any) {
       toast.error(err.message);
+    }
+  };
+
+  const handleDuplicate = async () => {
+    if (!sequence || !id) return;
+    setDuplicating(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const { data: newSeq, error: seqError } = await supabase.from('sequences').insert({
+        name: `${name.trim()} (Copy)`,
+        description: description.trim() || null,
+        channel, stop_on_reply: stopOnReply, job_id: jobId,
+        status: 'draft', created_by: userId,
+      } as any).select('id').single();
+      if (seqError) throw seqError;
+
+      if (steps.length > 0) {
+        const rows = steps.map((step) => ({
+          sequence_id: newSeq.id, step_order: step.order,
+          step_type: channelToStepType(step.channel), channel: channelToDbChannel(step.channel),
+          delay_days: step.delayDays, delay_hours: step.delayHours,
+          send_window_start: step.sendWindowStart, send_window_end: step.sendWindowEnd,
+          wait_for_connection: step.waitForConnection, min_hours_after_connection: step.minHoursAfterConnection,
+          subject: step.subject || null, body: step.content || null,
+          account_id: step.accountId || null,
+          is_reply: step.isReply ?? false, use_signature: step.useSignature ?? false,
+        } as any));
+        const { error: stepsError } = await supabase.from('sequence_steps').insert(rows);
+        if (stepsError) throw stepsError;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      toast.success('Sequence duplicated');
+      navigate(`/campaigns/${newSeq.id}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to duplicate');
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -280,6 +320,10 @@ const SequenceDetail = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={handleDuplicate} disabled={duplicating}>
+            {duplicating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+            Duplicate
+          </Button>
           <Button variant="ghost" size="sm" onClick={toggleStatus}>
             {sequence.status === 'active' ? <Pause className="h-3.5 w-3.5 text-warning" /> : <Play className="h-3.5 w-3.5 text-success" />}
             {sequence.status === 'active' ? 'Pause' : 'Activate'}
