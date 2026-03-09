@@ -577,6 +577,61 @@ Senior Recruiter | Your Company
                         </Button>
                       </div>
                     </div>
+
+                    {/* Outlook Prefilled Email */}
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info">
+                          <Mail className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-sm font-semibold text-foreground">Outlook / Email Client</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Choose how prefilled emails open when you click "Email" on a candidate or contact.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <Label className="text-xs">Default Email Method</Label>
+                        <div className="grid grid-cols-3 gap-3">
+                          {([
+                            { value: 'default', label: 'System Default', desc: 'Uses your OS default mail app' },
+                            { value: 'web', label: 'Outlook Web', desc: 'Opens Outlook 365 in browser' },
+                            { value: 'desktop', label: 'Outlook Desktop', desc: 'Opens Outlook desktop app' },
+                          ] as const).map((option) => (
+                            <button
+                              key={option.value}
+                              onClick={() => setOutlookPrefs((c) => ({ ...c, default_method: option.value }))}
+                              className={cn(
+                                'rounded-lg border p-3 text-left transition-colors',
+                                outlookPrefs.default_method === option.value
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-border hover:border-muted-foreground/30'
+                              )}
+                            >
+                              <p className="text-sm font-medium text-foreground">{option.label}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{option.desc}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          variant="gold"
+                          size="sm"
+                          disabled={isSaving('outlook_preferences')}
+                          onClick={() => saveIntegration('outlook_preferences', outlookPrefs, true)}
+                        >
+                          {isSaving('outlook_preferences') ? (
+                            <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
+                          ) : (
+                            'Save Outlook Preference'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
