@@ -183,6 +183,23 @@ export function useSequences() {
   });
 }
 
+// Send outs for a specific job
+export function useJobSendOuts(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['send_outs_job', jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_out_board')
+        .select('*')
+        .eq('job_id', jobId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
 // Send out board view
 export function useSendOutBoard() {
   return useQuery({
@@ -197,6 +214,7 @@ export function useSendOutBoard() {
     },
   });
 }
+
 
 // Messages (for Calls page - filter call type messages)
 export function useMessages(channel?: string) {
