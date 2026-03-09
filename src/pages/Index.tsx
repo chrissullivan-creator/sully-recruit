@@ -2,7 +2,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
-import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
+// CandidatePipeline removed from dashboard per user request
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
