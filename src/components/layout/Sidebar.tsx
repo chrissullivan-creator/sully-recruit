@@ -14,6 +14,7 @@ const navigation = [
   { name: 'Contacts', href: '/contacts', icon: Users },
   { name: 'Companies', href: '/companies', icon: Building2 },
   { name: 'Sequences', href: '/campaigns', icon: Megaphone },
+  { name: 'Calls', href: '/calls', icon: Phone },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
