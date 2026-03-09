@@ -214,6 +214,9 @@ export function useSendOutBoard() {
     },
   });
 }
+
+// Send out board view
+export function useSendOutBoard() {
   return useQuery({
     queryKey: ['send_out_board'],
     queryFn: async () => {
