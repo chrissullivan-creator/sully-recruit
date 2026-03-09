@@ -376,6 +376,8 @@ export type Database = {
           full_name: string | null
           id: string
           last_name: string | null
+          last_reached_out_at: string | null
+          last_responded_at: string | null
           linkedin_url: string | null
           owner_id: string | null
           phone: string | null
@@ -392,6 +394,8 @@ export type Database = {
           full_name?: string | null
           id?: string
           last_name?: string | null
+          last_reached_out_at?: string | null
+          last_responded_at?: string | null
           linkedin_url?: string | null
           owner_id?: string | null
           phone?: string | null
@@ -408,6 +412,8 @@ export type Database = {
           full_name?: string | null
           id?: string
           last_name?: string | null
+          last_reached_out_at?: string | null
+          last_responded_at?: string | null
           linkedin_url?: string | null
           owner_id?: string | null
           phone?: string | null
@@ -760,6 +766,42 @@ export type Database = {
         }
         Relationships: []
       }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          is_read: boolean
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          is_read?: boolean
+          title: string
+          type?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          is_read?: boolean
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       prospects: {
         Row: {
           created_at: string
@@ -769,7 +811,10 @@ export type Database = {
           first_name: string | null
           full_name: string | null
           id: string
+          last_comm_channel: string | null
           last_name: string | null
+          last_reached_out_at: string | null
+          last_responded_at: string | null
           linkedin_url: string | null
           location: string | null
           owner_id: string | null
@@ -786,7 +831,10 @@ export type Database = {
           first_name?: string | null
           full_name?: string | null
           id?: string
+          last_comm_channel?: string | null
           last_name?: string | null
+          last_reached_out_at?: string | null
+          last_responded_at?: string | null
           linkedin_url?: string | null
           location?: string | null
           owner_id?: string | null
@@ -803,7 +851,10 @@ export type Database = {
           first_name?: string | null
           full_name?: string | null
           id?: string
+          last_comm_channel?: string | null
           last_name?: string | null
+          last_reached_out_at?: string | null
+          last_responded_at?: string | null
           linkedin_url?: string | null
           location?: string | null
           owner_id?: string | null
@@ -1169,6 +1220,112 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      task_comments: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          task_id: string
+          user_id: string | null
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          task_id: string
+          user_id?: string | null
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          task_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      task_links: {
+        Row: {
+          created_at: string
+          entity_id: string
+          entity_type: string
+          id: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id: string
+          entity_type: string
+          id?: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string
+          entity_type?: string
+          id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_links_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          assigned_to: string | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          due_date: string | null
+          id: string
+          priority: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       user_integrations: {
         Row: {
