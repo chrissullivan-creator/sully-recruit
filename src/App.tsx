@@ -19,6 +19,7 @@ import Calls from "./pages/Calls";
 import Tasks from "./pages/Tasks";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
+import { ResumeSearch } from "./pages/ResumeSearch";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -44,6 +45,7 @@ const App = () => (
             <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

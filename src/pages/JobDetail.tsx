@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
 import { useJob, useContacts, useJobSendOuts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,17 +17,8 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Users,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
 } from 'lucide-react';
-
-const stageBadgeColor: Record<string, string> = {
-  new: 'bg-muted text-muted-foreground',
-  submitted: 'bg-blue-500/15 text-blue-600',
-  interview: 'bg-amber-500/15 text-amber-600',
-  offer: 'bg-emerald-500/15 text-emerald-600',
-  placed: 'bg-green-600/15 text-green-700',
-  rejected: 'bg-destructive/15 text-destructive',
-};
 
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -234,47 +226,11 @@ const JobDetail = () => {
         </Card>
 
         {/* Candidates tagged to this job */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className="h-5 w-5 text-accent" />
-              Candidates Tagged to This Role
-              {sendOuts.length > 0 && (
-                <Badge variant="secondary" className="ml-2">{sendOuts.length}</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {sendOuts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No candidates have been tagged to this job yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {sendOuts.map((so: any) => (
-                  <div
-                    key={so.id}
-                    className="flex items-center justify-between rounded-lg border border-border p-3 hover:border-accent/50 transition-colors cursor-pointer"
-                    onClick={() => so.candidate_id && navigate(`/candidates/${so.candidate_id}`)}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {so.candidate_name ?? 'Unknown Candidate'}
-                      </p>
-                      {so.company_name && (
-                        <p className="text-xs text-muted-foreground">{so.company_name}</p>
-                      )}
-                      {so.contact_name && (
-                        <p className="text-xs text-muted-foreground">Contact: {so.contact_name}</p>
-                      )}
-                    </div>
-                    <Badge className={stageBadgeColor[so.stage ?? ''] ?? 'bg-muted text-muted-foreground'}>
-                      {so.stage ?? 'new'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <SendOutPipeline
+          title="Candidates for This Role"
+          sendOuts={sendOuts}
+          isLoading={isLoading}
+        />
       </div>
 
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />

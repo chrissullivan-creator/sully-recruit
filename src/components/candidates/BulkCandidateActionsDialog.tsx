@@ -27,18 +27,15 @@ const stageBadgeColor: Record<string, string> = {
   rejected: 'bg-destructive/15 text-destructive',
 };
 
-const candidateStages = [
-  { value: 'send_out', label: 'Send Out' },
-  { value: 'submitted', label: 'Submitted' },
+const sendOutStages = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'pitch', label: 'Pitch' },
+  { value: 'sent', label: 'Sent' },
   { value: 'interview', label: 'Interview' },
-  { value: 'first_round', label: 'First Round' },
-  { value: 'second_round', label: 'Second Round' },
-  { value: 'third_plus_round', label: 'Third+ Round' },
   { value: 'offer', label: 'Offer' },
-  { value: 'accepted', label: 'Accepted' },
-  { value: 'declined', label: 'Declined' },
-  { value: 'counter_offer', label: 'Counter Offer' },
-  { value: 'disqualified', label: 'Disqualified' },
+  { value: 'placed', label: 'Placed' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'withdrawn', label: 'Withdrawn' },
 ];
 
 export const BulkCandidateActionsDialog = ({
@@ -48,7 +45,7 @@ export const BulkCandidateActionsDialog = ({
   candidateNames = []
 }: BulkCandidateActionsDialogProps) => {
   const [selectedJobId, setSelectedJobId] = useState<string>('');
-  const [selectedStage, setSelectedStage] = useState<string>('send_out');
+  const [selectedStage, setSelectedStage] = useState<string>('lead');
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
   const [enrollInSequence, setEnrollInSequence] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -61,7 +58,7 @@ export const BulkCandidateActionsDialog = ({
   useEffect(() => {
     if (!open) {
       setSelectedJobId('');
-      setSelectedStage('send_out');
+      setSelectedStage('lead');
       setSelectedSequenceId('');
       setEnrollInSequence(false);
     }
@@ -192,7 +189,7 @@ export const BulkCandidateActionsDialog = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {candidateStages.map((stage) => (
+                {sendOutStages.map((stage) => (
                   <SelectItem key={stage.value} value={stage.value}>
                     <Badge className={stageBadgeColor[stage.value] || 'bg-muted text-muted-foreground'}>
                       {stage.label}
