@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
@@ -37,6 +38,7 @@ const Candidates = () => {
   const { data: candidates = [], isLoading } = useCandidates();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
 
@@ -167,9 +169,9 @@ const Candidates = () => {
           </div>
 
           {selectedIds.length > 0 && (
-            <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}>
+            <Button variant="gold" size="sm" onClick={() => setBulkActionsOpen(true)}>
               <Play className="h-3.5 w-3.5" />
-              Enroll {selectedIds.length} in Sequence
+              Bulk Actions ({selectedIds.length})
             </Button>
           )}
 
@@ -262,6 +264,12 @@ const Candidates = () => {
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}
+        candidateIds={selectedIds}
+        candidateNames={selectedNames}
+      />
+      <BulkCandidateActionsDialog
+        open={bulkActionsOpen}
+        onOpenChange={setBulkActionsOpen}
         candidateIds={selectedIds}
         candidateNames={selectedNames}
       />
