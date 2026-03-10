@@ -169,10 +169,16 @@ const Candidates = () => {
           </div>
 
           {selectedIds.length > 0 && (
-            <Button variant="gold" size="sm" onClick={() => setBulkActionsOpen(true)}>
-              <Play className="h-3.5 w-3.5" />
-              Bulk Actions ({selectedIds.length})
-            </Button>
+            <>
+              <Button variant="gold" size="sm" onClick={() => setBulkActionsOpen(true)}>
+                <Play className="h-3.5 w-3.5" />
+                Bulk Actions ({selectedIds.length})
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                <Play className="h-3.5 w-3.5" />
+                Enroll in Sequence ({selectedIds.length})
+              </Button>
+            </>
           )}
 
           {filteredCandidates.length > 0 && selectedIds.length !== filteredCandidates.length && (

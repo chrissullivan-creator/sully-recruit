@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Contacts = () => {
@@ -14,7 +16,9 @@ const Contacts = () => {
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const { data: contacts = [], isLoading } = useContacts();
 
   const filteredContacts = contacts.filter((contact) => {
@@ -26,6 +30,24 @@ const Contacts = () => {
     return matchesSearch && matchesFilter;
   });
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.length === filteredContacts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredContacts.map((c) => c.id));
+    }
+  };
+
+  const selectedNames = contacts
+    .filter((c) => selectedIds.includes(c.id))
+    .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
+
   return (
     <MainLayout>
       <PageHeader 
@@ -33,6 +55,12 @@ const Contacts = () => {
         description="Your network of hiring managers, HR leaders, and decision makers."
         actions={
           <div className="flex items-center gap-2">
+            {selectedIds.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                <Play className="h-3.5 w-3.5" />
+                Enroll in Sequence ({selectedIds.length})
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
@@ -63,6 +91,18 @@ const Contacts = () => {
             <Button variant={filter === 'active' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('active')}>Active</Button>
             <Button variant={filter === 'inactive' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('inactive')}>Inactive</Button>
           </div>
+
+          {filteredContacts.length > 0 && selectedIds.length !== filteredContacts.length && (
+            <Button variant="outline" size="sm" onClick={toggleAll}>
+              Add All ({filteredContacts.length})
+            </Button>
+          )}
+
+          {selectedIds.length === filteredContacts.length && filteredContacts.length > 0 && (
+            <Button variant="outline" size="sm" onClick={toggleAll}>
+              Deselect All
+            </Button>
+          )}
         </div>
 
         {isLoading ? (
@@ -72,6 +112,12 @@ const Contacts = () => {
             <table className="w-full">
               <thead className="bg-secondary">
                 <tr>
+                  <th className="w-10 px-4 py-3">
+                    <Checkbox
+                      checked={selectedIds.length === filteredContacts.length && filteredContacts.length > 0}
+                      onCheckedChange={toggleAll}
+                    />
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
@@ -85,7 +131,13 @@ const Contacts = () => {
               <tbody className="divide-y divide-border">
                 {filteredContacts.map((contact) => (
                   <tr key={contact.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.includes(contact.id)}
+                        onCheckedChange={() => toggleSelect(contact.id)}
+                      />
+                    </td>
+                    <td className="px-4 py-3" onClick={() => {/* TODO: Navigate to contact detail */}}>
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
                           {(contact.first_name?.[0] ?? '')}{(contact.last_name?.[0] ?? '')}
@@ -155,6 +207,12 @@ const Contacts = () => {
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
+      <EnrollInSequenceDialog
+        open={enrollOpen}
+        onOpenChange={setEnrollOpen}
+        candidateIds={selectedIds}
+        candidateNames={selectedNames}
+      />
       {taskPanel && (
         <TaskSlidePanel
           open={!!taskPanel}
