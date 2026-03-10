@@ -10,20 +10,24 @@ import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidat
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
-import { useCandidates } from '@/hooks/useData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp } from 'lucide-react';
+import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
+import { AskJoeCandidateSearch } from '@/components/candidates/AskJoeCandidateSearch';
+import { useCandidates, useJobs } from '@/hooks/useData';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
 
-const statusFilters = ['all', 'active', 'inactive', 'placed', 'do_not_contact'] as const;
+const statusFilters = ['all', 'new', 'reached_out', 'qualified', 'converted', 'disqualified', 'no_answer'] as const;
 const statusColors: Record<string, string> = {
-  active: 'bg-success/10 text-success border-success/20',
-  inactive: 'bg-muted text-muted-foreground border-border',
-  placed: 'bg-info/10 text-info border-info/20',
-  do_not_contact: 'bg-destructive/10 text-destructive border-destructive/20',
+  new: 'bg-blue/10 text-blue border-blue/20',
+  reached_out: 'bg-yellow/10 text-yellow border-yellow/20',
+  qualified: 'bg-green/10 text-green border-green/20',
+  converted: 'bg-success/10 text-success border-success/20',
+  disqualified: 'bg-destructive/10 text-destructive border-destructive/20',
+  no_answer: 'bg-muted text-muted-foreground border-border',
 };
 
 const Candidates = () => {
@@ -31,16 +35,20 @@ const Candidates = () => {
   const [view, setView] = useState<'pipeline' | 'list'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [jobTagFilter, setJobTagFilter] = useState('all');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
+  const { data: jobs = [] } = useJobs();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
+  const [candidateSearchOpen, setCandidateSearchOpen] = useState(false);
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
@@ -49,7 +57,8 @@ const Candidates = () => {
         (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesJobTag = jobTagFilter === 'all' || c.tagged_job_id === jobTagFilter;
+      return matchesSearch && matchesStatus && matchesJobTag;
     });
 
     list.sort((a, b) => {
@@ -66,7 +75,7 @@ const Candidates = () => {
     });
 
     return list;
-  }, [candidates, searchQuery, statusFilter, sortField, sortDir]);
+  }, [candidates, searchQuery, statusFilter, jobTagFilter, sortField, sortDir]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -127,6 +136,14 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(true)}>
+              <Sparkles className="h-4 w-4 mr-1" />
+              Ask Joe — Firm & Title Search
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setCandidateSearchOpen(true)}>
+              <Search className="h-4 w-4 mr-1" />
+              Ask Joe — Candidate Search
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setResumeSearchOpen(true)}>
               <FileSearch className="h-4 w-4 mr-1" />
               Ask Joe — Resume Search
@@ -160,10 +177,23 @@ const Candidates = () => {
             />
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Status:</span>
             {statusFilters.map((s) => (
               <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="capitalize text-xs">
                 {s === 'all' ? 'All' : s.replace('_', ' ')}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Jobs:</span>
+            <Button variant={jobTagFilter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setJobTagFilter('all')} className="text-xs">
+              All Candidates
+            </Button>
+            {jobs.filter(j => j.status !== 'closed').map((job) => (
+              <Button key={job.id} variant={jobTagFilter === job.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setJobTagFilter(job.id)} className="text-xs max-w-[150px] truncate">
+                {job.title}
               </Button>
             ))}
           </div>
@@ -281,6 +311,8 @@ const Candidates = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AskJoeAdvancedSearch open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen} mode="candidate_search" />
+      <AskJoeCandidateSearch open={candidateSearchOpen} onOpenChange={setCandidateSearchOpen} />
       <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
     </MainLayout>

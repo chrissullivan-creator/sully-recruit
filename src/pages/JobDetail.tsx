@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
+import { EditJobDialog } from '@/components/jobs/EditJobDialog';
 import { useJob, useContacts, useJobSendOuts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
 } from 'lucide-react';
 
 const JobDetail = () => {
@@ -31,6 +32,7 @@ const JobDetail = () => {
   const [taskPanel, setTaskPanel] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [editJobOpen, setEditJobOpen] = useState(false);
 
   // Sort contacts: company contacts first
   const sortedContacts = useMemo(() => {
@@ -96,6 +98,10 @@ const JobDetail = () => {
             <Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditJobOpen(true)}>
+              <Edit className="h-4 w-4 mr-1" />
+              Edit
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
               <ListTodo className="h-4 w-4 mr-1" />
@@ -243,6 +249,7 @@ const JobDetail = () => {
           entityName={job.title}
         />
       )}
+      <EditJobDialog open={editJobOpen} onOpenChange={setEditJobOpen} job={job} />
     </MainLayout>
   );
 };

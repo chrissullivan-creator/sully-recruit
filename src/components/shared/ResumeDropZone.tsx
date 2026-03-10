@@ -49,6 +49,11 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setParsing(true);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('entity_type', entityType);
@@ -56,7 +61,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const resp = await fetch(PARSE_URL, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: formData,
       });

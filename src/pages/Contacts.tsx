@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -6,29 +6,76 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
+import { AskJoeCandidateSearch } from '@/components/candidates/AskJoeCandidateSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useContacts } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play } from 'lucide-react';
+import { useContacts, useJobs } from '@/hooks/useData';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+type ContactSortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'status';
+type ContactSortDir = 'asc' | 'desc';
 
 const Contacts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortField, setSortField] = useState<ContactSortField>('name');
+  const [sortDir, setSortDir] = useState<ContactSortDir>('asc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
+  const [candidateSearchOpen, setCandidateSearchOpen] = useState(false);
   const { data: contacts = [], isLoading } = useContacts();
+  const { data: jobs = [] } = useJobs();
 
-  const filteredContacts = contacts.filter((contact) => {
-    const matchesSearch = 
-      (contact.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ((contact.companies as any)?.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (contact.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filter === 'all' || contact.status === filter;
-    return matchesSearch && matchesFilter;
-  });
+  const filteredContacts = useMemo(() => {
+    let list = contacts.filter((contact) => {
+      const matchesSearch = 
+        (contact.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ((contact.companies as any)?.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (contact.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesFilter = filter === 'all' || contact.status === filter;
+      return matchesSearch && matchesFilter;
+    });
+
+    list.sort((a, b) => {
+      let aVal: string = '';
+      let bVal: string = '';
+      switch (sortField) {
+        case 'name':
+          aVal = (a.full_name || '').toLowerCase();
+          bVal = (b.full_name || '').toLowerCase();
+          break;
+        case 'title':
+          aVal = (a.title || '').toLowerCase();
+          bVal = (b.title || '').toLowerCase();
+          break;
+        case 'company':
+          aVal = ((a.companies as any)?.name || '').toLowerCase();
+          bVal = ((b.companies as any)?.name || '').toLowerCase();
+          break;
+        case 'status':
+          aVal = a.status || '';
+          bVal = b.status || '';
+          break;
+        case 'lastReached':
+          aVal = (a as any).last_reached_out_at || '';
+          bVal = (b as any).last_reached_out_at || '';
+          break;
+        case 'lastResponded':
+          aVal = (a as any).last_responded_at || '';
+          bVal = (b as any).last_responded_at || '';
+          break;
+      }
+      const cmp = aVal.localeCompare(bVal);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return list;
+  }, [contacts, searchQuery, filter, sortField, sortDir]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -42,6 +89,20 @@ const Contacts = () => {
     } else {
       setSelectedIds(filteredContacts.map((c) => c.id));
     }
+  };
+
+  const toggleSort = (field: ContactSortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: ContactSortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
   };
 
   const selectedNames = contacts
@@ -61,6 +122,14 @@ const Contacts = () => {
                 Enroll in Sequence ({selectedIds.length})
               </Button>
             )}
+            <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(true)}>
+              <Sparkles className="h-4 w-4 mr-1" />
+              Ask Joe — Firm & Title Search
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setCandidateSearchOpen(true)}>
+              <Sparkles className="h-4 w-4 mr-1" />
+              Ask Joe — Contacts
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
               Import CSV
@@ -86,7 +155,8 @@ const Contacts = () => {
             />
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Status:</span>
             <Button variant={filter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('all')}>All</Button>
             <Button variant={filter === 'active' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('active')}>Active</Button>
             <Button variant={filter === 'inactive' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('inactive')}>Inactive</Button>
@@ -118,14 +188,26 @@ const Contacts = () => {
                       onCheckedChange={toggleAll}
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact Info</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Reached Out</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Response</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
-                  <th className="w-10 px-4 py-3"></th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
+            <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
+          </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
+            <span className="flex items-center gap-1">Title <SortIcon field="title" /></span>
+          </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
+            <span className="flex items-center gap-1">Company <SortIcon field="company" /></span>
+          </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact Info</th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastReached')}>
+            <span className="flex items-center gap-1">Last Reached Out <SortIcon field="lastReached" /></span>
+          </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
+            <span className="flex items-center gap-1">Last Response <SortIcon field="lastResponded" /></span>
+          </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
+            <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
+          </th>
+          <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -207,6 +289,8 @@ const Contacts = () => {
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AskJoeAdvancedSearch open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen} mode="contact_search" />
+      <AskJoeCandidateSearch open={candidateSearchOpen} onOpenChange={setCandidateSearchOpen} />
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}

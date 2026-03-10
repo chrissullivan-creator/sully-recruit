@@ -50,6 +50,7 @@ serve(async (req) => {
     // Try Eden AI first for structured parsing
     const edenApiKey = Deno.env.get("Eden_AI");
     let edenResult: any = null;
+    let source = "none";
 
     if (edenApiKey) {
       try {
@@ -92,6 +93,7 @@ serve(async (req) => {
               linkedin_url: linkedinUrl,
               raw_text: affinda.raw_text || "",
             };
+            source = "eden_ai";
           }
         }
       } catch (e) {
@@ -99,76 +101,60 @@ serve(async (req) => {
       }
     }
 
-    // If Eden AI failed or not configured, fall back to Ask Joe (OpenAI)
-    if (!edenResult) {
+    // If Eden AI failed or not configured, fall back to Ask Joe (OpenAI) for text files only
+    if (!edenResult && file.type.includes('text')) {
       const fileText = await file.text();
       const openaiKey = Deno.env.get("OPENAI_API_KEY");
       const lovableKey = Deno.env.get("LOVABLE_API_KEY");
 
       const apiKey = openaiKey || lovableKey;
-      const apiUrl = openaiKey
-        ? "https://api.openai.com/v1/chat/completions"
-        : "https://ai.gateway.lovable.dev/v1/chat/completions";
-      const model = openaiKey ? "gpt-4.1" : "google/gemini-3-flash-preview";
+      if (apiKey) {
+        const apiUrl = openaiKey
+          ? "https://api.openai.com/v1/chat/completions"
+          : "https://ai.gateway.lovable.dev/v1/chat/completions";
+        const model = openaiKey ? "gpt-4.1" : "google/gemini-3-flash-preview";
 
-      if (!apiKey) {
-        return new Response(
-          JSON.stringify({
-            error: "No AI API key configured",
-            parsed: { first_name: "", last_name: "", email: "", phone: "", current_company: "", current_title: "", location: "", linkedin_url: "", raw_text: fileText.slice(0, 10000) },
-            file_path: filePath,
-            file_name: file.name,
-            source: "none",
+        const aiResp = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content: "You are Joe, a resume parsing assistant. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
+              },
+              {
+                role: "user",
+                content: `Parse this resume:\n\n${fileText.slice(0, 6000)}`,
+              },
+            ],
+            temperature: 0,
           }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+        });
 
-      const aiResp = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content: "You are Joe, a resume parsing assistant. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
-            },
-            {
-              role: "user",
-              content: `Parse this resume:\n\n${fileText.slice(0, 6000)}`,
-            },
-          ],
-          temperature: 0,
-        }),
-      });
-
-      if (aiResp.ok) {
-        const aiData = await aiResp.json();
-        const content = aiData.choices?.[0]?.message?.content || "";
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const data = JSON.parse(jsonMatch[0]);
-          edenResult = {
-            first_name: data.first_name || "",
-            last_name: data.last_name || "",
-            email: data.email || "",
-            phone: data.phone || "",
-            current_company: data.current_company || "",
-            current_title: data.current_title || "",
-            location: data.location || "",
-            linkedin_url: data.linkedin_url || "",
-            raw_text: fileText.slice(0, 50000),
-          };
-        } else {
-          edenResult = {
-            first_name: "", last_name: "", email: "", phone: "",
-            current_company: "", current_title: "", location: "", linkedin_url: "",
-            raw_text: fileText.slice(0, 50000),
-          };
+        if (aiResp.ok) {
+          const aiData = await aiResp.json();
+          const content = aiData.choices?.[0]?.message?.content || "";
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0]);
+            edenResult = {
+              first_name: data.first_name || "",
+              last_name: data.last_name || "",
+              email: data.email || "",
+              phone: data.phone || "",
+              current_company: data.current_company || "",
+              current_title: data.current_title || "",
+              location: data.location || "",
+              linkedin_url: data.linkedin_url || "",
+              raw_text: fileText.slice(0, 50000),
+            };
+            source = "ask_joe";
+          }
         }
       }
     }
@@ -188,7 +174,7 @@ serve(async (req) => {
         parsed: edenResult,
         file_path: filePath,
         file_name: file.name,
-        source: Deno.env.get("Eden_AI") ? "eden_ai" : "ask_joe",
+        source,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
