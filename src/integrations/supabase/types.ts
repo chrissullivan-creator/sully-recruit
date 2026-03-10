@@ -223,7 +223,6 @@ export type Database = {
           location: string | null
           owner_id: string | null
           phone: string | null
-          prospect_id: string | null
           status: string
           updated_at: string
         }
@@ -240,7 +239,6 @@ export type Database = {
           location?: string | null
           owner_id?: string | null
           phone?: string | null
-          prospect_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -825,69 +823,6 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      prospects: {
-        Row: {
-          created_at: string
-          current_company: string | null
-          current_title: string | null
-          email: string | null
-          first_name: string | null
-          full_name: string | null
-          id: string
-          last_comm_channel: string | null
-          last_name: string | null
-          last_reached_out_at: string | null
-          last_responded_at: string | null
-          linkedin_url: string | null
-          location: string | null
-          owner_id: string | null
-          phone: string | null
-          resume_url: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          current_company?: string | null
-          current_title?: string | null
-          email?: string | null
-          first_name?: string | null
-          full_name?: string | null
-          id?: string
-          last_comm_channel?: string | null
-          last_name?: string | null
-          last_reached_out_at?: string | null
-          last_responded_at?: string | null
-          linkedin_url?: string | null
-          location?: string | null
-          owner_id?: string | null
-          phone?: string | null
-          resume_url?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          current_company?: string | null
-          current_title?: string | null
-          email?: string | null
-          first_name?: string | null
-          full_name?: string | null
-          id?: string
-          last_comm_channel?: string | null
-          last_name?: string | null
-          last_reached_out_at?: string | null
-          last_responded_at?: string | null
-          linkedin_url?: string | null
-          location?: string | null
-          owner_id?: string | null
-          phone?: string | null
-          resume_url?: string | null
-          status?: string
           updated_at?: string
         }
         Relationships: []

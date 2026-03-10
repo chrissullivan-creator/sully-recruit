@@ -1,9 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 // Candidates
 export function useCandidates() {
-  return useQuery({
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
     queryKey: ['candidates'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -14,6 +17,30 @@ export function useCandidates() {
       return data;
     },
   });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('candidates-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'candidates',
+        },
+        (payload) => {
+          console.log('Candidates change detected:', payload);
+          queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
+  return query;
 }
 
 // Single candidate by ID
@@ -140,7 +167,9 @@ export function useCompanies() {
 
 // Contacts with company
 export function useContacts() {
-  return useQuery({
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
     queryKey: ['contacts'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -151,6 +180,30 @@ export function useContacts() {
       return data;
     },
   });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('contacts-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'contacts',
+        },
+        (payload) => {
+          console.log('Contacts change detected:', payload);
+          queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
+  return query;
 }
 
 // Sequences (Campaigns page)
