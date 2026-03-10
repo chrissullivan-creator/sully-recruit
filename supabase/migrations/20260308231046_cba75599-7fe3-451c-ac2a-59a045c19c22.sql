@@ -20,7 +20,6 @@ DROP POLICY IF EXISTS "authenticated full access integration_accounts" ON public
 
 -- 2. Enable RLS on tables that may not have it yet
 ALTER TABLE public.candidates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.prospects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.candidate_resumes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
@@ -34,16 +33,6 @@ CREATE POLICY "Users manage own candidates" ON public.candidates
   WITH CHECK (owner_id = auth.uid());
 
 CREATE POLICY "Users read all candidates" ON public.candidates
-  FOR SELECT TO authenticated
-  USING (true);
-
--- prospects (owner_id)
-CREATE POLICY "Users manage own prospects" ON public.prospects
-  FOR ALL TO authenticated
-  USING (owner_id = auth.uid())
-  WITH CHECK (owner_id = auth.uid());
-
-CREATE POLICY "Users read all prospects" ON public.prospects
   FOR SELECT TO authenticated
   USING (true);
 

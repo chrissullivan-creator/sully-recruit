@@ -26,17 +26,13 @@ serve(async (req) => {
     if (email) {
       const normalizedEmail = email.toLowerCase().trim();
       
-      const [candidateRes, prospectRes, contactRes] = await Promise.all([
+      const [candidateRes, contactRes] = await Promise.all([
         supabase.from('candidates').select('id, full_name, email').ilike('email', normalizedEmail).limit(5),
-        supabase.from('prospects').select('id, full_name, email').ilike('email', normalizedEmail).limit(5),
         supabase.from('contacts').select('id, full_name, email').ilike('email', normalizedEmail).limit(5),
       ]);
 
       if (candidateRes.data) {
         matches.push(...candidateRes.data.map(c => ({ ...c, entity_type: 'candidate', match_by: 'email' })));
-      }
-      if (prospectRes.data) {
-        matches.push(...prospectRes.data.map(p => ({ ...p, entity_type: 'prospect', match_by: 'email' })));
       }
       if (contactRes.data) {
         matches.push(...contactRes.data.map(c => ({ ...c, entity_type: 'contact', match_by: 'email' })));
@@ -47,19 +43,16 @@ serve(async (req) => {
     if (phone && matches.length === 0) {
       const normalizedPhone = phone.replace(/[^0-9+]/g, '');
       
-      const [candidateRes, prospectRes, contactRes] = await Promise.all([
+      const [candidateRes, contactRes] = await Promise.all([
         supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
-        supabase.from('prospects').select('id, full_name, phone').not('phone', 'is', null),
         supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
       ]);
 
       const normalize = (p: string) => p.replace(/[^0-9+]/g, '');
       const candidateMatch = candidateRes.data?.find(c => c.phone && normalize(c.phone) === normalizedPhone);
-      const prospectMatch = prospectRes.data?.find(p => p.phone && normalize(p.phone) === normalizedPhone);
       const contactMatch = contactRes.data?.find(c => c.phone && normalize(c.phone) === normalizedPhone);
 
       if (candidateMatch) matches.push({ ...candidateMatch, entity_type: 'candidate', match_by: 'phone' });
-      if (prospectMatch) matches.push({ ...prospectMatch, entity_type: 'prospect', match_by: 'phone' });
       if (contactMatch) matches.push({ ...contactMatch, entity_type: 'contact', match_by: 'phone' });
     }
 

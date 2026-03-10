@@ -5,8 +5,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useJobs, useSequences, useCandidates } from '@/hooks/useData';
+import { useJobs, useSequences } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
+import { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Users, Loader2, Briefcase, Play } from 'lucide-react';
@@ -38,11 +39,16 @@ const sendOutStages = [
   { value: 'withdrawn', label: 'Withdrawn' },
 ];
 
+type SendOutInsert = TablesInsert<'send_outs'>;
+type CandidateUpdate = TablesUpdate<'candidates'> & {
+  tagged_job_id?: string | null;
+};
+
 export const BulkCandidateActionsDialog = ({
   open,
   onOpenChange,
   candidateIds,
-  candidateNames = []
+  candidateNames = [],
 }: BulkCandidateActionsDialogProps) => {
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [selectedStage, setSelectedStage] = useState<string>('lead');
@@ -52,7 +58,6 @@ export const BulkCandidateActionsDialog = ({
 
   const { data: jobs = [] } = useJobs();
   const { data: sequences = [] } = useSequences();
-  const { data: candidates = [] } = useCandidates();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -66,6 +71,8 @@ export const BulkCandidateActionsDialog = ({
 
   const activeSequences = sequences.filter((s) => s.status === 'active' || s.status === 'draft');
   const selectedJob = jobs.find((j) => j.id === selectedJobId);
+  const selectedCountLabel = `${candidateIds.length} candidate${candidateIds.length > 1 ? 's' : ''}`;
+  const selectedNamesPreview = candidateNames.filter(Boolean).slice(0, 3).join(', ');
 
   const handleSubmit = async () => {
     if (!selectedJobId || candidateIds.length === 0) return;
@@ -74,21 +81,19 @@ export const BulkCandidateActionsDialog = ({
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
 
-      // 1. Add candidates to send_out_board
-      const sendOuts = candidateIds.map((candidateId) => ({
+      const sendOuts: SendOutInsert[] = candidateIds.map((candidateId) => ({
         job_id: selectedJobId,
         candidate_id: candidateId,
         stage: selectedStage,
-        created_by: userId,
+        recruiter_id: userId,
       }));
 
       const { error: sendOutError } = await supabase
-        .from('send_out_board')
+        .from('send_outs')
         .insert(sendOuts);
 
       if (sendOutError) throw sendOutError;
 
-      // 2. Optionally enroll in sequence
       if (enrollInSequence && selectedSequenceId) {
         const enrollments = candidateIds.map((candidateId) => ({
           sequence_id: selectedSequenceId,
@@ -105,15 +110,13 @@ export const BulkCandidateActionsDialog = ({
         if (enrollmentError) throw enrollmentError;
       }
 
-      // 3. Update candidate tagged_job_id
       const { error: updateError } = await supabase
         .from('candidates')
-        .update({ tagged_job_id: selectedJobId })
+        .update({ tagged_job_id: selectedJobId } as CandidateUpdate)
         .in('id', candidateIds);
 
       if (updateError) throw updateError;
 
-      // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
       queryClient.invalidateQueries({ queryKey: ['send_outs_job', selectedJobId] });
@@ -124,11 +127,11 @@ export const BulkCandidateActionsDialog = ({
 
       const actions = [`added to ${selectedJob?.title || 'job'}`];
       if (enrollInSequence && selectedSequenceId) {
-        const sequence = sequences.find(s => s.id === selectedSequenceId);
+        const sequence = sequences.find((s) => s.id === selectedSequenceId);
         actions.push(`enrolled in "${sequence?.name || 'sequence'}"`);
       }
 
-      toast.success(`Successfully ${actions.join(' and ')} for ${candidateIds.length} candidate${candidateIds.length > 1 ? 's' : ''}`);
+      toast.success(`Successfully ${actions.join(' and ')} for ${selectedCountLabel}`);
       onOpenChange(false);
     } catch (err: any) {
       console.error('Bulk action error:', err);
@@ -149,18 +152,17 @@ export const BulkCandidateActionsDialog = ({
             Bulk Candidate Actions
           </DialogTitle>
           <DialogDescription>
-            Add {candidateIds.length} selected candidate{candidateIds.length > 1 ? 's' : ''} to a job and optionally enroll them in a sequence.
+            Add {selectedCountLabel} to a job and optionally enroll them in a sequence.
+            {selectedNamesPreview ? ` Selected: ${selectedNamesPreview}${candidateIds.length > 3 ? '...' : ''}` : ''}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Selected Candidates Summary */}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Users className="h-4 w-4" />
-            <span>{candidateIds.length} candidate{candidateIds.length > 1 ? 's' : ''} selected</span>
+            <span>{selectedCountLabel} selected</span>
           </div>
 
-          {/* Job Selection */}
           <div className="space-y-2">
             <Label>Select Job</Label>
             <Select value={selectedJobId} onValueChange={setSelectedJobId}>
@@ -173,7 +175,9 @@ export const BulkCandidateActionsDialog = ({
                     <div className="flex items-center gap-2">
                       <Briefcase className="h-3.5 w-3.5" />
                       <span>{job.title}</span>
-                      <span className="text-xs text-muted-foreground">at {job.company}</span>
+                      <span className="text-xs text-muted-foreground">
+                        at {job.company_name ?? job.companies?.name ?? 'Unknown company'}
+                      </span>
                     </div>
                   </SelectItem>
                 ))}
@@ -181,7 +185,6 @@ export const BulkCandidateActionsDialog = ({
             </Select>
           </div>
 
-          {/* Stage Selection */}
           <div className="space-y-2">
             <Label>Set Status</Label>
             <Select value={selectedStage} onValueChange={setSelectedStage}>
@@ -200,7 +203,6 @@ export const BulkCandidateActionsDialog = ({
             </Select>
           </div>
 
-          {/* Sequence Enrollment Option */}
           <div className="space-y-3">
             <div className="flex items-center space-x-2">
               <Checkbox
@@ -214,7 +216,7 @@ export const BulkCandidateActionsDialog = ({
             </div>
 
             {enrollInSequence && (
-              <div className="space-y-2 ml-6">
+              <div className="ml-6 space-y-2">
                 <Label>Select Sequence</Label>
                 <Select value={selectedSequenceId} onValueChange={setSelectedSequenceId}>
                   <SelectTrigger>
@@ -245,7 +247,7 @@ export const BulkCandidateActionsDialog = ({
             disabled={!canSubmit || processing}
             className="min-w-[120px]"
           >
-            {processing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {processing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {processing ? 'Processing...' : 'Apply Actions'}
           </Button>
         </DialogFooter>
@@ -253,3 +255,4 @@ export const BulkCandidateActionsDialog = ({
     </Dialog>
   );
 };
+

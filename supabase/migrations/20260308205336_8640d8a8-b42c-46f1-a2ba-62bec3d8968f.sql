@@ -22,4 +22,4 @@ CREATE POLICY "Users can manage own integrations"
 CREATE TRIGGER set_updated_at_user_integrations
   BEFORE UPDATE ON public.user_integrations
   FOR EACH ROW
-  EXECUTE FUNCTION public.set_updated_at();
+  EXECUTE FUNCTION public.update_updated_at_column();

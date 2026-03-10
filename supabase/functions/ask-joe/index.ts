@@ -34,9 +34,8 @@ async function fetchCRMContext(authHeader: string | null): Promise<string> {
   const sb = makeSupabase(authHeader);
 
   try {
-    const [candidatesRes, prospectsRes, jobsRes, sequencesRes, contactsRes] = await Promise.all([
+    const [candidatesRes, jobsRes, sequencesRes, contactsRes] = await Promise.all([
       sb.from("candidates").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
-      sb.from("prospects").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
       sb.from("jobs").select("id, title, company_name, status, location, compensation, description").neq("status", "closed").order("created_at", { ascending: false }).limit(20),
       sb.from("sequences").select("id, name, channel, status, description, job_id, sequence_steps(step_order, step_type, channel, subject, body, delay_days)").order("created_at", { ascending: false }).limit(15),
       sb.from("contacts").select("full_name, title, email").order("created_at", { ascending: false }).limit(20),
@@ -50,13 +49,6 @@ async function fetchCRMContext(authHeader: string | null): Promise<string> {
     if (candidates.length > 0) {
       sections.push(`CANDIDATES IN PIPELINE (${candidates.length}):\n` + candidates.map(c =>
         `- ${c.full_name || "Unknown"}${c.current_title ? `, ${c.current_title}` : ""}${c.current_company ? ` @ ${c.current_company}` : ""}${c.location ? ` (${c.location})` : ""} — Status: ${c.status}`
-      ).join("\n"));
-    }
-
-    const prospects = prospectsRes.data ?? [];
-    if (prospects.length > 0) {
-      sections.push(`PROSPECTS (${prospects.length}):\n` + prospects.map(p =>
-        `- ${p.full_name || "Unknown"}${p.current_title ? `, ${p.current_title}` : ""}${p.current_company ? ` @ ${p.current_company}` : ""} — Status: ${p.status}`
       ).join("\n"));
     }
 

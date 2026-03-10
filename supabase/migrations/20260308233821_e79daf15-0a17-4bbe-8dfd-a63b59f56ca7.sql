@@ -76,24 +76,14 @@ BEGIN
   IF v_entity_id IS NOT NULL THEN
     v_entity_type := 'candidate';
   ELSE
-    -- Try to match prospect
+    -- Try to match contact
     SELECT id, full_name INTO v_entity_id, v_entity_name
-    FROM prospects
+    FROM contacts
     WHERE regexp_replace(phone, '[^0-9+]', '', 'g') = v_normalized_phone
     LIMIT 1;
     
     IF v_entity_id IS NOT NULL THEN
-      v_entity_type := 'prospect';
-    ELSE
-      -- Try to match contact
-      SELECT id, full_name INTO v_entity_id, v_entity_name
-      FROM contacts
-      WHERE regexp_replace(phone, '[^0-9+]', '', 'g') = v_normalized_phone
-      LIMIT 1;
-      
-      IF v_entity_id IS NOT NULL THEN
-        v_entity_type := 'contact';
-      END IF;
+      v_entity_type := 'contact';
     END IF;
   END IF;
   
@@ -156,25 +146,10 @@ BEGIN
       auth.uid()::text
     );
     
-    -- If it's a prospect, promote to candidate
-    IF v_call.linked_entity_type = 'prospect' THEN
-      SELECT * INTO v_new_candidate
-      FROM promote_prospect_to_candidate(v_call.linked_entity_id);
-      
-      -- Update the call to point to the new candidate
-      UPDATE call_logs
-      SET linked_entity_type = 'candidate',
-          linked_entity_id = v_new_candidate.id,
-          linked_entity_name = v_new_candidate.full_name
-      WHERE id = p_call_id;
-      
-      RETURN jsonb_build_object(
-        'success', true,
-        'promoted_to_candidate', true,
-        'candidate_id', v_new_candidate.id,
-        'candidate_name', v_new_candidate.full_name
-      );
-    END IF;
+    -- No prospects table: skip promotion logic
+    -- (previously would promote a prospect to candidate)
+    
+    NULL;
   END IF;
   
   RETURN jsonb_build_object('success', true, 'promoted_to_candidate', false);
