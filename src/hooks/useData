@@ -1,0 +1,283 @@
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+
+// Candidates
+export function useCandidates() {
+  return useQuery({
+    queryKey: ['candidates'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Single candidate by ID
+export function useCandidate(id: string | undefined) {
+  return useQuery({
+    queryKey: ['candidate', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('*')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Notes for an entity
+export function useNotes(entityId: string | undefined, entityType: string) {
+  return useQuery({
+    queryKey: ['notes', entityType, entityId],
+    enabled: !!entityId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('notes')
+        .select('*')
+        .eq('entity_id', entityId!)
+        .eq('entity_type', entityType)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Conversations & messages for a candidate
+export function useCandidateConversations(candidateId: string | undefined) {
+  return useQuery({
+    queryKey: ['conversations', candidateId],
+    enabled: !!candidateId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*, messages(*)')
+        .eq('candidate_id', candidateId!)
+        .order('last_message_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Send outs for a candidate
+export function useCandidateSendOuts(candidateId: string | undefined) {
+  return useQuery({
+    queryKey: ['send_outs', candidateId],
+    enabled: !!candidateId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_out_board')
+        .select('*')
+        .eq('candidate_id', candidateId!);
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Jobs with company info
+export function useJobs(includesClosed = false) {
+  return useQuery({
+    queryKey: ['jobs', includesClosed],
+    queryFn: async () => {
+      let query = supabase
+        .from('jobs')
+        .select('*, companies(name)')
+        .order('created_at', { ascending: false });
+      if (!includesClosed) {
+        query = query.neq('status', 'closed');
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Single job by ID
+export function useJob(id: string | undefined) {
+  return useQuery({
+    queryKey: ['job', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('*, companies(name)')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Companies with job counts
+export function useCompanies() {
+  return useQuery({
+    queryKey: ['companies'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*, jobs(id)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data.map((c) => ({
+        ...c,
+        job_count: c.jobs?.length ?? 0,
+      }));
+    },
+  });
+}
+
+// Contacts with company
+export function useContacts() {
+  return useQuery({
+    queryKey: ['contacts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*, companies(name)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Prospects (Leads page)
+export function useProspects() {
+  return useQuery({
+    queryKey: ['prospects'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('prospects')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Sequences (Campaigns page)
+export function useSequences() {
+  return useQuery({
+    queryKey: ['sequences'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sequences')
+        .select('*, sequence_steps(*), sequence_enrollments(id), jobs(id, title, company_name)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Send outs for a specific job
+export function useJobSendOuts(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['send_outs_job', jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_out_board')
+        .select('*')
+        .eq('job_id', jobId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Send out board view
+export function useSendOutBoard() {
+  return useQuery({
+    queryKey: ['send_out_board'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_out_board')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+
+// Messages (for Calls page - filter call type messages)
+export function useMessages(channel?: string) {
+  return useQuery({
+    queryKey: ['messages', channel],
+    queryFn: async () => {
+      let query = supabase
+        .from('messages')
+        .select('*, candidates(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (channel) {
+        query = query.eq('channel', channel);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Dashboard metrics (aggregated counts)
+export function useDashboardMetrics() {
+  return useQuery({
+    queryKey: ['dashboard_metrics'],
+    queryFn: async () => {
+      const [jobsRes, candidatesRes, sendOutsRes, prospectsRes] = await Promise.all([
+        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
+        supabase.from('candidates').select('id, status', { count: 'exact' }).eq('status', 'active'),
+        supabase.from('send_outs').select('id, stage'),
+        supabase.from('prospects').select('id', { count: 'exact' }),
+      ]);
+
+      const sendOuts = sendOutsRes.data ?? [];
+      const interviews = sendOuts.filter((s) => s.stage === 'interview').length;
+      const offers = sendOuts.filter((s) => s.stage === 'offer').length;
+
+      return {
+        activeJobs: jobsRes.count ?? 0,
+        activeCandidates: candidatesRes.count ?? 0,
+        interviewsThisWeek: interviews,
+        offersOut: offers,
+        leadsToFollow: prospectsRes.count ?? 0,
+        callsToday: 0,
+        emailsSent: 0,
+        responseRate: 0,
+      };
+    },
+  });
+}
+
+// Integration accounts (sender accounts — all team accounts visible)
+export function useIntegrationAccounts() {
+  return useQuery({
+    queryKey: ['integration_accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('integration_accounts')
+        .select('*')
+        .eq('is_active', true)
+        .order('account_label');
+      if (error) throw error;
+      return data;
+    },
+  });
+}
