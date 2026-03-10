@@ -10,8 +10,9 @@ export function useCandidates() {
         .from('candidates')
         .select('*')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -25,10 +26,11 @@ export function useCandidate(id: string | undefined) {
       const { data, error } = await supabase
         .from('candidates')
         .select('*')
-        .eq('id', id!)
+        .eq('id', id as string)
         .maybeSingle();
+
       if (error) throw error;
-      return data;
+      return data ?? null;
     },
   });
 }
@@ -42,11 +44,12 @@ export function useNotes(entityId: string | undefined, entityType: string) {
       const { data, error } = await supabase
         .from('notes')
         .select('*')
-        .eq('entity_id', entityId!)
+        .eq('entity_id', entityId as string)
         .eq('entity_type', entityType)
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -60,10 +63,11 @@ export function useCandidateConversations(candidateId: string | undefined) {
       const { data, error } = await supabase
         .from('conversations')
         .select('*, messages(*)')
-        .eq('candidate_id', candidateId!)
+        .eq('candidate_id', candidateId as string)
         .order('last_message_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -71,34 +75,39 @@ export function useCandidateConversations(candidateId: string | undefined) {
 // Send outs for a candidate
 export function useCandidateSendOuts(candidateId: string | undefined) {
   return useQuery({
-    queryKey: ['send_outs', candidateId],
+    queryKey: ['candidate_send_outs', candidateId],
     enabled: !!candidateId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('send_out_board')
         .select('*')
-        .eq('candidate_id', candidateId!);
+        .eq('candidate_id', candidateId as string)
+        .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
 
 // Jobs with company info
-export function useJobs(includesClosed = false) {
+export function useJobs(includeClosed = false) {
   return useQuery({
-    queryKey: ['jobs', includesClosed],
+    queryKey: ['jobs', includeClosed],
     queryFn: async () => {
       let query = supabase
         .from('jobs')
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
-      if (!includesClosed) {
+
+      if (!includeClosed) {
         query = query.neq('status', 'closed');
       }
+
       const { data, error } = await query;
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -112,10 +121,11 @@ export function useJob(id: string | undefined) {
       const { data, error } = await supabase
         .from('jobs')
         .select('*, companies(name)')
-        .eq('id', id!)
+        .eq('id', id as string)
         .maybeSingle();
+
       if (error) throw error;
-      return data;
+      return data ?? null;
     },
   });
 }
@@ -129,10 +139,12 @@ export function useCompanies() {
         .from('companies')
         .select('*, jobs(id)')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data.map((c) => ({
-        ...c,
-        job_count: c.jobs?.length ?? 0,
+
+      return (data ?? []).map((company) => ({
+        ...company,
+        job_count: company.jobs?.length ?? 0,
       }));
     },
   });
@@ -147,13 +159,14 @@ export function useContacts() {
         .from('contacts')
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
 
-// Prospects (Leads page)
+// Prospects
 export function useProspects() {
   return useQuery({
     queryKey: ['prospects'],
@@ -162,13 +175,14 @@ export function useProspects() {
         .from('prospects')
         .select('*')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
 
-// Sequences (Campaigns page)
+// Sequences
 export function useSequences() {
   return useQuery({
     queryKey: ['sequences'],
@@ -177,8 +191,9 @@ export function useSequences() {
         .from('sequences')
         .select('*, sequence_steps(*), sequence_enrollments(id), jobs(id, title, company_name)')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -186,16 +201,17 @@ export function useSequences() {
 // Send outs for a specific job
 export function useJobSendOuts(jobId: string | undefined) {
   return useQuery({
-    queryKey: ['send_outs_job', jobId],
+    queryKey: ['job_send_outs', jobId],
     enabled: !!jobId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('send_out_board')
         .select('*')
-        .eq('job_id', jobId!)
+        .eq('job_id', jobId as string)
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
@@ -209,14 +225,14 @@ export function useSendOutBoard() {
         .from('send_out_board')
         .select('*')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
 
-
-// Messages (for Calls page - filter call type messages)
+// Messages
 export function useMessages(channel?: string) {
   return useQuery({
     queryKey: ['messages', channel],
@@ -226,27 +242,35 @@ export function useMessages(channel?: string) {
         .select('*, candidates(full_name)')
         .order('created_at', { ascending: false })
         .limit(100);
+
       if (channel) {
         query = query.eq('channel', channel);
       }
+
       const { data, error } = await query;
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
 
-// Dashboard metrics (aggregated counts)
+// Dashboard metrics
 export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
       const [jobsRes, candidatesRes, sendOutsRes, prospectsRes] = await Promise.all([
-        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, status', { count: 'exact' }).eq('status', 'active'),
-        supabase.from('send_outs').select('id, stage'),
-        supabase.from('prospects').select('id', { count: 'exact' }),
+        supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+        supabase.from('candidates').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('send_out_board').select('id, stage'),
+        supabase.from('prospects').select('id', { count: 'exact', head: true }),
       ]);
+
+      if (jobsRes.error) throw jobsRes.error;
+      if (candidatesRes.error) throw candidatesRes.error;
+      if (sendOutsRes.error) throw sendOutsRes.error;
+      if (prospectsRes.error) throw prospectsRes.error;
 
       const sendOuts = sendOutsRes.data ?? [];
       const interviews = sendOuts.filter((s) => s.stage === 'interview').length;
@@ -266,7 +290,7 @@ export function useDashboardMetrics() {
   });
 }
 
-// Integration accounts (sender accounts — all team accounts visible)
+// Integration accounts
 export function useIntegrationAccounts() {
   return useQuery({
     queryKey: ['integration_accounts'],
@@ -275,9 +299,10 @@ export function useIntegrationAccounts() {
         .from('integration_accounts')
         .select('*')
         .eq('is_active', true)
-        .order('account_label');
+        .order('account_label', { ascending: true });
+
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 }
