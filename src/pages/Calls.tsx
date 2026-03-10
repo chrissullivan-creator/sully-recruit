@@ -57,16 +57,13 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     try {
       // Normalize
       const normalized = phone.replace(/[^0-9+]/g, '');
-      const [cRes, pRes, ctRes] = await Promise.all([
+      const [cRes, ctRes] = await Promise.all([
         supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
-        supabase.from('prospects').select('id, full_name, phone').not('phone', 'is', null),
         supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
       ]);
       const normalize = (p: string) => p.replace(/[^0-9+]/g, '');
       const candidate = cRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
       if (candidate) { setMatchResult({ matched: true, entity_type: 'candidate', entity_id: candidate.id, entity_name: candidate.full_name }); setMatching(false); return; }
-      const prospect = pRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
-      if (prospect) { setMatchResult({ matched: true, entity_type: 'prospect', entity_id: prospect.id, entity_name: prospect.full_name }); setMatching(false); return; }
       const contact = ctRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
       if (contact) { setMatchResult({ matched: true, entity_type: 'contact', entity_id: contact.id, entity_name: contact.full_name }); setMatching(false); return; }
       setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null });
@@ -103,20 +100,6 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           created_by: user?.id,
         });
         if (noteError) console.error('Note error:', noteError);
-
-        // If prospect, promote to candidate
-        if (matchResult.entity_type === 'prospect') {
-          const { error: promoteError } = await supabase.rpc('promote_prospect_to_candidate', {
-            p_prospect_id: matchResult.entity_id,
-          });
-          if (promoteError) {
-            console.error('Promote error:', promoteError);
-          } else {
-            toast.success(`🎉 ${matchResult.entity_name} promoted to Candidate!`, { duration: 5000 });
-            queryClient.invalidateQueries({ queryKey: ['candidates'] });
-            queryClient.invalidateQueries({ queryKey: ['prospects'] });
-          }
-        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
@@ -131,7 +114,6 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   };
 
   const entityIcon = matchResult?.entity_type === 'candidate' ? UserCheck
-    : matchResult?.entity_type === 'prospect' ? UserPlus
     : matchResult?.entity_type === 'contact' ? Users : null;
 
   return (
@@ -190,11 +172,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                   <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground">{matchResult.entity_name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{matchResult.entity_type}
-                      {matchResult.entity_type === 'prospect' && (
-                        <span className="ml-1 text-gold font-medium">→ will be promoted to Candidate on save</span>
-                      )}
-                    </p>
+                    <p className="text-xs text-muted-foreground capitalize">{matchResult.entity_type}</p>
                   </div>
                   <Badge variant="outline" className="capitalize text-xs shrink-0">{matchResult.entity_type}</Badge>
                 </>
@@ -273,14 +251,12 @@ const Calls = () => {
 
   const entityIcon = (type: string | null) => {
     if (type === 'candidate') return <UserCheck className="h-3.5 w-3.5" />;
-    if (type === 'prospect') return <UserPlus className="h-3.5 w-3.5" />;
     if (type === 'contact') return <Users className="h-3.5 w-3.5" />;
     return <User className="h-3.5 w-3.5" />;
   };
 
   const entityColor = (type: string | null) => {
     if (type === 'candidate') return 'border-success/30 bg-success/5 text-success';
-    if (type === 'prospect') return 'border-gold/30 bg-gold/5 text-gold';
     if (type === 'contact') return 'border-info/30 bg-info/5 text-info';
     return 'border-border bg-muted text-muted-foreground';
   };
@@ -289,7 +265,7 @@ const Calls = () => {
     <MainLayout>
       <PageHeader
         title="Calls"
-        description="Call history with notes auto-tagged to candidates, prospects, and contacts."
+        description="Call history with notes auto-tagged to candidates and contacts."
         actions={
           <Button variant="gold" onClick={() => setLogOpen(true)}>
             <Plus className="h-4 w-4" />
@@ -320,7 +296,7 @@ const Calls = () => {
             <Phone className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-1">No calls logged yet</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Log a call to automatically tag it to a candidate, prospect, or contact by phone number.
+              Log a call to automatically tag it to a candidate or contact by phone number.
             </p>
             <Button variant="gold" size="sm" onClick={() => setLogOpen(true)}>
               <Plus className="h-4 w-4 mr-1" /> Log a Call

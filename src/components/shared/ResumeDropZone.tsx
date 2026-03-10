@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 
 interface Props {
-  entityType: 'candidate' | 'prospect';
+  entityType: 'candidate';
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -112,9 +112,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setSaving(true);
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const table = entityType === 'candidate' ? 'candidates' : 'prospects';
       const { data: record, error } = await supabase
-        .from(table)
+        .from('candidates')
         .insert({
           first_name: parsed.first_name.trim() || null,
           last_name: parsed.last_name.trim() || null,
@@ -125,14 +124,13 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           location: parsed.location.trim() || null,
           linkedin_url: parsed.linkedin_url.trim() || null,
           owner_id: userId,
-          ...(entityType === 'prospect' ? { resume_url: parsed.file_path } : {}),
         } as any)
         .select()
         .single();
       if (error) throw error;
 
-      // Save resume record if candidate
-      if (entityType === 'candidate' && record) {
+      // Save resume record
+      if (record) {
         await supabase.from('candidate_resumes').insert({
           candidate_id: record.id,
           file_path: parsed.file_path,
@@ -143,8 +141,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         } as any);
       }
 
-      qc.invalidateQueries({ queryKey: [table === 'candidates' ? 'candidates' : 'prospects'] });
-      toast.success(`${entityType === 'candidate' ? 'Candidate' : 'Prospect'} created from resume`);
+      qc.invalidateQueries({ queryKey: ['candidates'] });
+      toast.success('Candidate created from resume');
       setParsed(null);
       onOpenChange(false);
     } catch (err: any) {

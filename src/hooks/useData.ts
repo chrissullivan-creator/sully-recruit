@@ -153,21 +153,6 @@ export function useContacts() {
   });
 }
 
-// Prospects (Leads page)
-export function useProspects() {
-  return useQuery({
-    queryKey: ['prospects'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('prospects')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
-}
-
 // Sequences (Campaigns page)
 export function useSequences() {
   return useQuery({
@@ -241,11 +226,10 @@ export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
-      const [jobsRes, candidatesRes, sendOutsRes, prospectsRes] = await Promise.all([
+      const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
         supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
         supabase.from('candidates').select('id, status', { count: 'exact' }).eq('status', 'active'),
         supabase.from('send_outs').select('id, stage'),
-        supabase.from('prospects').select('id', { count: 'exact' }),
       ]);
 
       const sendOuts = sendOutsRes.data ?? [];
@@ -257,7 +241,6 @@ export function useDashboardMetrics() {
         activeCandidates: candidatesRes.count ?? 0,
         interviewsThisWeek: interviews,
         offersOut: offers,
-        leadsToFollow: prospectsRes.count ?? 0,
         callsToday: 0,
         emailsSent: 0,
         responseRate: 0,

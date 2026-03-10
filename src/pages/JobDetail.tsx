@@ -233,7 +233,7 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Candidates & Prospects tagged to this job */}
+        {/* Candidates tagged to this job */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">

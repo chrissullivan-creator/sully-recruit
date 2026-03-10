@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Upload, FileSpreadsheet, Loader2, AlertCircle } from 'lucide-react';
 
-type EntityType = 'prospects' | 'candidates' | 'contacts' | 'jobs';
+type EntityType = 'candidates' | 'contacts' | 'jobs';
 
 interface FieldMapping {
   csvHeader: string;
@@ -17,18 +17,6 @@ interface FieldMapping {
 }
 
 const entityFields: Record<EntityType, { value: string; label: string }[]> = {
-  prospects: [
-    { value: 'skip', label: '— Skip —' },
-    { value: 'first_name', label: 'First Name' },
-    { value: 'last_name', label: 'Last Name' },
-    { value: 'email', label: 'Email' },
-    { value: 'phone', label: 'Phone' },
-    { value: 'linkedin_url', label: 'LinkedIn URL' },
-    { value: 'current_company', label: 'Company' },
-    { value: 'current_title', label: 'Title' },
-    { value: 'location', label: 'Location' },
-    { value: 'status', label: 'Status' },
-  ],
   candidates: [
     { value: 'skip', label: '— Skip —' },
     { value: 'first_name', label: 'First Name' },
@@ -162,7 +150,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
     const activeMappings = mappings.filter(m => m.dbColumn !== 'skip');
     if (activeMappings.length === 0) { toast.error('Map at least one column'); return; }
 
-    const ownerTables: EntityType[] = ['prospects', 'candidates', 'contacts'];
+    const ownerTables: EntityType[] = ['candidates', 'contacts'];
     const needsOwner = ownerTables.includes(entityType);
     const userId = needsOwner ? (await supabase.auth.getUser()).data.user?.id : undefined;
 
@@ -198,7 +186,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
     }
 
     setImportResult({ success, errors });
-    queryClient.invalidateQueries({ queryKey: [entityType === 'prospects' ? 'prospects' : entityType] });
+    queryClient.invalidateQueries({ queryKey: [entityType] });
     if (success > 0) toast.success(`Imported ${success} ${entityType}`);
     if (errors > 0) toast.error(`${errors} rows failed to import`);
   };

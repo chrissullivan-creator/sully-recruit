@@ -61,9 +61,8 @@ const Dashboard = () => {
               <p className="text-sm text-muted-foreground mt-0.5">
                 {isLoading ? 'Loading your stats...' : (
                   <>
-                    You have <span className="font-semibold text-foreground">{metrics?.activeJobs ?? 0} active jobs</span>,{' '}
-                    <span className="font-semibold text-foreground">{metrics?.activeCandidates ?? 0} candidates</span>, and{' '}
-                    <span className="font-semibold text-foreground">{metrics?.leadsToFollow ?? 0} prospects</span> to follow up on.
+                    You have <span className="font-semibold text-foreground">{metrics?.activeJobs ?? 0} active jobs</span> and{' '}
+                    <span className="font-semibold text-foreground">{metrics?.activeCandidates ?? 0} candidates</span>.
                   </>
                 )}
               </p>
@@ -83,7 +82,6 @@ const Dashboard = () => {
 
         {/* Secondary Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard label="Prospects to Follow" value={isLoading ? '...' : (metrics?.leadsToFollow ?? 0)} icon={<Target className="h-5 w-5" />} />
           <MetricCard label="Calls Today" value={isLoading ? '...' : (metrics?.callsToday ?? 0)} icon={<Phone className="h-5 w-5" />} />
           <MetricCard label="Emails Sent" value={isLoading ? '...' : (metrics?.emailsSent ?? 0)} icon={<Mail className="h-5 w-5" />} />
           <MetricCard label="Response Rate" value={isLoading ? '...' : `${((metrics?.responseRate ?? 0) * 100).toFixed(0)}%`} icon={<TrendingUp className="h-5 w-5" />} />

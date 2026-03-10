@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useSequences, useCandidates, useContacts, useProspects } from '@/hooks/useData';
+import { useSequences, useCandidates, useContacts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -17,12 +17,11 @@ interface EnrollInSequenceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   candidateIds: string[];
-  prospectIds?: string[];
   candidateNames?: string[];
   preselectedSequenceId?: string;
 }
 
-export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prospectIds = [], candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
+export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
   const [enrolling, setEnrolling] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,10 +29,9 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
   const { data: sequences = [], isLoading } = useSequences();
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
-  const { data: prospects = [] } = useProspects();
   const queryClient = useQueryClient();
 
-  const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0 && prospectIds.length === 0;
+  const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0;
 
   useEffect(() => {
     if (preselectedSequenceId) setSelectedSequenceId(preselectedSequenceId);
@@ -58,12 +56,6 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
       name: c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
       detail: [c.current_title, c.current_company].filter(Boolean).join(' · ') || c.email || '',
       sortDate: c.created_at,
-    })),
-    ...prospects.map(p => ({
-      id: p.id, type: 'prospect' as const,
-      name: p.full_name || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-      detail: [p.current_title, p.current_company].filter(Boolean).join(' · ') || p.email || '',
-      sortDate: p.created_at,
     })),
     ...contacts.map(c => ({
       id: c.id, type: 'contact' as const,
@@ -91,12 +83,12 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
   const handleEnroll = async () => {
     if (!selectedSequenceId) return;
 
-    // Combine all IDs: from candidateIds, prospectIds, or people picker
+    // Combine all IDs: from candidateIds or people picker
     let idsToEnroll: string[];
     if (isPeoplePicker) {
       idsToEnroll = selectedPeople;
     } else {
-      idsToEnroll = [...candidateIds, ...prospectIds];
+      idsToEnroll = candidateIds;
     }
     if (idsToEnroll.length === 0) return;
 
@@ -104,14 +96,12 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const candidateIdSet = new Set(candidates.map(c => c.id));
-      const prospectIdSet = new Set(prospects.map(p => p.id));
 
       const enrollments = idsToEnroll.map((personId) => {
         const isCand = candidateIdSet.has(personId);
-        const isProspect = prospectIdSet.has(personId);
         return {
           sequence_id: selectedSequenceId,
-          ...(isCand ? { candidate_id: personId } : isProspect ? { prospect_id: personId } : { contact_id: personId }),
+          ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
           current_step_order: 1,
           enrolled_by: userId,
@@ -132,8 +122,8 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
     }
   };
 
-  const enrollCount = isPeoplePicker ? selectedPeople.length : candidateIds.length + prospectIds.length;
-  const totalSelected = isPeoplePicker ? selectedPeople.length : candidateIds.length + prospectIds.length;
+  const enrollCount = isPeoplePicker ? selectedPeople.length : candidateIds.length;
+  const totalSelected = isPeoplePicker ? selectedPeople.length : candidateIds.length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -142,7 +132,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
           <DialogTitle>{isPeoplePicker ? 'Add People to Sequence' : 'Enroll in Sequence'}</DialogTitle>
           <DialogDescription>
             {isPeoplePicker
-              ? 'Search and select candidates, prospects, or contacts to enroll.'
+              ? 'Search and select candidates or contacts to enroll.'
               : totalSelected === 1 && candidateNames[0]
                 ? `Enroll ${candidateNames[0]} in an outreach sequence.`
                 : `Enroll ${totalSelected} people in an outreach sequence.`}
@@ -188,7 +178,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, prosp
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search candidates, prospects, or contacts..."
+                  placeholder="Search candidates or contacts..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
