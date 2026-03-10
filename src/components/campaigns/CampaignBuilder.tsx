@@ -24,7 +24,7 @@ import { Switch } from '@/components/ui/switch';
 import { CampaignStepItem } from './CampaignStepItem';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useIntegrationAccounts } from '@/hooks/useSupabaseData';
+import { useIntegrationAccounts } from '@/hooks/useData';
 import { toast } from 'sonner';
 import type { CampaignStep, ChannelType } from '@/types';
 

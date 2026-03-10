@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useCandidates } from '@/hooks/useSupabaseData';
+import { useCandidates } from '@/hooks/useData';
 import { PipelineColumn, candidateStageColors } from './PipelineColumn';
 import { Building } from 'lucide-react';
 

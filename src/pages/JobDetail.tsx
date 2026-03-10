@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useJob, useContacts, useJobSendOuts } from '@/hooks/useSupabaseData';
+import { useJob, useContacts, useJobSendOuts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';

@@ -9,7 +9,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
-import { useCandidates } from '@/hooks/useSupabaseData';
+import { useCandidates } from '@/hooks/useData';
 import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';

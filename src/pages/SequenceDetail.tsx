@@ -13,7 +13,7 @@ import { CampaignStepItem } from '@/components/campaigns/CampaignStepItem';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useIntegrationAccounts, useCandidates, useContacts, useJobs } from '@/hooks/useSupabaseData';
+import { useIntegrationAccounts, useCandidates, useContacts, useJobs } from '@/hooks/useData';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';

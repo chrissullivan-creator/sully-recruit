@@ -6,7 +6,7 @@ import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
-import { useDashboardMetrics } from '@/hooks/useSupabaseData';
+import { useDashboardMetrics } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   Briefcase, 

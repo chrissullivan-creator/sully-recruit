@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useContacts } from '@/hooks/useSupabaseData';
+import { useContacts } from '@/hooks/useData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 

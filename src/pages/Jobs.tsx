@@ -6,7 +6,7 @@ import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useJobs } from '@/hooks/useSupabaseData';
+import { useJobs } from '@/hooks/useData';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';

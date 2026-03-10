@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { useCompanies } from '@/hooks/useSupabaseData';
+import { useCompanies } from '@/hooks/useData';
 import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';

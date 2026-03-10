@@ -1,0 +1,84 @@
+# Query: useSupabaseData
+# ContextLines: 1
+
+16 results - 16 files
+
+src/components/campaigns/CampaignBuilder.tsx:
+  26  import { useQueryClient } from '@tanstack/react-query';
+  27: import { useIntegrationAccounts } from '@/hooks/useSupabaseData';
+  28  import { toast } from 'sonner';
+
+src/components/candidates/EnrollInSequenceDialog.tsx:
+   9  import { ScrollArea } from '@/components/ui/scroll-area';
+  10: import { useSequences, useCandidates, useContacts, useProspects } from '@/hooks/useSupabaseData';
+  11  import { supabase } from '@/integrations/supabase/client';
+
+src/components/contacts/AddContactDialog.tsx:
+  8  import { useQueryClient } from '@tanstack/react-query';
+  9: import { useCompanies } from '@/hooks/useData';
+  10  import { toast } from 'sonner';
+
+src/components/jobs/AddJobDialog.tsx:
+   9  import { useQueryClient } from '@tanstack/react-query';
+  10: import { useCompanies } from '@/hooks/useData';
+  11  import { toast } from 'sonner';
+
+src/components/pipeline/CandidatePipeline.tsx:
+  1  import { useNavigate } from 'react-router-dom';
+  2: import { useCandidates } from '@/hooks/useData';
+  3  import { PipelineColumn, candidateStageColors } from './PipelineColumn';
+
+src/components/pipeline/JobPipeline.tsx:
+  1  import { useNavigate } from 'react-router-dom';
+  2: import { useJobs } from '@/hooks/useSupabaseData';
+  3  import { PipelineColumn, jobStageColors } from './PipelineColumn';
+
+src/pages/Campaigns.tsx:
+  6  import { Checkbox } from '@/components/ui/checkbox';
+  7: import { useSequences } from '@/hooks/useSupabaseData';
+  8  import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2, Trash2, X } from 'lucide-react';
+
+src/pages/CandidateDetail.tsx:
+  8  import { TaskSidebar } from '@/components/tasks/TaskSidebar';
+  9: import { useCandidate, useNotes, useCandidateConversations } from '@/hooks/useSupabaseData';
+  10  import { supabase } from '@/integrations/supabase/client';
+
+src/pages/Candidates.tsx:
+  11  import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
+  12: import { useCandidates } from '@/hooks/useSupabaseData';
+  13  import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp } from 'lucide-react';
+
+src/pages/Companies.tsx:
+  4  import { Button } from '@/components/ui/button';
+  5: import { useCompanies } from '@/hooks/useSupabaseData';
+  6  import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo } from 'lucide-react';
+
+src/pages/Contacts.tsx:
+  7  import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+  8: import { useContacts } from '@/hooks/useSupabaseData';
+  9  import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo } from 'lucide-react';
+
+src/pages/Index.tsx:
+  8  import { Button } from '@/components/ui/button';
+  9: import { useDashboardMetrics } from '@/hooks/useSupabaseData';
+  10  import { useAuth } from '@/contexts/AuthContext';
+
+src/pages/JobDetail.tsx:
+  8  import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+  9: import { useJob, useContacts, useJobSendOuts } from '@/hooks/useSupabaseData';
+  10  import { supabase } from '@/integrations/supabase/client';
+
+src/pages/Jobs.tsx:
+  8  import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+  9: import { useJobs } from '@/hooks/useSupabaseData';
+  10  import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
+
+src/pages/Leads.tsx:
+   9  import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+  10: import { useProspects } from '@/hooks/useSupabaseData';
+  11  import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, ListTodo } from 'lucide-react';
+
+src/pages/SequenceDetail.tsx:
+  15  import { useQueryClient } from '@tanstack/react-query';
+  16: import { useIntegrationAccounts, useCandidates, useContacts, useJobs } from '@/hooks/useSupabaseData';
+  17  import { toast } from 'sonner';

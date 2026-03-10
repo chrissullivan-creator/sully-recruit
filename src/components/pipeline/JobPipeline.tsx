@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useJobs } from '@/hooks/useSupabaseData';
+import { useJobs } from '@/hooks/useData';
 import { PipelineColumn, jobStageColors } from './PipelineColumn';
 import { Briefcase, MapPin } from 'lucide-react';
 

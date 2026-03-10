@@ -7,7 +7,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddProspectDialog } from '@/components/prospects/AddProspectDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useProspects } from '@/hooks/useSupabaseData';
+import { useProspects } from '@/hooks/useData';
 import { Plus, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
