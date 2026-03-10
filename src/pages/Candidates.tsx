@@ -172,6 +172,18 @@ const Candidates = () => {
               Enroll {selectedIds.length} in Sequence
             </Button>
           )}
+
+          {filteredCandidates.length > 0 && selectedIds.length !== filteredCandidates.length && (
+            <Button variant="outline" size="sm" onClick={toggleAll}>
+              Add All ({filteredCandidates.length})
+            </Button>
+          )}
+
+          {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 && (
+            <Button variant="outline" size="sm" onClick={toggleAll}>
+              Deselect All
+            </Button>
+          )}
         </div>
 
         {isLoading ? (
