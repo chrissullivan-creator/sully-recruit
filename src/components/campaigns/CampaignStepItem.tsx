@@ -251,7 +251,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
               <Label className="text-xs text-muted-foreground whitespace-nowrap">Wait</Label>
               <Input
                 type="number"
-                min={0}
+                min={index === 0 ? 0 : 1}
                 value={step.delayDays}
                 onChange={(e) => onUpdate(step.id, { delayDays: parseInt(e.target.value) || 0 })}
                 className="w-16 h-8 text-sm"
