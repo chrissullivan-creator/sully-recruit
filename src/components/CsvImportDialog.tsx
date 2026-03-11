@@ -17,9 +17,9 @@ import {
 type Step = 'upload' | 'preview' | 'done';
 
 interface MappedRow {
-  first_name: string;
-  last_name: string;
-  email: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
   phone?: string;
   current_title?: string;
   current_company?: string;
@@ -28,6 +28,13 @@ interface MappedRow {
   source?: string;
   notes?: string;
   skills?: string;
+  // jobs
+  title?: string;
+  company?: string;
+  location?: string;
+  salary?: string;
+  priority?: string;
+  hiring_manager?: string;
 }
 
 interface ParsedResult {
@@ -39,14 +46,20 @@ interface ParsedResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VALID_STAGES = [
+const VALID_CANDIDATE_STAGES = [
   'back_of_resume', 'pitch', 'send_out', 'submitted', 'interview',
   'first_round', 'second_round', 'third_plus_round', 'offer',
   'accepted', 'declined', 'counter_offer', 'disqualified',
 ];
 
+const VALID_JOB_STAGES = [
+  'warm', 'hot', 'interviewing', 'offer', 'accepted', 'declined', 'lost', 'on_hold',
+];
+
+const VALID_PRIORITIES = ['low', 'medium', 'high'];
+
 // Alias map: schema_field → accepted CSV column names (lowercase)
-const FIELD_ALIASES: Record<keyof MappedRow, string[]> = {
+const CANDIDATE_ALIASES: Record<string, string[]> = {
   first_name: ['first_name', 'first', 'firstname', 'fname', 'given_name', 'given name', 'first name'],
   last_name: ['last_name', 'last', 'lastname', 'lname', 'surname', 'family_name', 'family name', 'last name'],
   email: ['email', 'email_address', 'e-mail', 'e_mail', 'email address'],
@@ -54,11 +67,24 @@ const FIELD_ALIASES: Record<keyof MappedRow, string[]> = {
   current_title: ['current_title', 'title', 'job_title', 'position', 'role', 'current title', 'current position', 'job title'],
   current_company: ['current_company', 'company', 'employer', 'organization', 'firm', 'current company', 'current employer'],
   linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin url', 'linkedin profile', 'profile_url'],
-  stage: ['stage', 'pipeline_stage', 'status', 'candidate_stage'],
+  stage: ['stage', 'pipeline_stage', 'candidate_stage'],
   source: ['source', 'lead_source', 'origin', 'referral', 'sourced_from'],
   notes: ['notes', 'note', 'comments', 'comment', 'bio', 'summary', 'additional_info'],
   skills: ['skills', 'skill', 'skill_set', 'skillset', 'technologies', 'tech_stack', 'expertise'],
 };
+
+const JOB_ALIASES: Record<string, string[]> = {
+  title: ['title', 'job_title', 'position', 'role', 'job title', 'job name', 'opening'],
+  company: ['company', 'company_name', 'employer', 'firm', 'organization', 'client', 'current company'],
+  location: ['location', 'city', 'office', 'site', 'work_location', 'work location'],
+  salary: ['salary', 'compensation', 'comp', 'pay', 'salary_range', 'salary range', 'base_salary'],
+  stage: ['stage', 'pipeline_stage', 'job_stage', 'status'],
+  priority: ['priority', 'urgency', 'importance'],
+  hiring_manager: ['hiring_manager', 'hiring manager', 'manager', 'contact', 'point_of_contact'],
+  notes: ['notes', 'note', 'comments', 'comment', 'description', 'details', 'additional_info'],
+};
+
+const FIELD_ALIASES = { ...CANDIDATE_ALIASES, ...JOB_ALIASES };
 
 // ─── CSV Parser ───────────────────────────────────────────────────────────────
 
@@ -81,10 +107,11 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   return { headers, rows };
 }
 
-function mapRow(row: Record<string, string>): MappedRow {
+function mapRow(row: Record<string, string>, entityType: string): MappedRow {
+  const aliases = entityType === 'jobs' ? JOB_ALIASES : CANDIDATE_ALIASES;
   const mapped: Partial<MappedRow> = {};
-  for (const [field, aliases] of Object.entries(FIELD_ALIASES) as [keyof MappedRow, string[]][]) {
-    for (const alias of aliases) {
+  for (const [field, aliasList] of Object.entries(aliases)) {
+    for (const alias of aliasList) {
       if (row[alias] !== undefined && row[alias] !== '') {
         (mapped as any)[field] = row[alias];
         break;
@@ -94,13 +121,25 @@ function mapRow(row: Record<string, string>): MappedRow {
   return mapped as MappedRow;
 }
 
-function validateRow(mapped: MappedRow): string[] {
+function validateRow(mapped: MappedRow, entityType: string): string[] {
   const errors: string[] = [];
-  if (!mapped.first_name) errors.push('Missing first name');
-  if (!mapped.last_name) errors.push('Missing last name');
-  if (mapped.stage) {
-    const norm = mapped.stage.toLowerCase().replace(/\s/g, '_');
-    if (!VALID_STAGES.includes(norm)) errors.push(`Invalid stage: "${mapped.stage}"`);
+  if (entityType === 'jobs') {
+    if (!mapped.title) errors.push('Missing title');
+    if (mapped.stage) {
+      const norm = mapped.stage.toLowerCase().replace(/\s/g, '_');
+      if (!VALID_JOB_STAGES.includes(norm)) errors.push(`Invalid stage: "${mapped.stage}"`);
+    }
+    if (mapped.priority) {
+      const norm = mapped.priority.toLowerCase();
+      if (!VALID_PRIORITIES.includes(norm)) errors.push(`Invalid priority: "${mapped.priority}"`);
+    }
+  } else {
+    if (!mapped.first_name) errors.push('Missing first name');
+    if (!mapped.last_name) errors.push('Missing last name');
+    if (mapped.stage) {
+      const norm = mapped.stage.toLowerCase().replace(/\s/g, '_');
+      if (!VALID_CANDIDATE_STAGES.includes(norm)) errors.push(`Invalid stage: "${mapped.stage}"`);
+    }
   }
   return errors;
 }
@@ -158,8 +197,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
       const parsed = rows
         .filter((row) => Object.values(row).some((v) => v !== ''))
         .map((row, i) => {
-          const mapped = mapRow(row);
-          const errors = validateRow(mapped);
+          const mapped = mapRow(row, entityType);
+          const errors = validateRow(mapped, entityType);
           return { raw: row, mapped, errors, idx: i + 2 };
         });
       setResults(parsed);
@@ -180,14 +219,13 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     setImporting(true);
 
     try {
-      // Only candidates is wired up fully; contacts/jobs would need their own logic
       if (entityType === 'candidates') {
         const rows = valid.map((r) => {
           const c = r.mapped;
           const stage = c.stage
             ? c.stage.toLowerCase().replace(/\s/g, '_')
             : 'back_of_resume';
-          const safeStage = VALID_STAGES.includes(stage) ? stage : 'back_of_resume';
+          const safeStage = VALID_CANDIDATE_STAGES.includes(stage) ? stage : 'back_of_resume';
           const skills = c.skills
             ? c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
             : [];
@@ -208,7 +246,6 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           };
         });
 
-        // Insert in batches of 100
         const BATCH = 100;
         let inserted = 0;
         for (let i = 0; i < rows.length; i += BATCH) {
@@ -217,9 +254,43 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           if (error) throw error;
           inserted += batch.length;
         }
-
         setImportedCount(inserted);
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
+
+      } else if (entityType === 'jobs') {
+        const rows = valid.map((r) => {
+          const j = r.mapped;
+          const stage = j.stage
+            ? j.stage.toLowerCase().replace(/\s/g, '_')
+            : 'warm';
+          const safeStage = VALID_JOB_STAGES.includes(stage) ? stage : 'warm';
+          const priority = j.priority
+            ? j.priority.toLowerCase()
+            : 'medium';
+          const safePriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium';
+          return {
+            user_id: user.id,
+            title: j.title || '',
+            company: j.company || '',
+            location: j.location || '',
+            salary: j.salary || null,
+            stage: safeStage,
+            priority: safePriority,
+            hiring_manager: j.hiring_manager || null,
+            notes: j.notes || null,
+          };
+        });
+
+        const BATCH = 100;
+        let inserted = 0;
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const batch = rows.slice(i, i + BATCH);
+          const { error } = await supabase.from('jobs').insert(batch as any);
+          if (error) throw error;
+          inserted += batch.length;
+        }
+        setImportedCount(inserted);
+        queryClient.invalidateQueries({ queryKey: ['jobs'] });
       }
 
       setStep('done');
@@ -231,8 +302,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   };
 
   // ── Column mapping display ──
+  const activeAliases = entityType === 'jobs' ? JOB_ALIASES : CANDIDATE_ALIASES;
   const columnMappings = headers.map((h) => {
-    const match = Object.entries(FIELD_ALIASES).find(([, aliases]) => aliases.includes(h));
+    const match = Object.entries(activeAliases).find(([, aliases]) => aliases.includes(h));
     return { header: h, field: match?.[0] ?? null };
   });
 
@@ -288,7 +360,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                   Drop your CSV here or <span className="text-accent">browse</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Supports Recruiterflow exports and any standard candidate CSV
+                  {entityType === 'jobs'
+                    ? 'Supports any standard jobs CSV with title, company, location, etc.'
+                    : 'Supports Recruiterflow exports and any standard candidate CSV'}
                 </p>
                 <input
                   ref={fileInputRef}
@@ -305,7 +379,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                   Recognized column names
                 </p>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-muted-foreground">
-                  {Object.entries(FIELD_ALIASES).map(([field, aliases]) => (
+                  {Object.entries(entityType === 'jobs' ? JOB_ALIASES : CANDIDATE_ALIASES).map(([field, aliases]) => (
                     <div key={field} className="flex items-center gap-1.5">
                       <span className="font-medium text-foreground w-28 shrink-0">{field}</span>
                       <span className="truncate opacity-60">{aliases.slice(0, 3).join(', ')}</span>
@@ -351,6 +425,35 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                       <AlertCircle className="h-8 w-8 mb-3 opacity-40" />
                       <p className="text-sm">No valid rows found</p>
                     </div>
+                  ) : entityType === 'jobs' ? (
+                    <table className="w-full text-xs">
+                      <thead className="bg-secondary sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">#</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Title</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Company</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Location</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Stage</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Priority</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {valid.map((r, i) => (
+                          <tr key={i} className="hover:bg-muted/40 transition-colors">
+                            <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
+                            <td className="px-4 py-2.5 font-medium text-foreground">{r.mapped.title || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.company || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.location || '—'}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="stage-badge bg-success/10 text-success border border-success/20">
+                                {r.mapped.stage || 'warm'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.priority || 'medium'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   ) : (
                     <table className="w-full text-xs">
                       <thead className="bg-secondary sticky top-0">
@@ -407,7 +510,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                           <tr key={i} className="hover:bg-muted/40">
                             <td className="px-4 py-2.5 text-muted-foreground">{r.idx}</td>
                             <td className="px-4 py-2.5 text-foreground">
-                              {[r.mapped.first_name, r.mapped.last_name].filter(Boolean).join(' ') || '—'}
+                              {entityType === 'jobs'
+                                ? r.mapped.title || '—'
+                                : [r.mapped.first_name, r.mapped.last_name].filter(Boolean).join(' ') || '—'}
                             </td>
                             <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.email || '—'}</td>
                             <td className="px-4 py-2.5">
@@ -465,10 +570,10 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
               </div>
               <div className="text-center">
                 <p className="text-lg font-semibold text-foreground">
-                  {importedCount} candidate{importedCount !== 1 ? 's' : ''} imported
+                  {importedCount} {entityType === 'jobs' ? `job${importedCount !== 1 ? 's' : ''}` : `candidate${importedCount !== 1 ? 's' : ''}`} imported
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  They'll appear in your candidates list now.
+                  {entityType === 'jobs' ? "They'll appear in your jobs list now." : "They'll appear in your candidates list now."}
                 </p>
               </div>
               <div className="flex gap-3">
