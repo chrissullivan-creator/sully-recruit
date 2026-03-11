@@ -27,9 +27,10 @@ interface ParsedData {
   raw_text: string;
   file_name: string;
   file_path: string;
+  candidate_id: string | null;
 }
 
-const PARSE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
+const PROCESS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`;
 
 export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   const qc = useQueryClient();
@@ -42,64 +43,72 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setParsed((prev) => prev ? { ...prev, [field]: value } : null);
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.type.includes('pdf') && !file.type.includes('doc') && !file.type.includes('text')) {
-      toast.error('Please upload a PDF, DOC, or text file');
+    if (!file.name.match(/\.(pdf|doc|docx|txt)$/i)) {
+      toast.error('Please upload a PDF, DOC, DOCX, or TXT file');
       return;
     }
     setParsing(true);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
-      }
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entity_type', entityType);
+      // Step 1: Upload file to Supabase storage
+      const ext = file.name.split('.').pop();
+      const storagePath = `${session.user.id}/${Date.now()}_${file.name}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('resumes')
+        .upload(storagePath, file, { contentType: file.type || 'application/pdf', upsert: false });
 
-      const resp = await fetch(PARSE_URL, {
+      if (uploadError) throw new Error('Upload failed: ' + uploadError.message);
+
+      // Step 2: Call process-resume with the file_path
+      const resp = await fetch(PROCESS_URL, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
         },
-        body: formData,
+        body: JSON.stringify({
+          file_path: uploadData.path,
+          file_name: file.name,
+        }),
       });
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => null);
-        throw new Error(errData?.error || 'Ask Joe failed to parse resume');
+        throw new Error(errData?.error || 'Failed to process resume');
       }
 
       const result = await resp.json();
       const data = result.parsed;
-      const source = result.source;
 
       setParsed({
-        first_name: data.first_name || '',
-        last_name: data.last_name || '',
-        email: data.email || '',
-        phone: data.phone || '',
+        first_name:      data.first_name || '',
+        last_name:       data.last_name || '',
+        email:           data.email || '',
+        phone:           data.phone || '',
         current_company: data.current_company || '',
-        current_title: data.current_title || '',
-        location: data.location || '',
-        linkedin_url: data.linkedin_url || '',
-        raw_text: data.raw_text || '',
-        file_name: result.file_name || file.name,
-        file_path: result.file_path || '',
+        current_title:   data.current_title || '',
+        location:        data.location || '',
+        linkedin_url:    data.linkedin_url || '',
+        raw_text:        '',
+        file_name:       file.name,
+        file_path:       uploadData.path,
+        candidate_id:    result.candidate_id || null,
       });
 
-      if (data.first_name || data.last_name || data.email) {
-        toast.success(`Ask Joe parsed resume via ${source === 'eden_ai' ? 'Eden AI' : 'AI'}`);
-      } else {
-        toast.info('Ask Joe couldn\'t auto-fill all fields. Please review manually.');
-      }
+      toast.success(
+        result.candidate_id
+          ? `Candidate ${result.parsed?.first_name ? 'updated' : 'created'} · Ask Joe indexed resume`
+          : 'Resume parsed — review and save'
+      );
     } catch (err: any) {
       toast.error(err.message || 'Failed to process resume');
     } finally {
       setParsing(false);
     }
-  }, [entityType]);
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -116,39 +125,46 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     }
     setSaving(true);
     try {
-      const userId = (await supabase.auth.getUser()).data.user?.id;
-      const { data: record, error } = await supabase
-        .from('candidates')
-        .insert({
-          user_id: userId,
-          first_name: parsed.first_name.trim() || '',
-          last_name: parsed.last_name.trim() || '',
-          email: parsed.email.trim() || '',
-          phone: parsed.phone.trim() || null,
-          current_company: parsed.current_company.trim() || '',
-          current_title: parsed.current_title.trim() || '',
-          location: parsed.location.trim() || null,
-          linkedin_url: parsed.linkedin_url.trim() || null,
-        } as any)
-        .select()
-        .single();
-      if (error) throw error;
-
-      // Save resume record
-      if (record) {
-        await supabase.from('candidate_resumes').insert({
-          user_id: userId,
-          candidate_id: record.id,
-          file_path: parsed.file_path,
-          file_name: parsed.file_name,
-          raw_text: parsed.raw_text.slice(0, 50000),
-          parse_status: 'completed',
-          source: 'resume_drop',
+      if (parsed.candidate_id) {
+        // Candidate already created/updated by process-resume — apply any manual review edits
+        const { error } = await supabase
+          .from('candidates')
+          .update({
+            first_name:      parsed.first_name.trim() || undefined,
+            last_name:       parsed.last_name.trim() || undefined,
+            full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || undefined,
+            email:           parsed.email.trim() || undefined,
+            phone:           parsed.phone.trim() || undefined,
+            current_company: parsed.current_company.trim() || undefined,
+            current_title:   parsed.current_title.trim() || undefined,
+            location_text:   parsed.location.trim() || undefined,
+            linkedin_url:    parsed.linkedin_url.trim() || undefined,
+            updated_at:      new Date().toISOString(),
+          } as any)
+          .eq('id', parsed.candidate_id);
+        if (error) throw error;
+        toast.success('Candidate saved');
+      } else {
+        // Fallback if edge function didn't return a candidate_id
+        const userId = (await supabase.auth.getUser()).data.user?.id;
+        const { error } = await supabase.from('candidates').insert({
+          owner_user_id:   userId,
+          first_name:      parsed.first_name.trim() || null,
+          last_name:       parsed.last_name.trim() || null,
+          full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || null,
+          email:           parsed.email.trim() || null,
+          phone:           parsed.phone.trim() || null,
+          current_company: parsed.current_company.trim() || null,
+          current_title:   parsed.current_title.trim() || null,
+          location_text:   parsed.location.trim() || null,
+          linkedin_url:    parsed.linkedin_url.trim() || null,
+          status: 'new',
         } as any);
+        if (error) throw error;
+        toast.success('Candidate created');
       }
 
       qc.invalidateQueries({ queryKey: ['candidates'] });
-      toast.success('Candidate created from resume');
       setParsed(null);
       onOpenChange(false);
     } catch (err: any) {
