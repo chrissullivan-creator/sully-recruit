@@ -94,6 +94,14 @@ const Settings = () => {
     warmup_days_completed: '0',
   });
 
+  // Email sending limits
+  const [emailLimits, setEmailLimits] = useState<IntegrationConfig>({
+    daily_email_cap: '100',
+    min_gap_minutes: '8',
+    send_window_start: '8',
+    send_window_end: '17',
+  });
+
   // Outlook state - fixed SMTP settings, user only provides email/password
   const [outlookConfig, setOutlookConfig] = useState<IntegrationConfig>({
     smtp_host: 'smtp-mail.outlook.com',
