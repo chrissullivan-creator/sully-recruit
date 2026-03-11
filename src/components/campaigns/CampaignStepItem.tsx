@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { useRef } from 'react';
 import type { CampaignStep, ChannelType } from '@/types';
 
 const channelOptions: { value: ChannelType; label: string; icon: React.ReactNode }[] = [
@@ -88,6 +89,24 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
   const showConnectionWait = isLinkedInChannel(step.channel) && step.channel !== 'linkedin_connection';
   const isEmail = step.channel === 'email';
 
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertAtCursor = (token: string) => {
+    if (contentRef.current) {
+      const el = contentRef.current;
+      const start = el.selectionStart || 0;
+      const end = el.selectionEnd || 0;
+      const newText = step.content.slice(0, start) + token + step.content.slice(end);
+      onUpdate(step.id, { content: newText });
+      setTimeout(() => {
+        el.focus();
+        const pos = start + token.length;
+        el.setSelectionRange(pos, pos);
+      }, 0);
+    } else {
+      onUpdate(step.id, { content: step.content + token });
+    }
+  };
   // Filter accounts relevant to this step's channel
   const relevantAccountTypes = channelToAccountTypes(step.channel);
   const relevantAccounts = accounts.filter(
@@ -371,7 +390,18 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
           )}
 
           {/* Content */}
+          {/* personalization helpers */}
+          <div className="flex gap-2">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => insertAtCursor('{{first_name}}')}
+            >
+              Insert first name
+            </Button>
+          </div>
           <Textarea
+            ref={contentRef}
             placeholder={channelPlaceholders[step.channel] || 'Message content...'}
             value={step.content}
             onChange={(e) => onUpdate(step.id, { content: e.target.value })}
