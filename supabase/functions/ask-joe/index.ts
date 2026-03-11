@@ -1,245 +1,222 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-function makeSupabase(authHeader: string | null) {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    authHeader ? { global: { headers: { Authorization: authHeader } } } : {}
-  );
-}
+// Joe's personality + schema knowledge
+const SYSTEM_PROMPT = `You are Joe — a blunt, old-school Wall Street recruiter assistant embedded in Sully Recruit. You've been placing candidates for 30 years and have zero patience for nonsense.
 
-async function getUserOpenAIConfig(authHeader: string | null) {
-  if (!authHeader) return null;
-  try {
-    const { data } = await makeSupabase(authHeader)
-      .from("user_integrations")
-      .select("config, is_active")
-      .eq("integration_type", "openai")
-      .eq("is_active", true)
-      .maybeSingle();
-    if (data?.config?.api_key) return data.config as { api_key: string; model?: string };
-  } catch { /* ignore */ }
-  return null;
-}
+You have access to a candidates database. When a user asks you to search, find, or filter candidates, you will:
+1. Extract search criteria from their query
+2. Use the search_candidates tool to query the database
+3. Present results in a crisp, no-BS table format
 
-async function fetchCRMContext(authHeader: string | null): Promise<string> {
-  if (!authHeader) return "";
-  const sb = makeSupabase(authHeader);
+Candidate schema you can filter on:
+- first_name, last_name (text)
+- email (text)
+- current_title (text) 
+- current_company (text)
+- status: 'new' | 'reached_out' | 'back_of_resume' | 'placed'
+- no_answer: boolean (true = no response after 10 days of outreach)
+- stage: 'back_of_resume' | 'pitch' | 'send_out' | 'submitted' | 'interview' | 'first_round' | 'second_round' | 'third_plus_round' | 'offer' | 'accepted' | 'declined' | 'counter_offer' | 'disqualified'
+- skills: text array
+- source (text)
+- notes (text)
+- created_at (timestamp)
 
-  try {
-    const [candidatesRes, jobsRes, sequencesRes, contactsRes] = await Promise.all([
-      sb.from("candidates").select("full_name, current_title, current_company, email, status, location").order("created_at", { ascending: false }).limit(30),
-      sb.from("jobs").select("id, title, company_name, status, location, compensation, description").neq("status", "closed").order("created_at", { ascending: false }).limit(20),
-      sb.from("sequences").select("id, name, channel, status, description, job_id, sequence_steps(step_order, step_type, channel, subject, body, delay_days)").order("created_at", { ascending: false }).limit(15),
-      sb.from("contacts").select("full_name, title, email").order("created_at", { ascending: false }).limit(20),
-    ]);
+When presenting results, be brief and direct. Lead with the count. If no results, say so and suggest a broader search. Stay in character — you're Joe, not a customer service bot.`;
 
-    const sections: string[] = [];
-    const jobs = jobsRes.data ?? [];
-    const jobMap = new Map(jobs.map((j: any) => [j.id, j]));
+const TOOLS = [
+  {
+    name: 'search_candidates',
+    description: 'Query the candidates database with filters. Returns matching candidates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        search_text: {
+          type: 'string',
+          description: 'Full text search across name, title, company, notes, skills',
+        },
+        status: {
+          type: 'string',
+          enum: ['new', 'reached_out', 'back_of_resume', 'placed'],
+          description: 'Filter by lead status',
+        },
+        stage: {
+          type: 'string',
+          description: 'Filter by pipeline stage',
+        },
+        no_answer: {
+          type: 'boolean',
+          description: 'Filter candidates who have not responded (no_answer = true)',
+        },
+        current_company_contains: {
+          type: 'string',
+          description: 'Filter by partial company name match',
+        },
+        current_title_contains: {
+          type: 'string',
+          description: 'Filter by partial title match',
+        },
+        skills_include: {
+          type: 'string',
+          description: 'Filter candidates who have this skill (partial match)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return, default 25',
+        },
+      },
+      required: [],
+    },
+  },
+];
 
-    const candidates = candidatesRes.data ?? [];
-    if (candidates.length > 0) {
-      sections.push(`CANDIDATES IN PIPELINE (${candidates.length}):\n` + candidates.map(c =>
-        `- ${c.full_name || "Unknown"}${c.current_title ? `, ${c.current_title}` : ""}${c.current_company ? ` @ ${c.current_company}` : ""}${c.location ? ` (${c.location})` : ""} — Status: ${c.status}`
-      ).join("\n"));
-    }
+async function searchCandidates(supabase: any, filters: any) {
+  let query = supabase
+    .from('candidates')
+    .select('id, first_name, last_name, current_title, current_company, status, stage, no_answer, email, skills, created_at')
+    .order('created_at', { ascending: false })
+    .limit(filters.limit ?? 25);
 
-    if (jobs.length > 0) {
-      sections.push(`OPEN JOBS (${jobs.length}):\n` + jobs.map((j: any) =>
-        `- [${j.id.slice(0,8)}] ${j.title}${j.company_name ? ` @ ${j.company_name}` : ""}${j.location ? ` (${j.location})` : ""}${j.compensation ? ` — ${j.compensation}` : ""} [${j.status}]${j.description ? `\n  Description: ${j.description.slice(0, 300)}` : ""}`
-      ).join("\n"));
-    }
-
-    const sequences = sequencesRes.data ?? [];
-    if (sequences.length > 0) {
-      sections.push(`OUTREACH SEQUENCES (${sequences.length}):\n` + sequences.map((s: any) => {
-        const taggedJob = s.job_id ? jobMap.get(s.job_id) : null;
-        const stepsArr = ((s.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
-        let entry = `- "${s.name}" — Channel: ${s.channel}, Status: ${s.status}${s.description ? `, ${s.description}` : ""}`;
-        if (taggedJob) {
-          entry += `\n  Tagged Job: ${taggedJob.title}${taggedJob.company_name ? ` @ ${taggedJob.company_name}` : ""}${taggedJob.location ? ` (${taggedJob.location})` : ""}${taggedJob.compensation ? `, ${taggedJob.compensation}` : ""}`;
-        }
-        if (stepsArr.length > 0) {
-          entry += `\n  Steps (${stepsArr.length}):`;
-          stepsArr.forEach((st: any) => {
-            const stepChannel = st.step_type || st.channel || "unknown";
-            entry += `\n    Step ${st.step_order}: [${stepChannel}]${st.delay_days > 0 ? ` wait ${st.delay_days}d` : ""}${st.subject ? ` Subject: "${st.subject}"` : ""}`;
-            if (st.body) entry += `\n      Content: ${st.body.slice(0, 500)}`;
-          });
-        }
-        return entry;
-      }).join("\n\n"));
-    }
-
-    const contacts = contactsRes.data ?? [];
-    if (contacts.length > 0) {
-      sections.push(`CONTACTS (${contacts.length}):\n` + contacts.map(c =>
-        `- ${c.full_name || "Unknown"}${c.title ? `, ${c.title}` : ""}${c.email ? ` <${c.email}>` : ""}`
-      ).join("\n"));
-    }
-
-    return sections.length > 0 ? sections.join("\n\n") : "No data found in the CRM yet.";
-  } catch (e) {
-    console.error("CRM context fetch error:", e);
-    return "";
+  if (filters.status) query = query.eq('status', filters.status);
+  if (filters.stage) query = query.eq('stage', filters.stage);
+  if (filters.no_answer !== undefined) query = query.eq('no_answer', filters.no_answer);
+  if (filters.current_company_contains) query = query.ilike('current_company', `%${filters.current_company_contains}%`);
+  if (filters.current_title_contains) query = query.ilike('current_title', `%${filters.current_title_contains}%`);
+  if (filters.skills_include) query = query.contains('skills', [filters.skills_include]);
+  if (filters.search_text) {
+    query = query.or(
+      `first_name.ilike.%${filters.search_text}%,last_name.ilike.%${filters.search_text}%,current_title.ilike.%${filters.search_text}%,current_company.ilike.%${filters.search_text}%,notes.ilike.%${filters.search_text}%`
+    );
   }
-}
 
-async function searchResumes(authHeader: string | null) {
-  if (!authHeader) return [];
-  try {
-    const { data: resumes } = await makeSupabase(authHeader)
-      .from("candidate_resumes")
-      .select("file_name, raw_text, ai_summary, candidates(full_name, current_title, current_company, email)")
-      .not("raw_text", "is", null)
-      .limit(50);
-    return resumes || [];
-  } catch { return []; }
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    const openaiConfig = await getUserOpenAIConfig(authHeader);
-
     const { messages, mode } = await req.json();
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    let apiUrl: string;
-    let apiKey: string;
-    let model: string;
+    // Agentic loop: Claude decides when to call search_candidates
+    let anthropicMessages = [...messages];
+    let iterations = 0;
+    const MAX_ITER = 5;
 
-    if (openaiConfig) {
-      apiUrl = "https://api.openai.com/v1/chat/completions";
-      apiKey = openaiConfig.api_key;
-      model = openaiConfig.model || "gpt-4o";
-    } else if (Deno.env.get("OPENAI_API_KEY")) {
-      apiUrl = "https://api.openai.com/v1/chat/completions";
-      apiKey = Deno.env.get("OPENAI_API_KEY")!;
-      model = "gpt-4.1";
-    } else {
-      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-      if (!LOVABLE_API_KEY) throw new Error("No AI API key configured.");
-      apiUrl = "https://ai.gateway.lovable.dev/v1/chat/completions";
-      apiKey = LOVABLE_API_KEY;
-      model = "google/gemini-3-flash-preview";
-    }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (text: string) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: text })}\n\n`));
+        };
 
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    };
+        try {
+          while (iterations < MAX_ITER) {
+            iterations++;
 
-    let systemPrompt: string;
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1024,
+                system: SYSTEM_PROMPT,
+                tools: TOOLS,
+                messages: anthropicMessages,
+              }),
+            });
 
-    if (mode === "resume_search") {
-      const resumes = await searchResumes(authHeader);
-      if (resumes.length > 0) {
-        const resumeContext = resumes.map((r: any, i: number) => {
-          const c = r.candidates;
-          const name = c?.full_name || "Unknown";
-          const title = c?.current_title || "";
-          const company = c?.current_company || "";
-          const text = (r.raw_text || "").slice(0, 2000);
-          return `--- Candidate ${i + 1}: ${name}${title ? ` (${title}` : ""}${company ? ` at ${company})` : title ? ")" : ""} ---\n${text}`;
-        }).join("\n\n");
+            if (!response.ok) {
+              const err = await response.text();
+              send(`\nError from Claude: ${err}`);
+              break;
+            }
 
-        systemPrompt = `You are Joe, an expert recruiting assistant inside Emerald Recruit. You have access to ${resumes.length} candidate resumes.
+            const result = await response.json();
+            const stopReason = result.stop_reason;
+            const content = result.content ?? [];
 
-When searching for candidates, identify matches and explain:
-1. Name, title, company
-2. Why they match (skills, experience, background)
-3. Fit level: Strong Match / Good Match / Partial Match
+            // Stream any text blocks immediately
+            for (const block of content) {
+              if (block.type === 'text') {
+                send(block.text);
+              }
+            }
 
-Be concise and direct. If no matches, say so honestly. Never mention databases, Supabase, IDs, or technical systems.
+            // If Claude wants to use a tool
+            if (stopReason === 'tool_use') {
+              const toolUseBlocks = content.filter((b: any) => b.type === 'tool_use');
+              const toolResults = [];
 
-RESUME DATABASE:\n${resumeContext}`;
-      } else {
-        systemPrompt = `You are Joe, a recruiting assistant. No resumes with parsed text are available yet — let the user know they need to upload resumes to candidates first.`;
-      }
-    } else {
-      // General mode — always inject live CRM context
-      const crmContext = await fetchCRMContext(authHeader);
+              for (const toolCall of toolUseBlocks) {
+                if (toolCall.name === 'search_candidates') {
+                  const candidates = await searchCandidates(supabase, toolCall.input);
+                  toolResults.push({
+                    type: 'tool_result',
+                    tool_use_id: toolCall.id,
+                    content: JSON.stringify({
+                      count: candidates.length,
+                      candidates: candidates.map((c: any) => ({
+                        name: `${c.first_name} ${c.last_name}`,
+                        title: c.current_title || '—',
+                        company: c.current_company || '—',
+                        status: c.status,
+                        stage: c.stage,
+                        no_answer: c.no_answer,
+                        email: c.email || '—',
+                      })),
+                    }),
+                  });
+                }
+              }
 
-      systemPrompt = `You are Joe, a sharp recruiting assistant embedded in Emerald Recruit CRM. You help recruiters work faster and smarter.
+              // Append assistant + tool results and loop
+              anthropicMessages = [
+                ...anthropicMessages,
+                { role: 'assistant', content },
+                { role: 'user', content: toolResults },
+              ];
+              continue;
+            }
 
-You can:
-- Answer questions about people, jobs, and sequences in the CRM
-- Draft outreach messages (LinkedIn, email, SMS) with a direct, professional tone
-- Write individual sequence steps — when asked, consider the job the sequence is tagged to (role, company, location, comp), the channel of each step, and the tone/content of prior steps so messages flow naturally and don't repeat themselves
-- Suggest next steps for specific candidates or roles
-- Advise on recruiting strategy and best practices
-
-Rules:
-- Be concise, specific, and actionable — no fluff
-- NEVER mention Supabase, databases, APIs, UUIDs, table names, technical systems, or internal IDs
-- When drafting messages, use {{first_name}}, {{company}}, {{title}} as personalization placeholders
-- When writing sequence steps, maintain a natural progression: first touch should introduce, follow-ups should add value or change angle, later steps should create urgency or offer a final touchpoint
-- Refer to data naturally, as if you know the team's pipeline
-
-CURRENT CRM DATA:
-${crmContext}`;
-    }
-
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-        stream: true,
-      }),
+            // end_turn — done
+            break;
+          }
+        } catch (err: any) {
+          send(`\nSomething broke: ${err.message}`);
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded, please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Add funds or check your OpenAI billing." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 401) {
-        return new Response(
-          JSON.stringify({ error: "Invalid API key. Check your key in Settings." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      const t = await response.text();
-      console.error("AI error:", response.status, t);
-      return new Response(
-        JSON.stringify({ error: "AI request failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
     });
-  } catch (e) {
-    console.error("ask-joe error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 });

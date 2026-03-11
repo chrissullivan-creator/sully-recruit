@@ -20,14 +20,12 @@ import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
 
-const statusFilters = ['all', 'new', 'reached_out', 'qualified', 'converted', 'disqualified', 'no_answer'] as const;
+const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed'] as const;
 const statusColors: Record<string, string> = {
-  new: 'bg-blue/10 text-blue border-blue/20',
-  reached_out: 'bg-yellow/10 text-yellow border-yellow/20',
-  qualified: 'bg-green/10 text-green border-green/20',
-  converted: 'bg-success/10 text-success border-success/20',
-  disqualified: 'bg-destructive/10 text-destructive border-destructive/20',
-  no_answer: 'bg-muted text-muted-foreground border-border',
+  new:            'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  reached_out:    'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  back_of_resume: 'bg-muted text-muted-foreground border-border',
+  placed:         'bg-success/10 text-success border-success/20',
 };
 
 const Candidates = () => {
@@ -273,9 +271,16 @@ const Candidates = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
-                      <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-info/10 text-info border-info/20')}>
-                        {candidate.status.replace('_', ' ')}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
+                          {candidate.status.replace(/_/g, ' ')}
+                        </span>
+                        {candidate.no_answer && (
+                          <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                            no answer
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.email ?? '-'}</td>
                   </tr>
