@@ -201,6 +201,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             current_company: c.current_company || '',
             linkedin_url: c.linkedin_url || null,
             stage: safeStage,
+            status: 'new',
             source: c.source || null,
             skills,
             notes: c.notes || null,
