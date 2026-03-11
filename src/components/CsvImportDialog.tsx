@@ -26,8 +26,8 @@ const entityFields: Record<EntityType, { value: string; label: string }[]> = {
     { value: 'linkedin_url', label: 'LinkedIn URL' },
     { value: 'current_company', label: 'Company' },
     { value: 'current_title', label: 'Title' },
-    { value: 'location', label: 'Location' },
     { value: 'status', label: 'Status' },
+    { value: 'source', label: 'Source' },
   ],
   contacts: [
     { value: 'skip', label: '— Skip —' },
@@ -43,10 +43,11 @@ const entityFields: Record<EntityType, { value: string; label: string }[]> = {
   jobs: [
     { value: 'skip', label: '— Skip —' },
     { value: 'title', label: 'Title' },
-    { value: 'company_name', label: 'Company Name' },
+    { value: 'company', label: 'Company' },
     { value: 'location', label: 'Location' },
-    { value: 'description', label: 'Description' },
+    { value: 'salary', label: 'Salary' },
     { value: 'status', label: 'Status' },
+    { value: 'hiring_manager', label: 'Hiring Manager' },
   ],
 };
 
@@ -58,16 +59,20 @@ function autoMapHeader(header: string, entity: EntityType): string {
     email: 'email', emailaddress: 'email',
     phone: 'phone', phonenumber: 'phone', mobile: 'phone',
     linkedin: 'linkedin_url', linkedinurl: 'linkedin_url',
-    company: entity === 'jobs' ? 'company_name' : 'current_company',
-    companyname: entity === 'jobs' ? 'company_name' : 'current_company',
+    company: entity === 'jobs' ? 'company' : (entity === 'contacts' ? 'company_name' : 'current_company'),
+    companyname: entity === 'jobs' ? 'company' : (entity === 'contacts' ? 'company_name' : 'current_company'),
     currentcompany: 'current_company',
-    title: entity === 'contacts' || entity === 'jobs' ? 'title' : 'current_title',
-    jobtitle: entity === 'contacts' ? 'title' : 'current_title',
+    title: 'title',
+    jobtitle: 'title',
     currenttitle: 'current_title',
-    location: 'location', city: 'location',
     status: 'status',
+    stage: entity === 'jobs' ? 'stage' : 'skip',
+    location: 'location',
+    salary: 'salary',
+    hiringmanager: 'hiring_manager',
     department: 'department', dept: 'department',
-    description: 'description',
+    source: 'source',
+    notes: 'notes',
   };
   const match = mappings[h];
   if (match && entityFields[entity].some(f => f.value === match)) return match;
@@ -179,6 +184,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
       const { error } = await supabase.from(entityType).insert(records as any);
       if (error) {
         console.error('Import batch error:', error);
+        toast.error(`Batch error: ${error.message || 'Unknown error'}`);
         errors += records.length;
       } else {
         success += records.length;
@@ -186,8 +192,10 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
     }
 
     setImportResult({ success, errors });
-    queryClient.invalidateQueries({ queryKey: [entityType] });
-    if (success > 0) toast.success(`Imported ${success} ${entityType}`);
+    if (success > 0) {
+      queryClient.invalidateQueries({ queryKey: [entityType] });
+      toast.success(`Imported ${success} ${entityType}`);
+    }
     if (errors > 0) toast.error(`${errors} rows failed to import`);
   };
 
