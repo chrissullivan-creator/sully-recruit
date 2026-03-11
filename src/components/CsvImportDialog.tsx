@@ -464,6 +464,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                           <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Title</th>
                           <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Company</th>
                           <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Stage</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -479,6 +480,11 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                             <td className="px-4 py-2.5">
                               <span className="stage-badge bg-success/10 text-success border border-success/20">
                                 {r.mapped.stage || 'back_of_resume'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span className="stage-badge bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                new
                               </span>
                             </td>
                           </tr>
