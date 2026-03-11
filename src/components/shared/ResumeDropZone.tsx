@@ -120,15 +120,15 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const { data: record, error } = await supabase
         .from('candidates')
         .insert({
-          first_name: parsed.first_name.trim() || null,
-          last_name: parsed.last_name.trim() || null,
-          email: parsed.email.trim() || null,
+          user_id: userId,
+          first_name: parsed.first_name.trim() || '',
+          last_name: parsed.last_name.trim() || '',
+          email: parsed.email.trim() || '',
           phone: parsed.phone.trim() || null,
-          current_company: parsed.current_company.trim() || null,
-          current_title: parsed.current_title.trim() || null,
+          current_company: parsed.current_company.trim() || '',
+          current_title: parsed.current_title.trim() || '',
           location: parsed.location.trim() || null,
           linkedin_url: parsed.linkedin_url.trim() || null,
-          owner_id: userId,
         } as any)
         .select()
         .single();
@@ -137,6 +137,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       // Save resume record
       if (record) {
         await supabase.from('candidate_resumes').insert({
+          user_id: userId,
           candidate_id: record.id,
           file_path: parsed.file_path,
           file_name: parsed.file_name,
