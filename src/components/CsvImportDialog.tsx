@@ -1,284 +1,506 @@
-import { useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useState, useCallback, useRef } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Upload, FileSpreadsheet, Loader2, AlertCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  Upload, CheckCircle2, AlertCircle, Loader2, FileText,
+  ChevronRight, X, ArrowLeft,
+} from 'lucide-react';
 
-type EntityType = 'candidates' | 'contacts' | 'jobs';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface FieldMapping {
-  csvHeader: string;
-  dbColumn: string;
+type Step = 'upload' | 'preview' | 'done';
+
+interface MappedRow {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  current_title?: string;
+  current_company?: string;
+  linkedin_url?: string;
+  stage?: string;
+  source?: string;
+  notes?: string;
+  skills?: string;
 }
 
-const entityFields: Record<EntityType, { value: string; label: string }[]> = {
-  candidates: [
-    { value: 'skip', label: '— Skip —' },
-    { value: 'first_name', label: 'First Name' },
-    { value: 'last_name', label: 'Last Name' },
-    { value: 'email', label: 'Email' },
-    { value: 'phone', label: 'Phone' },
-    { value: 'linkedin_url', label: 'LinkedIn URL' },
-    { value: 'current_company', label: 'Company' },
-    { value: 'current_title', label: 'Title' },
-    { value: 'status', label: 'Status' },
-    { value: 'source', label: 'Source' },
-  ],
-  contacts: [
-    { value: 'skip', label: '— Skip —' },
-    { value: 'first_name', label: 'First Name' },
-    { value: 'last_name', label: 'Last Name' },
-    { value: 'email', label: 'Email' },
-    { value: 'phone', label: 'Phone' },
-    { value: 'linkedin_url', label: 'LinkedIn URL' },
-    { value: 'title', label: 'Title' },
-    { value: 'department', label: 'Department' },
-    { value: 'status', label: 'Status' },
-  ],
-  jobs: [
-    { value: 'skip', label: '— Skip —' },
-    { value: 'title', label: 'Title' },
-    { value: 'company', label: 'Company' },
-    { value: 'location', label: 'Location' },
-    { value: 'salary', label: 'Salary' },
-    { value: 'status', label: 'Status' },
-    { value: 'hiring_manager', label: 'Hiring Manager' },
-  ],
+interface ParsedResult {
+  mapped: MappedRow;
+  errors: string[];
+  raw: Record<string, string>;
+  idx: number;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const VALID_STAGES = [
+  'back_of_resume', 'pitch', 'send_out', 'submitted', 'interview',
+  'first_round', 'second_round', 'third_plus_round', 'offer',
+  'accepted', 'declined', 'counter_offer', 'disqualified',
+];
+
+// Alias map: schema_field → accepted CSV column names (lowercase)
+const FIELD_ALIASES: Record<keyof MappedRow, string[]> = {
+  first_name: ['first_name', 'first', 'firstname', 'fname', 'given_name', 'given name', 'first name'],
+  last_name: ['last_name', 'last', 'lastname', 'lname', 'surname', 'family_name', 'family name', 'last name'],
+  email: ['email', 'email_address', 'e-mail', 'e_mail', 'email address'],
+  phone: ['phone', 'phone_number', 'mobile', 'cell', 'telephone', 'phone number', 'mobile_number'],
+  current_title: ['current_title', 'title', 'job_title', 'position', 'role', 'current title', 'current position', 'job title'],
+  current_company: ['current_company', 'company', 'employer', 'organization', 'firm', 'current company', 'current employer'],
+  linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin url', 'linkedin profile', 'profile_url'],
+  stage: ['stage', 'pipeline_stage', 'status', 'candidate_stage'],
+  source: ['source', 'lead_source', 'origin', 'referral', 'sourced_from'],
+  notes: ['notes', 'note', 'comments', 'comment', 'bio', 'summary', 'additional_info'],
+  skills: ['skills', 'skill', 'skill_set', 'skillset', 'technologies', 'tech_stack', 'expertise'],
 };
 
-function autoMapHeader(header: string, entity: EntityType): string {
-  const h = header.toLowerCase().replace(/[^a-z]/g, '');
-  const mappings: Record<string, string> = {
-    firstname: 'first_name', first: 'first_name', fname: 'first_name',
-    lastname: 'last_name', last: 'last_name', lname: 'last_name',
-    email: 'email', emailaddress: 'email',
-    phone: 'phone', phonenumber: 'phone', mobile: 'phone',
-    linkedin: 'linkedin_url', linkedinurl: 'linkedin_url',
-    company: entity === 'jobs' ? 'company' : (entity === 'contacts' ? 'company_name' : 'current_company'),
-    companyname: entity === 'jobs' ? 'company' : (entity === 'contacts' ? 'company_name' : 'current_company'),
-    currentcompany: 'current_company',
-    title: 'title',
-    jobtitle: 'title',
-    currenttitle: 'current_title',
-    status: 'status',
-    stage: entity === 'jobs' ? 'stage' : 'skip',
-    location: 'location',
-    salary: 'salary',
-    hiringmanager: 'hiring_manager',
-    department: 'department', dept: 'department',
-    source: 'source',
-    notes: 'notes',
-  };
-  const match = mappings[h];
-  if (match && entityFields[entity].some(f => f.value === match)) return match;
-  return 'skip';
-}
+// ─── CSV Parser ───────────────────────────────────────────────────────────────
 
-function parseCsv(text: string): { headers: string[]; rows: string[][] } {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length === 0) return { headers: [], rows: [] };
-  
-  const parseLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
+function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+  const rows = lines.slice(1).map((line) => {
+    const cols: string[] = [];
+    let cur = '', inQ = false;
     for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
-        else inQuotes = !inQuotes;
-      } else if (ch === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
-      }
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else { cur += c; }
     }
-    result.push(current.trim());
-    return result;
-  };
-
-  const headers = parseLine(lines[0]);
-  const rows = lines.slice(1).map(parseLine);
+    cols.push(cur.trim());
+    return Object.fromEntries(headers.map((h, i) => [h, (cols[i] || '').replace(/^"|"$/g, '').trim()]));
+  });
   return { headers, rows };
 }
 
-interface Props {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  entityType: EntityType;
+function mapRow(row: Record<string, string>): MappedRow {
+  const mapped: Partial<MappedRow> = {};
+  for (const [field, aliases] of Object.entries(FIELD_ALIASES) as [keyof MappedRow, string[]][]) {
+    for (const alias of aliases) {
+      if (row[alias] !== undefined && row[alias] !== '') {
+        (mapped as any)[field] = row[alias];
+        break;
+      }
+    }
+  }
+  return mapped as MappedRow;
 }
 
-export function CsvImportDialog({ open, onOpenChange, entityType }: Props) {
+function validateRow(mapped: MappedRow): string[] {
+  const errors: string[] = [];
+  if (!mapped.first_name) errors.push('Missing first name');
+  if (!mapped.last_name) errors.push('Missing last name');
+  if (mapped.stage) {
+    const norm = mapped.stage.toLowerCase().replace(/\s/g, '_');
+    if (!VALID_STAGES.includes(norm)) errors.push(`Invalid stage: "${mapped.stage}"`);
+  }
+  return errors;
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+interface CsvImportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entityType: 'candidates' | 'contacts' | 'jobs';
+}
+
+export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDialogProps) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<'upload' | 'map' | 'importing'>('upload');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [step, setStep] = useState<Step>('upload');
+  const [dragging, setDragging] = useState(false);
+  const [fileName, setFileName] = useState('');
   const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<string[][]>([]);
-  const [mappings, setMappings] = useState<FieldMapping[]>([]);
-  const [importResult, setImportResult] = useState<{ success: number; errors: number } | null>(null);
+  const [results, setResults] = useState<ParsedResult[]>([]);
+  const [activeTab, setActiveTab] = useState<'valid' | 'issues' | 'mapping'>('valid');
+  const [importing, setImporting] = useState(false);
+  const [importedCount, setImportedCount] = useState(0);
+
+  const valid = results.filter((r) => r.errors.length === 0);
+  const invalid = results.filter((r) => r.errors.length > 0);
 
   const reset = () => {
     setStep('upload');
+    setFileName('');
     setHeaders([]);
-    setRows([]);
-    setMappings([]);
-    setImportResult(null);
+    setResults([]);
+    setActiveTab('valid');
+    setImportedCount(0);
   };
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleClose = () => {
+    reset();
+    onOpenChange(false);
+  };
+
+  const processFile = useCallback((file: File) => {
+    if (!file.name.endsWith('.csv')) {
+      toast.error('Please upload a .csv file');
+      return;
+    }
+    setFileName(file.name);
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const { headers: h, rows: r } = parseCsv(text);
-      if (h.length === 0) { toast.error('Empty or invalid CSV'); return; }
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const { headers: h, rows } = parseCSV(text);
       setHeaders(h);
-      setRows(r);
-      setMappings(h.map(header => ({ csvHeader: header, dbColumn: autoMapHeader(header, entityType) })));
-      setStep('map');
+      const parsed = rows
+        .filter((row) => Object.values(row).some((v) => v !== ''))
+        .map((row, i) => {
+          const mapped = mapRow(row);
+          const errors = validateRow(mapped);
+          return { raw: row, mapped, errors, idx: i + 2 };
+        });
+      setResults(parsed);
+      setStep('preview');
     };
     reader.readAsText(file);
-  };
+  }, []);
 
-  const updateMapping = (index: number, dbColumn: string) => {
-    setMappings(prev => prev.map((m, i) => i === index ? { ...m, dbColumn } : m));
-  };
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) processFile(file);
+  }, [processFile]);
 
   const handleImport = async () => {
-    const activeMappings = mappings.filter(m => m.dbColumn !== 'skip');
-    if (activeMappings.length === 0) { toast.error('Map at least one column'); return; }
+    if (!user || valid.length === 0) return;
+    setImporting(true);
 
-    const ownerTables: EntityType[] = ['candidates', 'contacts'];
-    const needsOwner = ownerTables.includes(entityType);
-    const userId = needsOwner ? (await supabase.auth.getUser()).data.user?.id : undefined;
-
-    setStep('importing');
-    let success = 0;
-    let errors = 0;
-
-    const batchSize = 50;
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const batch = rows.slice(i, i + batchSize);
-      const records = batch.map(row => {
-        const record: Record<string, string | undefined> = {};
-        mappings.forEach((m, idx) => {
-          if (m.dbColumn !== 'skip' && row[idx] !== undefined) {
-            record[m.dbColumn] = row[idx];
-          }
+    try {
+      // Only candidates is wired up fully; contacts/jobs would need their own logic
+      if (entityType === 'candidates') {
+        const rows = valid.map((r) => {
+          const c = r.mapped;
+          const stage = c.stage
+            ? c.stage.toLowerCase().replace(/\s/g, '_')
+            : 'back_of_resume';
+          const safeStage = VALID_STAGES.includes(stage) ? stage : 'back_of_resume';
+          const skills = c.skills
+            ? c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
+            : [];
+          return {
+            user_id: user.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            email: c.email || '',
+            phone: c.phone || null,
+            current_title: c.current_title || '',
+            current_company: c.current_company || '',
+            linkedin_url: c.linkedin_url || null,
+            stage: safeStage,
+            source: c.source || null,
+            skills,
+            notes: c.notes || null,
+          };
         });
-        if (needsOwner && userId) {
-          record['owner_id'] = userId;
+
+        // Insert in batches of 100
+        const BATCH = 100;
+        let inserted = 0;
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const batch = rows.slice(i, i + BATCH);
+          const { error } = await supabase.from('candidates').insert(batch as any);
+          if (error) throw error;
+          inserted += batch.length;
         }
-        return record;
-      }).filter(r => Object.keys(r).length > (needsOwner ? 1 : 0));
 
-      if (records.length === 0) continue;
-
-      const { error } = await supabase.from(entityType).insert(records as any);
-      if (error) {
-        console.error('Import batch error:', error);
-        toast.error(`Batch error: ${error.message || 'Unknown error'}`);
-        errors += records.length;
-      } else {
-        success += records.length;
+        setImportedCount(inserted);
+        queryClient.invalidateQueries({ queryKey: ['candidates'] });
       }
-    }
 
-    setImportResult({ success, errors });
-    if (success > 0) {
-      queryClient.invalidateQueries({ queryKey: [entityType] });
-      toast.success(`Imported ${success} ${entityType}`);
+      setStep('done');
+    } catch (err: any) {
+      toast.error(err.message || 'Import failed');
+    } finally {
+      setImporting(false);
     }
-    if (errors > 0) toast.error(`${errors} rows failed to import`);
   };
 
-  const entityLabel = entityType.charAt(0).toUpperCase() + entityType.slice(1);
+  // ── Column mapping display ──
+  const columnMappings = headers.map((h) => {
+    const match = Object.entries(FIELD_ALIASES).find(([, aliases]) => aliases.includes(h));
+    return { header: h, field: match?.[0] ?? null };
+  });
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5" />
-            Import {entityLabel} from CSV
-          </DialogTitle>
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-0 gap-0">
+        {/* Header */}
+        <DialogHeader className="px-6 py-5 border-b border-border shrink-0">
+          <div className="flex items-center gap-3">
+            {step === 'preview' && (
+              <Button variant="ghost" size="icon" className="h-7 w-7 -ml-1" onClick={reset}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <DialogTitle className="text-base">
+              {step === 'upload' && `Import ${entityType.charAt(0).toUpperCase() + entityType.slice(1)} via CSV`}
+              {step === 'preview' && `Review Import — ${fileName}`}
+              {step === 'done' && 'Import Complete'}
+            </DialogTitle>
+            {step === 'preview' && (
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-xs text-muted-foreground">{valid.length} ready</span>
+                {invalid.length > 0 && (
+                  <span className="text-xs text-destructive">{invalid.length} issues</span>
+                )}
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
-        {step === 'upload' && (
-          <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-lg">
-            <Upload className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground mb-4">Select a CSV file to import {entityType}</p>
-            <Button variant="gold" onClick={() => fileRef.current?.click()}>
-              Choose File
-            </Button>
-            <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
-          </div>
-        )}
+        {/* Body */}
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
 
-        {step === 'map' && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <AlertCircle className="h-4 w-4" />
-              <span>{rows.length} rows found. Map CSV columns to {entityLabel} fields:</span>
+          {/* ── UPLOAD STEP ── */}
+          {step === 'upload' && (
+            <div className="flex-1 flex flex-col items-center justify-center p-10 gap-6">
+              <div
+                className={cn(
+                  'w-full max-w-lg rounded-xl border-2 border-dashed p-12 text-center cursor-pointer transition-all',
+                  dragging
+                    ? 'border-accent bg-accent/5'
+                    : 'border-border hover:border-accent/50 hover:bg-muted/30'
+                )}
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 mx-auto mb-4">
+                  <Upload className="h-6 w-6 text-accent" />
+                </div>
+                <p className="text-sm font-medium text-foreground mb-1">
+                  Drop your CSV here or <span className="text-accent">browse</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Supports Recruiterflow exports and any standard candidate CSV
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+                />
+              </div>
+
+              {/* Field reference */}
+              <div className="w-full max-w-lg rounded-lg border border-border bg-secondary/50 p-4">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                  Recognized column names
+                </p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-muted-foreground">
+                  {Object.entries(FIELD_ALIASES).map(([field, aliases]) => (
+                    <div key={field} className="flex items-center gap-1.5">
+                      <span className="font-medium text-foreground w-28 shrink-0">{field}</span>
+                      <span className="truncate opacity-60">{aliases.slice(0, 3).join(', ')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <ScrollArea className="max-h-[400px]">
-              <div className="space-y-3">
-                {headers.map((header, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="w-1/3">
-                      <p className="text-sm font-medium text-foreground truncate">{header}</p>
-                      <p className="text-xs text-muted-foreground truncate">{rows[0]?.[i] ?? ''}</p>
-                    </div>
-                    <span className="text-muted-foreground">→</span>
-                    <div className="flex-1">
-                      <Select value={mappings[i]?.dbColumn ?? 'skip'} onValueChange={(v) => updateMapping(i, v)}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {entityFields[entityType].map(f => (
-                            <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+          )}
+
+          {/* ── PREVIEW STEP ── */}
+          {step === 'preview' && (
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Tabs */}
+              <div className="flex border-b border-border shrink-0 px-6">
+                {([
+                  ['valid', `Ready (${valid.length})`],
+                  ['issues', `Issues (${invalid.length})`],
+                  ['mapping', 'Column Map'],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setActiveTab(key)}
+                    className={cn(
+                      'py-3 px-4 text-xs font-medium border-b-2 transition-colors',
+                      activeTab === key
+                        ? 'border-accent text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {label}
+                  </button>
                 ))}
               </div>
-            </ScrollArea>
-          </div>
-        )}
 
-        {step === 'importing' && !importResult && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-gold mb-3" />
-            <p className="text-sm text-muted-foreground">Importing {rows.length} {entityType}...</p>
-          </div>
-        )}
+              {/* Tab content */}
+              <div className="flex-1 overflow-auto">
 
-        {importResult && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-lg font-semibold text-foreground mb-2">Import Complete</p>
-            <p className="text-sm text-success">{importResult.success} successfully imported</p>
-            {importResult.errors > 0 && <p className="text-sm text-destructive">{importResult.errors} failed</p>}
-          </div>
-        )}
+                {/* Valid rows */}
+                {activeTab === 'valid' && (
+                  valid.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                      <AlertCircle className="h-8 w-8 mb-3 opacity-40" />
+                      <p className="text-sm">No valid rows found</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead className="bg-secondary sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">#</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Name</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Email</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Title</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Company</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Stage</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {valid.map((r, i) => (
+                          <tr key={i} className="hover:bg-muted/40 transition-colors">
+                            <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
+                            <td className="px-4 py-2.5 font-medium text-foreground">
+                              {r.mapped.first_name} {r.mapped.last_name}
+                            </td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.email || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.current_title || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.current_company || '—'}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="stage-badge bg-success/10 text-success border border-success/20">
+                                {r.mapped.stage || 'back_of_resume'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                )}
 
-        <DialogFooter>
-          {step === 'map' && (
-            <Button variant="gold" onClick={handleImport}>
-              Import {rows.length} {entityLabel}
-            </Button>
+                {/* Issues */}
+                {activeTab === 'issues' && (
+                  invalid.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                      <CheckCircle2 className="h-8 w-8 mb-3 opacity-40 text-success" />
+                      <p className="text-sm">No issues — all rows are valid!</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead className="bg-secondary sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Row</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Name</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Email</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Issues</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {invalid.map((r, i) => (
+                          <tr key={i} className="hover:bg-muted/40">
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.idx}</td>
+                            <td className="px-4 py-2.5 text-foreground">
+                              {[r.mapped.first_name, r.mapped.last_name].filter(Boolean).join(' ') || '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.email || '—'}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex flex-wrap gap-1">
+                                {r.errors.map((e, j) => (
+                                  <span key={j} className="stage-badge bg-destructive/10 text-destructive border border-destructive/20">
+                                    {e}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                )}
+
+                {/* Column mapping */}
+                {activeTab === 'mapping' && (
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary sticky top-0">
+                      <tr>
+                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Your CSV Column</th>
+                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Maps To</th>
+                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {columnMappings.map(({ header, field }, i) => (
+                        <tr key={i} className="hover:bg-muted/40">
+                          <td className="px-4 py-2.5 font-mono text-foreground">{header}</td>
+                          <td className="px-4 py-2.5 font-mono text-accent">{field ?? <span className="text-muted-foreground">—</span>}</td>
+                          <td className="px-4 py-2.5">
+                            {field ? (
+                              <span className="stage-badge bg-success/10 text-success border border-success/20">matched</span>
+                            ) : (
+                              <span className="stage-badge bg-muted text-muted-foreground border border-border">skipped</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           )}
-          {importResult && (
-            <Button variant="gold" onClick={() => { reset(); onOpenChange(false); }}>Done</Button>
+
+          {/* ── DONE STEP ── */}
+          {step === 'done' && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-5 p-10">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
+                <CheckCircle2 className="h-8 w-8 text-success" />
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold text-foreground">
+                  {importedCount} candidate{importedCount !== 1 ? 's' : ''} imported
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  They'll appear in your candidates list now.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={reset}>Import Another File</Button>
+                <Button variant="gold" onClick={handleClose}>Done</Button>
+              </div>
+            </div>
           )}
-        </DialogFooter>
+        </div>
+
+        {/* Footer */}
+        {step === 'preview' && (
+          <div className="px-6 py-4 border-t border-border shrink-0 flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              {invalid.length > 0 && `${invalid.length} rows with issues will be skipped. `}
+              {valid.length} row{valid.length !== 1 ? 's' : ''} will be imported.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              <Button
+                variant="gold"
+                onClick={handleImport}
+                disabled={importing || valid.length === 0}
+              >
+                {importing ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Importing...</>
+                ) : (
+                  <>Import {valid.length} {entityType.slice(0, -1)}{valid.length !== 1 ? 's' : ''}</>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
