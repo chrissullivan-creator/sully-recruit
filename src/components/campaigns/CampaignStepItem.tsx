@@ -288,7 +288,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {hourOptions.filter(h => parseInt(h.value) < 23).map((h) => (
+                  {hourOptions.filter(h => parseInt(h.value) >= 6 && parseInt(h.value) <= 20).map((h) => (
                     <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -302,11 +302,12 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {hourOptions.filter(h => parseInt(h.value) > step.sendWindowStart).map((h) => (
+                  {hourOptions.filter(h => parseInt(h.value) > step.sendWindowStart && parseInt(h.value) <= 21).map((h) => (
                     <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <span className="text-xs text-muted-foreground opacity-50">(business hours)</span>
             </div>
           </div>
 
