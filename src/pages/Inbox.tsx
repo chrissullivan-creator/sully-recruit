@@ -298,6 +298,15 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                 </Button>
               </Link>
             )}
+            {entityType === 'contact' && (
+              <Link to={`/contacts/${thread.contact_id}`}>
+                <Button variant="outline" size="sm" className="w-full gap-1.5">
+                  <Users className="h-3.5 w-3.5" />
+                  View Contact
+                  <ArrowRight className="h-3 w-3 ml-auto" />
+                </Button>
+              </Link>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
