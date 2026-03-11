@@ -229,21 +229,22 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           const skills = c.skills
             ? c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
             : [];
-          return {
+          const row: Record<string, any> = {
             user_id: user.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
-            phone: c.phone || null,
-            current_title: c.current_title || '',
-            current_company: c.current_company || '',
-            linkedin_url: c.linkedin_url || null,
             stage: safeStage,
             status: 'new',
-            source: c.source || null,
             skills,
-            notes: c.notes || null,
           };
+          if (c.phone) row.phone = c.phone;
+          if (c.current_title) row.current_title = c.current_title;
+          if (c.current_company) row.current_company = c.current_company;
+          if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
+          if (c.source) row.source = c.source;
+          if (c.notes) row.notes = c.notes;
+          return row;
         });
 
         const BATCH = 100;
@@ -268,17 +269,18 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             ? j.priority.toLowerCase()
             : 'medium';
           const safePriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium';
-          return {
+          const row: Record<string, any> = {
             user_id: user.id,
             title: j.title || '',
             company: j.company || '',
             location: j.location || '',
-            salary: j.salary || null,
             stage: safeStage,
             priority: safePriority,
-            hiring_manager: j.hiring_manager || null,
-            notes: j.notes || null,
           };
+          if (j.salary) row.salary = j.salary;
+          if (j.hiring_manager) row.hiring_manager = j.hiring_manager;
+          if (j.notes) row.notes = j.notes;
+          return row;
         });
 
         const BATCH = 100;
