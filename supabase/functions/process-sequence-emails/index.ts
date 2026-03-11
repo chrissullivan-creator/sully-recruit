@@ -262,10 +262,161 @@ Deno.serve(async (req: Request) => {
       processed++;
     }
 
+    // ── 9. Send scheduled executions ───────────────────────────────
+    const { data: scheduledExecutions, error: sendError } = await supabase
+      .from("sequence_step_executions")
+      .select(`
+        id,
+        enrollment_id,
+        sequence_step_id,
+        executed_at,
+        sequence_enrollments!inner (
+          candidate_id,
+          contact_id,
+          prospect_id,
+          enrolled_by,
+          account_id,
+          sequence_steps!inner (
+            channel,
+            subject,
+            body,
+            account_id
+          )
+        )
+      `)
+      .eq("status", "scheduled")
+      .lte("executed_at", now.toISOString())
+      .limit(50); // Limit to avoid overwhelming
+
+    if (sendError) {
+      console.error("Error fetching scheduled executions:", sendError);
+    } else if (scheduledExecutions && scheduledExecutions.length > 0) {
+      let sent = 0;
+      let failed = 0;
+
+      for (const exec of scheduledExecutions) {
+        try {
+          const enrollment = exec.sequence_enrollments as any;
+          const step = enrollment.sequence_steps as any;
+          
+          // Determine recipient
+          const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+          if (!entityId) {
+            console.error("No entity ID for execution:", exec.id);
+            failed++;
+            continue;
+          }
+
+          // Get recipient address based on channel
+          let to: string;
+          let conversation_id: string;
+          
+          // Ensure conversation exists
+          conversation_id = `seq_${exec.enrollment_id}`;
+          const { data: existingConv } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("id", conversation_id)
+            .single();
+          
+          if (!existingConv) {
+            await supabase
+              .from("conversations")
+              .insert({
+                id: conversation_id,
+                candidate_id: enrollment.candidate_id,
+                contact_id: enrollment.contact_id,
+                prospect_id: enrollment.prospect_id,
+                owner_id: enrollment.enrolled_by,
+                last_message_at: now.toISOString(),
+              } as any);
+          }
+          
+          if (step.channel === 'email') {
+            // For email, need to get email address
+            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const { data: entity } = await supabase
+              .from(table)
+              .select("email")
+              .eq("id", entityId)
+              .single();
+            to = entity?.email;
+          } else if (step.channel === 'sms') {
+            // For SMS, need phone number
+            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const { data: entity } = await supabase
+              .from(table)
+              .select("phone")
+              .eq("id", entityId)
+              .single();
+            to = entity?.phone;
+          } else if (step.channel.startsWith('linkedin')) {
+            // For LinkedIn, use the provider_id from candidate_channels
+            const { data: channel } = await supabase
+              .from("candidate_channels")
+              .select("provider_id, external_conversation_id")
+              .eq("candidate_id", entityId)
+              .eq("channel", "linkedin")
+              .single();
+            to = channel?.provider_id;
+            if (channel?.external_conversation_id) {
+              conversation_id = channel.external_conversation_id;
+            }
+          }
+
+          if (!to) {
+            console.error("No recipient address for execution:", exec.id);
+            failed++;
+            continue;
+          }
+
+          // Send the message using internal logic
+          const result = await sendSequenceMessage(supabase, {
+            channel: step.channel,
+            conversation_id,
+            candidate_id: enrollment.candidate_id,
+            contact_id: enrollment.contact_id,
+            to,
+            subject: step.subject,
+            body: step.body,
+            account_id: step.account_id || enrollment.account_id,
+            owner_id: enrollment.enrolled_by
+          });
+
+          // Update execution
+          await supabase
+            .from("sequence_step_executions")
+            .update({
+              status: "sent",
+              external_message_id: result.externalMessageId,
+              external_conversation_id: result.externalConversationId,
+              executed_at: now.toISOString(),
+            } as any)
+            .eq("id", exec.id);
+
+          sent++;
+        } catch (err: any) {
+          console.error("Error sending execution:", exec.id, err);
+          await supabase
+            .from("sequence_step_executions")
+            .update({
+              status: "failed",
+              error_message: err.message,
+              executed_at: now.toISOString(),
+            } as any)
+            .eq("id", exec.id);
+          failed++;
+        }
+      }
+
+      console.log(`Sent ${sent} messages, ${failed} failed`);
+    }
+
     const result = {
       processed,
       skipped,
       stopped,
+      sent: scheduledExecutions?.length || 0,
       total: enrollments.length,
       timestamp: now.toISOString(),
     };
@@ -286,6 +437,275 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEND SEQUENCE MESSAGE (internal function)
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendSequenceMessage(
+  supabase: any,
+  payload: {
+    channel: string;
+    conversation_id: string;
+    candidate_id?: string;
+    contact_id?: string;
+    to: string;
+    subject?: string;
+    body: string;
+    account_id?: string;
+    owner_id: string;
+  }
+): Promise<{ externalMessageId: string | null; externalConversationId: string | null }> {
+  const { channel, conversation_id, candidate_id, contact_id, to, subject, body, account_id, owner_id } = payload;
+
+  let result: any;
+  let externalMessageId: string | null = null;
+  let externalConversationId: string | null = null;
+
+  // Route to appropriate channel handler
+  switch (channel) {
+    case 'email':
+      result = await sendEmail(supabase, to, subject, body);
+      externalMessageId = result.messageId;
+      break;
+    case 'sms':
+      result = await sendSms(supabase, to, body);
+      externalMessageId = result.id?.toString();
+      break;
+    case 'linkedin':
+    case 'linkedin_connection':
+    case 'linkedin_recruiter':
+    case 'sales_nav':
+      result = await sendLinkedIn(supabase, to, body, account_id);
+      externalMessageId = result.message_id;
+      externalConversationId = result.conversation_id;
+      break;
+    default:
+      throw new Error(`Unsupported channel: ${channel}`);
+  }
+
+  // Log the message in database
+  const messageInsert: any = {
+    conversation_id,
+    candidate_id: candidate_id || null,
+    contact_id: contact_id || null,
+    channel,
+    direction: 'outbound',
+    subject: subject || null,
+    body,
+    sender_address: result.sender || null,
+    recipient_address: to,
+    sent_at: new Date().toISOString(),
+    external_message_id: externalMessageId,
+    external_conversation_id: externalConversationId,
+    provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+    owner_id,
+  };
+
+  const { error: msgError } = await supabase.from('messages').insert(messageInsert);
+  if (msgError) {
+    console.error('Failed to log message:', msgError);
+  }
+
+  // Update conversation's last_message_at
+  await supabase
+    .from('conversations')
+    .update({
+      last_message_at: new Date().toISOString(),
+      last_message_preview: body.substring(0, 100),
+      is_read: true,
+    })
+    .eq('id', conversation_id);
+
+  return { externalMessageId, externalConversationId };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL via SMTP (using Resend or generic SMTP)
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendEmail(
+  supabase: any,
+  to: string,
+  subject: string | undefined,
+  body: string
+): Promise<{ messageId: string; sender: string }> {
+  // Check for Resend API key first (simpler)
+  const resendApiKey = Deno.env.get('RESEND_API_KEY');
+  
+  if (resendApiKey) {
+    // Use Resend API
+    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
+    
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [to],
+        subject: subject || '',
+        html: body,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Resend API error: ${error}`);
+    }
+
+    const data = await response.json();
+    return { messageId: data.id, sender: fromEmail };
+  }
+
+  // Fallback to SMTP
+  const smtpConfig = await getSmtpConfig(supabase);
+  if (!smtpConfig) {
+    throw new Error('No email configuration found');
+  }
+
+  // Use a simple SMTP send (would need to implement SMTP client)
+  // For now, throw error
+  throw new Error('SMTP not implemented yet');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SMS via RingCentral
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendSms(
+  supabase: any,
+  to: string,
+  body: string
+): Promise<{ id: string; sender: string }> {
+  const ringcentralConfig = await getRingCentralConfig(supabase);
+  if (!ringcentralConfig) {
+    throw new Error('RingCentral not configured');
+  }
+
+  const authResponse = await fetch(`https://platform.ringcentral.com/restapi/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${btoa(`${ringcentralConfig.client_id}:${ringcentralConfig.client_secret}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'password',
+      username: ringcentralConfig.phone_number,
+      password: ringcentralConfig.jwt_token,
+      extension: '',
+    }),
+  });
+
+  if (!authResponse.ok) {
+    throw new Error('RingCentral auth failed');
+  }
+
+  const authData = await authResponse.json();
+  const accessToken = authData.access_token;
+
+  const smsResponse = await fetch(`https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/sms`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: [{ phoneNumber: to }],
+      from: { phoneNumber: ringcentralConfig.phone_number },
+      text: body,
+    }),
+  });
+
+  if (!smsResponse.ok) {
+    const error = await smsResponse.text();
+    throw new Error(`RingCentral SMS error: ${error}`);
+  }
+
+  const smsData = await smsResponse.json();
+  return { id: smsData.id, sender: ringcentralConfig.phone_number };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LINKEDIN via Unipile
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendLinkedIn(
+  supabase: any,
+  to: string,
+  body: string,
+  account_id?: string
+): Promise<{ message_id: string; conversation_id: string }> {
+  if (!account_id) {
+    throw new Error('LinkedIn account_id required');
+  }
+
+  const { data: account } = await supabase
+    .from('integration_accounts')
+    .select('provider_config')
+    .eq('id', account_id)
+    .single();
+
+  if (!account?.provider_config?.unipile_api_key) {
+    throw new Error('Unipile API key not found');
+  }
+
+  const apiKey = account.provider_config.unipile_api_key;
+  const baseUrl = 'https://api.unipile.com:13111/api/v1';
+
+  // Send message
+  const response = await fetch(`${baseUrl}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'X-UNIPILE-CLIENT': 'sully-recruit',
+    },
+    body: JSON.stringify({
+      provider_id: to,
+      text: body,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Unipile error: ${error}`);
+  }
+
+  const data = await response.json();
+  return { message_id: data.id, conversation_id: data.conversation_id };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+async function getSmtpConfig(supabase: any): Promise<any> {
+  // Get SMTP config from integration_accounts or env
+  const smtpHost = Deno.env.get('SMTP_HOST');
+  if (smtpHost) {
+    return {
+      smtp_host: smtpHost,
+      smtp_port: parseInt(Deno.env.get('SMTP_PORT') || '587'),
+      smtp_user: Deno.env.get('SMTP_USER'),
+      smtp_pass: Deno.env.get('SMTP_PASS'),
+      from_email: Deno.env.get('SMTP_FROM_EMAIL'),
+      from_name: Deno.env.get('SMTP_FROM_NAME'),
+    };
+  }
+  return null;
+}
+
+async function getRingCentralConfig(supabase: any): Promise<any> {
+  const clientId = Deno.env.get('RINGCENTRAL_CLIENT_ID');
+  if (clientId) {
+    return {
+      client_id: clientId,
+      client_secret: Deno.env.get('RINGCENTRAL_CLIENT_SECRET'),
+      jwt_token: Deno.env.get('RINGCENTRAL_JWT_TOKEN'),
+      server_url: Deno.env.get('RINGCENTRAL_SERVER_URL'),
+      phone_number: Deno.env.get('RINGCENTRAL_PHONE_NUMBER'),
+    };
+  }
+  return null;
+}
 
 /**
  * Scan recent executions with status 'sent' or 'delivered' and check
