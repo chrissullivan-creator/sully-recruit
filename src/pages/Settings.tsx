@@ -102,10 +102,6 @@ const Settings = () => {
     send_window_end: '17',
   });
 
-  // Email BCC
-  const [bccAddress, setBccAddress] = useState('');
-  const [bccActive, setBccActive] = useState(false);
-
   // Microsoft OAuth state
   const [msStatus, setMsStatus] = useState<{
     connected: boolean;
@@ -149,10 +145,7 @@ const Settings = () => {
             setRingcentralConfig((prev) => ({ ...prev, ...cfg }));
             setRingcentralActive(row.is_active);
             break;
-          case 'email_bcc':
-            setBccAddress(cfg.bcc_address ?? '');
-            setBccActive(row.is_active);
-            break;
+          case 'email_signature':
             setSignatureConfig((prev) => ({ ...prev, ...cfg }));
             break;
           case 'linkedin_limits':
@@ -465,66 +458,6 @@ Senior Recruiter | Your Company
                           ) : (
                             'Save Email Settings'
                           )}
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Outlook BCC */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
-                          bccActive && bccAddress ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
-                        )}>
-                          <Mail className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-sm font-semibold text-foreground">Outbound BCC</h3>
-                          <p className="text-xs text-muted-foreground">
-                            BCC every outbound sequence email to your Outlook inbox for a complete sent record.
-                          </p>
-                        </div>
-                        {bccActive && bccAddress && (
-                          <span className="flex items-center gap-1 text-xs text-success font-medium">
-                            <Check className="h-3.5 w-3.5" /> Active
-                          </span>
-                        )}
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">BCC Email Address</Label>
-                        <Input
-                          type="email"
-                          placeholder="you@outlook.com"
-                          value={bccAddress}
-                          onChange={(e) => setBccAddress(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">All outbound emails sent via Resend will be silently BCC'd here.</p>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        {bccActive && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setBccActive(false);
-                              saveIntegration('email_bcc', { bcc_address: bccAddress }, false);
-                            }}
-                          >
-                            Disable
-                          </Button>
-                        )}
-                        <Button
-                          variant="gold"
-                          size="sm"
-                          disabled={isSaving('email_bcc') || !bccAddress}
-                          onClick={() => {
-                            setBccActive(true);
-                            saveIntegration('email_bcc', { bcc_address: bccAddress }, true);
-                          }}
-                        >
-                          {isSaving('email_bcc') ? (
-                            <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
-                          ) : 'Save BCC'}
                         </Button>
                       </div>
                     </div>
