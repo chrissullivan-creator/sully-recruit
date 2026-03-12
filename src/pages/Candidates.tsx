@@ -13,9 +13,21 @@ import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
 import { useCandidates, useJobs } from '@/hooks/useData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
+import { format } from 'date-fns';
+
+const JOB_STATUS_COLORS: Record<string, string> = {
+  pitched:      'bg-blue-500/10 text-blue-400',
+  send_out:     'bg-yellow-500/10 text-yellow-400',
+  submitted:    'bg-purple-500/10 text-purple-400',
+  interviewing: 'bg-orange-500/10 text-orange-400',
+  offer:        'bg-emerald-500/10 text-emerald-400',
+  placed:       'bg-green-500/10 text-green-400',
+  rejected:     'bg-red-500/10 text-red-400',
+  withdrew:     'bg-muted text-muted-foreground',
+};
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
@@ -55,7 +67,7 @@ const Candidates = () => {
         (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-      const matchesJobTag = jobTagFilter === 'all' || c.tagged_job_id === jobTagFilter;
+      const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
       return matchesSearch && matchesStatus && matchesJobTag;
     });
 
@@ -241,7 +253,10 @@ const Candidates = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
                     <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Email</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Job</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
+                    <span className="flex items-center gap-1">Added <SortIcon field="created" /></span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -275,18 +290,36 @@ const Candidates = () => {
                         <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
                           {candidate.status.replace(/_/g, ' ')}
                         </span>
-                        {candidate.no_answer && (
+                        {(candidate as any).no_answer && (
                           <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
                             no answer
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.email ?? '-'}</td>
+                    <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
+                      {(candidate as any).job_id ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs text-foreground truncate max-w-[140px]">
+                            {jobs.find((j: any) => j.id === (candidate as any).job_id)?.title ?? '—'}
+                          </span>
+                          {(candidate as any).job_status && (
+                            <span className={cn('text-xs px-1.5 py-0.5 rounded w-fit font-medium', JOB_STATUS_COLORS[(candidate as any).job_status] ?? 'bg-muted text-muted-foreground')}>
+                              {(candidate as any).job_status.replace(/_/g, ' ')}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" onClick={() => navigate(`/candidates/${candidate.id}`)}>
+                      {format(new Date(candidate.created_at), 'MMM d, yyyy')}
+                    </td>
                   </tr>
                 ))}
                 {filteredCandidates.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
             </table>
