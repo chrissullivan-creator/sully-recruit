@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
-import { useCandidate, useNotes, useCandidateConversations } from '@/hooks/useData';
+import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -20,7 +20,9 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
 const JOB_STATUSES = [
-  { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
+  { value: 'reached_out',  label: 'Reached Out',  color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'pitched',      label: 'Pitched',      color: 'bg-indigo-500/15 text-indigo-400' },
   { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
   { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
@@ -35,6 +37,8 @@ const CandidateDetail = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: candidate, isLoading } = useCandidate(id);
+  const { data: jobs = [] } = useJobs();
+  const openJobs = (jobs as any[]).filter(j => j.status === 'open' || j.status === 'warm' || j.status === 'hot');
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
   const [enrollOpen, setEnrollOpen] = useState(false);
@@ -187,14 +191,35 @@ const CandidateDetail = () => {
             </div>
 
             {/* Job Association */}
-            {candidate.job_id && (
-              <div className="space-y-3">
-                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Job</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-foreground">
-                    <Target className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="truncate">{jobTitle ?? '...'}</span>
-                  </div>
+            <div className="space-y-3">
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Job</h3>
+              <div className="space-y-2">
+                <Select
+                  value={candidate.job_id ?? 'none'}
+                  onValueChange={async (val) => {
+                    const newJobId = val === 'none' ? null : val;
+                    await supabase.from('candidates').update({
+                      job_id: newJobId,
+                      job_status: newJobId ? 'new' : null,
+                    }).eq('id', id!);
+                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs w-full">
+                    <SelectValue placeholder="Assign a job…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— None —</SelectItem>
+                    {openJobs.map((j: any) => (
+                      <SelectItem key={j.id} value={j.id}>
+                        {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {candidate.job_id && (
                   <Select
                     value={candidate.job_status ?? ''}
                     onValueChange={updateJobStatus}
@@ -213,9 +238,9 @@ const CandidateDetail = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                )}
               </div>
-            )}
+            </div>
 
             <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Details</h3>

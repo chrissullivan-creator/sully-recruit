@@ -45,7 +45,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     }
   }, [open, preselectedSequenceId]);
 
-  const activeSequences = sequences.filter((s) => s.status === 'active' || s.status === 'draft');
+  const activeSequences = sequences.filter((s) => s.status === 'active');
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
   const steps = (selectedSequence?.sequence_steps as any[]) ?? [];
 

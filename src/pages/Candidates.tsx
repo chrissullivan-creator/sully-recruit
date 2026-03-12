@@ -33,6 +33,13 @@ type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
 
 const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed'] as const;
+const STATUS_LABELS: Record<string, string> = {
+  all: 'All',
+  new: 'New',
+  reached_out: 'Reached Out',
+  back_of_resume: 'Back of Resume',
+  placed: 'Placed',
+};
 const statusColors: Record<string, string> = {
   new:            'bg-blue-500/10 text-blue-400 border-blue-500/20',
   reached_out:    'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
@@ -182,8 +189,8 @@ const Candidates = () => {
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs text-muted-foreground font-medium">Status:</span>
             {statusFilters.map((s) => (
-              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="capitalize text-xs">
-                {s === 'all' ? 'All' : s.replace('_', ' ')}
+              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="text-xs">
+                {STATUS_LABELS[s]}
               </Button>
             ))}
           </div>
@@ -288,7 +295,7 @@ const Candidates = () => {
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <div className="flex items-center gap-1.5">
                         <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
-                          {candidate.status.replace(/_/g, ' ')}
+                          {STATUS_LABELS[candidate.status] ?? candidate.status.replace(/_/g, ' ')}
                         </span>
                         {(candidate as any).no_answer && (
                           <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
