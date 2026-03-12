@@ -102,16 +102,15 @@ const Settings = () => {
     send_window_end: '17',
   });
 
-  // Outlook state - fixed SMTP settings, user only provides email/password
-  const [outlookConfig, setOutlookConfig] = useState<IntegrationConfig>({
-    smtp_host: 'smtp-mail.outlook.com',
-    smtp_port: '587',
-    smtp_user: '',
-    smtp_pass: '',
-    from_name: '',
-    from_email: '',
-  });
-  const [outlookActive, setOutlookActive] = useState(false);
+  // Microsoft OAuth state
+  const [msStatus, setMsStatus] = useState<{
+    connected: boolean;
+    email_address?: string;
+    display_name?: string;
+    loading: boolean;
+  }>({ connected: false, loading: true });
+  const [msConnecting, setMsConnecting] = useState(false);
+  const [msDisconnecting, setMsDisconnecting] = useState(false);
 
   // Password visibility
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
@@ -168,6 +167,74 @@ const Settings = () => {
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  // Load Microsoft OAuth status
+  const loadMsStatus = useCallback(async () => {
+    if (!user) return;
+    setMsStatus(s => ({ ...s, loading: true }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/status`,
+        { headers: { Authorization: `Bearer ${session?.access_token}` } }
+      );
+      const data = await res.json();
+      setMsStatus({ ...data, loading: false });
+    } catch {
+      setMsStatus({ connected: false, loading: false });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadMsStatus();
+  }, [loadMsStatus]);
+
+  // Handle ?ms_connected=1 or ?ms_error= redirects from OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ms_connected')) {
+      toast.success('Microsoft account connected!');
+      loadMsStatus();
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('ms_error')) {
+      toast.error(`Microsoft connection failed: ${params.get('ms_error')}`);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [loadMsStatus]);
+
+  const connectMicrosoft = async () => {
+    setMsConnecting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/authorize`,
+        { headers: { Authorization: `Bearer ${session?.access_token}` } }
+      );
+      const { url, error } = await res.json();
+      if (error) throw new Error(error);
+      window.location.href = url;
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start Microsoft OAuth');
+      setMsConnecting(false);
+    }
+  };
+
+  const disconnectMicrosoft = async () => {
+    setMsDisconnecting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/disconnect`,
+        { method: 'POST', headers: { Authorization: `Bearer ${session?.access_token}` } }
+      );
+      setMsStatus({ connected: false, loading: false });
+      toast.success('Microsoft account disconnected');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to disconnect');
+    } finally {
+      setMsDisconnecting(false);
+    }
+  };
 
   // Upsert helper
   const saveIntegration = async (
@@ -571,105 +638,64 @@ Senior Recruiter | Your Company
                       </div>
                     </div>
 
-                    {/* Outlook */}
+                    {/* Microsoft / Outlook OAuth */}
                     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
                           'flex h-10 w-10 items-center justify-center rounded-lg',
-                          outlookActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
+                          msStatus.connected ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <Mail className="h-5 w-5" />
                         </div>
                         <div className="flex-1">
                           <h3 className="text-sm font-semibold text-foreground">Outlook / Microsoft 365</h3>
                           <p className="text-xs text-muted-foreground">
-                            Send emails directly from your Outlook/Microsoft 365 account.
+                            Connect via OAuth — send &amp; receive emails directly in the inbox.
                           </p>
                         </div>
-                        {outlookActive && (
-                          <span className="flex items-center gap-1 text-xs text-success">
+                        {msStatus.connected && (
+                          <span className="flex items-center gap-1 text-xs text-success font-medium">
                             <Check className="h-3.5 w-3.5" /> Connected
                           </span>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5 col-span-2">
-                          <Label className="text-xs">Email Address</Label>
-                          <Input
-                            type="email"
-                            placeholder="you@outlook.com or you@company.com"
-                            value={outlookConfig.smtp_user}
-                            onChange={(e) => {
-                              setOutlookConfig((c) => ({
-                                ...c,
-                                smtp_user: e.target.value,
-                                from_email: e.target.value,
-                              }));
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1.5 col-span-2">
-                          <Label className="text-xs">Password / App Password</Label>
-                          <div className="relative">
-                            <Input
-                              type={showPasswords.outlook_pass ? 'text' : 'password'}
-                              placeholder="••••••••"
-                              value={outlookConfig.smtp_pass}
-                              onChange={(e) => setOutlookConfig((c) => ({ ...c, smtp_pass: e.target.value }))}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => togglePassword('outlook_pass')}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                            >
-                              {showPasswords.outlook_pass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
+                      {msStatus.connected ? (
+                        <div className="flex items-center justify-between rounded-md bg-muted/40 border border-border px-4 py-3">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{msStatus.display_name}</p>
+                            <p className="text-xs text-muted-foreground">{msStatus.email_address}</p>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Use an app password if you have 2FA enabled.
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={disconnectMicrosoft}
+                            disabled={msDisconnecting}
+                            className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                          >
+                            {msDisconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-3">
+                          <p className="text-xs text-muted-foreground">
+                            Sign in with your Microsoft account to enable two-way email sync. Inbound emails will appear in your inbox automatically.
                           </p>
+                          <Button
+                            variant="gold"
+                            size="sm"
+                            onClick={connectMicrosoft}
+                            disabled={msConnecting || msStatus.loading}
+                            className="w-fit"
+                          >
+                            {msConnecting ? (
+                              <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Connecting...</>
+                            ) : (
+                              'Connect Microsoft Account'
+                            )}
+                          </Button>
                         </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">From Name (Optional)</Label>
-                          <Input
-                            placeholder="John Doe"
-                            value={outlookConfig.from_name}
-                            onChange={(e) => setOutlookConfig((c) => ({ ...c, from_name: e.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">SMTP Server</Label>
-                          <Input
-                            value={outlookConfig.smtp_host}
-                            disabled
-                            className="bg-muted/50 cursor-not-allowed"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">SMTP Port</Label>
-                          <Input
-                            value={outlookConfig.smtp_port}
-                            disabled
-                            className="bg-muted/50 cursor-not-allowed"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end">
-                        <Button
-                          variant="gold"
-                          size="sm"
-                          disabled={isSaving('outlook')}
-                          onClick={() => saveIntegration('outlook', outlookConfig, true)}
-                        >
-                          {isSaving('outlook') ? (
-                            <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
-                          ) : (
-                            'Save Outlook Settings'
-                          )}
-                        </Button>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
