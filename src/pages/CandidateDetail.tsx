@@ -10,13 +10,25 @@ import { useCandidate, useNotes, useCandidateConversations } from '@/hooks/useDa
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin, Calendar,
-  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play,
+  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target,
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+
+const JOB_STATUSES = [
+  { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
+  { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
+  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
+  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
+  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
+  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+];
 
 const CandidateDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -28,6 +40,23 @@ const CandidateDetail = () => {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [jobTitle, setJobTitle] = useState<string | null>(null);
+  const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
+
+  // Fetch job title when candidate has a job_id
+  useEffect(() => {
+    if (!candidate?.job_id) { setJobTitle(null); return; }
+    supabase.from('jobs').select('title').eq('id', candidate.job_id).maybeSingle()
+      .then(({ data }) => setJobTitle(data?.title ?? null));
+  }, [candidate?.job_id]);
+
+  const updateJobStatus = async (newStatus: string) => {
+    if (!id) return;
+    setUpdatingJobStatus(true);
+    await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    setUpdatingJobStatus(false);
+  };
 
   if (isLoading) {
     return (
@@ -156,6 +185,37 @@ const CandidateDetail = () => {
                 )}
               </div>
             </div>
+
+            {/* Job Association */}
+            {candidate.job_id && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Job</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-foreground">
+                    <Target className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">{jobTitle ?? '...'}</span>
+                  </div>
+                  <Select
+                    value={candidate.job_status ?? ''}
+                    onValueChange={updateJobStatus}
+                    disabled={updatingJobStatus}
+                  >
+                    <SelectTrigger className="h-7 text-xs w-full">
+                      <SelectValue placeholder="Set status…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {JOB_STATUSES.map(s => (
+                        <SelectItem key={s.value} value={s.value}>
+                          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
+                            {s.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Details</h3>
