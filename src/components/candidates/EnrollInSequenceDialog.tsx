@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useSequences, useCandidates, useContacts } from '@/hooks/useData';
+import { useSequences, useCandidates, useContacts, useIntegrationAccounts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -23,12 +23,15 @@ interface EnrollInSequenceDialogProps {
 
 export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [enrolling, setEnrolling] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
   const { data: sequences = [], isLoading } = useSequences();
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
+  const { data: integrationAccounts = [] } = useIntegrationAccounts();
+  const emailAccounts = (integrationAccounts as any[]).filter(a => a.provider === 'email');
   const queryClient = useQueryClient();
 
   const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0;
@@ -41,9 +44,19 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     if (!open) {
       setSearchQuery('');
       setSelectedPeople([]);
+      setSelectedAccountId('');
       if (!preselectedSequenceId) setSelectedSequenceId('');
+    } else {
+      // Auto-select current user's own email account
+      supabase.auth.getUser().then(({ data }) => {
+        const userId = data.user?.id;
+        if (!userId) return;
+        const mine = emailAccounts.find((a: any) => a.owner_user_id === userId || a.user_id === userId);
+        if (mine) setSelectedAccountId(mine.id);
+        else if (emailAccounts.length === 1) setSelectedAccountId(emailAccounts[0].id);
+      });
     }
-  }, [open, preselectedSequenceId]);
+  }, [open, preselectedSequenceId, emailAccounts.length]);
 
   const activeSequences = sequences.filter((s) => s.status === 'active');
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
@@ -82,6 +95,10 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
 
   const handleEnroll = async () => {
     if (!selectedSequenceId) return;
+    if (!selectedAccountId) {
+      toast.error('Please select a sender account before enrolling');
+      return;
+    }
 
     // Combine all IDs: from candidateIds or people picker
     let idsToEnroll: string[];
@@ -105,6 +122,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           status: 'active',
           current_step_order: 1,
           enrolled_by: userId,
+          integration_account_id: selectedAccountId || null,
         };
       });
 
@@ -169,6 +187,28 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                   </SelectContent>
                 </Select>
               )}
+            </div>
+          )}
+
+          {/* Sender account picker — required */}
+          {emailAccounts.length > 0 && (
+            <div className="space-y-2">
+              <Label>Send From <span className="text-destructive">*</span></Label>
+              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                <SelectTrigger className={!selectedAccountId ? 'border-destructive/50' : ''}>
+                  <SelectValue placeholder="Choose sender account..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {emailAccounts.map((acct: any) => (
+                    <SelectItem key={acct.id} value={acct.id}>
+                      <span className="flex items-center gap-2">
+                        <Mail className="h-3.5 w-3.5" />
+                        {acct.account_label} — {acct.email_address}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 
