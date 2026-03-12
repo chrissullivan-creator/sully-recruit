@@ -8,7 +8,7 @@ import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
 import { EditJobDialog } from '@/components/jobs/EditJobDialog';
-import { useJob, useContacts, useJobSendOuts } from '@/hooks/useData';
+import { useJob, useContacts, useJobSendOuts, useJobCandidates } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -18,8 +18,20 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit, Users,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+const JOB_STATUSES = [
+  { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
+  { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
+  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
+  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
+  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
+  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+];
 
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -28,6 +40,7 @@ const JobDetail = () => {
   const { data: job, isLoading } = useJob(id);
   const { data: contacts = [] } = useContacts();
   const { data: sendOuts = [] } = useJobSendOuts(id);
+  const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState('');
@@ -228,6 +241,67 @@ const JobDetail = () => {
                 Create New Contact
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Linked Candidates */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5 text-accent" />
+              Candidates
+              {jobCandidates.length > 0 && (
+                <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {candidatesLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates...
+              </div>
+            ) : jobCandidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">
+                No candidates linked yet. Enroll candidates in a sequence tagged to this job.
+              </p>
+            ) : (
+              <div className="divide-y divide-border">
+                {(jobCandidates as any[]).map((c) => {
+                  const statusCfg = JOB_STATUSES.find(s => s.value === c.job_status);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between py-3 gap-4"
+                    >
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => navigate(`/candidates/${c.id}`)}
+                      >
+                        <p className="text-sm font-medium text-foreground hover:text-accent truncate">
+                          {c.full_name}
+                        </p>
+                        {(c.current_title || c.current_company) && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {c.current_title}{c.current_title && c.current_company ? ' at ' : ''}{c.current_company}
+                          </p>
+                        )}
+                      </div>
+                      <div className="shrink-0">
+                        {statusCfg ? (
+                          <span className={cn('px-2 py-0.5 rounded text-xs font-medium', statusCfg.color)}>
+                            {statusCfg.label}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground">
+                            No status
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 

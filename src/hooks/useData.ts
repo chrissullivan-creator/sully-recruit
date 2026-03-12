@@ -317,3 +317,93 @@ export function useIntegrationAccounts() {
     },
   });
 }
+
+// Candidates linked to a specific job
+export function useJobCandidates(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['job_candidates', jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('id, first_name, last_name, full_name, current_title, current_company, job_status, status, email')
+        .eq('job_id', jobId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+// Real activity feed — messages sent + notes added + enrollments, scoped to current user
+export function useActivityFeed(limit = 20) {
+  return useQuery({
+    queryKey: ['activity_feed'],
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+
+      const [messagesRes, notesRes, enrollmentsRes] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('id, channel, direction, body, subject, sender_address, recipient_address, sent_at, received_at, candidate_id, contact_id, candidates(full_name), contacts(full_name)')
+          .eq('owner_id', user.id)
+          .order('sent_at', { ascending: false, nullsFirst: false })
+          .limit(limit),
+        supabase
+          .from('notes')
+          .select('id, note, created_at, entity_type, entity_id, created_by')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+          .limit(limit),
+        supabase
+          .from('sequence_enrollments')
+          .select('id, enrolled_at, candidate_id, sequence_id, candidates(full_name), sequences(name)')
+          .eq('enrolled_by', user.id)
+          .order('enrolled_at', { ascending: false })
+          .limit(limit),
+      ]);
+
+      const items: any[] = [];
+
+      for (const msg of messagesRes.data ?? []) {
+        const ts = msg.sent_at || msg.received_at;
+        const personName = (msg.candidates as any)?.full_name || (msg.contacts as any)?.full_name || msg.recipient_address || msg.sender_address;
+        const channelLabel = msg.channel === 'email' ? 'Email' : msg.channel === 'sms' ? 'SMS' : 'LinkedIn';
+        const direction = msg.direction === 'outbound' ? 'sent' : 'received';
+        items.push({
+          id: `msg-${msg.id}`,
+          type: msg.channel === 'email' ? 'email_sent' : msg.channel === 'sms' ? 'sms_sent' : 'linkedin_sent',
+          description: `${channelLabel} ${direction}${personName ? ` — ${personName}` : ''}${msg.subject ? `: ${msg.subject}` : ''}`,
+          timestamp: ts ? new Date(ts) : new Date(),
+          candidateId: msg.candidate_id,
+          contactId: msg.contact_id,
+        });
+      }
+
+      for (const note of notesRes.data ?? []) {
+        items.push({
+          id: `note-${note.id}`,
+          type: 'note_added',
+          description: `Note added on ${note.entity_type}: ${note.note.slice(0, 80)}${note.note.length > 80 ? '…' : ''}`,
+          timestamp: new Date(note.created_at),
+        });
+      }
+
+      for (const enr of enrollmentsRes.data ?? []) {
+        const candName = (enr.candidates as any)?.full_name;
+        const seqName = (enr.sequences as any)?.name;
+        items.push({
+          id: `enr-${enr.id}`,
+          type: 'enrolled',
+          description: `${candName ?? 'Candidate'} enrolled in ${seqName ?? 'sequence'}`,
+          timestamp: enr.enrolled_at ? new Date(enr.enrolled_at) : new Date(),
+          candidateId: enr.candidate_id,
+        });
+      }
+
+      return items.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
+    },
+  });
+}
