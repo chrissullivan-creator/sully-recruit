@@ -4,21 +4,23 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
 import { EditJobDialog } from '@/components/jobs/EditJobDialog';
 import { useJob, useContacts, useJobSendOuts, useJobCandidates } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit, Users,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
+  Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +35,179 @@ const JOB_STATUSES = [
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
 
+// ── Send-out card with inline submittal notes + resume upload ─────────────────
+const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) => {
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [notes, setNotes] = useState(sendOut.submittal_notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const contact = contacts.find((c: any) => c.id === sendOut.contact_id);
+  const stageCfg = JOB_STATUSES.find(s => s.value === sendOut.stage);
+
+  const saveNotes = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('send_outs').update({ submittal_notes: notes }).eq('id', sendOut.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      toast.success('Notes saved');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadResume = async (file: File) => {
+    setUploading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const path = `${session.user.id}/${sendOut.id}_${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('send-outs').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('send-outs').getPublicUrl(path);
+      const { error: dbErr } = await supabase.from('send_outs').update({
+        resume_url: urlData.publicUrl,
+        resume_file_name: file.name,
+      }).eq('id', sendOut.id);
+      if (dbErr) throw dbErr;
+      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      toast.success('Resume uploaded');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card/40 overflow-hidden">
+      {/* Header row — always visible */}
+      <div
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors select-none"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">
+              {sendOut.candidate_name ?? sendOut.candidates?.full_name ?? 'Unknown Candidate'}
+            </p>
+            {contact && (
+              <p className="text-xs text-muted-foreground">Contact: {contact.full_name}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {sendOut.resume_url && (
+            <span title="Resume attached">
+              <FileText className="h-3.5 w-3.5 text-accent" />
+            </span>
+          )}
+          {sendOut.submittal_notes && (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Notes</span>
+          )}
+          {stageCfg && (
+            <span className={cn('px-2 py-0.5 rounded text-xs font-medium', stageCfg.color)}>
+              {stageCfg.label}
+            </span>
+          )}
+          {expanded
+            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </div>
+
+      {/* Expanded: resume + submittal notes */}
+      {expanded && (
+        <div className="px-4 pb-4 pt-3 border-t border-border space-y-5">
+          {/* Resume upload */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Submittal Resume
+            </Label>
+            {sendOut.resume_url ? (
+              <div className="flex items-center gap-3">
+                <a
+                  href={sendOut.resume_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-sm text-accent hover:underline"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {sendOut.resume_file_name ?? 'Resume'}
+                  <ExternalLink className="h-3 w-3 opacity-60" />
+                </a>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                >
+                  Replace
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+                Upload Resume
+              </Button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.doc,.docx"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) uploadResume(file);
+                e.target.value = '';
+              }}
+            />
+          </div>
+
+          {/* Submittal notes */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Submittal Notes
+            </Label>
+            <Textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Why is this candidate a strong fit? Add context for the client, key highlights, any caveats..."
+              className="min-h-[110px] text-sm resize-none"
+            />
+            <Button
+              variant="gold"
+              size="sm"
+              className="h-8"
+              onClick={saveNotes}
+              disabled={saving || notes === (sendOut.submittal_notes ?? '')}
+            >
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              Save Notes
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Main page ────────────────────────────────────────────────────────────────
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -41,44 +216,111 @@ const JobDetail = () => {
   const { data: contacts = [] } = useContacts();
   const { data: sendOuts = [] } = useJobSendOuts(id);
   const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
+
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [editJobOpen, setEditJobOpen] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
-  // Sort contacts: company contacts first
-  const sortedContacts = useMemo(() => {
-    if (!job?.company_id) return contacts;
-    return [...contacts].sort((a: any, b: any) => {
-      const aMatch = a.company_id === job.company_id ? 0 : 1;
-      const bMatch = b.company_id === job.company_id ? 0 : 1;
-      return aMatch - bMatch;
-    });
-  }, [contacts, job?.company_id]);
+  // ── Job contacts (multi) ──────────────────────────────────────────────────
+  const { data: jobContacts = [], refetch: refetchJobContacts } = useQuery({
+    queryKey: ['job_contacts', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_contacts')
+        .select('id, contact_id, is_primary, role, contacts(id, full_name, email, phone, title)')
+        .eq('job_id', id!)
+        .order('is_primary', { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const assignedContactIds = useMemo(
+    () => new Set((jobContacts as any[]).map(jc => jc.contact_id)),
+    [jobContacts]
+  );
 
   const companyContactIds = useMemo(() => {
     if (!job?.company_id) return new Set<string>();
     return new Set(contacts.filter((c: any) => c.company_id === job.company_id).map((c: any) => c.id));
   }, [contacts, job?.company_id]);
 
-  const assignContact = async () => {
+  // Only show contacts not yet assigned
+  const availableSorted = useMemo(() => {
+    return contacts
+      .filter((c: any) => !assignedContactIds.has(c.id))
+      .sort((a: any, b: any) => {
+        const aMatch = companyContactIds.has(a.id) ? 0 : 1;
+        const bMatch = companyContactIds.has(b.id) ? 0 : 1;
+        return aMatch - bMatch;
+      });
+  }, [contacts, assignedContactIds, companyContactIds]);
+
+  const addContact = async () => {
     if (!selectedContactId || !id) return;
     setAssigning(true);
     try {
-      const { error } = await supabase
-        .from('jobs')
-        .update({ contact_id: selectedContactId })
-        .eq('id', id);
+      const isFirst = (jobContacts as any[]).length === 0;
+      const { error } = await supabase.from('job_contacts').insert({
+        job_id: id,
+        contact_id: selectedContactId,
+        is_primary: isFirst,
+      });
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      toast.success('Contact assigned to job');
+      // Keep legacy contact_id in sync for the primary
+      if (isFirst) {
+        await supabase.from('jobs').update({ contact_id: selectedContactId }).eq('id', id);
+        queryClient.invalidateQueries({ queryKey: ['job', id] });
+        queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      }
+      refetchJobContacts();
+      toast.success('Contact added');
       setSelectedContactId('');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to assign contact');
+      toast.error(err.message || 'Failed to add contact');
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const removeContact = async (jobContactId: string, contactId: string, isPrimary: boolean) => {
+    setRemovingId(jobContactId);
+    try {
+      const { error } = await supabase.from('job_contacts').delete().eq('id', jobContactId);
+      if (error) throw error;
+      if (isPrimary) {
+        const remaining = (jobContacts as any[]).filter(jc => jc.id !== jobContactId);
+        if (remaining.length > 0) {
+          await supabase.from('job_contacts').update({ is_primary: true }).eq('id', remaining[0].id);
+          await supabase.from('jobs').update({ contact_id: remaining[0].contact_id }).eq('id', id!);
+        } else {
+          await supabase.from('jobs').update({ contact_id: null }).eq('id', id!);
+        }
+      }
+      refetchJobContacts();
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      toast.success('Contact removed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove contact');
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const setPrimary = async (jobContactId: string, contactId: string) => {
+    try {
+      await supabase.from('job_contacts').update({ is_primary: false }).eq('job_id', id!);
+      await supabase.from('job_contacts').update({ is_primary: true }).eq('id', jobContactId);
+      await supabase.from('jobs').update({ contact_id: contactId }).eq('id', id!);
+      refetchJobContacts();
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      toast.success('Primary contact updated');
+    } catch (err: any) {
+      toast.error(err.message);
     }
   };
 
@@ -99,7 +341,6 @@ const JobDetail = () => {
   }
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
-  const currentContact = contacts.find((c: any) => c.id === job.contact_id);
 
   return (
     <MainLayout>
@@ -125,7 +366,8 @@ const JobDetail = () => {
       />
 
       <div className="p-8 space-y-6 max-w-4xl">
-        {/* Job Info */}
+
+        {/* ── Job Info ──────────────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -137,9 +379,7 @@ const JobDetail = () => {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               <div>
                 <span className="text-muted-foreground">Status</span>
-                <div className="mt-1">
-                  <Badge variant="secondary">{job.status}</Badge>
-                </div>
+                <div className="mt-1"><Badge variant="secondary">{job.status}</Badge></div>
               </div>
               {companyName && (
                 <div>
@@ -149,13 +389,17 @@ const JobDetail = () => {
               )}
               {job.location && (
                 <div>
-                  <span className="text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> Location</span>
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3" /> Location
+                  </span>
                   <p className="mt-1 font-medium text-foreground">{job.location}</p>
                 </div>
               )}
               {job.compensation && (
                 <div>
-                  <span className="text-muted-foreground flex items-center gap-1"><DollarSign className="h-3 w-3" /> Compensation</span>
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <DollarSign className="h-3 w-3" /> Compensation
+                  </span>
                   <p className="mt-1 font-medium text-foreground">{job.compensation}</p>
                 </div>
               )}
@@ -169,73 +413,127 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Current Contact */}
+        {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-accent" />
-              Job Contact
+              Job Contacts
+              {(jobContacts as any[]).length > 0 && (
+                <Badge variant="secondary" className="ml-1">{(jobContacts as any[]).length}</Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {currentContact ? (
-              <div className="rounded-lg border border-border p-3 text-sm">
-                <p className="font-medium text-foreground">{currentContact.full_name}</p>
-                {currentContact.title && <p className="text-muted-foreground">{currentContact.title}</p>}
-                {currentContact.email && <p className="text-muted-foreground">{currentContact.email}</p>}
-                {currentContact.phone && <p className="text-muted-foreground">{currentContact.phone}</p>}
-              </div>
+            {/* Assigned list */}
+            {(jobContacts as any[]).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No contacts assigned yet.</p>
             ) : (
-              <p className="text-sm text-muted-foreground">No contact assigned yet.</p>
+              <div className="space-y-2">
+                {(jobContacts as any[]).map(jc => {
+                  const c = jc.contacts;
+                  return (
+                    <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
+                      <div className="flex-1 min-w-0 text-sm">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-foreground">{c?.full_name}</p>
+                          {jc.is_primary && (
+                            <span className="flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded font-medium">
+                              <Star className="h-2.5 w-2.5 fill-current" /> Primary
+                            </span>
+                          )}
+                          {jc.role && (
+                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                              {jc.role}
+                            </span>
+                          )}
+                        </div>
+                        {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
+                        {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                        {c?.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!jc.is_primary && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => setPrimary(jc.id, jc.contact_id)}
+                          >
+                            Set Primary
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeContact(jc.id, jc.contact_id, jc.is_primary)}
+                          disabled={removingId === jc.id}
+                        >
+                          {removingId === jc.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <X className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
 
-            <div className="flex items-end gap-3">
-              <div className="flex-1 space-y-2">
-                <Label className="text-sm">Assign Existing Contact</Label>
-                <Select value={selectedContactId || 'none'} onValueChange={(v) => setSelectedContactId(v === 'none' ? '' : v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a contact" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Select a contact</SelectItem>
-                    {companyContactIds.size > 0 && (
-                      <>
+            {/* Add contact */}
+            <div className="pt-3 border-t border-border space-y-3">
+              <Label className="text-sm font-medium">Add Contact</Label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <Select
+                    value={selectedContactId || 'none'}
+                    onValueChange={v => setSelectedContactId(v === 'none' ? '' : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a contact…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select a contact…</SelectItem>
+                      {/* Company contacts first */}
+                      {(availableSorted as any[]).some((c: any) => companyContactIds.has(c.id)) && (
                         <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
                           {companyName ?? 'Company'} Contacts
                         </div>
-                        {sortedContacts
-                          .filter((c: any) => companyContactIds.has(c.id))
-                          .map((c: any) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.full_name}{c.title ? ` — ${c.title}` : ''}
-                            </SelectItem>
-                          ))}
-                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t border-border mt-1 pt-1.5">
-                          Other Contacts
-                        </div>
-                      </>
-                    )}
-                    {sortedContacts
-                      .filter((c: any) => !companyContactIds.has(c.id))
-                      .map((c: any) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.full_name}{c.title ? ` — ${c.title}` : ''}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                      )}
+                      {(availableSorted as any[])
+                        .filter((c: any) => companyContactIds.has(c.id))
+                        .map((c: any) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.full_name}{c.title ? ` — ${c.title}` : ''}
+                          </SelectItem>
+                        ))}
+                      {/* Divider if both groups present */}
+                      {(availableSorted as any[]).some((c: any) => companyContactIds.has(c.id)) &&
+                        (availableSorted as any[]).some((c: any) => !companyContactIds.has(c.id)) && (
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t border-border mt-1 pt-1.5">
+                            Other Contacts
+                          </div>
+                        )}
+                      {(availableSorted as any[])
+                        .filter((c: any) => !companyContactIds.has(c.id))
+                        .map((c: any) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.full_name}{c.title ? ` — ${c.title}` : ''}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  variant="gold"
+                  onClick={addContact}
+                  disabled={!selectedContactId || assigning}
+                >
+                  {assigning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Add
+                </Button>
               </div>
-              <Button
-                variant="gold"
-                onClick={assignContact}
-                disabled={!selectedContactId || assigning}
-              >
-                {assigning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-                Assign
-              </Button>
-            </div>
-
-            <div className="pt-2 border-t border-border">
               <Button variant="outline" size="sm" onClick={() => setAddContactOpen(true)}>
                 <UserPlus className="h-4 w-4 mr-1" />
                 Create New Contact
@@ -244,7 +542,7 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Linked Candidates */}
+        {/* ── Linked Candidates ────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -266,13 +564,10 @@ const JobDetail = () => {
               </p>
             ) : (
               <div className="divide-y divide-border">
-                {(jobCandidates as any[]).map((c) => {
+                {(jobCandidates as any[]).map(c => {
                   const statusCfg = JOB_STATUSES.find(s => s.value === c.job_status);
                   return (
-                    <div
-                      key={c.id}
-                      className="flex items-center justify-between py-3 gap-4"
-                    >
+                    <div key={c.id} className="flex items-center justify-between py-3 gap-4">
                       <div
                         className="flex-1 min-w-0 cursor-pointer"
                         onClick={() => navigate(`/candidates/${c.id}`)}
@@ -305,7 +600,25 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Candidates tagged to this job */}
+        {/* ── Send Outs with submittal notes + resume ──────────────────────── */}
+        {(sendOuts as any[]).length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileText className="h-5 w-5 text-accent" />
+                Send Outs
+                <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(sendOuts as any[]).map(so => (
+                <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Pipeline board ───────────────────────────────────────────────── */}
         <SendOutPipeline
           title="Candidates for This Role"
           sendOuts={sendOuts}
