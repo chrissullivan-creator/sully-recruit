@@ -21,10 +21,14 @@ import { Label } from '@/components/ui/label';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
+  Search, ChevronRight,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 const JOB_STATUSES = [
+  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
+  { value: 'reached_out',  label: 'Reached Out',  color: 'bg-sky-500/15 text-sky-400' },
   { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
   { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
   { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
@@ -220,6 +224,8 @@ const JobDetail = () => {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState('');
+  const [contactSearch, setContactSearch] = useState('');
+  const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [editJobOpen, setEditJobOpen] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -534,49 +540,95 @@ const JobDetail = () => {
               </div>
             )}
 
-            {/* Add contact */}
+            {/* Add contact — searchable */}
             <div className="pt-3 border-t border-border space-y-3">
               <Label className="text-sm font-medium">Add Contact</Label>
               <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <Select
-                    value={selectedContactId || 'none'}
-                    onValueChange={v => setSelectedContactId(v === 'none' ? '' : v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a contact…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select a contact…</SelectItem>
-                      {/* Company contacts first */}
-                      {(availableSorted as any[]).some((c: any) => companyContactIds.has(c.id)) && (
-                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                          {companyName ?? 'Company'} Contacts
+                <div className="flex-1 relative">
+                  {/* Selected display */}
+                  {selectedContactId ? (
+                    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                      <span className="flex-1 truncate">
+                        {(() => {
+                          const c = (contacts as any[]).find((c: any) => c.id === selectedContactId);
+                          return c ? `${c.full_name}${c.title ? ` — ${c.title}` : ''}` : 'Selected';
+                        })()}
+                      </span>
+                      <button onClick={() => { setSelectedContactId(''); setContactSearch(''); }} className="text-muted-foreground hover:text-foreground">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                      <Input
+                        className="pl-8 h-9 text-sm"
+                        placeholder="Search contacts…"
+                        value={contactSearch}
+                        onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
+                        onFocus={() => setContactSearchOpen(true)}
+                        onBlur={() => setTimeout(() => setContactSearchOpen(false), 150)}
+                      />
+                      {contactSearchOpen && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-popover shadow-md max-h-56 overflow-y-auto">
+                          {(() => {
+                            const q = contactSearch.toLowerCase();
+                            const filtered = (availableSorted as any[]).filter((c: any) =>
+                              !q ||
+                              c.full_name?.toLowerCase().includes(q) ||
+                              c.title?.toLowerCase().includes(q) ||
+                              c.email?.toLowerCase().includes(q)
+                            );
+                            const companyOnes = filtered.filter((c: any) => companyContactIds.has(c.id));
+                            const others = filtered.filter((c: any) => !companyContactIds.has(c.id));
+                            if (filtered.length === 0) return (
+                              <div className="px-3 py-3 text-sm text-muted-foreground">No contacts found</div>
+                            );
+                            return (
+                              <>
+                                {companyOnes.length > 0 && (
+                                  <>
+                                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 sticky top-0">
+                                      {companyName ?? 'Company'} Contacts
+                                    </div>
+                                    {companyOnes.map((c: any) => (
+                                      <button
+                                        key={c.id}
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
+                                        onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
+                                      >
+                                        <span className="font-medium text-foreground">{c.full_name}</span>
+                                        {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
+                                {others.length > 0 && (
+                                  <>
+                                    {companyOnes.length > 0 && (
+                                      <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 sticky top-0 border-t border-border">
+                                        Other Contacts
+                                      </div>
+                                    )}
+                                    {others.map((c: any) => (
+                                      <button
+                                        key={c.id}
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
+                                        onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
+                                      >
+                                        <span className="font-medium text-foreground">{c.full_name}</span>
+                                        {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
-                      {(availableSorted as any[])
-                        .filter((c: any) => companyContactIds.has(c.id))
-                        .map((c: any) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.full_name}{c.title ? ` — ${c.title}` : ''}
-                          </SelectItem>
-                        ))}
-                      {/* Divider if both groups present */}
-                      {(availableSorted as any[]).some((c: any) => companyContactIds.has(c.id)) &&
-                        (availableSorted as any[]).some((c: any) => !companyContactIds.has(c.id)) && (
-                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t border-border mt-1 pt-1.5">
-                            Other Contacts
-                          </div>
-                        )}
-                      {(availableSorted as any[])
-                        .filter((c: any) => !companyContactIds.has(c.id))
-                        .map((c: any) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.full_name}{c.title ? ` — ${c.title}` : ''}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  )}
                 </div>
                 <Button
                   variant="gold"
@@ -607,59 +659,81 @@ const JobDetail = () => {
           </div>
         )}
 
-        {/* ── Linked Candidates ────────────────────────────────────────────── */}
+        {/* ── Candidates Kanban Board ───────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="h-5 w-5 text-accent" />
-              Candidates
+              Candidate Pipeline
               {jobCandidates.length > 0 && (
                 <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {candidatesLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates...
               </div>
             ) : jobCandidates.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-2">
+              <p className="text-sm text-muted-foreground p-6">
                 No candidates linked yet. Enroll candidates in a sequence tagged to this job.
               </p>
             ) : (
-              <div className="divide-y divide-border">
-                {(jobCandidates as any[]).map(c => {
-                  const statusCfg = JOB_STATUSES.find(s => s.value === c.job_status);
-                  return (
-                    <div key={c.id} className="flex items-center justify-between py-3 gap-4">
+              <div className="overflow-x-auto">
+                <div className="flex gap-0 min-w-max">
+                  {JOB_STATUSES.map((stage, idx) => {
+                    const stageCandidates = (jobCandidates as any[]).filter(c => c.job_status === stage.value);
+                    const isLast = idx === JOB_STATUSES.length - 1;
+                    return (
                       <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => navigate(`/candidates/${c.id}`)}
+                        key={stage.value}
+                        className={cn(
+                          'flex flex-col min-w-[160px] w-[160px] border-r border-border',
+                          isLast && 'border-r-0'
+                        )}
                       >
-                        <p className="text-sm font-medium text-foreground hover:text-accent truncate">
-                          {c.full_name}
-                        </p>
-                        {(c.current_title || c.current_company) && (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {c.current_title}{c.current_title && c.current_company ? ' at ' : ''}{c.current_company}
-                          </p>
-                        )}
-                      </div>
-                      <div className="shrink-0">
-                        {statusCfg ? (
-                          <span className={cn('px-2 py-0.5 rounded text-xs font-medium', statusCfg.color)}>
-                            {statusCfg.label}
+                        {/* Column header */}
+                        <div className={cn(
+                          'px-3 py-2.5 border-b border-border flex items-center justify-between gap-1',
+                        )}>
+                          <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', stage.color)}>
+                            {stage.label}
                           </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground">
-                            No status
-                          </span>
-                        )}
+                          {stageCandidates.length > 0 && (
+                            <span className="text-xs text-muted-foreground font-medium">
+                              {stageCandidates.length}
+                            </span>
+                          )}
+                        </div>
+                        {/* Cards */}
+                        <div className="flex flex-col gap-2 p-2 min-h-[120px]">
+                          {stageCandidates.map((c: any) => (
+                            <div
+                              key={c.id}
+                              onClick={() => navigate(`/candidates/${c.id}`)}
+                              className="group rounded-md border border-border bg-card hover:border-accent/50 hover:bg-accent/5 p-2.5 cursor-pointer transition-colors"
+                            >
+                              <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
+                                {c.first_name} {c.last_name}
+                              </p>
+                              {c.current_title && (
+                                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                  {c.current_title}
+                                </p>
+                              )}
+                              {c.current_company && (
+                                <p className="text-[10px] text-muted-foreground truncate">
+                                  {c.current_company}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </CardContent>
@@ -682,13 +756,6 @@ const JobDetail = () => {
             </CardContent>
           </Card>
         )}
-
-        {/* ── Pipeline board ───────────────────────────────────────────────── */}
-        <SendOutPipeline
-          title="Candidates for This Role"
-          sendOuts={sendOuts}
-          isLoading={isLoading}
-        />
       </div>
 
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
