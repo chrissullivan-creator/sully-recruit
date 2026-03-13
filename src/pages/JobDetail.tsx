@@ -570,7 +570,7 @@ const JobDetail = () => {
                         onBlur={() => setTimeout(() => setContactSearchOpen(false), 150)}
                       />
                       {contactSearchOpen && (
-                        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-popover shadow-md max-h-56 overflow-y-auto">
+                        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card text-foreground shadow-md max-h-56 overflow-y-auto">
                           {(() => {
                             const q = contactSearch.toLowerCase();
                             const filtered = (availableSorted as any[]).filter((c: any) =>
@@ -588,7 +588,7 @@ const JobDetail = () => {
                               <>
                                 {companyOnes.length > 0 && (
                                   <>
-                                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 sticky top-0">
+                                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0">
                                       {companyName ?? 'Company'} Contacts
                                     </div>
                                     {companyOnes.map((c: any) => (
@@ -606,7 +606,7 @@ const JobDetail = () => {
                                 {others.length > 0 && (
                                   <>
                                     {companyOnes.length > 0 && (
-                                      <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 sticky top-0 border-t border-border">
+                                      <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0 border-t border-border">
                                         Other Contacts
                                       </div>
                                     )}
