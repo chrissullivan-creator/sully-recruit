@@ -17,6 +17,9 @@ import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, A
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   pitched:      'bg-blue-500/10 text-blue-400',
@@ -187,24 +190,34 @@ const Candidates = () => {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Status:</span>
-            {statusFilters.map((s) => (
-              <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(s)} className="text-xs">
-                {STATUS_LABELS[s]}
-              </Button>
-            ))}
-          </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                {statusFilters.filter(s => s !== 'all').map(s => (
+                  <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Jobs:</span>
-            <Button variant={jobTagFilter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setJobTagFilter('all')} className="text-xs">
-              All Candidates
-            </Button>
-            {jobs.filter(j => j.status !== 'closed').map((job) => (
-              <Button key={job.id} variant={jobTagFilter === job.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setJobTagFilter(job.id)} className="text-xs max-w-[150px] truncate">
-                {job.title}
-              </Button>
-            ))}
+            <Select value={jobTagFilter} onValueChange={setJobTagFilter}>
+              <SelectTrigger className="h-8 w-52 text-xs">
+                <SelectValue placeholder="All Jobs" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Jobs</SelectItem>
+                {(jobs as any[])
+                  .filter(j => j.status !== 'closed' && j.status !== 'on_hold')
+                  .sort((a, b) => a.title.localeCompare(b.title))
+                  .map(job => (
+                    <SelectItem key={job.id} value={job.id}>
+                      {job.title}{job.company_name ? ` — ${job.company_name}` : ''}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {selectedIds.length > 0 && (
