@@ -20,7 +20,7 @@ import {
 import { Label } from '@/components/ui/label';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
-  Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp,
+  Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -223,8 +223,30 @@ const JobDetail = () => {
   const [assigning, setAssigning] = useState(false);
   const [editJobOpen, setEditJobOpen] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
+  const [instructionsLoaded, setInstructionsLoaded] = useState(false);
+  const [savingInstructions, setSavingInstructions] = useState(false);
 
-  // ── Job contacts (multi) ──────────────────────────────────────────────────
+  // Seed local state from job data once loaded
+  if (job && !instructionsLoaded) {
+    setSubmittalInstructions((job as any).submittal_instructions ?? '');
+    setInstructionsLoaded(true);
+  }
+
+  const saveInstructions = async () => {
+    if (!id) return;
+    setSavingInstructions(true);
+    try {
+      const { error } = await supabase.from('jobs').update({ submittal_instructions: submittalInstructions }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      toast.success('Submittal instructions saved');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSavingInstructions(false);
+    }
+  };
   const { data: jobContacts = [], refetch: refetchJobContacts } = useQuery({
     queryKey: ['job_contacts', id],
     enabled: !!id,
@@ -413,6 +435,37 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
+        {/* ── Submittal Instructions ───────────────────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-accent" />
+              Submittal Instructions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Instructions for submitting candidates to this role — format requirements, what to include, client preferences, etc.
+            </p>
+            <Textarea
+              value={submittalInstructions}
+              onChange={e => setSubmittalInstructions(e.target.value)}
+              placeholder="e.g. Send blind resume only. Include comp expectations and reason for looking. Client requires GPA 3.5+. Submit to hiring manager directly, not HR..."
+              className="min-h-[130px] text-sm resize-none"
+            />
+            <Button
+              variant="gold"
+              size="sm"
+              className="h-8"
+              onClick={saveInstructions}
+              disabled={savingInstructions || submittalInstructions === ((job as any).submittal_instructions ?? '')}
+            >
+              {savingInstructions && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              Save Instructions
+            </Button>
+          </CardContent>
+        </Card>
+
         {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
         <Card>
           <CardHeader>
@@ -541,6 +594,18 @@ const JobDetail = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* ── Submittal Instructions (read-only display under contacts) ────── */}
+        {(job as any).submittal_instructions && (
+          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
+            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
+              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
+            </p>
+            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+              {(job as any).submittal_instructions}
+            </p>
+          </div>
+        )}
 
         {/* ── Linked Candidates ────────────────────────────────────────────── */}
         <Card>
