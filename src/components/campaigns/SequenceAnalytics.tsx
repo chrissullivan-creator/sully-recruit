@@ -17,6 +17,12 @@ interface StepExecution {
   sequence_step_id: string;
   status: string;
   executed_at: string | null;
+  delivered_at?: string | null;
+  opened_at?: string | null;
+  clicked_at?: string | null;
+  bounced_at?: string | null;
+  open_count?: number;
+  click_count?: number;
 }
 
 interface Step {
@@ -55,26 +61,34 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
       .sort((a, b) => a.order - b.order)
       .map((step) => {
         const stepExecs = executions.filter(e => e.sequence_step_id === step.id);
-        const sent = stepExecs.filter(e => e.status === 'sent' || e.status === 'delivered' || e.status === 'completed').length;
-        const opened = stepExecs.filter(e => e.status === 'opened').length;
+        const sent = stepExecs.filter(e => ['sent','delivered','opened','clicked','complained'].includes(e.status)).length;
+        const delivered = stepExecs.filter(e => e.delivered_at || ['delivered','opened','clicked'].includes(e.status)).length;
+        const opened = stepExecs.filter(e => e.opened_at || e.status === 'opened' || e.status === 'clicked').length;
+        const clicked = stepExecs.filter(e => e.clicked_at || e.status === 'clicked').length;
         const replied = stepExecs.filter(e => e.status === 'replied').length;
-        const bounced = stepExecs.filter(e => e.status === 'bounced' || e.status === 'failed').length;
+        const bounced = stepExecs.filter(e => e.bounced_at || e.status === 'bounced' || e.status === 'failed').length;
 
         return {
           name: `Step ${step.order}`,
           channel: step.channel,
           sent,
+          delivered,
           opened,
+          clicked,
           replied,
           bounced,
-          openRate: sent > 0 ? Math.round((opened / sent) * 100) : 0,
+          deliverRate: sent > 0 ? Math.round((delivered / sent) * 100) : 0,
+          openRate: delivered > 0 ? Math.round((opened / delivered) * 100) : 0,
+          clickRate: opened > 0 ? Math.round((clicked / opened) * 100) : 0,
           replyRate: sent > 0 ? Math.round((replied / sent) * 100) : 0,
         };
       });
 
     // Overall stats
     const totalSent = perStep.reduce((a, b) => a + b.sent, 0);
+    const totalDelivered = perStep.reduce((a, b) => a + b.delivered, 0);
     const totalOpened = perStep.reduce((a, b) => a + b.opened, 0);
+    const totalClicked = perStep.reduce((a, b) => a + b.clicked, 0);
     const totalReplied = perStep.reduce((a, b) => a + b.replied, 0);
     const totalBounced = perStep.reduce((a, b) => a + b.bounced, 0);
 
@@ -92,10 +106,14 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
     return {
       totalEnrolled,
       totalSent,
+      totalDelivered,
       totalOpened,
+      totalClicked,
       totalReplied,
       totalBounced,
-      overallOpenRate: totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) : 0,
+      overallDeliverRate: totalSent > 0 ? Math.round((totalDelivered / totalSent) * 100) : 0,
+      overallOpenRate: totalDelivered > 0 ? Math.round((totalOpened / totalDelivered) * 100) : 0,
+      overallClickRate: totalOpened > 0 ? Math.round((totalClicked / totalOpened) * 100) : 0,
       overallReplyRate: totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0,
       perStep,
       funnelData,
@@ -114,12 +132,13 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <SummaryCard icon={<Send className="h-4 w-4" />} label="Sent" value={metrics.totalSent} />
+        <SummaryCard icon={<TrendingUp className="h-4 w-4" />} label="Delivered" value={metrics.totalDelivered} suffix={`${metrics.overallDeliverRate}%`} />
         <SummaryCard icon={<Eye className="h-4 w-4" />} label="Opened" value={metrics.totalOpened} suffix={`${metrics.overallOpenRate}%`} />
+        <SummaryCard icon={<MousePointerClick className="h-4 w-4" />} label="Clicked" value={metrics.totalClicked} suffix={`${metrics.overallClickRate}%`} />
         <SummaryCard icon={<MessageSquare className="h-4 w-4" />} label="Replied" value={metrics.totalReplied} suffix={`${metrics.overallReplyRate}%`} />
-        <SummaryCard icon={<MousePointerClick className="h-4 w-4" />} label="Bounced" value={metrics.totalBounced} />
-        <SummaryCard icon={<TrendingUp className="h-4 w-4" />} label="Enrolled" value={metrics.totalEnrolled} />
+        <SummaryCard icon={<TrendingUp className="h-4 w-4" />} label="Bounced" value={metrics.totalBounced} />
       </div>
 
       {/* Per-Step Bar Chart */}
@@ -141,8 +160,10 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
                 }}
               />
               <Bar dataKey="sent" name="Sent" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="delivered" name="Delivered" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
               <Bar dataKey="opened" name="Opened" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="replied" name="Replied" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="clicked" name="Clicked" fill="hsl(217 91% 60%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="replied" name="Replied" fill="hsl(280 67% 51%)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
@@ -187,10 +208,12 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Step</th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sent</th>
+              <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Delivered</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Opened</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Open %</th>
+              <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Clicked</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Replied</th>
-              <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Reply %</th>
+              <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Bounced</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -199,10 +222,12 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
                 <td className="px-4 py-2.5 font-medium text-foreground">{step.name}</td>
                 <td className="px-4 py-2.5 text-muted-foreground capitalize">{step.channel}</td>
                 <td className="px-4 py-2.5 text-right text-foreground">{step.sent}</td>
+                <td className="px-4 py-2.5 text-right text-foreground">{step.delivered}</td>
                 <td className="px-4 py-2.5 text-right text-foreground">{step.opened}</td>
                 <td className="px-4 py-2.5 text-right text-accent font-medium">{step.openRate}%</td>
+                <td className="px-4 py-2.5 text-right text-foreground">{step.clicked}</td>
                 <td className="px-4 py-2.5 text-right text-foreground">{step.replied}</td>
-                <td className="px-4 py-2.5 text-right text-success font-medium">{step.replyRate}%</td>
+                <td className="px-4 py-2.5 text-right text-destructive font-medium">{step.bounced}</td>
               </tr>
             ))}
           </tbody>
