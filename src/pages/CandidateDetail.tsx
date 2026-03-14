@@ -6,19 +6,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
-  FileText, Sparkles, Loader2, Save, X, ExternalLink, RefreshCw,
-  ChevronDown, ChevronUp,
+  FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
+  DollarSign, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -37,40 +36,84 @@ const JOB_STATUSES = [
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
 
-function JoeSaysContent({ content }: { content: string }) {
-  const lines = content.split('\n');
+const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
+  label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
+  type?: string; placeholder?: string;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setDraft(value ?? ''); }, [value]);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  const save = async () => { setSaving(true); await onSave(draft); setSaving(false); setEditing(false); };
+  const cancel = () => { setDraft(value ?? ''); setEditing(false); };
   return (
-    <div className="space-y-1">
-      {lines.map((line, i) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={i} className="h-1" />;
-        if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-          return <h4 key={i} className="text-sm font-semibold text-accent mt-4 first:mt-0">{trimmed.replace(/\*\*/g, '')}</h4>;
-        }
-        if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
-          return (
-            <div key={i} className="flex items-start gap-2 text-sm text-foreground">
-              <span className="text-accent mt-0.5 shrink-0">•</span>
-              <span>{trimmed.replace(/^[-•]\s+/, '')}</span>
-            </div>
-          );
-        }
-        return <p key={i} className="text-sm text-foreground">{trimmed}</p>;
-      })}
+    <div className="group space-y-0.5">
+      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <Input ref={inputRef} type={type} value={draft} onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
+            className="h-7 text-sm flex-1" placeholder={placeholder} />
+          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-green-400" />}
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={cancel}>
+            <X className="h-3 w-3 text-red-400" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/10 transition-colors" onClick={() => setEditing(true)}>
+          <span className={cn('text-sm flex-1 truncate', value ? 'text-foreground' : 'text-muted-foreground italic')}>
+            {value || placeholder || '—'}
+          </span>
+          <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+        </div>
+      )}
     </div>
   );
-}
+};
 
-function EditField({ label, value, onChange, type = 'text', placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string;
-}) {
+const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
+  label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
+  placeholder?: string; rows?: number;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(value ?? ''); }, [value]);
+  const save = async () => { setSaving(true); await onSave(draft); setSaving(false); setEditing(false); };
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      <Input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder ?? label} className="h-8 text-sm" />
+      <div className="flex items-center justify-between">
+        <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="text-[10px] text-muted-foreground hover:text-accent flex items-center gap-0.5">
+            <Edit className="h-2.5 w-2.5" /> Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="space-y-1.5">
+          <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)} rows={rows}
+            className="w-full rounded-md border border-input bg-background text-foreground p-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+            placeholder={placeholder} />
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="gold" onClick={save} disabled={saving} className="h-7 text-xs">
+              {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null} Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setDraft(value ?? ''); setEditing(false); }} className="h-7 text-xs">Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="text-sm text-foreground rounded-md border border-transparent hover:border-border cursor-pointer p-1.5 -mx-1.5 min-h-8 whitespace-pre-wrap" onClick={() => setEditing(true)}>
+          {value || <span className="text-muted-foreground italic">{placeholder || 'Click to add…'}</span>}
+        </div>
+      )}
     </div>
   );
-}
+};
 
 const CandidateDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -81,62 +124,45 @@ const CandidateDetail = () => {
   const openJobs = (jobs as any[]).filter(j => ['open','warm','hot'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
-
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [generatingJoe, setGeneratingJoe] = useState(false);
-  const [editData, setEditData] = useState<Record<string, string>>({});
+  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
-
-  const { data: latestResume } = useQuery({
-    queryKey: ['latest_resume', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data } = await supabase.from('resumes').select('id, file_path, file_name, created_at')
-        .eq('candidate_id', id!).order('created_at', { ascending: false }).limit(1).maybeSingle();
-      return data;
-    },
-  });
-
-  const { data: resumeSignedUrl } = useQuery({
-    queryKey: ['resume_url', latestResume?.file_path],
-    enabled: !!latestResume?.file_path,
-    queryFn: async () => {
-      const { data } = await supabase.storage.from('resumes').createSignedUrl(latestResume!.file_path, 3600);
-      return data?.signedUrl ?? null;
-    },
-  });
+  const [compExpanded, setCompExpanded] = useState(false);
 
   useEffect(() => {
-    if (candidate && editMode) {
-      setEditData({
-        first_name: candidate.first_name ?? '',
-        last_name: candidate.last_name ?? '',
-        email: candidate.email ?? '',
-        phone: candidate.phone ?? '',
-        linkedin_url: candidate.linkedin_url ?? '',
-        current_title: candidate.current_title ?? '',
-        current_company: candidate.current_company ?? '',
-        location_text: candidate.location_text ?? '',
-        current_base_comp: (candidate as any).current_base_comp?.toString() ?? '',
-        current_bonus_comp: (candidate as any).current_bonus_comp?.toString() ?? '',
-        current_total_comp: (candidate as any).current_total_comp?.toString() ?? '',
-        target_base_comp: (candidate as any).target_base_comp?.toString() ?? '',
-        target_total_comp: (candidate as any).target_total_comp?.toString() ?? '',
-        comp_notes: (candidate as any).comp_notes ?? '',
-        reason_for_leaving: (candidate as any).reason_for_leaving ?? '',
-        target_roles: (candidate as any).target_roles ?? '',
-        target_locations: (candidate as any).target_locations ?? '',
-        work_authorization: (candidate as any).work_authorization ?? '',
-        relocation_preference: (candidate as any).relocation_preference ?? '',
-        back_of_resume_notes: candidate.back_of_resume_notes ?? '',
+    if (!id) return;
+    supabase.from('resumes').select('file_path, created_at').eq('candidate_id', id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => {
+        if (data?.file_path) {
+          const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(data.file_path);
+          setResumeUrl(urlData?.publicUrl ?? null);
+        }
       });
-    }
-  }, [candidate, editMode]);
+  }, [id]);
+
+  useEffect(() => {
+    if (!resumeUrl && candidate?.resume_url) setResumeUrl(candidate.resume_url);
+  }, [candidate?.resume_url]);
+
+  const updateField = async (field: string, value: string) => {
+    if (!id) return;
+    const { error } = await supabase.from('candidates').update({ [field]: value || null }).eq('id', id);
+    if (error) { toast.error(`Failed to update`); return; }
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+  };
+
+  const updateComp = async (field: string, value: string) => {
+    if (!id) return;
+    const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
+    await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+  };
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
@@ -146,50 +172,21 @@ const CandidateDetail = () => {
     setUpdatingJobStatus(false);
   };
 
-  const set = (field: string) => (v: string) => setEditData(prev => ({ ...prev, [field]: v }));
-
-  const handleSave = async () => {
-    if (!id) return;
-    setSaving(true);
-    const update: Record<string, any> = {};
-    Object.entries(editData).forEach(([k, v]) => {
-      if (['current_base_comp','current_bonus_comp','current_total_comp','target_base_comp','target_total_comp'].includes(k)) {
-        update[k] = v ? parseFloat(v.replace(/,/g, '')) : null;
-      } else {
-        update[k] = v || null;
-      }
-    });
-    update.full_name = `${editData.first_name ?? ''} ${editData.last_name ?? ''}`.trim();
-    const { error } = await supabase.from('candidates').update(update).eq('id', id);
-    if (error) { toast.error('Failed to save'); }
-    else {
-      toast.success('Saved');
-      setEditMode(false);
-      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-    }
-    setSaving(false);
-  };
-
   const generateJoeSays = async () => {
     if (!id) return;
     setGeneratingJoe(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-joe-says`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidate_id: id }),
-        }
-      );
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-joe-says`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+        body: JSON.stringify({ candidate_id: id }),
+      });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? 'Failed');
-      toast.success('Joe Says updated');
+      if (!data.success) throw new Error(data.error);
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      toast.success('Joe Says updated');
     } catch (err: any) {
-      toast.error(err.message ?? 'Failed to generate');
+      toast.error(err.message || 'Failed to generate');
     } finally {
       setGeneratingJoe(false);
     }
@@ -199,21 +196,17 @@ const CandidateDetail = () => {
     if (!noteText.trim() || !id) return;
     setSavingNote(true);
     const { error } = await supabase.from('notes').insert({ entity_id: id, entity_type: 'candidate', note: noteText.trim() });
-    if (error) { toast.error('Failed to save note'); }
+    if (error) toast.error('Failed to save note');
     else { toast.success('Note saved'); setNoteText(''); queryClient.invalidateQueries({ queryKey: ['notes', 'candidate', id] }); }
     setSavingNote(false);
   };
 
-  if (isLoading) return (
-    <MainLayout><div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div></MainLayout>
-  );
-
-  if (!candidate) return (
-    <MainLayout><div className="flex items-center justify-center h-full"><p className="text-muted-foreground">Candidate not found.</p></div></MainLayout>
-  );
+  if (isLoading) return <MainLayout><div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div></MainLayout>;
+  if (!candidate) return <MainLayout><div className="flex items-center justify-center h-full"><p className="text-muted-foreground">Candidate not found.</p></div></MainLayout>;
 
   const initials = `${candidate.first_name?.[0] ?? ''}${candidate.last_name?.[0] ?? ''}`;
   const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
+  const c = candidate as any;
 
   return (
     <MainLayout>
@@ -221,27 +214,37 @@ const CandidateDetail = () => {
         <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
         <div className="flex-1">
           <h1 className="text-lg font-semibold text-foreground">{fullName}</h1>
-          <p className="text-sm text-muted-foreground">
-            {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}
-          </p>
+          <p className="text-sm text-muted-foreground">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}><Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence</Button>
-          {editMode ? (
-            <>
-              <Button variant="gold" size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Save className="h-3.5 w-3.5 mr-1" />}Save
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setEditMode(false)}><X className="h-3.5 w-3.5 mr-1" />Cancel</Button>
-            </>
-          ) : (
-            <Button variant="gold-outline" size="sm" onClick={() => setEditMode(true)}><Edit className="h-3.5 w-3.5 mr-1" />Edit</Button>
+          {resumeUrl && (
+            <Button variant="outline" size="sm" onClick={() => setShowResume(!showResume)}>
+              <FileText className="h-3.5 w-3.5 mr-1" />{showResume ? 'Hide Resume' : 'View Resume'}
+            </Button>
           )}
+          <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}>
+            <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
+          </Button>
         </div>
       </div>
 
+      {showResume && resumeUrl && (
+        <div className="border-b border-border">
+          <div className="flex items-center justify-between px-8 py-2 bg-muted/30">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-accent" />
+              <span className="text-sm font-medium">Resume</span>
+              <a href={resumeUrl} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline flex items-center gap-1">
+                Open in new tab <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowResume(false)}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+          <iframe src={resumeUrl} className="w-full h-[500px]" title="Resume" />
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar */}
         <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
@@ -249,76 +252,50 @@ const CandidateDetail = () => {
               <Badge variant="secondary" className="capitalize text-xs">{candidate.status}</Badge>
             </div>
 
-            {/* Contact */}
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Contact</h3>
-              {editMode ? (
-                <div className="space-y-2">
-                  <EditField label="First Name" value={editData.first_name ?? ''} onChange={set('first_name')} />
-                  <EditField label="Last Name" value={editData.last_name ?? ''} onChange={set('last_name')} />
-                  <EditField label="Email" value={editData.email ?? ''} onChange={set('email')} type="email" />
-                  <EditField label="Phone" value={editData.phone ?? ''} onChange={set('phone')} />
-                  <EditField label="LinkedIn URL" value={editData.linkedin_url ?? ''} onChange={set('linkedin_url')} />
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {candidate.email && <div className="flex items-center gap-2 text-sm"><Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><a href={`mailto:${candidate.email}`} className="hover:text-accent truncate">{candidate.email}</a></div>}
-                  {candidate.phone && <div className="flex items-center gap-2 text-sm"><Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span>{candidate.phone}</span></div>}
-                  {candidate.linkedin_url && <div className="flex items-center gap-2 text-sm"><Linkedin className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><a href={candidate.linkedin_url} target="_blank" rel="noreferrer" className="hover:text-accent flex items-center gap-1">LinkedIn <ExternalLink className="h-3 w-3" /></a></div>}
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Contact</h3>
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
+              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." />
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Current Role</h3>
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" />
+              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" />
+            </div>
+
+            <div className="space-y-2">
+              <button className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest w-full" onClick={() => setCompExpanded(!compExpanded)}>
+                <DollarSign className="h-3 w-3" /> Compensation
+                {compExpanded ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+              </button>
+              {compExpanded && (
+                <div className="space-y-2 pl-1">
+                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" />
+                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" />
+                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" />
+                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" />
+                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" />
+                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." />
                 </div>
               )}
-            </section>
+            </div>
 
-            {/* Current Role */}
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Current Role</h3>
-              {editMode ? (
-                <div className="space-y-2">
-                  <EditField label="Title" value={editData.current_title ?? ''} onChange={set('current_title')} />
-                  <EditField label="Company" value={editData.current_company ?? ''} onChange={set('current_company')} />
-                  <EditField label="Location" value={editData.location_text ?? ''} onChange={set('location_text')} />
-                  <EditField label="Work Auth" value={editData.work_authorization ?? ''} onChange={set('work_authorization')} />
-                  <EditField label="Relocation" value={editData.relocation_preference ?? ''} onChange={set('relocation_preference')} />
-                  <EditField label="Target Locations" value={editData.target_locations ?? ''} onChange={set('target_locations')} />
-                  <EditField label="Target Roles" value={editData.target_roles ?? ''} onChange={set('target_roles')} />
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {candidate.current_title && <div className="flex items-center gap-2 text-sm"><Briefcase className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span>{candidate.current_title}</span></div>}
-                  {candidate.current_company && <div className="flex items-center gap-2 text-sm"><Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span>{candidate.current_company}</span></div>}
-                  {(candidate.location_text || (candidate as any).location) && <div className="flex items-center gap-2 text-sm"><MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span>{candidate.location_text ?? (candidate as any).location}</span></div>}
-                </div>
-              )}
-            </section>
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Preferences</h3>
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." />
+              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." />
+            </div>
 
-            {/* Comp */}
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Compensation</h3>
-              {editMode ? (
-                <div className="space-y-2">
-                  <EditField label="Current Base" value={editData.current_base_comp ?? ''} onChange={set('current_base_comp')} placeholder="200000" />
-                  <EditField label="Current Bonus" value={editData.current_bonus_comp ?? ''} onChange={set('current_bonus_comp')} />
-                  <EditField label="Current Total" value={editData.current_total_comp ?? ''} onChange={set('current_total_comp')} />
-                  <EditField label="Target Base" value={editData.target_base_comp ?? ''} onChange={set('target_base_comp')} />
-                  <EditField label="Target Total" value={editData.target_total_comp ?? ''} onChange={set('target_total_comp')} />
-                  <div className="space-y-1"><Label className="text-xs text-muted-foreground">Comp Notes</Label><Textarea value={editData.comp_notes ?? ''} onChange={e => set('comp_notes')(e.target.value)} className="text-sm h-16 resize-none" /></div>
-                  <div className="space-y-1"><Label className="text-xs text-muted-foreground">Reason for Leaving</Label><Textarea value={editData.reason_for_leaving ?? ''} onChange={e => set('reason_for_leaving')(e.target.value)} className="text-sm h-16 resize-none" /></div>
-                </div>
-              ) : (
-                <div className="space-y-1 text-sm">
-                  {(candidate as any).current_base_comp && <div className="flex justify-between"><span className="text-muted-foreground text-xs">Base</span><span className="font-medium">${Number((candidate as any).current_base_comp).toLocaleString()}</span></div>}
-                  {(candidate as any).current_bonus_comp && <div className="flex justify-between"><span className="text-muted-foreground text-xs">Bonus</span><span>${Number((candidate as any).current_bonus_comp).toLocaleString()}</span></div>}
-                  {(candidate as any).current_total_comp && <div className="flex justify-between border-t border-border pt-1"><span className="text-muted-foreground text-xs">Total</span><span className="font-semibold text-accent">${Number((candidate as any).current_total_comp).toLocaleString()}</span></div>}
-                  {(candidate as any).target_total_comp && <div className="flex justify-between text-xs text-muted-foreground"><span>Target</span><span>${Number((candidate as any).target_total_comp).toLocaleString()}</span></div>}
-                  {(candidate as any).reason_for_leaving && <p className="text-xs text-muted-foreground pt-1 border-t border-border"><span className="font-medium text-foreground">Leaving: </span>{(candidate as any).reason_for_leaving}</p>}
-                  {!(candidate as any).current_base_comp && !(candidate as any).current_total_comp && <p className="text-xs text-muted-foreground">No comp data</p>}
-                </div>
-              )}
-            </section>
-
-            {/* Job Association */}
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Active Job</h3>
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Active Job</h3>
               <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
                 const newJobId = val === 'none' ? null : val;
                 await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
@@ -333,132 +310,100 @@ const CandidateDetail = () => {
                 </SelectContent>
               </Select>
               {candidate.job_id && (
-                <Select value={candidate.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
+                <Select value={c.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
                   <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Set status…" /></SelectTrigger>
                   <SelectContent>
-                    {JOB_STATUSES.map(s => <SelectItem key={s.value} value={s.value}><span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span></SelectItem>)}
+                    {JOB_STATUSES.map(s => (
+                      <SelectItem key={s.value} value={s.value}>
+                        <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
-            </section>
+            </div>
 
-            {/* Resume */}
-            {latestResume && (
-              <section className="space-y-2">
-                <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Latest Resume</h3>
-                <div className="rounded-md border border-border bg-muted/20 p-2.5 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-3.5 w-3.5 text-accent shrink-0" />
-                    <span className="text-xs text-foreground truncate flex-1">{latestResume.file_name ?? 'Resume'}</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{format(new Date(latestResume.created_at), 'MMM d, yyyy')}</p>
-                  <div className="flex gap-1.5">
-                    <Button variant="outline" size="sm" className="flex-1 h-6 text-[10px]" onClick={() => setShowResume(!showResume)}>
-                      {showResume ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}
-                      {showResume ? 'Hide' : 'View'}
-                    </Button>
-                    {resumeSignedUrl && (
-                      <Button variant="outline" size="sm" className="h-6 text-[10px]" asChild>
-                        <a href={resumeSignedUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3" /></a>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </section>
-            )}
+            <p className="text-[10px] text-muted-foreground">Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</p>
           </div>
         </aside>
 
-        {/* Main content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs defaultValue="joe-says" className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-6 pt-4 border-b border-border">
+          <Tabs defaultValue="joe" className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-secondary">
-                <TabsTrigger value="joe-says" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" />Joe Says</TabsTrigger>
-                <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" />Communications</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" />Notes</TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" />Activity</TabsTrigger>
+                <TabsTrigger value="joe" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
+                <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
+                <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+                <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
-              {/* Joe Says */}
-              <TabsContent value="joe-says" className="px-6 py-5 mt-0 space-y-4">
-                {showResume && resumeSignedUrl && (
-                  <div className="rounded-lg border border-border overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border">
-                      <span className="text-xs font-medium">{latestResume?.file_name ?? 'Resume'}</span>
-                      <Button variant="ghost" size="sm" className="h-6" onClick={() => setShowResume(false)}><X className="h-3 w-3" /></Button>
-                    </div>
-                    <iframe src={resumeSignedUrl} className="w-full h-[500px]" title="Resume" />
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
+              <TabsContent value="joe" className="px-8 py-5 mt-0">
+                <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-accent" />
-                    <h3 className="text-sm font-semibold text-foreground">Joe Says</h3>
-                    {(candidate as any).joe_says_updated_at && (
-                      <span className="text-[10px] text-muted-foreground">
-                        Updated {format(new Date((candidate as any).joe_says_updated_at), 'MMM d, h:mm a')}
-                      </span>
+                    <Sparkles className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Joe Says</h2>
+                    {c.joe_says_updated_at && (
+                      <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
                     )}
                   </div>
-                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe} className="h-7 text-xs">
-                    {generatingJoe
-                      ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Generating…</>
-                      : <><RefreshCw className="h-3 w-3 mr-1" />{(candidate as any).joe_says ? 'Regenerate' : 'Generate'}</>
-                    }
+                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                    {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                    {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
                   </Button>
                 </div>
 
-                {(candidate as any).joe_says ? (
-                  <div className="rounded-lg border border-accent/20 bg-accent/5 p-4">
-                    <JoeSaysContent content={(candidate as any).joe_says} />
+                {generatingJoe ? (
+                  <div className="flex items-center gap-3 py-10 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-sm">Joe is analyzing this candidate...</span>
+                  </div>
+                ) : c.joe_says ? (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1">
+                    {(c.joe_says as string).split('\n').map((line: string, i: number) => (
+                      line.trim() ? (
+                        <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
+                      ) : <div key={i} className="h-1" />
+                    ))}
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-dashed border-border p-8 text-center space-y-3">
-                    <Sparkles className="h-8 w-8 text-muted-foreground mx-auto" />
-                    <p className="text-sm text-muted-foreground">No intelligence brief yet.</p>
-                    <p className="text-xs text-muted-foreground max-w-xs mx-auto">Joe will analyze the resume, notes, communications, and sequence history to write a structured brief.</p>
-                    <Button variant="gold" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
-                      {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-                      Generate Joe Says
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No Joe Says yet</p>
+                    <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
+                    <Button variant="gold" size="sm" onClick={generateJoeSays}>
+                      <Sparkles className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
                     </Button>
                   </div>
                 )}
-
-                <div className="space-y-2 pt-3 border-t border-border">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Back of Resume Notes</h4>
-                  {editMode ? (
-                    <Textarea value={editData.back_of_resume_notes ?? ''} onChange={e => set('back_of_resume_notes')(e.target.value)} className="text-sm min-h-[100px]" placeholder="Internal notes visible only to recruiters…" />
-                  ) : candidate.back_of_resume_notes ? (
-                    <p className="text-sm text-foreground whitespace-pre-wrap">{candidate.back_of_resume_notes}</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No back of resume notes. Click Edit to add.</p>
-                  )}
-                </div>
               </TabsContent>
 
-              {/* Communications */}
-              <TabsContent value="communications" className="px-6 py-5 mt-0">
+              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
+                <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
+                <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
+                <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
+              </TabsContent>
+
+              <TabsContent value="communications" className="px-8 py-5 mt-0">
                 <div className="flex items-center gap-2 mb-5">
-                  <Button variant="outline" size="sm"><Mail className="h-3.5 w-3.5 mr-1" />Email</Button>
-                  <Button variant="outline" size="sm"><Phone className="h-3.5 w-3.5 mr-1" />Call</Button>
-                  <Button variant="outline" size="sm"><Linkedin className="h-3.5 w-3.5 mr-1" />LinkedIn</Button>
-                  <Button variant="outline" size="sm"><MessageSquare className="h-3.5 w-3.5 mr-1" />SMS</Button>
+                  <Button variant="outline" size="sm"><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
+                  <Button variant="outline" size="sm"><Phone className="h-3.5 w-3.5 mr-1" /> Call</Button>
+                  <Button variant="outline" size="sm"><Linkedin className="h-3.5 w-3.5 mr-1" /> LinkedIn</Button>
+                  <Button variant="outline" size="sm"><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
                 </div>
                 {(conversations as any[]).length === 0 ? (
                   <p className="text-sm text-muted-foreground">No communications yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {(conversations as any[]).map((conv: any) => (
+                    {(conversations as any[]).map((conv) => (
                       <div key={conv.id} className="rounded-lg border border-border p-4">
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between mb-1.5">
                           <span className="text-sm font-medium capitalize">{conv.channel}</span>
                           <span className="text-xs text-muted-foreground">{conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}</span>
                         </div>
-                        {conv.subject && <p className="text-sm mb-1">{conv.subject}</p>}
+                        {conv.subject && <p className="text-sm mb-0.5">{conv.subject}</p>}
                         {conv.last_message_preview && <p className="text-xs text-muted-foreground">{conv.last_message_preview}</p>}
                       </div>
                     ))}
@@ -466,17 +411,15 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              {/* Notes */}
-              <TabsContent value="notes" className="px-6 py-5 mt-0 space-y-4">
-                <div className="space-y-2">
-                  <Textarea placeholder="Add a note..." value={noteText} onChange={e => setNoteText(e.target.value)} className="h-24 resize-none text-sm" />
-                  <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()}>
-                    {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}Save Note
-                  </Button>
-                </div>
+              <TabsContent value="notes" className="px-8 py-5 mt-0 space-y-4">
+                <textarea placeholder="Add a note..." value={noteText} onChange={e => setNoteText(e.target.value)}
+                  className="w-full h-24 rounded-lg border border-input bg-background text-foreground p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none" />
+                <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()}>
+                  {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
+                </Button>
                 {(notes as any[]).length > 0 ? (
                   <div className="space-y-3">
-                    {(notes as any[]).map((n: any) => (
+                    {(notes as any[]).map((n) => (
                       <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-4">
                         <p className="text-sm whitespace-pre-wrap">{n.note}</p>
                         <p className="text-xs text-muted-foreground mt-2">{format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}</p>
@@ -486,8 +429,7 @@ const CandidateDetail = () => {
                 ) : <p className="text-sm text-muted-foreground">No notes yet.</p>}
               </TabsContent>
 
-              {/* Activity */}
-              <TabsContent value="activity" className="px-6 py-5 mt-0">
+              <TabsContent value="activity" className="px-8 py-5 mt-0">
                 <p className="text-sm text-muted-foreground">Activity history will appear here.</p>
               </TabsContent>
             </ScrollArea>
