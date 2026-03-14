@@ -42,8 +42,8 @@ export function Sidebar() {
         <div className="flex items-center gap-3">
           <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
           <div>
-            <h1 className="text-base font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
-            <p className="text-[9px] tracking-widest text-gold uppercase -mt-0.5">Sully Recruit</p>
+            <h1 className="text-xs font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
+            <p className="text-[7px] tracking-widest text-gold uppercase -mt-0.5">Sully Recruit</p>
           </div>
         </div>
         <NotificationBell />
@@ -61,7 +61,7 @@ export function Sidebar() {
                 key={item.name}
                 to={item.href}
                 className={cn(
-                  'group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  'group flex items-center gap-3 rounded-md px-3 py-2 text-xs font-medium transition-all duration-150',
                   isActive
                     ? 'bg-sidebar-accent text-sidebar-primary'
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
@@ -80,15 +80,15 @@ export function Sidebar() {
       {/* User section */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-foreground">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-xs font-medium text-accent-foreground">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.user_metadata?.display_name || 'User'}</p>
-            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+            <p className="text-xs font-medium text-sidebar-foreground truncate">{user?.user_metadata?.display_name || 'User'}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
           </div>
           <button onClick={handleSignOut} className="text-muted-foreground hover:text-foreground transition-colors" title="Sign out">
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3 w-3" />
           </button>
         </div>
       </div>

@@ -13,7 +13,7 @@ import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
 import { useCandidates, useJobs } from '@/hooks/useData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
@@ -50,6 +50,8 @@ const statusColors: Record<string, string> = {
   placed:         'bg-success/10 text-success border-success/20',
 };
 
+const ITEMS_PER_PAGE = 50;
+
 const Candidates = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('list');
@@ -60,6 +62,7 @@ const Candidates = () => {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const { data: candidates = [], isLoading } = useCandidates();
   const { data: jobs = [] } = useJobs();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -97,6 +100,16 @@ const Candidates = () => {
     return list;
   }, [candidates, searchQuery, statusFilter, jobTagFilter, sortField, sortDir]);
 
+  // Reset to page 1 when filters change
+  useMemo(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, jobTagFilter, sortField, sortDir]);
+
+  const totalPages = Math.ceil(filteredCandidates.length / ITEMS_PER_PAGE);
+  const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const paginatedCandidates = filteredCandidates.slice(startIdx, endIdx);
+
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -118,10 +131,13 @@ const Candidates = () => {
   };
 
   const toggleAll = () => {
-    if (selectedIds.length === filteredCandidates.length) {
-      setSelectedIds([]);
+    const pageIds = paginatedCandidates.map((c) => c.id);
+    if (pageIds.every((id) => selectedIds.includes(id))) {
+      setSelectedIds(selectedIds.filter((id) => !pageIds.includes(id)));
     } else {
-      setSelectedIds(filteredCandidates.map((c) => c.id));
+      const newIds = new Set(selectedIds);
+      pageIds.forEach((id) => newIds.add(id));
+      setSelectedIds(Array.from(newIds));
     }
   };
 
@@ -233,15 +249,15 @@ const Candidates = () => {
             </>
           )}
 
-          {filteredCandidates.length > 0 && selectedIds.length !== filteredCandidates.length && (
+          {paginatedCandidates.length > 0 && !paginatedCandidates.every((c) => selectedIds.includes(c.id)) && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
-              Add All ({filteredCandidates.length})
+              Add Page ({paginatedCandidates.length})
             </Button>
           )}
 
-          {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 && (
+          {paginatedCandidates.length > 0 && paginatedCandidates.every((c) => selectedIds.includes(c.id)) && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
-              Deselect All
+              Deselect Page
             </Button>
           )}
         </div>
@@ -257,7 +273,7 @@ const Candidates = () => {
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <Checkbox
-                      checked={selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0}
+                      checked={paginatedCandidates.length > 0 && paginatedCandidates.every((c) => selectedIds.includes(c.id))}
                       onCheckedChange={toggleAll}
                     />
                   </th>
@@ -280,7 +296,7 @@ const Candidates = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredCandidates.map((candidate) => (
+                {paginatedCandidates.map((candidate) => (
                   <tr key={candidate.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -343,6 +359,47 @@ const Candidates = () => {
                 )}
               </tbody>
             </table>
+            {filteredCandidates.length > 0 && (
+              <div className="flex items-center justify-between bg-secondary px-4 py-3 text-sm">
+                <div className="text-muted-foreground">
+                  Showing {startIdx + 1} to {Math.min(endIdx, filteredCandidates.length)} of {filteredCandidates.length} candidates
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={cn(
+                          'h-8 w-8 rounded text-xs font-medium transition-colors',
+                          page === currentPage
+                            ? 'bg-accent text-accent-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
