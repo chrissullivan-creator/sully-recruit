@@ -46,6 +46,9 @@ const CandidateDetail = () => {
   const [saving, setSaving] = useState(false);
   const [jobTitle, setJobTitle] = useState<string | null>(null);
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Fetch job title when candidate has a job_id
   useEffect(() => {
@@ -53,6 +56,43 @@ const CandidateDetail = () => {
     supabase.from('jobs').select('title').eq('id', candidate.job_id).maybeSingle()
       .then(({ data }) => setJobTitle(data?.title ?? null));
   }, [candidate?.job_id]);
+
+  // Generate candidate summary on load
+  useEffect(() => {
+    if (!candidate || !notes || !conversations) return;
+
+    const generateSummary = async () => {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-candidate-summary', {
+          body: {
+            candidateName: fullName,
+            communications: conversations,
+            notes: notes,
+            jobs: candidate.job_id ? [{ title: candidate.current_title, company: candidate.current_company, job_status: candidate.job_status }] : [],
+            currentTitle: candidate.current_title,
+            currentCompany: candidate.current_company,
+            location: candidate.location,
+          },
+        });
+
+        if (error) {
+          setSummaryError(error.message || 'Failed to generate summary');
+          console.error('Summary generation error:', error);
+        } else {
+          setSummary(data?.summary || null);
+        }
+      } catch (err) {
+        setSummaryError(err instanceof Error ? err.message : 'Unknown error');
+        console.error('Summary error:', err);
+      } finally {
+        setSummaryLoading(false);
+      }
+    };
+
+    generateSummary();
+  }, [candidate, notes, conversations, fullName]);
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
@@ -132,7 +172,21 @@ const CandidateDetail = () => {
       </div>
 
       {/* Profile section */}
-      <div className="px-8 py-6 border-b border-border">
+      <div className="px-8 py-6 border-b border-border space-y-6">
+        {/* Summary section */}
+        {(summary || summaryLoading || summaryError) && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">AI Summary</h3>
+            {summaryLoading ? (
+              <p className="text-sm text-muted-foreground italic">Generating summary...</p>
+            ) : summaryError ? (
+              <p className="text-sm text-red-400">{summaryError}</p>
+            ) : (
+              <p className="text-sm text-foreground leading-relaxed">{summary}</p>
+            )}
+          </div>
+        )}
+
         <div className="flex gap-6">
           {/* Picture and basic info */}
           <div className="flex flex-col items-center">
