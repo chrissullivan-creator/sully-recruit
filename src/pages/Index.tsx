@@ -62,7 +62,7 @@ const Dashboard = () => {
                 {isLoading ? 'Loading your stats...' : (
                   <>
                     You have <span className="font-semibold text-foreground">{metrics?.activeJobs ?? 0} active jobs</span> and{' '}
-                    <span className="font-semibold text-foreground">{metrics?.activeCandidates ?? 0} candidates</span>.
+                    <span className="font-semibold text-foreground">{metrics?.totalCandidates ?? 0} candidates</span> in pipeline.
                   </>
                 )}
               </p>
@@ -72,19 +72,20 @@ const Dashboard = () => {
           <div className="absolute -right-2 -bottom-8 h-24 w-24 rounded-full bg-accent/5 blur-xl" />
         </div>
 
-        {/* Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Primary Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <MetricCard label="Active Jobs" value={isLoading ? '...' : (metrics?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
-          <MetricCard label="Active Candidates" value={isLoading ? '...' : (metrics?.activeCandidates ?? 0)} icon={<Users className="h-5 w-5" />} />
-          <MetricCard label="Interviews" value={isLoading ? '...' : (metrics?.interviewsThisWeek ?? 0)} icon={<Calendar className="h-5 w-5" />} />
-          <MetricCard label="Offers Out" value={isLoading ? '...' : (metrics?.offersOut ?? 0)} icon={<FileText className="h-5 w-5" />} />
+          <MetricCard label="New" value={isLoading ? '...' : (metrics?.newCandidates ?? 0)} icon={<Users className="h-5 w-5" />} />
+          <MetricCard label="Contacted" value={isLoading ? '...' : (metrics?.contactedCandidates ?? 0)} icon={<Mail className="h-5 w-5" />} />
+          <MetricCard label="Pitched" value={isLoading ? '...' : (metrics?.pitchedCandidates ?? 0)} icon={<Target className="h-5 w-5" />} />
         </div>
 
-        {/* Secondary Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard label="Calls Today" value={isLoading ? '...' : (metrics?.callsToday ?? 0)} icon={<Phone className="h-5 w-5" />} />
-          <MetricCard label="Emails Sent" value={isLoading ? '...' : (metrics?.emailsSent ?? 0)} icon={<Mail className="h-5 w-5" />} />
-          <MetricCard label="Response Rate" value={isLoading ? '...' : `${((metrics?.responseRate ?? 0) * 100).toFixed(0)}%`} icon={<TrendingUp className="h-5 w-5" />} />
+        {/* Pipeline Stage Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <MetricCard label="Send Out" value={isLoading ? '...' : (metrics?.sendOutCandidates ?? 0)} icon={<FileText className="h-5 w-5" />} />
+          <MetricCard label="Submitted" value={isLoading ? '...' : (metrics?.submittedCandidates ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
+          <MetricCard label="Interviewing" value={isLoading ? '...' : (metrics?.interviewingCandidates ?? 0)} icon={<Calendar className="h-5 w-5" />} />
+          <MetricCard label="Offers Out" value={isLoading ? '...' : (metrics?.offerCandidates ?? 0)} icon={<Phone className="h-5 w-5" />} />
         </div>
 
         {/* Tasks + Activity Feed */}

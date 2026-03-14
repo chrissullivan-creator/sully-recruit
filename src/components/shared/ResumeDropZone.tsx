@@ -55,6 +55,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [batchDone, setBatchDone] = useState(false);
+  const [isSingleParsing, setIsSingleParsing] = useState(false);
 
   const update = (field: keyof ParsedData, value: string) =>
     setParsed((prev) => prev ? { ...prev, [field]: value } : null);
@@ -67,6 +68,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setBatchProgress(0);
     setBatchTotal(0);
     setBatchDone(false);
+    setIsSingleParsing(false);
   };
 
   // ── Upload + parse a single file, returns {file_path, file_name} ───────────
@@ -94,24 +96,34 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     if (valid.length === 1) {
       setParsed(null);
       setBatchMode(false);
+      setIsSingleParsing(true);
 
       try {
         setBatchProgress(0);
         setBatchTotal(1);
         const { file_path, file_name } = await uploadFile(valid[0], session);
 
-        const resp = await fetch(PROCESS_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ file_path, file_name }),
-        });
+        const ctrl1 = new AbortController();
+        const t1 = setTimeout(() => ctrl1.abort(), 65000);
+        let resp: Response;
+        try {
+          resp = await fetch(PROCESS_URL, {
+            method: 'POST',
+            signal: ctrl1.signal,
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ file_path, file_name }),
+          });
+        } finally {
+          clearTimeout(t1);
+        }
 
-        const result = await resp.json();
-        if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
+        let result: any;
+        try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status} — parse service error`); }
+        if (!resp.ok || !result.success) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
 
         const data = result.parsed;
         setParsed({
@@ -128,10 +140,13 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           candidate_id:    result.candidate_id || null,
         });
         setBatchProgress(1);
+        setIsSingleParsing(false);
         toast.success(result.candidate_id ? 'Resume parsed — review below' : 'Resume parsed');
       } catch (err: any) {
         toast.error(err.message || 'Failed to process resume');
         setBatchProgress(0);
+        setBatchTotal(0);
+        setIsSingleParsing(false);
       }
       return;
     }
@@ -150,17 +165,26 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       try {
         const { file_path, file_name } = await uploadFile(file, session);
 
-        const resp = await fetch(PROCESS_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ file_path, file_name }),
-        });
+        const ctrl2 = new AbortController();
+        const t2 = setTimeout(() => ctrl2.abort(), 65000);
+        let resp: Response;
+        try {
+          resp = await fetch(PROCESS_URL, {
+            method: 'POST',
+            signal: ctrl2.signal,
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ file_path, file_name }),
+          });
+        } finally {
+          clearTimeout(t2);
+        }
 
-        const result = await resp.json();
+        let result: any;
+        try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status}`); }
         if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
 
         results.push({
@@ -316,7 +340,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         )}
 
         {/* ── Single file parsing spinner ── */}
-        {!parsed && !batchMode && batchTotal === 1 && batchProgress === 0 && (
+        {isSingleProcessing && (
           <div className="flex items-center gap-3 py-2">
             <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
             <p className="text-sm text-muted-foreground">Uploading and parsing...</p>

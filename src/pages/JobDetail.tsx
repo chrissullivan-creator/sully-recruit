@@ -707,7 +707,7 @@ const JobDetail = () => {
                           )}
                         </div>
                         {/* Cards */}
-                        <div className="flex flex-col gap-2 p-2 min-h-[120px]">
+                        <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
                           {stageCandidates.map((c: any) => (
                             <div
                               key={c.id}

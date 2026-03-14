@@ -281,19 +281,28 @@ export function useDashboardMetrics() {
     queryFn: async () => {
       const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
         supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, status', { count: 'exact' }).eq('status', 'active'),
+        supabase.from('candidates').select('id, job_status'),
         supabase.from('send_outs').select('id, stage'),
       ]);
 
+      const candidates = candidatesRes.data ?? [];
       const sendOuts = sendOutsRes.data ?? [];
-      const interviews = sendOuts.filter((s) => s.stage === 'interview').length;
-      const offers = sendOuts.filter((s) => s.stage === 'offer').length;
+
+      const countByJobStatus = (status: string) => candidates.filter(c => c.job_status === status).length;
 
       return {
         activeJobs: jobsRes.count ?? 0,
-        activeCandidates: candidatesRes.count ?? 0,
-        interviewsThisWeek: interviews,
-        offersOut: offers,
+        totalCandidates: candidates.length,
+        newCandidates: countByJobStatus('new'),
+        contactedCandidates: countByJobStatus('reached_out'),
+        pitchedCandidates: countByJobStatus('pitched'),
+        sendOutCandidates: countByJobStatus('send_out'),
+        submittedCandidates: countByJobStatus('submitted'),
+        interviewingCandidates: countByJobStatus('interviewing'),
+        offerCandidates: countByJobStatus('offer'),
+        placedCandidates: countByJobStatus('placed'),
+        interviewsThisWeek: sendOuts.filter((s) => s.stage === 'interview').length,
+        offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
         callsToday: 0,
         emailsSent: 0,
         responseRate: 0,
