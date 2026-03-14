@@ -19,6 +19,7 @@ import Calls from "./pages/Calls";
 import Tasks from "./pages/Tasks";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
+import MicrosoftCallback from "./pages/MicrosoftCallback";
 import { ResumeSearch } from "./pages/ResumeSearch";
 import NotFound from "./pages/NotFound";
 
@@ -33,6 +34,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/auth/microsoft/callback" element={<MicrosoftCallback />} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
             <Route path="/inbox" element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
             <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
