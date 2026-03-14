@@ -50,6 +50,10 @@ const CandidateDetail = () => {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
+  // Calculate these early so they're available in useEffect dependencies
+  const initials = `${candidate?.first_name?.[0] ?? ''}${candidate?.last_name?.[0] ?? ''}`;
+  const fullName = candidate?.full_name ?? `${candidate?.first_name ?? ''} ${candidate?.last_name ?? ''}`;
+
   // Fetch job title when candidate has a job_id
   useEffect(() => {
     if (!candidate?.job_id) { setJobTitle(null); return; }
@@ -139,9 +143,6 @@ const CandidateDetail = () => {
     }
     setSaving(false);
   };
-
-  const initials = `${candidate.first_name?.[0] ?? ''}${candidate.last_name?.[0] ?? ''}`;
-  const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
 
   return (
     <MainLayout>
