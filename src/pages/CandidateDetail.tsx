@@ -143,7 +143,7 @@ const CandidateDetail = () => {
           </div>
 
           {/* Information grid */}
-          <div className="flex-1 grid grid-cols-2 gap-6">
+          <div className="flex-1 grid grid-cols-3 gap-6">
             <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</h3>
               <div className="space-y-2">
@@ -193,57 +193,6 @@ const CandidateDetail = () => {
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Job</h3>
-              <div className="space-y-2">
-                <Select
-                  value={candidate.job_id ?? 'none'}
-                  onValueChange={async (val) => {
-                    const newJobId = val === 'none' ? null : val;
-                    await supabase.from('candidates').update({
-                      job_id: newJobId,
-                      job_status: newJobId ? 'new' : null,
-                    }).eq('id', id!);
-                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                  }}
-                >
-                  <SelectTrigger className="h-7 text-xs w-full">
-                    <SelectValue placeholder="Assign a job…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {openJobs.map((j: any) => (
-                      <SelectItem key={j.id} value={j.id}>
-                        {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {candidate.job_id && (
-                  <Select
-                    value={candidate.job_status ?? ''}
-                    onValueChange={updateJobStatus}
-                    disabled={updatingJobStatus}
-                  >
-                    <SelectTrigger className="h-7 text-xs w-full">
-                      <SelectValue placeholder="Set status…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {JOB_STATUSES.map(s => (
-                        <SelectItem key={s.value} value={s.value}>
-                          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
-                            {s.label}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Details</h3>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
@@ -286,11 +235,65 @@ const CandidateDetail = () => {
 
           <ScrollArea className="flex-1">
             <TabsContent value="jobs" className="px-8 py-4 mt-0">
-              <p className="text-sm text-muted-foreground">Job information will appear here.</p>
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-foreground">Active Job</h3>
+                  <div className="space-y-2">
+                    <Select
+                      value={candidate.job_id ?? 'none'}
+                      onValueChange={async (val) => {
+                        const newJobId = val === 'none' ? null : val;
+                        await supabase.from('candidates').update({
+                          job_id: newJobId,
+                          job_status: newJobId ? 'new' : null,
+                        }).eq('id', id!);
+                        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                        toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm w-full max-w-sm">
+                        <SelectValue placeholder="Assign a job…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— None —</SelectItem>
+                        {openJobs.map((j: any) => (
+                          <SelectItem key={j.id} value={j.id}>
+                            {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {candidate.job_id && (
+                      <Select
+                        value={candidate.job_status ?? ''}
+                        onValueChange={updateJobStatus}
+                        disabled={updatingJobStatus}
+                      >
+                        <SelectTrigger className="h-9 text-sm w-full max-w-sm">
+                          <SelectValue placeholder="Set status…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {JOB_STATUSES.map(s => (
+                            <SelectItem key={s.value} value={s.value}>
+                              <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
+                                {s.label}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="sequences" className="px-8 py-4 mt-0">
-              <p className="text-sm text-muted-foreground">Sequence information will appear here.</p>
+              <div className="space-y-4">
+                {/* Placeholder for enrolled sequences */}
+                <p className="text-sm text-muted-foreground">No sequences enrolled.</p>
+              </div>
             </TabsContent>
 
             <TabsContent value="resume" className="px-8 py-4 mt-0">
