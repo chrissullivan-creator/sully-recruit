@@ -226,7 +226,7 @@ const Candidates = () => {
                 <Play className="h-3.5 w-3.5" />
                 Bulk Actions ({selectedIds.length})
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+              <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)} style={{ borderColor: '#1c5f20' }}>
                 <Play className="h-3.5 w-3.5" />
                 Enroll in Sequence ({selectedIds.length})
               </Button>
