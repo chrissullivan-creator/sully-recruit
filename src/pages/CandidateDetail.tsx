@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin, Calendar,
-  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target,
+  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target, FileText,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -46,6 +46,13 @@ const CandidateDetail = () => {
   const [saving, setSaving] = useState(false);
   const [jobTitle, setJobTitle] = useState<string | null>(null);
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  // Calculate these early so they're available in useEffect dependencies
+  const initials = `${candidate?.first_name?.[0] ?? ''}${candidate?.last_name?.[0] ?? ''}`;
+  const fullName = candidate?.full_name ?? `${candidate?.first_name ?? ''} ${candidate?.last_name ?? ''}`;
 
   // Fetch job title when candidate has a job_id
   useEffect(() => {
@@ -53,6 +60,43 @@ const CandidateDetail = () => {
     supabase.from('jobs').select('title').eq('id', candidate.job_id).maybeSingle()
       .then(({ data }) => setJobTitle(data?.title ?? null));
   }, [candidate?.job_id]);
+
+  // Generate candidate summary on load
+  useEffect(() => {
+    if (!candidate || !notes || !conversations) return;
+
+    const generateSummary = async () => {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-candidate-summary', {
+          body: {
+            candidateName: fullName,
+            communications: conversations,
+            notes: notes,
+            jobs: candidate.job_id ? [{ title: candidate.current_title, company: candidate.current_company, job_status: candidate.job_status }] : [],
+            currentTitle: candidate.current_title,
+            currentCompany: candidate.current_company,
+            location: candidate.location,
+          },
+        });
+
+        if (error) {
+          setSummaryError(error.message || 'Failed to generate summary');
+          console.error('Summary generation error:', error);
+        } else {
+          setSummary(data?.summary || null);
+        }
+      } catch (err) {
+        setSummaryError(err instanceof Error ? err.message : 'Unknown error');
+        console.error('Summary error:', err);
+      } finally {
+        setSummaryLoading(false);
+      }
+    };
+
+    generateSummary();
+  }, [candidate, notes, conversations, fullName]);
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
@@ -100,9 +144,6 @@ const CandidateDetail = () => {
     setSaving(false);
   };
 
-  const initials = `${candidate.first_name?.[0] ?? ''}${candidate.last_name?.[0] ?? ''}`;
-  const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
-
   return (
     <MainLayout>
       {/* Top bar */}
@@ -131,17 +172,33 @@ const CandidateDetail = () => {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar */}
-        <aside className="w-80 shrink-0 border-r border-border overflow-y-auto">
-          <div className="p-6 space-y-6">
-            <div className="flex flex-col items-center text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-3">
-                {initials}
-              </div>
-              <Badge variant="secondary" className="capitalize">{candidate.status}</Badge>
-            </div>
+      {/* Profile section */}
+      <div className="px-8 py-6 border-b border-border space-y-6">
+        {/* Summary section */}
+        {(summary || summaryLoading || summaryError) && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">AI Summary</h3>
+            {summaryLoading ? (
+              <p className="text-sm text-muted-foreground italic">Generating summary...</p>
+            ) : summaryError ? (
+              <p className="text-sm text-red-400">{summaryError}</p>
+            ) : (
+              <p className="text-sm text-foreground leading-relaxed">{summary}</p>
+            )}
+          </div>
+        )}
 
+        <div className="flex gap-6">
+          {/* Picture and basic info */}
+          <div className="flex flex-col items-center">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-accent/10 text-2xl font-semibold text-accent mb-3">
+              {initials}
+            </div>
+            <Badge variant="secondary" className="capitalize">{candidate.status}</Badge>
+          </div>
+
+          {/* Information grid */}
+          <div className="flex-1 grid grid-cols-3 gap-6">
             <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</h3>
               <div className="space-y-2">
@@ -190,58 +247,6 @@ const CandidateDetail = () => {
               </div>
             </div>
 
-            {/* Job Association */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Job</h3>
-              <div className="space-y-2">
-                <Select
-                  value={candidate.job_id ?? 'none'}
-                  onValueChange={async (val) => {
-                    const newJobId = val === 'none' ? null : val;
-                    await supabase.from('candidates').update({
-                      job_id: newJobId,
-                      job_status: newJobId ? 'new' : null,
-                    }).eq('id', id!);
-                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                  }}
-                >
-                  <SelectTrigger className="h-7 text-xs w-full">
-                    <SelectValue placeholder="Assign a job…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {openJobs.map((j: any) => (
-                      <SelectItem key={j.id} value={j.id}>
-                        {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {candidate.job_id && (
-                  <Select
-                    value={candidate.job_status ?? ''}
-                    onValueChange={updateJobStatus}
-                    disabled={updatingJobStatus}
-                  >
-                    <SelectTrigger className="h-7 text-xs w-full">
-                      <SelectValue placeholder="Set status…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {JOB_STATUSES.map(s => (
-                        <SelectItem key={s.value} value={s.value}>
-                          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
-                            {s.label}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </div>
-
             <div className="space-y-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Details</h3>
               <div className="space-y-2 text-sm text-muted-foreground">
@@ -252,97 +257,160 @@ const CandidateDetail = () => {
               </div>
             </div>
           </div>
-        </aside>
+        </div>
+      </div>
 
-        {/* Main content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs defaultValue="communications" className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-4">
-              <TabsList className="bg-secondary">
-                <TabsTrigger value="communications" className="gap-1.5">
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  Communications
-                </TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5">
-                  <History className="h-3.5 w-3.5" />
-                  Activity
-                </TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5">
-                  <User className="h-3.5 w-3.5" />
-                  Notes
-                </TabsTrigger>
-              </TabsList>
-            </div>
+      {/* Tabs section */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Tabs defaultValue="communications" className="flex-1 flex flex-col overflow-hidden">
+          <div className="px-8 pt-4">
+            <TabsList className="bg-secondary">
+              <TabsTrigger value="jobs" className="gap-1.5">
+                <Briefcase className="h-3.5 w-3.5" />
+                Jobs
+              </TabsTrigger>
+              <TabsTrigger value="sequences" className="gap-1.5">
+                <Target className="h-3.5 w-3.5" />
+                Sequences
+              </TabsTrigger>
+              <TabsTrigger value="resume" className="gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                Resume
+              </TabsTrigger>
+              <TabsTrigger value="communications" className="gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" />
+                Communications
+              </TabsTrigger>
+              <TabsTrigger value="notes" className="gap-1.5">
+                <User className="h-3.5 w-3.5" />
+                Notes
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-            <ScrollArea className="flex-1">
-              <TabsContent value="communications" className="px-8 py-4 mt-0">
-                <div className="flex items-center gap-2 mb-6">
-                  <Button variant="outline" size="sm"><Mail className="h-3.5 w-3.5" /> Email</Button>
-                  <Button variant="outline" size="sm"><Phone className="h-3.5 w-3.5" /> Call</Button>
-                  <Button variant="outline" size="sm"><Linkedin className="h-3.5 w-3.5" /> LinkedIn</Button>
-                  <Button variant="outline" size="sm"><MessageSquare className="h-3.5 w-3.5" /> SMS</Button>
+          <ScrollArea className="flex-1">
+            <TabsContent value="jobs" className="px-8 py-4 mt-0">
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-foreground">Active Job</h3>
+                  <div className="space-y-2">
+                    <Select
+                      value={candidate.job_id ?? 'none'}
+                      onValueChange={async (val) => {
+                        const newJobId = val === 'none' ? null : val;
+                        await supabase.from('candidates').update({
+                          job_id: newJobId,
+                          job_status: newJobId ? 'new' : null,
+                        }).eq('id', id!);
+                        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                        toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm w-full max-w-sm">
+                        <SelectValue placeholder="Assign a job…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— None —</SelectItem>
+                        {openJobs.map((j: any) => (
+                          <SelectItem key={j.id} value={j.id}>
+                            {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {candidate.job_id && (
+                      <Select
+                        value={candidate.job_status ?? ''}
+                        onValueChange={updateJobStatus}
+                        disabled={updatingJobStatus}
+                      >
+                        <SelectTrigger className="h-9 text-sm w-full max-w-sm">
+                          <SelectValue placeholder="Set status…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {JOB_STATUSES.map(s => (
+                            <SelectItem key={s.value} value={s.value}>
+                              <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
+                                {s.label}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                 </div>
-                {conversations.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No communications yet.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {conversations.map((conv: any) => (
-                      <div key={conv.id} className="rounded-lg border border-border p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-foreground capitalize">{conv.channel}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
-                          </span>
-                        </div>
-                        {conv.subject && <p className="text-sm text-foreground mb-1">{conv.subject}</p>}
-                        {conv.last_message_preview && <p className="text-xs text-muted-foreground">{conv.last_message_preview}</p>}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="sequences" className="px-8 py-4 mt-0">
+              <div className="space-y-4">
+                {/* Placeholder for enrolled sequences */}
+                <p className="text-sm text-muted-foreground">No sequences enrolled.</p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="resume" className="px-8 py-4 mt-0">
+              <p className="text-sm text-muted-foreground">Resume will appear here.</p>
+            </TabsContent>
+
+            <TabsContent value="communications" className="px-8 py-4 mt-0">
+              <div className="flex items-center gap-2 mb-6">
+                <Button variant="outline" size="sm"><Mail className="h-3.5 w-3.5" /> Email</Button>
+                <Button variant="outline" size="sm"><Phone className="h-3.5 w-3.5" /> Call</Button>
+                <Button variant="outline" size="sm"><Linkedin className="h-3.5 w-3.5" /> LinkedIn</Button>
+                <Button variant="outline" size="sm"><MessageSquare className="h-3.5 w-3.5" /> SMS</Button>
+              </div>
+              {conversations.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No communications yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {conversations.map((conv: any) => (
+                    <div key={conv.id} className="rounded-lg border border-border p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-foreground capitalize">{conv.channel}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
+                        </span>
+                      </div>
+                      {conv.subject && <p className="text-sm text-foreground mb-1">{conv.subject}</p>}
+                      {conv.last_message_preview && <p className="text-xs text-muted-foreground">{conv.last_message_preview}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="notes" className="px-8 py-4 mt-0">
+              <div className="space-y-4">
+                <textarea
+                  placeholder="Add a note..."
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  className="w-full h-28 rounded-lg border border-input bg-background text-foreground p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+                <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={saving || !noteText.trim()}>
+                  Save Note
+                </Button>
+                {notes.length > 0 ? (
+                  <div className="space-y-3">
+                    {notes.map((n: any) => (
+                      <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-4">
+                        <p className="text-sm text-foreground">{n.note}</p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
+                        </p>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No notes yet.</p>
                 )}
-              </TabsContent>
-
-              <TabsContent value="activity" className="px-8 py-4 mt-0">
-                <p className="text-sm text-muted-foreground">Activity history will appear here.</p>
-              </TabsContent>
-
-              <TabsContent value="notes" className="px-8 py-4 mt-0">
-                <div className="space-y-4">
-                  <textarea
-                    placeholder="Add a note..."
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    className="w-full h-28 rounded-lg border border-input bg-background text-foreground p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                  />
-                  <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={saving || !noteText.trim()}>
-                    Save Note
-                  </Button>
-                  {notes.length > 0 ? (
-                    <div className="space-y-3">
-                      {notes.map((n: any) => (
-                        <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-4">
-                          <p className="text-sm text-foreground">{n.note}</p>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No notes yet.</p>
-                  )}
-                </div>
-              </TabsContent>
-            </ScrollArea>
-          </Tabs>
-        </div>
-        
-        {/* Right sidebar: Tasks */}
-        {id && (
-          <div className="w-80 shrink-0 border-l border-border p-4 overflow-y-auto">
-            <TaskSidebar entityType="candidate" entityId={id} />
-          </div>
-        )}
+              </div>
+            </TabsContent>
+          </ScrollArea>
+        </Tabs>
       </div>
 
       <EnrollInSequenceDialog
