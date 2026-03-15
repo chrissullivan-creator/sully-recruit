@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin, Calendar,
-  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target, FileText, Sparkles,
+  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target, FileText, Wine,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -260,7 +260,7 @@ const CandidateDetail = () => {
                 Resume
               </TabsTrigger>
               <TabsTrigger value="what_joe_says" className="gap-1.5">
-                <Sparkles className="h-3.5 w-3.5" />
+                <Wine className="h-3.5 w-3.5" />
                 What Joe Says
               </TabsTrigger>
               <TabsTrigger value="communications" className="gap-1.5">
@@ -350,16 +350,16 @@ const CandidateDetail = () => {
                 ) : summary ? (
                   <div className="rounded-lg border border-border bg-secondary/30 p-6">
                     <div className="flex items-start gap-3">
-                      <Sparkles className="h-5 w-5 text-accent shrink-0 mt-1" />
+                      <Wine className="h-5 w-5 text-accent shrink-0 mt-1" />
                       <div>
-                        <h3 className="text-sm font-semibold text-foreground mb-3">AI-Powered Candidate Insights</h3>
+                        <h3 className="text-sm font-semibold text-foreground mb-3">What Joe Says</h3>
                         <p className="text-sm text-foreground leading-relaxed">{summary}</p>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center justify-center py-8">
-                    <p className="text-sm text-muted-foreground">Joe couldn't generate insights for this candidate at this time. Check back later!</p>
+                    <p className="text-sm text-muted-foreground">Joe hasn't shared his thoughts on this candidate yet.</p>
                   </div>
                 )}
               </div>
