@@ -151,10 +151,6 @@ const Settings = () => {
           case 'linkedin_limits':
             setLinkedinLimits((prev) => ({ ...prev, ...cfg }));
             break;
-          case 'outlook':
-            setOutlookConfig((prev) => ({ ...prev, ...cfg }));
-            setOutlookActive(row.is_active);
-            break;
         }
       });
     } catch (err: any) {
@@ -205,14 +201,32 @@ const Settings = () => {
   const connectMicrosoft = async () => {
     setMsConnecting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error('You must be logged in to connect Microsoft');
+      }
+
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/authorize`,
-        { headers: { Authorization: `Bearer ${session?.access_token}` } }
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
       );
-      const { url, error } = await res.json();
-      if (error) throw new Error(error);
-      window.location.href = url;
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to start Microsoft OAuth');
+      }
+      if (!data?.url) {
+        throw new Error('Missing Microsoft authorization URL');
+      }
+
+      window.location.href = data.url;
     } catch (err: any) {
       toast.error(err.message || 'Failed to start Microsoft OAuth');
       setMsConnecting(false);
