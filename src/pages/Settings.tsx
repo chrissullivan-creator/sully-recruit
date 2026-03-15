@@ -209,14 +209,18 @@ const Settings = () => {
         throw new Error('You must be logged in to connect Microsoft');
       }
 
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/authorize`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
+      const frontendCallbackUrl = `${window.location.origin}/auth/microsoft/callback`;
+      const authorizeUrl = new URL(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/microsoft-oauth/authorize`
       );
+      authorizeUrl.searchParams.set('redirect_uri', frontendCallbackUrl);
+      authorizeUrl.searchParams.set('redirect_to', frontendCallbackUrl);
+
+      const res = await fetch(authorizeUrl.toString(), {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
       const data = await res.json();
       if (!res.ok) {
