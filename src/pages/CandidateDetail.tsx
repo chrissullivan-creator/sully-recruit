@@ -48,7 +48,6 @@ const CandidateDetail = () => {
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Calculate these early so they're available in useEffect dependencies
   const initials = `${candidate?.first_name?.[0] ?? ''}${candidate?.last_name?.[0] ?? ''}`;
@@ -63,17 +62,16 @@ const CandidateDetail = () => {
 
   // Generate candidate summary on load
   useEffect(() => {
-    if (!candidate || !notes || !conversations) return;
+    if (!candidate) return;
 
     const generateSummary = async () => {
       setSummaryLoading(true);
-      setSummaryError(null);
       try {
         const { data, error } = await supabase.functions.invoke('generate-candidate-summary', {
           body: {
             candidateName: fullName,
-            communications: conversations,
-            notes: notes,
+            communications: conversations || [],
+            notes: notes || [],
             jobs: candidate.job_id ? [{ title: candidate.current_title, company: candidate.current_company, job_status: candidate.job_status }] : [],
             currentTitle: candidate.current_title,
             currentCompany: candidate.current_company,
@@ -82,14 +80,16 @@ const CandidateDetail = () => {
         });
 
         if (error) {
-          setSummaryError(error.message || 'Failed to generate summary');
           console.error('Summary generation error:', error);
-        } else {
-          setSummary(data?.summary || null);
+          // Silently fail - summary is optional
+          setSummary(null);
+        } else if (data?.summary) {
+          setSummary(data.summary);
         }
       } catch (err) {
-        setSummaryError(err instanceof Error ? err.message : 'Unknown error');
         console.error('Summary error:', err);
+        // Silently fail - summary is optional
+        setSummary(null);
       } finally {
         setSummaryLoading(false);
       }
@@ -175,13 +175,11 @@ const CandidateDetail = () => {
       {/* Profile section */}
       <div className="px-8 py-6 border-b border-border space-y-6">
         {/* Summary section */}
-        {(summary || summaryLoading || summaryError) && (
+        {(summary || summaryLoading) && (
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">AI Summary</h3>
             {summaryLoading ? (
               <p className="text-sm text-muted-foreground italic">Generating summary...</p>
-            ) : summaryError ? (
-              <p className="text-sm text-red-400">{summaryError}</p>
             ) : (
               <p className="text-sm text-foreground leading-relaxed">{summary}</p>
             )}

@@ -374,20 +374,63 @@ const Candidates = () => {
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                      <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={cn(
-                          'h-8 w-8 rounded text-xs font-medium transition-colors',
-                          page === currentPage
-                            ? 'bg-accent text-accent-foreground'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    {totalPages <= 10 ? (
+                      // Show all pages if 10 or fewer
+                      Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            'h-8 w-8 rounded text-xs font-medium transition-colors',
+                            page === currentPage
+                              ? 'bg-accent text-accent-foreground'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          )}
+                        >
+                          {page}
+                        </button>
+                      ))
+                    ) : (
+                      // Show compact pagination for many pages
+                      <>
+                        {currentPage > 2 && (
+                          <>
+                            <button
+                              onClick={() => setCurrentPage(1)}
+                              className="h-8 w-8 rounded text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            >
+                              1
+                            </button>
+                            {currentPage > 3 && <span className="text-muted-foreground">…</span>}
+                          </>
                         )}
-                      >
-                        {page}
-                      </button>
-                    ))}
+                        {[currentPage - 1, currentPage, currentPage + 1].filter(p => p > 0 && p <= totalPages).map((page) => (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={cn(
+                              'h-8 w-8 rounded text-xs font-medium transition-colors',
+                              page === currentPage
+                                ? 'bg-accent text-accent-foreground'
+                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                            )}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                        {currentPage < totalPages - 1 && (
+                          <>
+                            {currentPage < totalPages - 2 && <span className="text-muted-foreground">…</span>}
+                            <button
+                              onClick={() => setCurrentPage(totalPages)}
+                              className="h-8 w-8 rounded text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            >
+                              {totalPages}
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
                   </div>
                   <Button
                     variant="outline"
