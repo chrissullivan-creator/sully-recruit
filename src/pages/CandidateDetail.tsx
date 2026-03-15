@@ -61,6 +61,9 @@ const CandidateDetail = () => {
   }, [candidate?.job_id]);
 
   // Generate candidate summary on load
+  // TODO: Deploy the generate-candidate-summary Supabase Edge Function
+  // Uncomment below once deployed at: supabase/functions/generate-candidate-summary/index.ts
+  /*
   useEffect(() => {
     if (!candidate) return;
 
@@ -93,6 +96,7 @@ const CandidateDetail = () => {
 
     generateSummary();
   }, [candidate, notes, conversations, fullName]);
+  */
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
