@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin, Calendar,
-  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target, FileText,
+  Edit, MoreHorizontal, Briefcase, MessageSquare, History, User, Play, Target, FileText, Sparkles,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -61,10 +61,6 @@ const CandidateDetail = () => {
   }, [candidate?.job_id]);
 
   // Generate candidate summary on load
-  // TODO: Deploy the generate-candidate-summary Supabase Edge Function to enable this feature
-  // Function code is in: supabase/functions/generate-candidate-summary/index.ts
-  // Uncomment the code below once the function is deployed to Supabase
-  /*
   useEffect(() => {
     if (!candidate) return;
 
@@ -97,7 +93,6 @@ const CandidateDetail = () => {
 
     generateSummary();
   }, [candidate, notes, conversations, fullName]);
-  */
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
@@ -175,18 +170,6 @@ const CandidateDetail = () => {
 
       {/* Profile section */}
       <div className="px-8 py-6 border-b border-border space-y-6">
-        {/* Summary section */}
-        {(summary || summaryLoading) && (
-          <div className="rounded-lg border border-border bg-secondary/30 p-4">
-            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">AI Summary</h3>
-            {summaryLoading ? (
-              <p className="text-sm text-muted-foreground italic">Generating summary...</p>
-            ) : (
-              <p className="text-sm text-foreground leading-relaxed">{summary}</p>
-            )}
-          </div>
-        )}
-
         <div className="flex gap-6">
           {/* Picture and basic info */}
           <div className="flex flex-col items-center">
@@ -276,6 +259,10 @@ const CandidateDetail = () => {
                 <FileText className="h-3.5 w-3.5" />
                 Resume
               </TabsTrigger>
+              <TabsTrigger value="what_joe_says" className="gap-1.5">
+                <Sparkles className="h-3.5 w-3.5" />
+                What Joe Says
+              </TabsTrigger>
               <TabsTrigger value="communications" className="gap-1.5">
                 <MessageSquare className="h-3.5 w-3.5" />
                 Communications
@@ -352,6 +339,30 @@ const CandidateDetail = () => {
 
             <TabsContent value="resume" className="px-8 py-4 mt-0">
               <p className="text-sm text-muted-foreground">Resume will appear here.</p>
+            </TabsContent>
+
+            <TabsContent value="what_joe_says" className="px-8 py-4 mt-0">
+              <div className="space-y-4">
+                {summaryLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <p className="text-sm text-muted-foreground">Joe is analyzing this candidate...</p>
+                  </div>
+                ) : summary ? (
+                  <div className="rounded-lg border border-border bg-secondary/30 p-6">
+                    <div className="flex items-start gap-3">
+                      <Sparkles className="h-5 w-5 text-accent shrink-0 mt-1" />
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground mb-3">AI-Powered Candidate Insights</h3>
+                        <p className="text-sm text-foreground leading-relaxed">{summary}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-8">
+                    <p className="text-sm text-muted-foreground">Joe couldn't generate insights for this candidate at this time. Check back later!</p>
+                  </div>
+                )}
+              </div>
             </TabsContent>
 
             <TabsContent value="communications" className="px-8 py-4 mt-0">
