@@ -270,18 +270,18 @@ Deno.serve(async (req: Request) => {
         enrollment_id,
         sequence_step_id,
         executed_at,
+        sequence_steps!inner (
+          channel,
+          subject,
+          body,
+          account_id
+        ),
         sequence_enrollments!inner (
           candidate_id,
           contact_id,
           prospect_id,
           enrolled_by,
-          account_id,
-          sequence_steps!inner (
-            channel,
-            subject,
-            body,
-            account_id
-          )
+          account_id
         )
       `)
       .eq("status", "scheduled")
@@ -297,7 +297,7 @@ Deno.serve(async (req: Request) => {
       for (const exec of scheduledExecutions) {
         try {
           const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
+          const step = exec.sequence_steps as any;
           
           // Determine recipient
           const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
@@ -309,27 +309,41 @@ Deno.serve(async (req: Request) => {
 
           // Get recipient address based on channel
           let to: string;
-          let conversation_id: string;
-          
-          // Ensure conversation exists
-          conversation_id = `seq_${exec.enrollment_id}`;
+          let conversation_id: string | null = null;
+
+          // Reuse existing conversation when possible
           const { data: existingConv } = await supabase
             .from("conversations")
             .select("id")
-            .eq("id", conversation_id)
-            .single();
+            .eq("candidate_id", enrollment.candidate_id ?? null)
+            .eq("contact_id", enrollment.contact_id ?? null)
+            .eq("prospect_id", enrollment.prospect_id ?? null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
           
-          if (!existingConv) {
-            await supabase
+          if (existingConv?.id) {
+            conversation_id = existingConv.id;
+          } else {
+            const newConversationId = crypto.randomUUID();
+            const { error: convInsertError } = await supabase
               .from("conversations")
               .insert({
-                id: conversation_id,
+                id: newConversationId,
                 candidate_id: enrollment.candidate_id,
                 contact_id: enrollment.contact_id,
                 prospect_id: enrollment.prospect_id,
                 owner_id: enrollment.enrolled_by,
                 last_message_at: now.toISOString(),
               } as any);
+
+            if (!convInsertError) {
+              conversation_id = newConversationId;
+            }
+          }
+
+          if (!conversation_id) {
+            throw new Error("Could not resolve conversation for execution");
           }
           
           if (step.channel === 'email') {

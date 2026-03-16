@@ -17,3 +17,9 @@ verify_jwt = false
 
 [functions.parse-resume]
 verify_jwt = false
+
+[functions.microsoft-oauth]
+verify_jwt = false
+
+[functions.microsoft-webhook]
+verify_jwt = false
