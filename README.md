@@ -71,3 +71,20 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+
+## Supabase Edge Function entrypoint (`index.ts`)
+
+Yes — the `index.ts` inside each function folder is the real entrypoint used by Supabase.
+For this repo, sequence processing lives at:
+
+- `supabase/functions/process-sequence-emails/index.ts`
+
+You do **not** need to copy/paste code into the dashboard if you deploy from the CLI.
+Use:
+
+```sh
+supabase functions deploy process-sequence-emails
+```
+
+If you edit in the Supabase web editor instead, then you would paste there manually.
