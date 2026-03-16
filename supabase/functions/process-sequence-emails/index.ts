@@ -42,7 +42,6 @@ Deno.serve(async (req: Request) => {
         sequence_id,
         candidate_id,
         contact_id,
-        prospect_id,
         current_step_order,
         next_step_at,
         account_id,
@@ -81,12 +80,13 @@ Deno.serve(async (req: Request) => {
 
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
-        const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-        if (entityId) {
+        const recipientColumn = enrollment.candidate_id ? "candidate_id" : enrollment.contact_id ? "contact_id" : null;
+        const entityId = enrollment.candidate_id || enrollment.contact_id;
+        if (entityId && recipientColumn) {
           const { data: replies } = await supabase
             .from("messages")
             .select("id")
-            .eq("candidate_id", entityId)
+            .eq(recipientColumn, entityId)
             .eq("direction", "inbound")
             .gte("created_at", enrollment.enrolled_at || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
             .limit(1);
@@ -275,7 +275,6 @@ Deno.serve(async (req: Request) => {
         sequence_enrollments!inner (
           candidate_id,
           contact_id,
-          prospect_id,
           enrolled_by,
           account_id
         ),
@@ -302,7 +301,7 @@ Deno.serve(async (req: Request) => {
           const step = exec.sequence_steps as any;
           
           // Determine recipient
-          const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+          const entityId = enrollment.candidate_id || enrollment.contact_id;
           if (!entityId) {
             console.error("No entity ID for execution:", exec.id);
             failed++;
@@ -328,7 +327,6 @@ Deno.serve(async (req: Request) => {
                 id: conversation_id,
                 candidate_id: enrollment.candidate_id,
                 contact_id: enrollment.contact_id,
-                prospect_id: enrollment.prospect_id,
                 owner_id: enrollment.enrolled_by,
                 last_message_at: now.toISOString(),
               } as any);
@@ -336,7 +334,7 @@ Deno.serve(async (req: Request) => {
           
           if (step.channel === 'email') {
             // For email, need to get email address
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = enrollment.candidate_id ? "candidates" : "contacts";
             const { data: entity } = await supabase
               .from(table)
               .select("email")
@@ -345,7 +343,7 @@ Deno.serve(async (req: Request) => {
             to = entity?.email;
           } else if (step.channel === 'sms') {
             // For SMS, need phone number
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = enrollment.candidate_id ? "candidates" : "contacts";
             const { data: entity } = await supabase
               .from(table)
               .select("phone")
@@ -353,11 +351,13 @@ Deno.serve(async (req: Request) => {
               .single();
             to = entity?.phone;
           } else if (step.channel.startsWith('linkedin')) {
-            // For LinkedIn, use the provider_id from candidate_channels
+            // For LinkedIn, use provider_id from candidate_channels/contact_channels
+            const channelTable = enrollment.candidate_id ? "candidate_channels" : "contact_channels";
+            const channelIdColumn = enrollment.candidate_id ? "candidate_id" : "contact_id";
             const { data: channel } = await supabase
-              .from("candidate_channels")
+              .from(channelTable)
               .select("provider_id, external_conversation_id")
-              .eq("candidate_id", entityId)
+              .eq(channelIdColumn, entityId)
               .eq("channel", "linkedin")
               .single();
             to = channel?.provider_id;
@@ -743,7 +743,7 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
     const enrollmentIds = [...new Set(executions.map((e: any) => e.enrollment_id))];
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")
-      .select("id, candidate_id, contact_id, prospect_id")
+      .select("id, candidate_id, contact_id")
       .in("id", enrollmentIds);
 
     const enrollmentMap = new Map((enrollments ?? []).map((e: any) => [e.id, e]));
@@ -752,14 +752,15 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
       const enrollment = enrollmentMap.get(exec.enrollment_id);
       if (!enrollment) continue;
 
-      const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-      if (!entityId) continue;
+      const recipientColumn = enrollment.candidate_id ? "candidate_id" : enrollment.contact_id ? "contact_id" : null;
+      const entityId = enrollment.candidate_id || enrollment.contact_id;
+      if (!entityId || !recipientColumn) continue;
 
       // Check for inbound reply after this execution
       const { data: replies } = await supabase
         .from("messages")
         .select("id")
-        .eq("candidate_id", entityId)
+        .eq(recipientColumn, entityId)
         .eq("direction", "inbound")
         .gte("created_at", exec.executed_at)
         .limit(1);
