@@ -83,6 +83,7 @@ const SequenceDetail = () => {
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [executions, setExecutions] = useState<any[]>([]);
+  const [schedulePage, setSchedulePage] = useState(1);
   // Editable state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -108,10 +109,9 @@ const SequenceDetail = () => {
   const loadSequence = async () => {
     setLoading(true);
     try {
-      const [seqRes, enrollRes, execRes] = await Promise.all([
+      const [seqRes, enrollRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
         supabase.from('sequence_enrollments').select('*, candidates(first_name, last_name, full_name, email, current_title), contacts(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
-        supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
 
       if (seqRes.error) throw seqRes.error;
@@ -140,7 +140,32 @@ const SequenceDetail = () => {
       });
       setSteps(loadedSteps);
       setEnrollments(enrollRes.data ?? []);
-      setExecutions(execRes.data ?? []);
+      setSchedulePage(1);
+
+      const enrollmentIds = (enrollRes.data ?? []).map((enrollment: any) => enrollment.id);
+      if (enrollmentIds.length === 0) {
+        setExecutions([]);
+      } else {
+        const { data: executionData, error: executionError } = await supabase
+          .from('sequence_step_executions')
+          .select(`
+            id,
+            sequence_step_id,
+            enrollment_id,
+            status,
+            executed_at,
+            sequence_enrollments (
+              id,
+              candidates (first_name, last_name, full_name, email),
+              contacts (first_name, last_name, full_name, email)
+            )
+          `)
+          .in('enrollment_id', enrollmentIds)
+          .order('executed_at', { ascending: true });
+
+        if (executionError) throw executionError;
+        setExecutions(executionData ?? []);
+      }
     } catch (err: any) {
       toast.error('Failed to load sequence');
       console.error(err);
@@ -284,6 +309,15 @@ const SequenceDetail = () => {
   const activeEnrollments = enrollments.filter(e => e.status === 'active').length;
   const completedEnrollments = enrollments.filter(e => e.status === 'completed').length;
   const stoppedEnrollments = enrollments.filter(e => e.status === 'stopped').length;
+  const scheduledExecutions = useMemo(
+    () => executions.filter((execution) => execution.status === 'scheduled'),
+    [executions],
+  );
+  const totalSchedulePages = Math.max(1, Math.ceil(scheduledExecutions.length / 15));
+  const paginatedScheduledExecutions = useMemo(() => {
+    const start = (schedulePage - 1) * 15;
+    return scheduledExecutions.slice(start, start + 15);
+  }, [schedulePage, scheduledExecutions]);
 
   if (loading) {
     return (
@@ -343,6 +377,7 @@ const SequenceDetail = () => {
               <TabsTrigger value="general" className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />General</TabsTrigger>
               <TabsTrigger value="steps" className="gap-1.5"><Mail className="h-3.5 w-3.5" />Steps</TabsTrigger>
               <TabsTrigger value="enrollees" className="gap-1.5"><Users className="h-3.5 w-3.5" />Enrollees</TabsTrigger>
+              <TabsTrigger value="schedule" className="gap-1.5"><Clock className="h-3.5 w-3.5" />Schedule</TabsTrigger>
             </TabsList>
           </div>
 
@@ -481,6 +516,68 @@ const SequenceDetail = () => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Schedule */}
+            <TabsContent value="schedule" className="px-8 py-6 mt-0">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-foreground">Scheduled Steps ({scheduledExecutions.length})</h3>
+                <p className="text-xs text-muted-foreground">15 per page</p>
+              </div>
+
+              {scheduledExecutions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Clock className="h-10 w-10 text-muted-foreground mb-3" />
+                  <p className="text-muted-foreground mb-1">No scheduled sends</p>
+                  <p className="text-sm text-muted-foreground">Upcoming sequence steps will appear here.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {paginatedScheduledExecutions.map((execution) => {
+                    const enrollment = execution.sequence_enrollments;
+                    const person = enrollment?.candidates || enrollment?.contacts;
+                    const personName = person?.full_name || `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim() || 'Unknown';
+                    const stepOrder = steps.find((step) => step.id === execution.sequence_step_id)?.order ?? '—';
+                    const sendAt = execution.executed_at
+                      ? format(new Date(execution.executed_at), 'MMM d, yyyy h:mm a')
+                      : 'Not scheduled';
+
+                    return (
+                      <div key={execution.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+                          {(person?.first_name?.[0] ?? '')}{(person?.last_name?.[0] ?? '')}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{personName}</p>
+                          <p className="text-xs text-muted-foreground truncate">{person?.email || ''}</p>
+                        </div>
+                        <div className="text-xs text-muted-foreground">Step {stepOrder}</div>
+                        <div className="text-xs text-muted-foreground">{sendAt}</div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSchedulePage((page) => Math.max(1, page - 1))}
+                      disabled={schedulePage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-xs text-muted-foreground">Page {schedulePage} of {totalSchedulePages}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSchedulePage((page) => Math.min(totalSchedulePages, page + 1))}
+                      disabled={schedulePage === totalSchedulePages}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
               )}
             </TabsContent>
