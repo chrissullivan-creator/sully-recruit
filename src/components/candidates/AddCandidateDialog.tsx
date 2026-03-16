@@ -32,6 +32,12 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
     setLoading(true);
 
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        console.error(userError);
+        return;
+      }
+
       const { error } = await supabase
         .from('candidates')
         .insert([
@@ -40,9 +46,11 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
             last_name: lastName,
             email,
             phone,
-            status: 'new'
+            status: 'new',
+            owner_user_id: '83a7b48d-0220-4407-a494-3d982a8446db',
+            created_by_user_id: userData.user.id,
           }
-        ]);
+        ] as any);
 
       if (error) {
         console.error(error);
