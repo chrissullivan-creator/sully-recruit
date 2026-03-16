@@ -46,7 +46,17 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { setDraft(value ?? ''); }, [value]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
-  const save = async () => { setSaving(true); await onSave(draft); setSaving(false); setEditing(false); };
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch {
+      // Keep the field in edit mode so the user can correct/retry.
+    } finally {
+      setSaving(false);
+    }
+  };
   const cancel = () => { setDraft(value ?? ''); setEditing(false); };
   return (
     <div className="group space-y-0.5">
@@ -83,7 +93,17 @@ const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
   const [draft, setDraft] = useState(value ?? '');
   const [saving, setSaving] = useState(false);
   useEffect(() => { setDraft(value ?? ''); }, [value]);
-  const save = async () => { setSaving(true); await onSave(draft); setSaving(false); setEditing(false); };
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch {
+      // Keep the field in edit mode so the user can correct/retry.
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
@@ -132,6 +152,7 @@ const CandidateDetail = () => {
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [compExpanded, setCompExpanded] = useState(false);
+  const locationField = 'location_text' in (candidate ?? {}) ? 'location_text' : 'location';
 
   useEffect(() => {
     if (!id) return;
@@ -152,7 +173,10 @@ const CandidateDetail = () => {
   const updateField = async (field: string, value: string) => {
     if (!id) return;
     const { error } = await supabase.from('candidates').update({ [field]: value || null }).eq('id', id);
-    if (error) { toast.error(`Failed to update`); return; }
+    if (error) {
+      toast.error(error.message || 'Failed to update');
+      throw error;
+    }
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
     queryClient.invalidateQueries({ queryKey: ['candidates'] });
   };
@@ -160,14 +184,23 @@ const CandidateDetail = () => {
   const updateComp = async (field: string, value: string) => {
     if (!id) return;
     const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
-    await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
+    const { error } = await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
+    if (error) {
+      toast.error(error.message || 'Failed to update compensation');
+      throw error;
+    }
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
   };
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
     setUpdatingJobStatus(true);
-    await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+    const { error } = await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+    if (error) {
+      toast.error(error.message || 'Failed to update job status');
+      setUpdatingJobStatus(false);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
     setUpdatingJobStatus(false);
   };
@@ -265,7 +298,7 @@ const CandidateDetail = () => {
               <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} />
               <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" />
               <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" />
+              <EditableField label="Location" value={c[locationField]} onSave={v => updateField(locationField, v)} placeholder="City, State" />
             </div>
 
             <div className="space-y-2">
