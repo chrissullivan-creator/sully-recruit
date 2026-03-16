@@ -60,6 +60,25 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## Connect to Supabase
+
+1. Create a Supabase project at [supabase.com](https://supabase.com).
+2. Copy `.env.example` to `.env`.
+3. Add your project values:
+
+```sh
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<your-anon-publishable-key>
+```
+
+4. Start the app:
+
+```sh
+npm run dev
+```
+
+> The app now validates these variables at startup and shows a clear error if they are missing.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
