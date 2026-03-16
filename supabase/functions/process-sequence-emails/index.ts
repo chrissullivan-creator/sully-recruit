@@ -42,7 +42,6 @@ Deno.serve(async (req: Request) => {
         sequence_id,
         candidate_id,
         contact_id,
-        prospect_id,
         current_step_order,
         next_step_at,
         account_id,
@@ -79,7 +78,7 @@ Deno.serve(async (req: Request) => {
 
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
-        const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+        const entityId = enrollment.candidate_id || enrollment.contact_id;
         if (entityId) {
           const { data: replies } = await supabase
             .from("messages")
@@ -273,7 +272,6 @@ Deno.serve(async (req: Request) => {
         sequence_enrollments!inner (
           candidate_id,
           contact_id,
-          prospect_id,
           enrolled_by,
           account_id,
           sequence_steps!inner (
@@ -300,7 +298,7 @@ Deno.serve(async (req: Request) => {
           const step = enrollment.sequence_steps as any;
           
           // Determine recipient
-          const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+          const entityId = enrollment.candidate_id || enrollment.contact_id;
           if (!entityId) {
             console.error("No entity ID for execution:", exec.id);
             failed++;
@@ -326,7 +324,6 @@ Deno.serve(async (req: Request) => {
                 id: conversation_id,
                 candidate_id: enrollment.candidate_id,
                 contact_id: enrollment.contact_id,
-                prospect_id: enrollment.prospect_id,
                 owner_id: enrollment.enrolled_by,
                 last_message_at: now.toISOString(),
               } as any);
@@ -334,7 +331,7 @@ Deno.serve(async (req: Request) => {
           
           if (step.channel === 'email') {
             // For email, need to get email address
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = enrollment.candidate_id ? "candidates" : "contacts";
             const { data: entity } = await supabase
               .from(table)
               .select("email")
@@ -343,7 +340,7 @@ Deno.serve(async (req: Request) => {
             to = entity?.email;
           } else if (step.channel === 'sms') {
             // For SMS, need phone number
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = enrollment.candidate_id ? "candidates" : "contacts";
             const { data: entity } = await supabase
               .from(table)
               .select("phone")
@@ -741,7 +738,7 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
     const enrollmentIds = [...new Set(executions.map((e: any) => e.enrollment_id))];
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")
-      .select("id, candidate_id, contact_id, prospect_id")
+      .select("id, candidate_id, contact_id")
       .in("id", enrollmentIds);
 
     const enrollmentMap = new Map((enrollments ?? []).map((e: any) => [e.id, e]));
@@ -750,7 +747,7 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
       const enrollment = enrollmentMap.get(exec.enrollment_id);
       if (!enrollment) continue;
 
-      const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+      const entityId = enrollment.candidate_id || enrollment.contact_id;
       if (!entityId) continue;
 
       // Check for inbound reply after this execution
