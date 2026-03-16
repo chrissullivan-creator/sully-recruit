@@ -32,9 +32,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const action = url.pathname.split('/').pop();
 
-    if (action === 'callback') {
-      return await handleCallback(url, adminClient);
-    }
+    if (action === 'callback') return await handleCallback(url, adminClient);
 
     const { data: { user }, error: authError } = await userClient.auth.getUser();
     if (authError || !user) return json({ error: 'Unauthorized' }, 401);
@@ -61,7 +59,7 @@ Deno.serve(async (req) => {
     if (action === 'status') {
       const { data: account } = await adminClient
         .from('integration_accounts')
-        .select('id, external_account_id, account_label, is_active, token_expires_at, microsoft_subscription_id, microsoft_subscription_expires_at, microsoft_user_id')
+        .select('*')
         .eq('owner_user_id', user.id)
         .eq('auth_provider', 'microsoft')
         .eq('provider', 'email')
@@ -70,27 +68,56 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
+      if (!account) {
+        return json({ connected: false });
+      }
+
+      const token = await getUsableAccessToken(adminClient, account);
+      const { microsoftUserId, emailAddress } = await ensureMicrosoftIdentity(adminClient, account, token);
+      const subscription = await ensureInboxSubscription(adminClient, account, token, supabaseUrl);
+
       return json({
-        connected: Boolean(account),
-        email_address: account?.external_account_id ?? undefined,
-        display_name: account?.account_label ?? undefined,
-        token_expires_at: account?.token_expires_at ?? null,
-        microsoft_user_id: account?.microsoft_user_id ?? null,
-        microsoft_subscription_id: account?.microsoft_subscription_id ?? null,
-        microsoft_subscription_expires_at: account?.microsoft_subscription_expires_at ?? null,
+        connected: true,
+        email_address: emailAddress || account.external_account_id,
+        display_name: account.account_label ?? undefined,
+        token_expires_at: account.token_expires_at ?? null,
+        microsoft_user_id: microsoftUserId,
+        microsoft_subscription_id: subscription?.id ?? account.microsoft_subscription_id ?? null,
+        microsoft_subscription_expires_at:
+          subscription?.expirationDateTime ?? account.microsoft_subscription_expires_at ?? null,
       });
     }
 
     if (action === 'disconnect' && req.method === 'POST') {
-      await adminClient
+      const { data: accounts } = await adminClient
         .from('integration_accounts')
-        .update({
-          is_active: false,
-          microsoft_subscription_id: null,
-          microsoft_subscription_expires_at: null,
-        } as any)
+        .select('id, access_token, refresh_token, token_expires_at, microsoft_subscription_id')
         .eq('owner_user_id', user.id)
-        .eq('auth_provider', 'microsoft');
+        .eq('auth_provider', 'microsoft')
+        .eq('is_active', true);
+
+      for (const account of accounts ?? []) {
+        if (account.microsoft_subscription_id) {
+          try {
+            const token = await getUsableAccessToken(adminClient, account);
+            await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${account.microsoft_subscription_id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch (error) {
+            console.error('Failed to revoke Graph subscription', error);
+          }
+        }
+
+        await adminClient
+          .from('integration_accounts')
+          .update({
+            is_active: false,
+            microsoft_subscription_id: null,
+            microsoft_subscription_expires_at: null,
+          } as any)
+          .eq('id', account.id);
+      }
 
       return json({ success: true });
     }
@@ -125,6 +152,47 @@ async function handleCallback(url: URL, adminClient: any): Promise<Response> {
     return Response.redirect(`${appUrl}/settings?ms_error=invalid_state`, 302);
   }
 
+  const tokenJson = await exchangeCodeForToken(code, redirectUri);
+  const accessToken = tokenJson.access_token as string;
+  const refreshToken = tokenJson.refresh_token as string;
+  const expiresIn = Number(tokenJson.expires_in || 3600);
+  const tokenExpiresAt = new Date(Date.now() + (expiresIn - 60) * 1000).toISOString();
+
+  const profile = await fetchGraphMe(accessToken);
+  const subscription = await createInboxSubscription(accessToken, supabaseUrl);
+
+  const upsertPayload = {
+    owner_user_id: statePayload.user_id,
+    provider: 'email',
+    account_type: 'inbox',
+    auth_provider: 'microsoft',
+    external_account_id: profile.mail || profile.userPrincipalName,
+    account_label: profile.displayName || profile.mail || profile.userPrincipalName,
+    is_active: true,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    token_expires_at: tokenExpiresAt,
+    microsoft_user_id: profile.id,
+    microsoft_subscription_id: subscription.id,
+    microsoft_subscription_expires_at: subscription.expirationDateTime,
+  };
+
+  const { error } = await adminClient
+    .from('integration_accounts')
+    .upsert(upsertPayload as any, { onConflict: 'owner_user_id,auth_provider,external_account_id' });
+
+  if (error) {
+    console.error('Failed to save Microsoft integration:', error);
+    return Response.redirect(`${appUrl}/settings?ms_error=integration_save_failed`, 302);
+  }
+
+  return Response.redirect(`${appUrl}/settings?ms_connected=1`, 302);
+}
+
+async function exchangeCodeForToken(code: string, redirectUri: string) {
+  const tenantId = Deno.env.get('MICROSOFT_TENANT_ID') || 'common';
+  const clientId = Deno.env.get('MICROSOFT_CLIENT_ID') || '';
+  const clientSecret = Deno.env.get('MICROSOFT_CLIENT_SECRET') || '';
   const tokenResp = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -140,35 +208,73 @@ async function handleCallback(url: URL, adminClient: any): Promise<Response> {
 
   if (!tokenResp.ok) {
     const body = await tokenResp.text();
-    console.error('Token exchange failed:', body);
-    return Response.redirect(`${appUrl}/settings?ms_error=token_exchange_failed`, 302);
+    throw new Error(`Token exchange failed: ${body}`);
   }
 
-  const tokenJson = await tokenResp.json();
+  return tokenResp.json();
+}
+
+async function getUsableAccessToken(adminClient: any, account: any): Promise<string> {
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : 0;
+  if (account.access_token && expiresAt > Date.now() + 60_000) return account.access_token;
+  if (!account.refresh_token) throw new Error('Missing refresh token for Microsoft account');
+
+  const tenantId = Deno.env.get('MICROSOFT_TENANT_ID') || 'common';
+  const clientId = Deno.env.get('MICROSOFT_CLIENT_ID') || '';
+  const clientSecret = Deno.env.get('MICROSOFT_CLIENT_SECRET') || '';
+
+  const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: account.refresh_token,
+      scope: GRAPH_SCOPE,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Microsoft refresh failed: ${body}`);
+  }
+
+  const tokenJson = await response.json();
   const accessToken = tokenJson.access_token as string;
-  const refreshToken = tokenJson.refresh_token as string;
+  const refreshToken = (tokenJson.refresh_token as string) || account.refresh_token;
   const expiresIn = Number(tokenJson.expires_in || 3600);
   const tokenExpiresAt = new Date(Date.now() + (expiresIn - 60) * 1000).toISOString();
 
+  await adminClient
+    .from('integration_accounts')
+    .update({ access_token: accessToken, refresh_token: refreshToken, token_expires_at: tokenExpiresAt } as any)
+    .eq('id', account.id);
+
+  account.access_token = accessToken;
+  account.refresh_token = refreshToken;
+  account.token_expires_at = tokenExpiresAt;
+  return accessToken;
+}
+
+async function fetchGraphMe(accessToken: string) {
   const meResp = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
+
   if (!meResp.ok) {
     const body = await meResp.text();
-    console.error('Failed to fetch /me:', body);
-    return Response.redirect(`${appUrl}/settings?ms_error=profile_fetch_failed`, 302);
+    throw new Error(`Failed to fetch /me: ${body}`);
   }
 
-  const me = await meResp.json();
-  const email = me.mail || me.userPrincipalName;
+  return meResp.json();
+}
 
+async function createInboxSubscription(accessToken: string, supabaseUrl: string) {
   const notificationUrl = Deno.env.get('MICROSOFT_WEBHOOK_URL') || `${supabaseUrl}/functions/v1/microsoft-webhook`;
   const subResp = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       changeType: 'created,updated',
       notificationUrl,
@@ -180,38 +286,51 @@ async function handleCallback(url: URL, adminClient: any): Promise<Response> {
 
   if (!subResp.ok) {
     const body = await subResp.text();
-    console.error('Subscription create failed:', body);
-    return Response.redirect(`${appUrl}/settings?ms_error=subscription_create_failed`, 302);
+    throw new Error(`Subscription create failed: ${body}`);
   }
 
-  const subscription = await subResp.json();
+  return subResp.json();
+}
 
-  const upsertPayload = {
-    owner_user_id: statePayload.user_id,
-    provider: 'email',
-    account_type: 'inbox',
-    auth_provider: 'microsoft',
-    external_account_id: email,
-    account_label: me.displayName || email,
-    is_active: true,
-    access_token: accessToken,
-    refresh_token: refreshToken,
-    token_expires_at: tokenExpiresAt,
-    microsoft_user_id: me.id,
-    microsoft_subscription_id: subscription.id,
-    microsoft_subscription_expires_at: subscription.expirationDateTime,
-  };
+async function ensureMicrosoftIdentity(adminClient: any, account: any, accessToken: string) {
+  if (account.microsoft_user_id && account.external_account_id) {
+    return { microsoftUserId: account.microsoft_user_id, emailAddress: account.external_account_id };
+  }
 
-  const { error } = await adminClient
+  const me = await fetchGraphMe(accessToken);
+  const microsoftUserId = me.id as string;
+  const emailAddress = (me.mail || me.userPrincipalName) as string;
+
+  await adminClient
     .from('integration_accounts')
-    .upsert(upsertPayload as any, { onConflict: 'owner_user_id,auth_provider,external_account_id' });
+    .update({
+      microsoft_user_id: microsoftUserId,
+      external_account_id: emailAddress,
+      account_label: account.account_label || me.displayName || emailAddress,
+    } as any)
+    .eq('id', account.id);
 
-  if (error) {
-    console.error('Failed to save Microsoft integration:', error);
-    return Response.redirect(`${appUrl}/settings?ms_error=integration_save_failed`, 302);
-  }
+  return { microsoftUserId, emailAddress };
+}
 
-  return Response.redirect(`${appUrl}/settings?ms_connected=1`, 302);
+async function ensureInboxSubscription(adminClient: any, account: any, accessToken: string, supabaseUrl: string) {
+  const existingExpiry = account.microsoft_subscription_expires_at
+    ? new Date(account.microsoft_subscription_expires_at).getTime()
+    : 0;
+  const stillValid = Boolean(account.microsoft_subscription_id) && existingExpiry > Date.now() + 5 * 60 * 1000;
+
+  if (stillValid) return { id: account.microsoft_subscription_id, expirationDateTime: account.microsoft_subscription_expires_at };
+
+  const subscription = await createInboxSubscription(accessToken, supabaseUrl);
+  await adminClient
+    .from('integration_accounts')
+    .update({
+      microsoft_subscription_id: subscription.id,
+      microsoft_subscription_expires_at: subscription.expirationDateTime,
+    } as any)
+    .eq('id', account.id);
+
+  return subscription;
 }
 
 function json(data: Record<string, unknown>, status = 200) {

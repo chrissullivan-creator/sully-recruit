@@ -310,18 +310,24 @@ Deno.serve(async (req: Request) => {
           // Get recipient address based on channel
           let to: string;
           let conversation_id: string | null = null;
+          let linkedExternalConversationId: string | null = null;
 
           // Reuse existing conversation when possible
-          const { data: existingConv } = await supabase
+          let conversationQuery = supabase
             .from("conversations")
             .select("id")
-            .eq("candidate_id", enrollment.candidate_id ?? null)
-            .eq("contact_id", enrollment.contact_id ?? null)
-            .eq("prospect_id", enrollment.prospect_id ?? null)
+            .eq("channel", step.channel)
             .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          
+            .limit(1);
+
+          conversationQuery = enrollment.candidate_id
+            ? conversationQuery.eq("candidate_id", enrollment.candidate_id)
+            : conversationQuery.is("candidate_id", null);
+          conversationQuery = enrollment.contact_id
+            ? conversationQuery.eq("contact_id", enrollment.contact_id)
+            : conversationQuery.is("contact_id", null);
+          const { data: existingConv } = await conversationQuery.maybeSingle();
+
           if (existingConv?.id) {
             conversation_id = existingConv.id;
           } else {
@@ -332,8 +338,10 @@ Deno.serve(async (req: Request) => {
                 id: newConversationId,
                 candidate_id: enrollment.candidate_id,
                 contact_id: enrollment.contact_id,
-                prospect_id: enrollment.prospect_id,
                 owner_id: enrollment.enrolled_by,
+                channel: step.channel,
+                account_id: step.account_id || enrollment.account_id,
+                status: "active",
                 last_message_at: now.toISOString(),
               } as any);
 
@@ -345,7 +353,7 @@ Deno.serve(async (req: Request) => {
           if (!conversation_id) {
             throw new Error("Could not resolve conversation for execution");
           }
-          
+
           if (step.channel === 'email') {
             // For email, need to get email address
             const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
@@ -374,7 +382,7 @@ Deno.serve(async (req: Request) => {
               .single();
             to = channel?.provider_id;
             if (channel?.external_conversation_id) {
-              conversation_id = channel.external_conversation_id;
+              linkedExternalConversationId = channel.external_conversation_id;
             }
           }
 
@@ -382,6 +390,13 @@ Deno.serve(async (req: Request) => {
             console.error("No recipient address for execution:", exec.id);
             failed++;
             continue;
+          }
+
+          if (linkedExternalConversationId) {
+            await supabase
+              .from("conversations")
+              .update({ external_conversation_id: linkedExternalConversationId } as any)
+              .eq("id", conversation_id);
           }
 
           // Send the message using internal logic
