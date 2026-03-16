@@ -1,5 +1,9 @@
 # Welcome to your Lovable project
 
+## Product context
+
+This repository powers **Ask Joe**, an AI-focused CRM/ATS for a Wall Street staffing firm that prioritizes high-quality data discovery and AI-assisted recruiting workflows.
+
 ## Project info
 
 **URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
