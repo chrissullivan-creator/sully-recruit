@@ -11,8 +11,8 @@ const corsHeaders = {
  * 
  * Called by pg_cron every minute. For each active email enrollment due now:
  * - Checks the step's send_window_start / send_window_end
- * - Randomises send timing: 3–9 min jitter per email
- * - Enforces a hard cap of 180 emails / day / user (across all sequences)
+ * - Randomises send timing: 3–15 min jitter per email
+ * - Enforces a hard cap of 150 emails / day / sender (across all sequences)
  * - If stop_on_reply is true and a reply exists, marks enrollment stopped
  *   AND updates the relevant execution to 'replied'
  * - Creates execution records and queues the email
@@ -29,7 +29,7 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, serviceKey);
 
     const now = new Date();
-    const currentHour = now.getUTCHours();
+    const currentHour = getChicagoHour(now);
 
     // ── 0. Update open/reply statuses for pending executions ──────────
     await updateTrackingStatuses(supabase, now);
@@ -62,6 +62,11 @@ Deno.serve(async (req: Request) => {
       throw enrollError;
     }
 
+    console.log("process-sequence-emails invoked", {
+      now: now.toISOString(),
+      dueEnrollments: enrollments?.length ?? 0,
+    });
+
     if (!enrollments || enrollments.length === 0) {
       return new Response(
         JSON.stringify({ processed: 0, message: "No enrollments due" }),
@@ -74,6 +79,7 @@ Deno.serve(async (req: Request) => {
     let stopped = 0;
 
     for (const enrollment of enrollments) {
+      try {
       const sequence = enrollment.sequences as any;
       const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
 
@@ -148,7 +154,7 @@ Deno.serve(async (req: Request) => {
 
       // ── 4. Check send window ────────────────────────────────────────
       const sendStart = step.send_window_start ?? 6;
-      const sendEnd = step.send_window_end ?? 23;
+      const sendEnd = step.send_window_end ?? 21;
 
       if (currentHour < sendStart || currentHour >= sendEnd) {
         const nextWindow = new Date(now);
@@ -173,39 +179,23 @@ Deno.serve(async (req: Request) => {
       const isConnection = stepChannel === "linkedin_connection";
       const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav";
 
-      // ── 5a. Daily cap: 40/day for connections, no cap for InMails ──
+      // ── 5a. Daily cap: 150/day per sender (in 6am–9pm Chicago window) ──
       if (!isInMail) {
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
+        const { data: senderDailyCount, error: countError } = await supabase.rpc("count_sender_daily_sequence_sends", {
+          p_sender_id: enrollment.enrolled_by,
+          p_now: now.toISOString(),
+        });
 
-        // For connections, count only connection executions; otherwise count all non-inmail
-        const { data: todayExecs } = await supabase
-          .from("sequence_step_executions")
-          .select("id, sequence_step_id")
-          .gte("executed_at", todayStart.toISOString())
-          .in("status", ["sent", "scheduled"]);
-
-        let relevantCount = 0;
-        if (isConnection && todayExecs) {
-          // Count connection-type executions by joining step info
-          const stepIds = todayExecs.map((e: any) => e.sequence_step_id);
-          if (stepIds.length > 0) {
-            const { data: steps } = await supabase
-              .from("sequence_steps")
-              .select("id, channel, step_type")
-              .in("id", stepIds);
-            relevantCount = (steps ?? []).filter((s: any) =>
-              s.channel === "linkedin_connection" || s.step_type === "linkedin_connection"
-            ).length;
-          }
-        } else {
-          relevantCount = (todayExecs ?? []).length;
+        if (countError) {
+          console.error("Failed to count sender daily sent volume", {
+            enrollmentId: enrollment.id,
+            senderId: enrollment.enrolled_by,
+            error: countError,
+          });
         }
 
-        if (relevantCount >= 40) {
-          const tomorrow = new Date(now);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+        if ((senderDailyCount ?? 0) >= 150) {
+          const tomorrow = getNextChicagoWindowUtc(now, sendStart);
 
           await supabase
             .from("sequence_enrollments")
@@ -217,24 +207,9 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // ── 6. Delay: 2–9 min for connections/messages, instant for InMails
-      const randomDelayMinutes = isInMail ? 0 : 2 + Math.floor(Math.random() * 8);
+      // ── 6. Delay: 3–15 min for connections/messages, instant for InMails
+      const randomDelayMinutes = isInMail ? 0 : 3 + Math.floor(Math.random() * 13);
       const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
-
-      // ── 7. Create execution record ──────────────────────────────────
-      const { error: execError } = await supabase
-        .from("sequence_step_executions")
-        .insert({
-          enrollment_id: enrollment.id,
-          sequence_step_id: step.id,
-          status: "scheduled",
-          executed_at: scheduledSendAt.toISOString(),
-        } as any);
-
-      if (execError) {
-        console.error("Error creating execution:", execError);
-        continue;
-      }
 
       // ── 8. Calculate next step timing ───────────────────────────────
       const nextDelayMs =
@@ -251,15 +226,34 @@ Deno.serve(async (req: Request) => {
         nextStepAt.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
       }
 
-      await supabase
-        .from("sequence_enrollments")
-        .update({
-          current_step_order: nextStepOrder,
-          next_step_at: nextStepAt.toISOString(),
-        } as any)
-        .eq("id", enrollment.id);
+      // ── 7/8. Transactionally insert execution + advance enrollment ──
+      const { error: txError } = await supabase.rpc("process_due_sequence_step", {
+        p_enrollment_id: enrollment.id,
+        p_sequence_step_id: step.id,
+        p_next_step_order: nextStepOrder,
+        p_next_step_at: nextStepAt.toISOString(),
+        p_executed_at: scheduledSendAt.toISOString(),
+      });
+
+      if (txError) {
+        console.error("Error processing due sequence step transaction", {
+          enrollmentId: enrollment.id,
+          stepId: step.id,
+          error: txError,
+        });
+        skipped++;
+        continue;
+      }
 
       processed++;
+      } catch (enrollmentError: any) {
+        console.error("Error processing enrollment", {
+          enrollmentId: enrollment.id,
+          error: enrollmentError?.message || enrollmentError,
+        });
+        skipped++;
+        continue;
+      }
     }
 
     // ── 9. Send scheduled executions ───────────────────────────────
@@ -275,13 +269,13 @@ Deno.serve(async (req: Request) => {
           contact_id,
           prospect_id,
           enrolled_by,
-          account_id,
-          sequence_steps!inner (
-            channel,
-            subject,
-            body,
-            account_id
-          )
+          account_id
+        ),
+        sequence_steps!inner (
+          channel,
+          subject,
+          body,
+          account_id
         )
       `)
       .eq("status", "scheduled")
@@ -297,7 +291,7 @@ Deno.serve(async (req: Request) => {
       for (const exec of scheduledExecutions) {
         try {
           const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
+          const step = exec.sequence_steps as any;
           
           // Determine recipient
           const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
@@ -310,26 +304,36 @@ Deno.serve(async (req: Request) => {
           // Get recipient address based on channel
           let to: string;
           let conversation_id: string;
-          
-          // Ensure conversation exists
-          conversation_id = `seq_${exec.enrollment_id}`;
+
+          // Ensure conversation exists using UUID conversation IDs
           const { data: existingConv } = await supabase
             .from("conversations")
             .select("id")
-            .eq("id", conversation_id)
-            .single();
-          
+            .eq("candidate_id", enrollment.candidate_id)
+            .eq("contact_id", enrollment.contact_id)
+            .eq("channel", step.channel)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
           if (!existingConv) {
-            await supabase
+            const { data: createdConv, error: convError } = await supabase
               .from("conversations")
               .insert({
-                id: conversation_id,
                 candidate_id: enrollment.candidate_id,
                 contact_id: enrollment.contact_id,
-                prospect_id: enrollment.prospect_id,
-                owner_id: enrollment.enrolled_by,
+                channel: step.channel,
                 last_message_at: now.toISOString(),
-              } as any);
+              } as any)
+              .select("id")
+              .single();
+
+            if (convError || !createdConv) {
+              throw convError || new Error("Failed to create conversation");
+            }
+            conversation_id = createdConv.id;
+          } else {
+            conversation_id = existingConv.id;
           }
           
           if (step.channel === 'email') {
@@ -359,9 +363,6 @@ Deno.serve(async (req: Request) => {
               .eq("channel", "linkedin")
               .single();
             to = channel?.provider_id;
-            if (channel?.external_conversation_id) {
-              conversation_id = channel.external_conversation_id;
-            }
           }
 
           if (!to) {
@@ -384,15 +385,16 @@ Deno.serve(async (req: Request) => {
           });
 
           // Update execution
-          await supabase
-            .from("sequence_step_executions")
-            .update({
-              status: "sent",
-              external_message_id: result.externalMessageId,
-              external_conversation_id: result.externalConversationId,
-              executed_at: now.toISOString(),
-            } as any)
-            .eq("id", exec.id);
+          const { error: sentTxError } = await supabase.rpc("mark_execution_sent", {
+            p_execution_id: exec.id,
+            p_executed_at: now.toISOString(),
+            p_external_message_id: result.externalMessageId,
+            p_external_conversation_id: result.externalConversationId,
+          });
+
+          if (sentTxError) {
+            throw sentTxError;
+          }
 
           sent++;
         } catch (err: any) {
@@ -416,7 +418,7 @@ Deno.serve(async (req: Request) => {
       processed,
       skipped,
       stopped,
-      sent: scheduledExecutions?.length || 0,
+      sent: scheduledExecutions?.filter((e: any) => e).length || 0,
       total: enrollments.length,
       timestamp: now.toISOString(),
     };
@@ -437,6 +439,31 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+
+function getChicagoHour(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(date);
+  const hourPart = parts.find((p) => p.type === "hour")?.value;
+  return hourPart ? parseInt(hourPart, 10) : date.getUTCHours();
+}
+
+function getNextChicagoWindowUtc(date: Date, windowStartHour: number): Date {
+  const chicagoNow = new Date(date.toLocaleString("en-US", { timeZone: "America/Chicago" }));
+  const chicagoTarget = new Date(chicagoNow);
+
+  if (chicagoNow.getHours() >= windowStartHour) {
+    chicagoTarget.setDate(chicagoTarget.getDate() + 1);
+  }
+
+  chicagoTarget.setHours(windowStartHour, Math.floor(Math.random() * 10), 0, 0);
+
+  const diffMs = chicagoTarget.getTime() - chicagoNow.getTime();
+  return new Date(date.getTime() + diffMs);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SEND SEQUENCE MESSAGE (internal function)
