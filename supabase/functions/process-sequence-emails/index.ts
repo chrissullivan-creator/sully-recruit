@@ -75,7 +75,9 @@ Deno.serve(async (req: Request) => {
 
     for (const enrollment of enrollments) {
       const sequence = enrollment.sequences as any;
-      const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
+      // current_step_order represents the next step to execute.
+      // Some older rows may still have 0/null, so coerce those to step 1.
+      const stepOrderToExecute = Math.max(enrollment.current_step_order ?? 1, 1);
 
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
@@ -126,7 +128,7 @@ Deno.serve(async (req: Request) => {
         .from("sequence_steps")
         .select("*")
         .eq("sequence_id", enrollment.sequence_id)
-        .eq("step_order", nextStepOrder)
+        .eq("step_order", stepOrderToExecute)
         .eq("is_active", true)
         .maybeSingle();
 
@@ -254,7 +256,7 @@ Deno.serve(async (req: Request) => {
       await supabase
         .from("sequence_enrollments")
         .update({
-          current_step_order: nextStepOrder,
+          current_step_order: stepOrderToExecute + 1,
           next_step_at: nextStepAt.toISOString(),
         } as any)
         .eq("id", enrollment.id);
@@ -275,13 +277,13 @@ Deno.serve(async (req: Request) => {
           contact_id,
           prospect_id,
           enrolled_by,
-          account_id,
-          sequence_steps!inner (
-            channel,
-            subject,
-            body,
-            account_id
-          )
+          account_id
+        ),
+        sequence_steps!inner (
+          channel,
+          subject,
+          body,
+          account_id
         )
       `)
       .eq("status", "scheduled")
@@ -297,7 +299,7 @@ Deno.serve(async (req: Request) => {
       for (const exec of scheduledExecutions) {
         try {
           const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
+          const step = exec.sequence_steps as any;
           
           // Determine recipient
           const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
