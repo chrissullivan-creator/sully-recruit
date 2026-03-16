@@ -25,15 +25,6 @@ interface RingCentralConfig {
   phone_number: string;
 }
 
-interface SmtpConfig {
-  smtp_host: string;
-  smtp_port: number;
-  smtp_user: string;
-  smtp_pass: string;
-  from_email: string;
-  from_name: string;
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -96,7 +87,7 @@ serve(async (req) => {
       recipient_address: to,
       sent_at: new Date().toISOString(),
       external_message_id: externalMessageId,
-      provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+      provider: channel === 'email' ? 'microsoft' : channel === 'sms' ? 'ringcentral' : 'unipile',
       owner_id: user.id,
     };
 
@@ -130,7 +121,7 @@ serve(async (req) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EMAIL via SMTP (using Resend or generic SMTP)
+// EMAIL via Microsoft Graph (Outlook only)
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendEmail(
   supabase: any,
@@ -139,54 +130,43 @@ async function sendEmail(
   subject: string | undefined,
   body: string
 ): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || 'No Subject',
-        html: body.replace(/\n/g, '<br>'),
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Resend API error: ${errorText}`);
-    }
-
-    const result = await response.json();
-    return { messageId: result.id, sender: fromEmail };
-  }
-
-  // Fallback: Check user's SMTP integration config
   const { data: integrationData } = await supabase
     .from('user_integrations')
     .select('config')
     .eq('user_id', userId)
-    .eq('integration_type', 'smtp')
+    .eq('integration_type', 'outlook')
     .eq('is_active', true)
     .maybeSingle();
 
-  if (!integrationData) {
-    throw new Error('No email integration configured. Please set up SMTP or Resend.');
+  if (!integrationData?.config?.access_token) {
+    throw new Error('No valid Microsoft account exists. Connect Outlook in Settings.');
   }
 
-  const config = integrationData.config as SmtpConfig;
-  
-  // For now, we'll use a simple HTTP-based email service
-  // In production, you'd use a proper SMTP library
-  throw new Error('Custom SMTP not yet implemented. Please configure RESEND_API_KEY secret.');
+  const accessToken = integrationData.config.access_token;
+  const fromEmail = integrationData.config.email || integrationData.config.user_principal_name || 'microsoft';
+
+  const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message: {
+        subject: subject || 'No Subject',
+        body: { contentType: 'HTML', content: body.replace(/\n/g, '<br>') },
+        toRecipients: [{ emailAddress: { address: to } }],
+      },
+      saveToSentItems: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`send failure from Graph: ${errorText}`);
+  }
+
+  return { messageId: crypto.randomUUID(), sender: fromEmail };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

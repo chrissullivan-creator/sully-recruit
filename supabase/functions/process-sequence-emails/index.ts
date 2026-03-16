@@ -2,39 +2,27 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-/**
- * process-sequence-emails
- * 
- * Called by pg_cron every minute. For each active email enrollment due now:
- * - Checks the step's send_window_start / send_window_end
- * - Randomises send timing: 3–9 min jitter per email
- * - Enforces a hard cap of 180 emails / day / user (across all sequences)
- * - If stop_on_reply is true and a reply exists, marks enrollment stopped
- *   AND updates the relevant execution to 'replied'
- * - Creates execution records and queues the email
- * - Checks for open/reply signals in messages table and updates executions
- */
+type AnyRecord = Record<string, any>;
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
 
     const now = new Date();
     const currentHour = now.getUTCHours();
 
-    // ── 0. Update open/reply statuses for pending executions ──────────
     await updateTrackingStatuses(supabase, now);
 
-    // ── 1. Get active enrollments that are due ──────────────────────────
     const { data: enrollments, error: enrollError } = await supabase
       .from("sequence_enrollments")
       .select(`
@@ -57,27 +45,29 @@ Deno.serve(async (req: Request) => {
       .eq("status", "active")
       .lte("next_step_at", now.toISOString());
 
-    if (enrollError) {
-      console.error("Error fetching enrollments:", enrollError);
-      throw enrollError;
+    if (enrollError) throw enrollError;
+
+    if (!enrollments?.length) {
+      return json({ processed: 0, message: "No enrollments due" });
     }
 
-    if (!enrollments || enrollments.length === 0) {
-      return new Response(
-        JSON.stringify({ processed: 0, message: "No enrollments due" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    console.log("[sequence] enrollment pickup", { due: enrollments.length, at: now.toISOString() });
 
     let processed = 0;
     let skipped = 0;
     let stopped = 0;
 
-    for (const enrollment of enrollments) {
-      const sequence = enrollment.sequences as any;
+    for (const enrollment of enrollments as AnyRecord[]) {
+      console.log("[sequence] processing enrollment", {
+        enrollment_id: enrollment.id,
+        sequence_id: enrollment.sequence_id,
+        current_step_order: enrollment.current_step_order,
+        next_step_at: enrollment.next_step_at,
+      });
+
+      const sequence = enrollment.sequences as AnyRecord;
       const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
 
-      // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
         const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
         if (entityId) {
@@ -89,8 +79,7 @@ Deno.serve(async (req: Request) => {
             .gte("created_at", enrollment.enrolled_at || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
             .limit(1);
 
-          if (replies && replies.length > 0) {
-            // Mark the latest sent execution as 'replied'
+          if (replies?.length) {
             const { data: latestExec } = await supabase
               .from("sequence_step_executions")
               .select("id")
@@ -99,11 +88,8 @@ Deno.serve(async (req: Request) => {
               .order("executed_at", { ascending: false })
               .limit(1);
 
-            if (latestExec && latestExec.length > 0) {
-              await supabase
-                .from("sequence_step_executions")
-                .update({ status: "replied" } as any)
-                .eq("id", latestExec[0].id);
+            if (latestExec?.length) {
+              await supabase.from("sequence_step_executions").update({ status: "replied" } as any).eq("id", latestExec[0].id);
             }
 
             await supabase
@@ -121,7 +107,18 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // ── 3. Get the next step ────────────────────────────────────────
+      const recipient = await resolveRecipientAddress(supabase, enrollment, nextStepOrder);
+      if (recipient.errorMessage) {
+        await insertFailedExecution(supabase, {
+          enrollmentId: enrollment.id,
+          sequenceStepId: null,
+          reason: recipient.errorMessage,
+          context: { stage: "recipient_resolution", next_step_order: nextStepOrder },
+        });
+        await failEnrollment(supabase, enrollment.id, "invalid_enrollment_missing_recipient");
+        continue;
+      }
+
       const { data: step, error: stepError } = await supabase
         .from("sequence_steps")
         .select("*")
@@ -131,54 +128,53 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (stepError) {
-        console.error("Error fetching step:", stepError);
+        await insertFailedExecution(supabase, {
+          enrollmentId: enrollment.id,
+          sequenceStepId: null,
+          reason: `step lookup failed: ${stepError.message}`,
+          context: { stage: "step_resolution", next_step_order: nextStepOrder },
+        });
         continue;
       }
+
+      console.log("[sequence] step resolution", {
+        enrollment_id: enrollment.id,
+        next_step_order: nextStepOrder,
+        step_id: step?.id ?? null,
+      });
 
       if (!step) {
-        await supabase
-          .from("sequence_enrollments")
-          .update({
-            status: "completed",
-            completed_at: now.toISOString(),
-          } as any)
-          .eq("id", enrollment.id);
+        await insertFailedExecution(supabase, {
+          enrollmentId: enrollment.id,
+          sequenceStepId: null,
+          reason: `no active step found for order ${nextStepOrder}`,
+          context: { stage: "step_resolution" },
+        });
+        await failEnrollment(supabase, enrollment.id, "missing_or_inactive_step");
         continue;
       }
 
-      // ── 4. Check send window ────────────────────────────────────────
       const sendStart = step.send_window_start ?? 6;
       const sendEnd = step.send_window_end ?? 23;
 
       if (currentHour < sendStart || currentHour >= sendEnd) {
         const nextWindow = new Date(now);
-        if (currentHour >= sendEnd) {
-          nextWindow.setDate(nextWindow.getDate() + 1);
-        }
-        nextWindow.setHours(sendStart, 0, 0, 0);
-        const jitterMinutes = Math.floor(Math.random() * 10);
-        nextWindow.setMinutes(jitterMinutes);
+        if (currentHour >= sendEnd) nextWindow.setDate(nextWindow.getDate() + 1);
+        nextWindow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
 
-        await supabase
-          .from("sequence_enrollments")
-          .update({ next_step_at: nextWindow.toISOString() } as any)
-          .eq("id", enrollment.id);
-
+        await supabase.from("sequence_enrollments").update({ next_step_at: nextWindow.toISOString() } as any).eq("id", enrollment.id);
         skipped++;
         continue;
       }
 
-      // ── 5. Determine channel type for rate limiting ─────────────────
       const stepChannel = step.channel || step.step_type || sequence.channel || "";
       const isConnection = stepChannel === "linkedin_connection";
       const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav";
 
-      // ── 5a. Daily cap: 40/day for connections, no cap for InMails ──
       if (!isInMail) {
         const todayStart = new Date(now);
         todayStart.setHours(0, 0, 0, 0);
 
-        // For connections, count only connection executions; otherwise count all non-inmail
         const { data: todayExecs } = await supabase
           .from("sequence_step_executions")
           .select("id, sequence_step_id")
@@ -186,17 +182,14 @@ Deno.serve(async (req: Request) => {
           .in("status", ["sent", "scheduled"]);
 
         let relevantCount = 0;
-        if (isConnection && todayExecs) {
-          // Count connection-type executions by joining step info
-          const stepIds = todayExecs.map((e: any) => e.sequence_step_id);
-          if (stepIds.length > 0) {
+        if (isConnection && todayExecs?.length) {
+          const stepIds = todayExecs.map((e: AnyRecord) => e.sequence_step_id).filter(Boolean);
+          if (stepIds.length) {
             const { data: steps } = await supabase
               .from("sequence_steps")
               .select("id, channel, step_type")
               .in("id", stepIds);
-            relevantCount = (steps ?? []).filter((s: any) =>
-              s.channel === "linkedin_connection" || s.step_type === "linkedin_connection"
-            ).length;
+            relevantCount = (steps ?? []).filter((s: AnyRecord) => s.channel === "linkedin_connection" || s.step_type === "linkedin_connection").length;
           }
         } else {
           relevantCount = (todayExecs ?? []).length;
@@ -206,48 +199,48 @@ Deno.serve(async (req: Request) => {
           const tomorrow = new Date(now);
           tomorrow.setDate(tomorrow.getDate() + 1);
           tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
-
-          await supabase
-            .from("sequence_enrollments")
-            .update({ next_step_at: tomorrow.toISOString() } as any)
-            .eq("id", enrollment.id);
-
+          await supabase.from("sequence_enrollments").update({ next_step_at: tomorrow.toISOString() } as any).eq("id", enrollment.id);
           skipped++;
           continue;
         }
       }
 
-      // ── 6. Delay: 2–9 min for connections/messages, instant for InMails
       const randomDelayMinutes = isInMail ? 0 : 2 + Math.floor(Math.random() * 8);
       const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
 
-      // ── 7. Create execution record ──────────────────────────────────
-      const { error: execError } = await supabase
+      const { data: insertedExecution, error: execError } = await supabase
         .from("sequence_step_executions")
         .insert({
           enrollment_id: enrollment.id,
           sequence_step_id: step.id,
           status: "scheduled",
           executed_at: scheduledSendAt.toISOString(),
-        } as any);
+        } as any)
+        .select("id")
+        .single();
 
-      if (execError) {
-        console.error("Error creating execution:", execError);
+      if (execError || !insertedExecution) {
+        await insertFailedExecution(supabase, {
+          enrollmentId: enrollment.id,
+          sequenceStepId: step.id,
+          reason: `execution insert failed: ${execError?.message ?? "unknown"}`,
+          context: { stage: "execution_insert", step_id: step.id },
+        });
         continue;
       }
 
-      // ── 8. Calculate next step timing ───────────────────────────────
-      const nextDelayMs =
-        ((step.delay_days ?? 0) * 24 * 60 + (step.delay_hours ?? 0) * 60) *
-        60 *
-        1000;
-      const nextStepAt = new Date(scheduledSendAt.getTime() + nextDelayMs);
+      console.log("[sequence] execution insert", {
+        enrollment_id: enrollment.id,
+        execution_id: insertedExecution.id,
+        step_id: step.id,
+        scheduled_for: scheduledSendAt.toISOString(),
+      });
 
+      const nextDelayMs = (((step.delay_days ?? 0) * 24 * 60) + ((step.delay_hours ?? 0) * 60)) * 60 * 1000;
+      const nextStepAt = new Date(scheduledSendAt.getTime() + nextDelayMs);
       const nextHour = nextStepAt.getHours();
       if (nextHour < sendStart || nextHour >= sendEnd) {
-        if (nextHour >= sendEnd) {
-          nextStepAt.setDate(nextStepAt.getDate() + 1);
-        }
+        if (nextHour >= sendEnd) nextStepAt.setDate(nextStepAt.getDate() + 1);
         nextStepAt.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
       }
 
@@ -259,10 +252,15 @@ Deno.serve(async (req: Request) => {
         } as any)
         .eq("id", enrollment.id);
 
+      console.log("[sequence] enrollment advance", {
+        enrollment_id: enrollment.id,
+        new_current_step_order: nextStepOrder,
+        next_step_at: nextStepAt.toISOString(),
+      });
+
       processed++;
     }
 
-    // ── 9. Send scheduled executions ───────────────────────────────
     const { data: scheduledExecutions, error: sendError } = await supabase
       .from("sequence_step_executions")
       .select(`
@@ -286,161 +284,215 @@ Deno.serve(async (req: Request) => {
       `)
       .eq("status", "scheduled")
       .lte("executed_at", now.toISOString())
-      .limit(50); // Limit to avoid overwhelming
+      .limit(50);
 
     if (sendError) {
       console.error("Error fetching scheduled executions:", sendError);
-    } else if (scheduledExecutions && scheduledExecutions.length > 0) {
-      let sent = 0;
-      let failed = 0;
-
-      for (const exec of scheduledExecutions) {
-        try {
-          const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
-          
-          // Determine recipient
-          const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-          if (!entityId) {
-            console.error("No entity ID for execution:", exec.id);
-            failed++;
-            continue;
-          }
-
-          // Get recipient address based on channel
-          let to: string;
-          let conversation_id: string;
-          
-          // Ensure conversation exists
-          conversation_id = `seq_${exec.enrollment_id}`;
-          const { data: existingConv } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("id", conversation_id)
-            .single();
-          
-          if (!existingConv) {
-            await supabase
-              .from("conversations")
-              .insert({
-                id: conversation_id,
-                candidate_id: enrollment.candidate_id,
-                contact_id: enrollment.contact_id,
-                prospect_id: enrollment.prospect_id,
-                owner_id: enrollment.enrolled_by,
-                last_message_at: now.toISOString(),
-              } as any);
-          }
-          
-          if (step.channel === 'email') {
-            // For email, need to get email address
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
-            const { data: entity } = await supabase
-              .from(table)
-              .select("email")
-              .eq("id", entityId)
-              .single();
-            to = entity?.email;
-          } else if (step.channel === 'sms') {
-            // For SMS, need phone number
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
-            const { data: entity } = await supabase
-              .from(table)
-              .select("phone")
-              .eq("id", entityId)
-              .single();
-            to = entity?.phone;
-          } else if (step.channel.startsWith('linkedin')) {
-            // For LinkedIn, use the provider_id from candidate_channels
-            const { data: channel } = await supabase
-              .from("candidate_channels")
-              .select("provider_id, external_conversation_id")
-              .eq("candidate_id", entityId)
-              .eq("channel", "linkedin")
-              .single();
-            to = channel?.provider_id;
-            if (channel?.external_conversation_id) {
-              conversation_id = channel.external_conversation_id;
-            }
-          }
-
-          if (!to) {
-            console.error("No recipient address for execution:", exec.id);
-            failed++;
-            continue;
-          }
-
-          // Send the message using internal logic
-          const result = await sendSequenceMessage(supabase, {
-            channel: step.channel,
-            conversation_id,
-            candidate_id: enrollment.candidate_id,
-            contact_id: enrollment.contact_id,
-            to,
-            subject: step.subject,
-            body: step.body,
-            account_id: step.account_id || enrollment.account_id,
-            owner_id: enrollment.enrolled_by
-          });
-
-          // Update execution
-          await supabase
-            .from("sequence_step_executions")
-            .update({
-              status: "sent",
-              external_message_id: result.externalMessageId,
-              external_conversation_id: result.externalConversationId,
-              executed_at: now.toISOString(),
-            } as any)
-            .eq("id", exec.id);
-
-          sent++;
-        } catch (err: any) {
-          console.error("Error sending execution:", exec.id, err);
-          await supabase
-            .from("sequence_step_executions")
-            .update({
-              status: "failed",
-              error_message: err.message,
-              executed_at: now.toISOString(),
-            } as any)
-            .eq("id", exec.id);
-          failed++;
-        }
-      }
-
-      console.log(`Sent ${sent} messages, ${failed} failed`);
     }
 
-    const result = {
+    let sent = 0;
+    let failed = 0;
+
+    for (const exec of (scheduledExecutions ?? []) as AnyRecord[]) {
+      const enrollment = exec.sequence_enrollments as AnyRecord;
+      const step = enrollment.sequence_steps as AnyRecord;
+
+      try {
+        const recipient = await resolveRecipientForExecution(supabase, enrollment, step.channel);
+        if (recipient.errorMessage || !recipient.to) {
+          throw new Error(recipient.errorMessage || "recipient resolution failed");
+        }
+
+        const account = await resolveAccountForStep(supabase, {
+          channel: step.channel,
+          ownerId: enrollment.enrolled_by,
+          explicitAccountId: step.account_id || enrollment.account_id,
+        });
+
+        console.log("[sequence] account resolution", {
+          execution_id: exec.id,
+          channel: step.channel,
+          account_id: account.accountId ?? null,
+          provider: account.provider,
+        });
+
+        console.log("[sequence] send attempt", {
+          execution_id: exec.id,
+          channel: step.channel,
+          has_subject: Boolean(step.subject),
+        });
+
+        const result = await sendSequenceMessage(supabase, {
+          channel: step.channel,
+          conversation_id: recipient.conversationId,
+          candidate_id: enrollment.candidate_id,
+          contact_id: enrollment.contact_id,
+          to: recipient.to,
+          subject: step.subject,
+          body: step.body,
+          owner_id: enrollment.enrolled_by,
+          account,
+        });
+
+        await supabase
+          .from("sequence_step_executions")
+          .update({
+            status: "sent",
+            external_message_id: result.externalMessageId,
+            external_conversation_id: result.externalConversationId,
+            executed_at: now.toISOString(),
+            error_message: null,
+          } as any)
+          .eq("id", exec.id);
+
+        sent++;
+      } catch (err: any) {
+        await supabase
+          .from("sequence_step_executions")
+          .update({ status: "failed", error_message: err.message, executed_at: now.toISOString() } as any)
+          .eq("id", exec.id);
+
+        await failEnrollment(supabase, exec.enrollment_id, "send_failure");
+        failed++;
+      }
+    }
+
+    return json({
       processed,
       skipped,
       stopped,
-      sent: scheduledExecutions?.length || 0,
+      sent,
+      failed,
       total: enrollments.length,
       timestamp: now.toISOString(),
-    };
-
-    console.log("Process result:", result);
-
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
     console.error("Process error:", err);
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEND SEQUENCE MESSAGE (internal function)
-// ─────────────────────────────────────────────────────────────────────────────
+function json(data: AnyRecord) {
+  return new Response(JSON.stringify(data), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function resolveRecipientAddress(supabase: any, enrollment: AnyRecord, nextStepOrder: number) {
+  const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+  if (!entityId) {
+    return { errorMessage: "missing contact_id/candidate_id/prospect_id" };
+  }
+
+  const { data: step } = await supabase
+    .from("sequence_steps")
+    .select("channel")
+    .eq("sequence_id", enrollment.sequence_id)
+    .eq("step_order", nextStepOrder)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!step) {
+    return { errorMessage: `missing or inactive step ${nextStepOrder}` };
+  }
+
+  const recipient = await resolveRecipientForExecution(supabase, enrollment, step.channel);
+  if (recipient.errorMessage || !recipient.to) {
+    return { errorMessage: recipient.errorMessage || "missing recipient address" };
+  }
+
+  return { errorMessage: null };
+}
+
+async function resolveRecipientForExecution(supabase: any, enrollment: AnyRecord, channel: string) {
+  const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+  if (!entityId) {
+    return { errorMessage: "missing recipient entity id", to: null, conversationId: null };
+  }
+
+  let to: string | null = null;
+  let conversationId = `seq_${enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id}_${enrollment.enrolled_by || "system"}`;
+
+  const { data: existingConv } = await supabase.from("conversations").select("id").eq("id", conversationId).maybeSingle();
+  if (!existingConv) {
+    await supabase.from("conversations").insert({
+      id: conversationId,
+      candidate_id: enrollment.candidate_id,
+      contact_id: enrollment.contact_id,
+      prospect_id: enrollment.prospect_id,
+      owner_id: enrollment.enrolled_by,
+      channel: channel || "email",
+      last_message_at: new Date().toISOString(),
+    } as any);
+  }
+
+  if (channel === "email") {
+    const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+    const { data: entity } = await supabase.from(table).select("email").eq("id", entityId).maybeSingle();
+    to = entity?.email ?? null;
+  } else if (channel === "sms") {
+    const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+    const { data: entity } = await supabase.from(table).select("phone").eq("id", entityId).maybeSingle();
+    to = entity?.phone ?? null;
+  } else if (String(channel).startsWith("linkedin")) {
+    const { data: row } = await supabase
+      .from("candidate_channels")
+      .select("provider_id, external_conversation_id")
+      .eq("candidate_id", entityId)
+      .eq("channel", "linkedin")
+      .maybeSingle();
+
+    to = row?.provider_id ?? null;
+    if (row?.external_conversation_id) conversationId = row.external_conversation_id;
+  }
+
+  if (!to) return { errorMessage: `missing recipient address for channel ${channel}`, to: null, conversationId };
+
+  return { errorMessage: null, to, conversationId };
+}
+
+async function resolveAccountForStep(
+  supabase: any,
+  payload: { channel: string; ownerId: string; explicitAccountId?: string },
+) {
+  const { channel, ownerId, explicitAccountId } = payload;
+
+  if (channel !== "email") {
+    return { provider: "non_email", accountId: explicitAccountId ?? null, config: null };
+  }
+
+  if (explicitAccountId) {
+    const { data: account } = await supabase
+      .from("integration_accounts")
+      .select("id, provider, is_active, provider_config")
+      .eq("id", explicitAccountId)
+      .maybeSingle();
+
+    if (!account || !account.is_active || String(account.provider).toLowerCase() !== "microsoft") {
+      throw new Error("no valid Microsoft account exists for this step");
+    }
+
+    return { provider: "microsoft", accountId: account.id, config: account.provider_config };
+  }
+
+  const { data: outlook } = await supabase
+    .from("user_integrations")
+    .select("id, config")
+    .eq("user_id", ownerId)
+    .eq("integration_type", "outlook")
+    .eq("is_active", true)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!outlook) throw new Error("no valid Microsoft account exists for owner");
+
+  return { provider: "microsoft", accountId: outlook.id, config: outlook.config };
+}
+
 async function sendSequenceMessage(
   supabase: any,
   payload: {
@@ -451,31 +503,30 @@ async function sendSequenceMessage(
     to: string;
     subject?: string;
     body: string;
-    account_id?: string;
     owner_id: string;
-  }
+    account: { provider: string; accountId: string | null; config: any };
+  },
 ): Promise<{ externalMessageId: string | null; externalConversationId: string | null }> {
-  const { channel, conversation_id, candidate_id, contact_id, to, subject, body, account_id, owner_id } = payload;
+  const { channel, conversation_id, candidate_id, contact_id, to, subject, body, owner_id, account } = payload;
 
-  let result: any;
+  let result: AnyRecord;
   let externalMessageId: string | null = null;
   let externalConversationId: string | null = null;
 
-  // Route to appropriate channel handler
   switch (channel) {
-    case 'email':
-      result = await sendEmail(supabase, to, subject, body);
+    case "email":
+      result = await sendEmailMicrosoftOnly(to, subject, body, account.config);
       externalMessageId = result.messageId;
       break;
-    case 'sms':
+    case "sms":
       result = await sendSms(supabase, to, body);
       externalMessageId = result.id?.toString();
       break;
-    case 'linkedin':
-    case 'linkedin_connection':
-    case 'linkedin_recruiter':
-    case 'sales_nav':
-      result = await sendLinkedIn(supabase, to, body, account_id);
+    case "linkedin":
+    case "linkedin_connection":
+    case "linkedin_recruiter":
+    case "sales_nav":
+      result = await sendLinkedIn(supabase, to, body, account.accountId ?? undefined);
       externalMessageId = result.message_id;
       externalConversationId = result.conversation_id;
       break;
@@ -483,13 +534,12 @@ async function sendSequenceMessage(
       throw new Error(`Unsupported channel: ${channel}`);
   }
 
-  // Log the message in database
-  const messageInsert: any = {
+  await supabase.from("messages").insert({
     conversation_id,
     candidate_id: candidate_id || null,
     contact_id: contact_id || null,
     channel,
-    direction: 'outbound',
+    direction: "outbound",
     subject: subject || null,
     body,
     sender_address: result.sender || null,
@@ -497,117 +547,80 @@ async function sendSequenceMessage(
     sent_at: new Date().toISOString(),
     external_message_id: externalMessageId,
     external_conversation_id: externalConversationId,
-    provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+    provider: channel === "email" ? "microsoft" : channel === "sms" ? "ringcentral" : "unipile",
     owner_id,
-  };
+  } as any);
 
-  const { error: msgError } = await supabase.from('messages').insert(messageInsert);
-  if (msgError) {
-    console.error('Failed to log message:', msgError);
-  }
-
-  // Update conversation's last_message_at
-  await supabase
-    .from('conversations')
-    .update({
-      last_message_at: new Date().toISOString(),
-      last_message_preview: body.substring(0, 100),
-      is_read: true,
-    })
-    .eq('id', conversation_id);
+  await supabase.from("conversations").update({
+    last_message_at: new Date().toISOString(),
+    last_message_preview: body.substring(0, 100),
+    is_read: true,
+  }).eq("id", conversation_id);
 
   return { externalMessageId, externalConversationId };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EMAIL via SMTP (using Resend or generic SMTP)
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendEmail(
-  supabase: any,
+async function sendEmailMicrosoftOnly(
   to: string,
   subject: string | undefined,
-  body: string
+  body: string,
+  outlookConfig: AnyRecord,
 ): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || '',
-        html: body,
-      }),
-    });
+  const accessToken = outlookConfig?.access_token;
+  const fromEmail = outlookConfig?.email;
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend API error: ${error}`);
-    }
+  if (!accessToken) throw new Error("expired Microsoft token or missing access token");
 
-    const data = await response.json();
-    return { messageId: data.id, sender: fromEmail };
-  }
-
-  // Fallback to SMTP
-  const smtpConfig = await getSmtpConfig(supabase);
-  if (!smtpConfig) {
-    throw new Error('No email configuration found');
-  }
-
-  // Use a simple SMTP send (would need to implement SMTP client)
-  // For now, throw error
-  throw new Error('SMTP not implemented yet');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SMS via RingCentral
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendSms(
-  supabase: any,
-  to: string,
-  body: string
-): Promise<{ id: string; sender: string }> {
-  const ringcentralConfig = await getRingCentralConfig(supabase);
-  if (!ringcentralConfig) {
-    throw new Error('RingCentral not configured');
-  }
-
-  const authResponse = await fetch(`https://platform.ringcentral.com/restapi/oauth/token`, {
-    method: 'POST',
+  const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method: "POST",
     headers: {
-      'Authorization': `Basic ${btoa(`${ringcentralConfig.client_id}:${ringcentralConfig.client_secret}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
-    body: new URLSearchParams({
-      grant_type: 'password',
-      username: ringcentralConfig.phone_number,
-      password: ringcentralConfig.jwt_token,
-      extension: '',
+    body: JSON.stringify({
+      message: {
+        subject: subject || "",
+        body: { contentType: "HTML", content: body },
+        toRecipients: [{ emailAddress: { address: to } }],
+      },
+      saveToSentItems: true,
     }),
   });
 
-  if (!authResponse.ok) {
-    throw new Error('RingCentral auth failed');
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`send failure from Graph: ${errorText}`);
   }
 
-  const authData = await authResponse.json();
-  const accessToken = authData.access_token;
+  return { messageId: crypto.randomUUID(), sender: fromEmail || "microsoft" };
+}
 
-  const smsResponse = await fetch(`https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/sms`, {
-    method: 'POST',
+async function sendSms(supabase: any, to: string, body: string): Promise<{ id: string; sender: string }> {
+  const ringcentralConfig = await getRingCentralConfig();
+  if (!ringcentralConfig) throw new Error("RingCentral not configured");
+
+  const authResponse = await fetch("https://platform.ringcentral.com/restapi/oauth/token", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+      Authorization: `Basic ${btoa(`${ringcentralConfig.client_id}:${ringcentralConfig.client_secret}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "password",
+      username: ringcentralConfig.phone_number,
+      password: ringcentralConfig.jwt_token,
+      extension: "",
+    }),
+  });
+
+  if (!authResponse.ok) throw new Error("RingCentral auth failed");
+
+  const authData = await authResponse.json();
+  const smsResponse = await fetch("https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/sms", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${authData.access_token}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       to: [{ phoneNumber: to }],
@@ -625,44 +638,25 @@ async function sendSms(
   return { id: smsData.id, sender: ringcentralConfig.phone_number };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LINKEDIN via Unipile
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendLinkedIn(
-  supabase: any,
-  to: string,
-  body: string,
-  account_id?: string
-): Promise<{ message_id: string; conversation_id: string }> {
-  if (!account_id) {
-    throw new Error('LinkedIn account_id required');
-  }
+async function sendLinkedIn(supabase: any, to: string, body: string, account_id?: string) {
+  if (!account_id) throw new Error("LinkedIn account_id required");
 
   const { data: account } = await supabase
-    .from('integration_accounts')
-    .select('provider_config')
-    .eq('id', account_id)
+    .from("integration_accounts")
+    .select("provider_config")
+    .eq("id", account_id)
     .single();
 
-  if (!account?.provider_config?.unipile_api_key) {
-    throw new Error('Unipile API key not found');
-  }
+  if (!account?.provider_config?.unipile_api_key) throw new Error("Unipile API key not found");
 
-  const apiKey = account.provider_config.unipile_api_key;
-  const baseUrl = 'https://api.unipile.com:13111/api/v1';
-
-  // Send message
-  const response = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
+  const response = await fetch("https://api.unipile.com:13111/api/v1/messages", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'X-UNIPILE-CLIENT': 'sully-recruit',
+      Authorization: `Bearer ${account.provider_config.unipile_api_key}`,
+      "Content-Type": "application/json",
+      "X-UNIPILE-CLIENT": "sully-recruit",
     },
-    body: JSON.stringify({
-      provider_id: to,
-      text: body,
-    }),
+    body: JSON.stringify({ provider_id: to, text: body }),
   });
 
   if (!response.ok) {
@@ -674,86 +668,70 @@ async function sendLinkedIn(
   return { message_id: data.id, conversation_id: data.conversation_id };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIG HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-async function getSmtpConfig(supabase: any): Promise<any> {
-  // Get SMTP config from integration_accounts or env
-  const smtpHost = Deno.env.get('SMTP_HOST');
-  if (smtpHost) {
-    return {
-      smtp_host: smtpHost,
-      smtp_port: parseInt(Deno.env.get('SMTP_PORT') || '587'),
-      smtp_user: Deno.env.get('SMTP_USER'),
-      smtp_pass: Deno.env.get('SMTP_PASS'),
-      from_email: Deno.env.get('SMTP_FROM_EMAIL'),
-      from_name: Deno.env.get('SMTP_FROM_NAME'),
-    };
-  }
-  return null;
+async function getRingCentralConfig() {
+  const clientId = Deno.env.get("RINGCENTRAL_CLIENT_ID");
+  if (!clientId) return null;
+
+  return {
+    client_id: clientId,
+    client_secret: Deno.env.get("RINGCENTRAL_CLIENT_SECRET"),
+    jwt_token: Deno.env.get("RINGCENTRAL_JWT_TOKEN"),
+    phone_number: Deno.env.get("RINGCENTRAL_PHONE_NUMBER"),
+  };
 }
 
-async function getRingCentralConfig(supabase: any): Promise<any> {
-  const clientId = Deno.env.get('RINGCENTRAL_CLIENT_ID');
-  if (clientId) {
-    return {
-      client_id: clientId,
-      client_secret: Deno.env.get('RINGCENTRAL_CLIENT_SECRET'),
-      jwt_token: Deno.env.get('RINGCENTRAL_JWT_TOKEN'),
-      server_url: Deno.env.get('RINGCENTRAL_SERVER_URL'),
-      phone_number: Deno.env.get('RINGCENTRAL_PHONE_NUMBER'),
-    };
-  }
-  return null;
+async function insertFailedExecution(
+  supabase: any,
+  payload: { enrollmentId: string; sequenceStepId: string | null; reason: string; context?: AnyRecord },
+) {
+  console.error("[sequence] execution failure", payload);
+  await supabase.from("sequence_step_executions").insert({
+    enrollment_id: payload.enrollmentId,
+    sequence_step_id: payload.sequenceStepId,
+    status: "failed",
+    executed_at: new Date().toISOString(),
+    error_message: payload.reason,
+    raw_payload: payload.context ?? {},
+  } as any);
 }
 
-/**
- * Scan recent executions with status 'sent' or 'delivered' and check
- * the messages table for open/reply signals. Updates execution statuses:
- * - sent → delivered (if external_message_id is set)
- * - sent/delivered → opened (if message has been read/opened)
- * - any → replied (if an inbound reply exists in the conversation)
- */
+async function failEnrollment(supabase: any, enrollmentId: string, reason: string) {
+  await supabase.from("sequence_enrollments").update({
+    status: "failed",
+    stopped_reason: reason,
+    completed_at: new Date().toISOString(),
+  } as any).eq("id", enrollmentId).eq("status", "active");
+}
+
 async function updateTrackingStatuses(supabase: any, now: Date) {
   try {
-    // Get executions from the last 14 days that could still be tracked
     const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-    const { data: executions, error } = await supabase
+    const { data: executions } = await supabase
       .from("sequence_step_executions")
-      .select(`
-        id,
-        enrollment_id,
-        sequence_step_id,
-        status,
-        external_message_id,
-        external_conversation_id,
-        executed_at
-      `)
+      .select("id,enrollment_id,status,external_message_id,external_conversation_id,executed_at")
       .in("status", ["sent", "delivered"])
       .gte("executed_at", cutoff.toISOString())
       .order("executed_at", { ascending: false })
       .limit(200);
 
-    if (error || !executions || executions.length === 0) return;
+    if (!executions?.length) return;
 
-    // Get enrollment details for entity lookups
-    const enrollmentIds = [...new Set(executions.map((e: any) => e.enrollment_id))];
+    const enrollmentIds = [...new Set(executions.map((e: AnyRecord) => e.enrollment_id))];
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")
       .select("id, candidate_id, contact_id, prospect_id")
       .in("id", enrollmentIds);
 
-    const enrollmentMap = new Map((enrollments ?? []).map((e: any) => [e.id, e]));
+    const enrollmentMap = new Map((enrollments ?? []).map((e: AnyRecord) => [e.id, e]));
 
-    for (const exec of executions) {
+    for (const exec of executions as AnyRecord[]) {
       const enrollment = enrollmentMap.get(exec.enrollment_id);
       if (!enrollment) continue;
 
       const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
       if (!entityId) continue;
 
-      // Check for inbound reply after this execution
       const { data: replies } = await supabase
         .from("messages")
         .select("id")
@@ -762,15 +740,11 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
         .gte("created_at", exec.executed_at)
         .limit(1);
 
-      if (replies && replies.length > 0) {
-        await supabase
-          .from("sequence_step_executions")
-          .update({ status: "replied" } as any)
-          .eq("id", exec.id);
+      if (replies?.length) {
+        await supabase.from("sequence_step_executions").update({ status: "replied" } as any).eq("id", exec.id);
         continue;
       }
 
-      // Check if the conversation has been read (proxy for "opened")
       if (exec.external_conversation_id) {
         const { data: conv } = await supabase
           .from("conversations")
@@ -779,24 +753,15 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
           .maybeSingle();
 
         if (conv?.is_read && exec.status === "sent") {
-          await supabase
-            .from("sequence_step_executions")
-            .update({ status: "opened" } as any)
-            .eq("id", exec.id);
+          await supabase.from("sequence_step_executions").update({ status: "opened" } as any).eq("id", exec.id);
           continue;
         }
       }
 
-      // If we have an external_message_id but status is still 'sent', mark delivered
       if (exec.status === "sent" && exec.external_message_id) {
-        await supabase
-          .from("sequence_step_executions")
-          .update({ status: "delivered" } as any)
-          .eq("id", exec.id);
+        await supabase.from("sequence_step_executions").update({ status: "delivered" } as any).eq("id", exec.id);
       }
     }
-
-    console.log(`Tracking update: checked ${executions.length} executions`);
   } catch (err) {
     console.error("Tracking update error:", err);
   }
