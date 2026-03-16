@@ -234,7 +234,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
     try {
       if (entityType === 'candidates') {
-        const rows = valid.map((r) => {
+        const parsedCsvRows = valid.map((r) => {
           const c = r.mapped;
           const stage = c.stage
             ? c.stage.toLowerCase().replace(/\s/g, '_')
@@ -261,15 +261,82 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           return row;
         });
 
+        const normalizedEmails = [...new Set(
+          parsedCsvRows
+            .map((r) => r.email?.trim()?.toLowerCase())
+            .filter(Boolean),
+        )] as string[];
+
+        const existingMap = new Map<string, { id: string; email_normalized: string }>();
+        if (normalizedEmails.length > 0) {
+          const { data: existing, error: existingError } = await supabase
+            .from('candidates')
+            .select('id, email_normalized')
+            .in('email_normalized', normalizedEmails);
+
+          if (existingError) throw existingError;
+
+          for (const candidate of existing || []) {
+            if (candidate.email_normalized) {
+              existingMap.set(candidate.email_normalized, candidate as { id: string; email_normalized: string });
+            }
+          }
+        }
+
+        const newRows: Record<string, any>[] = [];
+        const updates: Array<{ id: string; payload: Record<string, any> }> = [];
+
+        for (const row of parsedCsvRows) {
+          const email = row.email?.trim() || null;
+          const emailNormalized = email?.toLowerCase() || null;
+          if (!emailNormalized) continue;
+
+          const existingCandidate = existingMap.get(emailNormalized);
+
+          if (!existingCandidate) {
+            newRows.push({
+              ...row,
+              email,
+              email_normalized: emailNormalized,
+            });
+            continue;
+          }
+
+          const payload: Record<string, any> = {
+            first_name: row.first_name ?? null,
+            last_name: row.last_name ?? null,
+            phone: row.phone ?? null,
+            linkedin_url: row.linkedin_url ?? null,
+            current_company: row.current_company ?? null,
+            current_title: row.current_title ?? null,
+            location: row.location ?? null,
+            source: row.source ?? null,
+            notes: row.notes ?? null,
+            skills: row.skills ?? [],
+            updated_at: new Date().toISOString(),
+          };
+
+          updates.push({ id: existingCandidate.id, payload });
+        }
+
         const BATCH = 100;
         let inserted = 0;
-        for (let i = 0; i < rows.length; i += BATCH) {
-          const batch = rows.slice(i, i + BATCH);
+        for (let i = 0; i < newRows.length; i += BATCH) {
+          const batch = newRows.slice(i, i + BATCH);
           const { error } = await supabase.from('candidates').insert(batch as any);
           if (error) throw error;
           inserted += batch.length;
         }
-        setImportedCount(inserted);
+
+        for (const { id, payload } of updates) {
+          const { error } = await supabase
+            .from('candidates')
+            .update(payload)
+            .eq('id', id);
+          if (error) throw error;
+        }
+
+        setImportedCount(inserted + updates.length);
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
 
       } else if (entityType === 'jobs') {

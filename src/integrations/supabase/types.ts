@@ -215,6 +215,7 @@ export type Database = {
           current_company: string | null
           current_title: string | null
           email: string | null
+          email_normalized: string | null
           first_name: string | null
           full_name: string | null
           id: string
@@ -231,6 +232,7 @@ export type Database = {
           current_company?: string | null
           current_title?: string | null
           email?: string | null
+          email_normalized?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
@@ -247,6 +249,7 @@ export type Database = {
           current_company?: string | null
           current_title?: string | null
           email?: string | null
+          email_normalized?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
@@ -370,6 +373,7 @@ export type Database = {
           created_at: string
           department: string | null
           email: string | null
+          email_normalized: string | null
           first_name: string | null
           full_name: string | null
           id: string
@@ -388,6 +392,7 @@ export type Database = {
           created_at?: string
           department?: string | null
           email?: string | null
+          email_normalized?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
@@ -406,6 +411,7 @@ export type Database = {
           created_at?: string
           department?: string | null
           email?: string | null
+          email_normalized?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
@@ -1368,6 +1374,7 @@ export type Database = {
           current_company: string | null
           current_title: string | null
           email: string | null
+          email_normalized: string | null
           first_name: string | null
           full_name: string | null
           id: string | null
@@ -1502,6 +1509,7 @@ export type Database = {
           current_company: string | null
           current_title: string | null
           email: string | null
+          email_normalized: string | null
           first_name: string | null
           full_name: string | null
           id: string
