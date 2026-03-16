@@ -15,6 +15,7 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = 'upload' | 'preview' | 'done';
+type DuplicateAction = 'keep_existing' | 'use_imported' | 'skip';
 
 interface MappedRow {
   first_name?: string;
@@ -42,6 +43,14 @@ interface ParsedResult {
   errors: string[];
   raw: Record<string, string>;
   idx: number;
+}
+
+interface DuplicateMatch {
+  rowIdx: number;
+  conflictBy: Array<'email' | 'phone' | 'linkedin_url'>;
+  existingId: string;
+  existing: Record<string, any>;
+  incoming: MappedRow;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -158,6 +167,18 @@ function validateRow(mapped: MappedRow, entityType: string): string[] {
   return errors;
 }
 
+function normalizeEmail(value?: string) {
+  return (value || '').trim().toLowerCase();
+}
+
+function normalizeLinkedin(value?: string) {
+  return (value || '').trim().toLowerCase().replace(/\/$/, '');
+}
+
+function normalizePhone(value?: string) {
+  return (value || '').replace(/\D/g, '');
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 interface CsvImportDialogProps {
@@ -179,6 +200,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const [activeTab, setActiveTab] = useState<'valid' | 'issues' | 'mapping'>('valid');
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  const [duplicateActions, setDuplicateActions] = useState<Record<number, DuplicateAction>>({});
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
 
   const valid = results.filter((r) => r.errors.length === 0);
   const invalid = results.filter((r) => r.errors.length > 0);
@@ -188,6 +212,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     setFileName('');
     setHeaders([]);
     setResults([]);
+    setDuplicates([]);
+    setDuplicateActions({});
     setActiveTab('valid');
     setImportedCount(0);
   };
@@ -196,6 +222,91 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     reset();
     onOpenChange(false);
   };
+
+  const detectDuplicates = useCallback(async (parsed: ParsedResult[]) => {
+    if (!user || !['candidates', 'contacts'].includes(entityType)) {
+      setDuplicates([]);
+      setDuplicateActions({});
+      return;
+    }
+
+    const validRows = parsed.filter((r) => r.errors.length === 0);
+    const emails = [...new Set(validRows.map((r) => normalizeEmail(r.mapped.email)).filter(Boolean))];
+    const phones = [...new Set(validRows.map((r) => normalizePhone(r.mapped.phone)).filter(Boolean))];
+    const linkedins = [...new Set(validRows.map((r) => normalizeLinkedin(r.mapped.linkedin_url)).filter(Boolean))];
+
+    if (emails.length === 0 && phones.length === 0 && linkedins.length === 0) {
+      setDuplicates([]);
+      setDuplicateActions({});
+      return;
+    }
+
+    setCheckingDuplicates(true);
+    try {
+      const table = entityType;
+      const baseSelect = entityType === 'candidates'
+        ? 'id, first_name, last_name, email, phone, linkedin_url, current_title, current_company, stage, status, source, notes, skills'
+        : 'id, first_name, last_name, email, phone, linkedin_url, title, company_name, notes';
+
+      const [emailRes, phoneRes, linkedinRes] = await Promise.all([
+        emails.length
+          ? supabase.from(table).select(baseSelect).eq('user_id', user.id).in('email', emails)
+          : Promise.resolve({ data: [] as any[] }),
+        phones.length
+          ? supabase.from(table).select(baseSelect).eq('user_id', user.id).in('phone', phones)
+          : Promise.resolve({ data: [] as any[] }),
+        linkedins.length
+          ? supabase.from(table).select(baseSelect).eq('user_id', user.id).in('linkedin_url', linkedins)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
+      const existingRecords = [
+        ...((emailRes as any).data ?? []),
+        ...((phoneRes as any).data ?? []),
+        ...((linkedinRes as any).data ?? []),
+      ];
+
+      const existingByEmail = new Map<string, any>();
+      const existingByPhone = new Map<string, any>();
+      const existingByLinkedin = new Map<string, any>();
+
+      for (const existing of existingRecords) {
+        const e = normalizeEmail(existing.email);
+        const p = normalizePhone(existing.phone);
+        const l = normalizeLinkedin(existing.linkedin_url);
+        if (e && !existingByEmail.has(e)) existingByEmail.set(e, existing);
+        if (p && !existingByPhone.has(p)) existingByPhone.set(p, existing);
+        if (l && !existingByLinkedin.has(l)) existingByLinkedin.set(l, existing);
+      }
+
+      const matches: DuplicateMatch[] = [];
+      for (const row of validRows) {
+        const conflictBy: Array<'email' | 'phone' | 'linkedin_url'> = [];
+        const email = normalizeEmail(row.mapped.email);
+        const phone = normalizePhone(row.mapped.phone);
+        const linkedin = normalizeLinkedin(row.mapped.linkedin_url);
+
+        const existing = existingByEmail.get(email) || existingByPhone.get(phone) || existingByLinkedin.get(linkedin);
+        if (!existing) continue;
+        if (email && normalizeEmail(existing.email) === email) conflictBy.push('email');
+        if (phone && normalizePhone(existing.phone) === phone) conflictBy.push('phone');
+        if (linkedin && normalizeLinkedin(existing.linkedin_url) === linkedin) conflictBy.push('linkedin_url');
+
+        matches.push({
+          rowIdx: row.idx,
+          conflictBy,
+          existingId: existing.id,
+          existing,
+          incoming: row.mapped,
+        });
+      }
+
+      setDuplicates(matches);
+      setDuplicateActions(Object.fromEntries(matches.map((m) => [m.rowIdx, 'keep_existing' as DuplicateAction])));
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  }, [entityType, user]);
 
   const processFile = useCallback((file: File) => {
     if (!file.name.endsWith('.csv')) {
@@ -216,10 +327,11 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           return { raw: row, mapped, errors, idx: i + 2 };
         });
       setResults(parsed);
+      void detectDuplicates(parsed);
       setStep('preview');
     };
     reader.readAsText(file);
-  }, []);
+  }, [detectDuplicates, entityType]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -233,8 +345,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     setImporting(true);
 
     try {
+      const duplicateByRow = new Map(duplicates.map((d) => [d.rowIdx, d]));
       if (entityType === 'candidates') {
-        const rows = valid.map((r) => {
+        const rows = valid.filter((r) => !duplicateByRow.has(r.idx)).map((r) => {
           const c = r.mapped;
           const stage = c.stage
             ? c.stage.toLowerCase().replace(/\s/g, '_')
@@ -269,11 +382,37 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           if (error) throw error;
           inserted += batch.length;
         }
+
+        for (const match of duplicates) {
+          const action = duplicateActions[match.rowIdx] ?? 'keep_existing';
+          if (action !== 'use_imported') continue;
+          const c = match.incoming;
+          const updates: Record<string, any> = {};
+          if (c.first_name) updates.first_name = c.first_name;
+          if (c.last_name) updates.last_name = c.last_name;
+          if (c.email) updates.email = normalizeEmail(c.email);
+          if (c.phone) updates.phone = c.phone;
+          if (c.current_title) updates.current_title = c.current_title;
+          if (c.current_company) updates.current_company = c.current_company;
+          if (c.linkedin_url) updates.linkedin_url = c.linkedin_url;
+          if (c.source) updates.source = c.source;
+          if (c.notes) updates.notes = c.notes;
+          if (c.stage) {
+            const stage = c.stage.toLowerCase().replace(/\s/g, '_');
+            if (VALID_CANDIDATE_STAGES.includes(stage)) updates.stage = stage;
+          }
+          if (c.skills) updates.skills = c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean);
+          if (Object.keys(updates).length > 0) {
+            const { error } = await supabase.from('candidates').update(updates as any).eq('id', match.existingId);
+            if (error) throw error;
+          }
+        }
+
         setImportedCount(inserted);
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
 
       } else if (entityType === 'jobs') {
-        const rows = valid.map((r) => {
+        const rows = valid.filter((r) => !duplicateByRow.has(r.idx)).map((r) => {
           const j = r.mapped;
           const stage = j.stage
             ? j.stage.toLowerCase().replace(/\s/g, '_')
@@ -333,6 +472,26 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           if (error) throw error;
           inserted += batch.length;
         }
+
+        for (const match of duplicates) {
+          const action = duplicateActions[match.rowIdx] ?? 'keep_existing';
+          if (action !== 'use_imported') continue;
+          const c = match.incoming;
+          const updates: Record<string, any> = {};
+          if (c.first_name) updates.first_name = c.first_name;
+          if (c.last_name) updates.last_name = c.last_name;
+          if (c.email) updates.email = normalizeEmail(c.email);
+          if (c.phone) updates.phone = c.phone;
+          if (c.title) updates.title = c.title;
+          if (c.company_name) updates.company_name = c.company_name;
+          if (c.linkedin_url) updates.linkedin_url = c.linkedin_url;
+          if (c.notes) updates.notes = c.notes;
+          if (Object.keys(updates).length > 0) {
+            const { error } = await supabase.from('contacts').update(updates as any).eq('id', match.existingId);
+            if (error) throw error;
+          }
+        }
+
         setImportedCount(inserted);
         queryClient.invalidateQueries({ queryKey: ['contacts'] });
       }
@@ -371,6 +530,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             {step === 'preview' && (
               <div className="flex items-center gap-2 ml-auto">
                 <span className="text-xs text-muted-foreground">{valid.length} ready</span>
+                {duplicates.length > 0 && (
+                  <span className="text-xs text-amber-500">{duplicates.length} duplicates</span>
+                )}
                 {invalid.length > 0 && (
                   <span className="text-xs text-destructive">{invalid.length} issues</span>
                 )}
@@ -443,7 +605,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
               <div className="flex border-b border-border shrink-0 px-6">
                 {([
                   ['valid', `Ready (${valid.length})`],
-                  ['issues', `Issues (${invalid.length})`],
+                  ['issues', duplicates.length > 0 ? `Duplicates (${duplicates.length})` : `Issues (${invalid.length})`],
                   ['mapping', 'Column Map'],
                 ] as const).map(([key, label]) => (
                   <button
@@ -567,7 +729,40 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
                 {/* Issues */}
                 {activeTab === 'issues' && (
-                  invalid.length === 0 ? (
+                  duplicates.length > 0 ? (
+                    <table className="w-full text-xs">
+                      <thead className="bg-secondary sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Row</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Incoming</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Matched By</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Existing</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Decision</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {duplicates.map((d) => (
+                          <tr key={d.rowIdx} className="hover:bg-muted/40">
+                            <td className="px-4 py-2.5 text-muted-foreground">{d.rowIdx}</td>
+                            <td className="px-4 py-2.5 text-foreground">{[d.incoming.first_name, d.incoming.last_name].filter(Boolean).join(' ') || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{d.conflictBy.map((key) => key === 'linkedin_url' ? 'linkedin' : key).join(', ')}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{[d.existing.first_name, d.existing.last_name].filter(Boolean).join(' ') || '—'}</td>
+                            <td className="px-4 py-2.5">
+                              <select
+                                className="bg-background border border-border rounded px-2 py-1"
+                                value={duplicateActions[d.rowIdx] ?? 'keep_existing'}
+                                onChange={(e) => setDuplicateActions((prev) => ({ ...prev, [d.rowIdx]: e.target.value as DuplicateAction }))}
+                              >
+                                <option value="keep_existing">Keep existing record</option>
+                                <option value="use_imported">Use uploaded data (update existing)</option>
+                                <option value="skip">Skip row</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : invalid.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                       <CheckCircle2 className="h-8 w-8 mb-3 opacity-40 text-success" />
                       <p className="text-sm">No issues — all rows are valid!</p>
@@ -664,6 +859,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         {step === 'preview' && (
           <div className="px-6 py-4 border-t border-border shrink-0 flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
+              {checkingDuplicates && 'Checking duplicates... '}
+              {duplicates.length > 0 && `${duplicates.length} duplicate rows found. Decide what information to keep in the Duplicates tab. `}
               {invalid.length > 0 && `${invalid.length} rows with issues will be skipped. `}
               {valid.length} row{valid.length !== 1 ? 's' : ''} will be imported.
             </p>
