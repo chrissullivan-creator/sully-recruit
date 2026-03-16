@@ -17,6 +17,7 @@ import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, A
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
+import { getFrontendImportState } from '@/lib/importReviewStatus';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -35,19 +36,25 @@ const JOB_STATUS_COLORS: Record<string, string> = {
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
 
-const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed'] as const;
+const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed', 'review_needed', 'merged', 'promoted'] as const;
 const STATUS_LABELS: Record<string, string> = {
   all: 'All',
   new: 'New',
   reached_out: 'Reached Out',
   back_of_resume: 'Back of Resume',
   placed: 'Placed',
+  review_needed: 'Needs Review',
+  merged: 'Merged',
+  promoted: 'Promoted',
 };
 const statusColors: Record<string, string> = {
   new:            'bg-blue-500/10 text-blue-400 border-blue-500/20',
   reached_out:    'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   back_of_resume: 'bg-muted text-muted-foreground border-border',
   placed:         'bg-success/10 text-success border-success/20',
+  review_needed:  'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  merged:         'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  promoted:       'bg-green-500/10 text-green-400 border-green-500/20',
 };
 
 const Candidates = () => {
@@ -76,7 +83,9 @@ const Candidates = () => {
         (c.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+      const importState = getFrontendImportState(c as any);
+      const candidateStatus = importState.statusKey;
+      const matchesStatus = statusFilter === 'all' || candidateStatus === statusFilter;
       const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
       return matchesSearch && matchesStatus && matchesJobTag;
     });
@@ -87,7 +96,10 @@ const Candidates = () => {
         case 'name': aVal = a.full_name ?? ''; bVal = b.full_name ?? ''; break;
         case 'title': aVal = a.current_title ?? ''; bVal = b.current_title ?? ''; break;
         case 'company': aVal = a.current_company ?? ''; bVal = b.current_company ?? ''; break;
-        case 'status': aVal = a.status; bVal = b.status; break;
+        case 'status':
+          aVal = getFrontendImportState(a as any).statusKey;
+          bVal = getFrontendImportState(b as any).statusKey;
+          break;
         case 'created': aVal = a.created_at; bVal = b.created_at; break;
       }
       const cmp = aVal.localeCompare(bVal);
@@ -307,9 +319,20 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <div className="flex items-center gap-1.5">
-                        <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
-                          {STATUS_LABELS[candidate.status] ?? candidate.status.replace(/_/g, ' ')}
-                        </span>
+                        {(() => {
+                          const importState = getFrontendImportState(candidate as any);
+                          const fallbackStatus = candidate.status?.replace(/_/g, ' ') ?? 'new';
+                          return (
+                            <>
+                              <span className={cn('stage-badge border', statusColors[importState.statusKey] ?? statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
+                                {STATUS_LABELS[importState.statusKey] ?? importState.label ?? fallbackStatus}
+                              </span>
+                              {importState.helperText && (
+                                <span className="text-[11px] text-muted-foreground">{importState.helperText}</span>
+                              )}
+                            </>
+                          );
+                        })()}
                         {(candidate as any).no_answer && (
                           <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
                             no answer
