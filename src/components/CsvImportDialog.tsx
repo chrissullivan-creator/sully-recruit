@@ -229,10 +229,16 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   }, [processFile]);
 
   const handleImport = async () => {
-    if (!user || valid.length === 0) return;
+    if (valid.length === 0) return;
     setImporting(true);
 
     try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) {
+        toast.error('You must be logged in to import CSV data');
+        return;
+      }
+
       if (entityType === 'candidates') {
         const rows = valid.map((r) => {
           const c = r.mapped;
@@ -244,7 +250,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             ? c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
             : [];
           const row: Record<string, any> = {
-            user_id: user.id,
+            user_id: currentUser.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
@@ -284,7 +290,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             : 'medium';
           const safePriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium';
           const row: Record<string, any> = {
-            user_id: user.id,
+            user_id: currentUser.id,
             title: j.title || '',
             company: j.company || '',
             location: j.location || '',
@@ -312,7 +318,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         const rows = valid.map((r) => {
           const c = r.mapped;
           const row: Record<string, any> = {
-            user_id: user.id,
+            user_id: currentUser.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
