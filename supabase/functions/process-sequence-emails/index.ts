@@ -77,17 +77,34 @@ Deno.serve(async (req: Request) => {
       const sequence = enrollment.sequences as any;
       const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
 
+      const recipient = getRecipient(enrollment);
+      if (!recipient) {
+        await supabase
+          .from("sequence_enrollments")
+          .update({
+            status: "failed",
+            stopped_reason: "missing_recipient_identity",
+            completed_at: now.toISOString(),
+          } as any)
+          .eq("id", enrollment.id);
+        continue;
+      }
+
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
-        const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-        if (entityId) {
-          const { data: replies } = await supabase
+        if (recipient) {
+          const repliesQuery = supabase
             .from("messages")
             .select("id")
-            .eq("candidate_id", entityId)
             .eq("direction", "inbound")
             .gte("created_at", enrollment.enrolled_at || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
             .limit(1);
+
+          if (recipient.table === "candidates") repliesQuery.eq("candidate_id", recipient.id);
+          if (recipient.table === "contacts") repliesQuery.eq("contact_id", recipient.id);
+          if (recipient.table === "prospects") repliesQuery.eq("prospect_id", recipient.id);
+
+          const { data: replies } = await repliesQuery;
 
           if (replies && replies.length > 0) {
             // Mark the latest sent execution as 'replied'
@@ -143,6 +160,60 @@ Deno.serve(async (req: Request) => {
             completed_at: now.toISOString(),
           } as any)
           .eq("id", enrollment.id);
+        continue;
+      }
+
+      const channelStatus = await getStepChannelStatus(supabase, recipient, step);
+      if (!channelStatus.available) {
+        await supabase
+          .from("sequence_step_executions")
+          .insert({
+            enrollment_id: enrollment.id,
+            sequence_step_id: step.id,
+            status: "skipped",
+            error_message: channelStatus.reason,
+            executed_at: now.toISOString(),
+          } as any);
+
+        const { data: remainingSteps } = await supabase
+          .from("sequence_steps")
+          .select("id, sequence_id, step_order, channel, step_type, is_active")
+          .eq("sequence_id", enrollment.sequence_id)
+          .eq("is_active", true)
+          .gt("step_order", nextStepOrder)
+          .order("step_order", { ascending: true });
+
+        let hasRunnableRemainingStep = false;
+        for (const remainingStep of remainingSteps ?? []) {
+          const remainingStatus = await getStepChannelStatus(supabase, recipient, remainingStep);
+          if (remainingStatus.available) {
+            hasRunnableRemainingStep = true;
+            break;
+          }
+        }
+
+        if (!hasRunnableRemainingStep) {
+          await supabase
+            .from("sequence_enrollments")
+            .update({
+              status: "failed",
+              stopped_reason: "all_remaining_steps_impossible",
+              current_step_order: nextStepOrder,
+              completed_at: now.toISOString(),
+            } as any)
+            .eq("id", enrollment.id);
+          continue;
+        }
+
+        await supabase
+          .from("sequence_enrollments")
+          .update({
+            current_step_order: nextStepOrder,
+            next_step_at: now.toISOString(),
+          } as any)
+          .eq("id", enrollment.id);
+
+        skipped++;
         continue;
       }
 
@@ -270,18 +341,18 @@ Deno.serve(async (req: Request) => {
         enrollment_id,
         sequence_step_id,
         executed_at,
+        sequence_steps!inner (
+          channel,
+          subject,
+          body,
+          account_id
+        ),
         sequence_enrollments!inner (
           candidate_id,
           contact_id,
           prospect_id,
           enrolled_by,
-          account_id,
-          sequence_steps!inner (
-            channel,
-            subject,
-            body,
-            account_id
-          )
+          account_id
         )
       `)
       .eq("status", "scheduled")
@@ -297,13 +368,32 @@ Deno.serve(async (req: Request) => {
       for (const exec of scheduledExecutions) {
         try {
           const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
+          const step = exec.sequence_steps as any;
           
           // Determine recipient
-          const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-          if (!entityId) {
-            console.error("No entity ID for execution:", exec.id);
-            failed++;
+          const recipient = getRecipient(enrollment);
+          if (!recipient) {
+            await supabase
+              .from("sequence_step_executions")
+              .update({
+                status: "failed",
+                error_message: "missing_recipient_identity",
+                executed_at: now.toISOString(),
+              } as any)
+              .eq("id", exec.id);
+            continue;
+          }
+
+          const channelStatus = await getStepChannelStatus(supabase, recipient, step);
+          if (!channelStatus.available) {
+            await supabase
+              .from("sequence_step_executions")
+              .update({
+                status: "skipped",
+                error_message: channelStatus.reason,
+                executed_at: now.toISOString(),
+              } as any)
+              .eq("id", exec.id);
             continue;
           }
 
@@ -334,28 +424,36 @@ Deno.serve(async (req: Request) => {
           
           if (step.channel === 'email') {
             // For email, need to get email address
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = recipient.table;
             const { data: entity } = await supabase
               .from(table)
               .select("email")
-              .eq("id", entityId)
+              .eq("id", recipient.id)
               .single();
             to = entity?.email;
           } else if (step.channel === 'sms') {
             // For SMS, need phone number
-            const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+            const table = recipient.table;
             const { data: entity } = await supabase
               .from(table)
               .select("phone")
-              .eq("id", entityId)
+              .eq("id", recipient.id)
+              .single();
+            to = entity?.phone;
+          } else if (step.channel === 'phone') {
+            const table = recipient.table;
+            const { data: entity } = await supabase
+              .from(table)
+              .select("phone")
+              .eq("id", recipient.id)
               .single();
             to = entity?.phone;
           } else if (step.channel.startsWith('linkedin')) {
             // For LinkedIn, use the provider_id from candidate_channels
             const { data: channel } = await supabase
-              .from("candidate_channels")
+              .from(recipient.channelTable)
               .select("provider_id, external_conversation_id")
-              .eq("candidate_id", entityId)
+              .eq(recipient.channelForeignKey, recipient.id)
               .eq("channel", "linkedin")
               .single();
             to = channel?.provider_id;
@@ -405,6 +503,16 @@ Deno.serve(async (req: Request) => {
               executed_at: now.toISOString(),
             } as any)
             .eq("id", exec.id);
+          if (String(err?.message || "").includes("missing_recipient_identity") || String(err?.message || "").includes("all_remaining_steps_impossible")) {
+            await supabase
+              .from("sequence_enrollments")
+              .update({
+                status: "failed",
+                stopped_reason: String(err?.message || "provider_failure"),
+                completed_at: now.toISOString(),
+              } as any)
+              .eq("id", exec.enrollment_id);
+          }
           failed++;
         }
       }
@@ -437,6 +545,101 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+type RecipientRef = {
+  id: string;
+  table: "candidates" | "contacts" | "prospects";
+  channelTable: "candidate_channels" | "contact_channels";
+  channelForeignKey: "candidate_id" | "contact_id";
+};
+
+function getRecipient(enrollment: any): RecipientRef | null {
+  if (enrollment.candidate_id) {
+    return {
+      id: enrollment.candidate_id,
+      table: "candidates",
+      channelTable: "candidate_channels",
+      channelForeignKey: "candidate_id",
+    };
+  }
+
+  if (enrollment.contact_id) {
+    return {
+      id: enrollment.contact_id,
+      table: "contacts",
+      channelTable: "contact_channels",
+      channelForeignKey: "contact_id",
+    };
+  }
+
+  if (enrollment.prospect_id) {
+    return {
+      id: enrollment.prospect_id,
+      table: "prospects",
+      channelTable: "candidate_channels",
+      channelForeignKey: "candidate_id",
+    };
+  }
+
+  return null;
+}
+
+async function getStepChannelStatus(
+  supabase: any,
+  recipient: RecipientRef,
+  step: any,
+): Promise<{ available: boolean; reason?: string }> {
+  const normalizedChannel = String(step?.channel || step?.step_type || "").toLowerCase();
+
+  if (normalizedChannel === "email") {
+    const { data: entity } = await supabase
+      .from(recipient.table)
+      .select("email")
+      .eq("id", recipient.id)
+      .maybeSingle();
+    return entity?.email ? { available: true } : { available: false, reason: "missing_email" };
+  }
+
+  if (normalizedChannel === "sms" || normalizedChannel === "phone") {
+    const { data: entity } = await supabase
+      .from(recipient.table)
+      .select("phone")
+      .eq("id", recipient.id)
+      .maybeSingle();
+    return entity?.phone ? { available: true } : { available: false, reason: "missing_phone" };
+  }
+
+  if (
+    normalizedChannel.startsWith("linkedin") ||
+    normalizedChannel === "sales_nav" ||
+    normalizedChannel === "linkedin_recruiter"
+  ) {
+    if (recipient.table === "prospects") {
+      return { available: false, reason: "missing_linkedin" };
+    }
+
+    const { data: channel } = await supabase
+      .from(recipient.channelTable)
+      .select("provider_id")
+      .eq(recipient.channelForeignKey, recipient.id)
+      .eq("channel", "linkedin")
+      .maybeSingle();
+
+    if (channel?.provider_id) {
+      return { available: true };
+    }
+
+    const { data: entity } = await supabase
+      .from(recipient.table)
+      .select("linkedin_url")
+      .eq("id", recipient.id)
+      .maybeSingle();
+
+    return entity?.linkedin_url ? { available: true } : { available: false, reason: "missing_linkedin" };
+  }
+
+  return { available: true };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SEND SEQUENCE MESSAGE (internal function)
@@ -528,45 +731,7 @@ async function sendEmail(
   subject: string | undefined,
   body: string
 ): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || '',
-        html: body,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend API error: ${error}`);
-    }
-
-    const data = await response.json();
-    return { messageId: data.id, sender: fromEmail };
-  }
-
-  // Fallback to SMTP
-  const smtpConfig = await getSmtpConfig(supabase);
-  if (!smtpConfig) {
-    throw new Error('No email configuration found');
-  }
-
-  // Use a simple SMTP send (would need to implement SMTP client)
-  // For now, throw error
-  throw new Error('SMTP not implemented yet');
+  throw new Error('Email provider failure: Microsoft/Outlook sending is required for sequence email steps and Resend fallback is disabled');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -750,17 +915,22 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
       const enrollment = enrollmentMap.get(exec.enrollment_id);
       if (!enrollment) continue;
 
-      const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-      if (!entityId) continue;
+      const recipient = getRecipient(enrollment);
+      if (!recipient) continue;
 
       // Check for inbound reply after this execution
-      const { data: replies } = await supabase
+      const repliesQuery = supabase
         .from("messages")
         .select("id")
-        .eq("candidate_id", entityId)
         .eq("direction", "inbound")
         .gte("created_at", exec.executed_at)
         .limit(1);
+
+      if (recipient.table === "candidates") repliesQuery.eq("candidate_id", recipient.id);
+      if (recipient.table === "contacts") repliesQuery.eq("contact_id", recipient.id);
+      if (recipient.table === "prospects") repliesQuery.eq("prospect_id", recipient.id);
+
+      const { data: replies } = await repliesQuery;
 
       if (replies && replies.length > 0) {
         await supabase
