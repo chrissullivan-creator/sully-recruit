@@ -255,18 +255,10 @@ export type Database = {
           location?: string | null
           owner_id?: string | null
           phone?: string | null
-          prospect_id?: string | null
           status?: string
           updated_at?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "candidates_prospect_id_fkey"
-            columns: ["prospect_id"]
-            isOneToOne: true
-            referencedRelation: "prospects"
-            referencedColumns: ["id"]
-          },
         ]
       }
       companies: {
@@ -917,7 +909,6 @@ export type Database = {
           id: string
           next_step_at: string | null
           paused_at: string | null
-          prospect_id: string | null
           send_out_id: string | null
           sequence_id: string
           status: string
@@ -936,7 +927,6 @@ export type Database = {
           id?: string
           next_step_at?: string | null
           paused_at?: string | null
-          prospect_id?: string | null
           send_out_id?: string | null
           sequence_id: string
           status?: string
@@ -955,7 +945,6 @@ export type Database = {
           id?: string
           next_step_at?: string | null
           paused_at?: string | null
-          prospect_id?: string | null
           send_out_id?: string | null
           sequence_id?: string
           status?: string
@@ -982,13 +971,6 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sequence_enrollments_prospect_id_fkey"
-            columns: ["prospect_id"]
-            isOneToOne: false
-            referencedRelation: "prospects"
             referencedColumns: ["id"]
           },
           {
@@ -1494,32 +1476,6 @@ export type Database = {
       match_phone_and_link_call: {
         Args: { p_call_id: string; p_phone_number: string }
         Returns: Json
-      }
-      promote_prospect_to_candidate: {
-        Args: { p_prospect_id: string }
-        Returns: {
-          created_at: string
-          current_company: string | null
-          current_title: string | null
-          email: string | null
-          first_name: string | null
-          full_name: string | null
-          id: string
-          last_name: string | null
-          linkedin_url: string | null
-          location: string | null
-          owner_id: string | null
-          phone: string | null
-          prospect_id: string | null
-          status: string
-          updated_at: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "candidates"
-          isOneToOne: true
-          isSetofReturn: false
-        }
       }
     }
     Enums: {
