@@ -31,6 +31,13 @@ Deno.serve(async (req: Request) => {
     const now = new Date();
     const currentHour = now.getUTCHours();
 
+    const { data: auditResult, error: auditError } = await supabase.rpc("audit_and_repair_sequences");
+    if (auditError) {
+      console.error("[sequence] audit_and_repair failed", auditError);
+    } else {
+      console.log("[sequence] audit_and_repair", auditResult);
+    }
+
     // ── 0. Update open/reply statuses for pending executions ──────────
     await updateTrackingStatuses(supabase, now);
 
@@ -74,6 +81,12 @@ Deno.serve(async (req: Request) => {
     let stopped = 0;
 
     for (const enrollment of enrollments) {
+      console.log("[sequence] enrollment pickup", {
+        enrollmentId: enrollment.id,
+        sequenceId: enrollment.sequence_id,
+        currentStepOrder: enrollment.current_step_order,
+        nextStepAt: enrollment.next_step_at,
+      });
       const sequence = enrollment.sequences as any;
       const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
 
@@ -131,15 +144,46 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (stepError) {
-        console.error("Error fetching step:", stepError);
+        console.error("[sequence] step resolution failed", {
+          enrollmentId: enrollment.id,
+          nextStepOrder,
+          error: stepError,
+        });
+
+        await markEnrollmentFailed(supabase, enrollment.id, `step_resolution_failed:${stepError.message}`);
         continue;
       }
 
+      console.log("[sequence] step resolution", {
+        enrollmentId: enrollment.id,
+        sequenceId: enrollment.sequence_id,
+        nextStepOrder,
+        stepId: step?.id ?? null,
+      });
+
       if (!step) {
+        const { data: fallbackStep } = await supabase
+          .from("sequence_steps")
+          .select("id")
+          .eq("sequence_id", enrollment.sequence_id)
+          .eq("step_order", nextStepOrder)
+          .maybeSingle();
+
+        if (fallbackStep?.id) {
+          await supabase.from("sequence_step_executions").insert({
+            enrollment_id: enrollment.id,
+            sequence_step_id: fallbackStep.id,
+            status: "failed",
+            executed_at: now.toISOString(),
+            error_message: "Step is missing or inactive",
+          } as any);
+        }
+
         await supabase
           .from("sequence_enrollments")
           .update({
-            status: "completed",
+            status: "failed",
+            stopped_reason: "missing_or_inactive_step",
             completed_at: now.toISOString(),
           } as any)
           .eq("id", enrollment.id);
@@ -232,9 +276,19 @@ Deno.serve(async (req: Request) => {
         } as any);
 
       if (execError) {
-        console.error("Error creating execution:", execError);
+        console.error("[sequence] execution insert failed", {
+          enrollmentId: enrollment.id,
+          stepId: step.id,
+          error: execError,
+        });
         continue;
       }
+
+      console.log("[sequence] execution insert", {
+        enrollmentId: enrollment.id,
+        stepId: step.id,
+        status: "scheduled",
+      });
 
       // ── 8. Calculate next step timing ───────────────────────────────
       const nextDelayMs =
@@ -259,6 +313,12 @@ Deno.serve(async (req: Request) => {
         } as any)
         .eq("id", enrollment.id);
 
+      console.log("[sequence] enrollment advance", {
+        enrollmentId: enrollment.id,
+        currentStepOrder: nextStepOrder,
+        nextStepAt: nextStepAt.toISOString(),
+      });
+
       processed++;
     }
 
@@ -275,13 +335,13 @@ Deno.serve(async (req: Request) => {
           contact_id,
           prospect_id,
           enrolled_by,
-          account_id,
-          sequence_steps!inner (
-            channel,
-            subject,
-            body,
-            account_id
-          )
+          account_id
+        ),
+        sequence_steps!inner (
+          channel,
+          subject,
+          body,
+          account_id
         )
       `)
       .eq("status", "scheduled")
@@ -297,12 +357,20 @@ Deno.serve(async (req: Request) => {
       for (const exec of scheduledExecutions) {
         try {
           const enrollment = exec.sequence_enrollments as any;
-          const step = enrollment.sequence_steps as any;
+          const step = exec.sequence_steps as any;
           
           // Determine recipient
           const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
           if (!entityId) {
-            console.error("No entity ID for execution:", exec.id);
+            console.error("[sequence] send attempt failed: no entity", { executionId: exec.id });
+            await supabase
+              .from("sequence_step_executions")
+              .update({
+                status: "failed",
+                error_message: "No candidate/contact/prospect recipient on enrollment",
+                executed_at: now.toISOString(),
+              } as any)
+              .eq("id", exec.id);
             failed++;
             continue;
           }
@@ -365,10 +433,34 @@ Deno.serve(async (req: Request) => {
           }
 
           if (!to) {
-            console.error("No recipient address for execution:", exec.id);
+            console.error("[sequence] send attempt failed: missing recipient address", {
+              executionId: exec.id,
+              channel: step.channel,
+              enrollmentId: exec.enrollment_id,
+            });
+            await supabase
+              .from("sequence_step_executions")
+              .update({
+                status: "failed",
+                error_message: `No recipient address for ${step.channel}`,
+                executed_at: now.toISOString(),
+              } as any)
+              .eq("id", exec.id);
             failed++;
             continue;
           }
+
+          console.log("[sequence] account resolution", {
+            executionId: exec.id,
+            stepAccountId: step.account_id ?? null,
+            enrollmentAccountId: enrollment.account_id ?? null,
+          });
+
+          console.log("[sequence] send attempt", {
+            executionId: exec.id,
+            channel: step.channel,
+            enrollmentId: exec.enrollment_id,
+          });
 
           // Send the message using internal logic
           const result = await sendSequenceMessage(supabase, {
@@ -393,6 +485,11 @@ Deno.serve(async (req: Request) => {
               executed_at: now.toISOString(),
             } as any)
             .eq("id", exec.id);
+
+          console.log("[sequence] execution insert", {
+            executionId: exec.id,
+            status: "sent",
+          });
 
           sent++;
         } catch (err: any) {
@@ -464,7 +561,7 @@ async function sendSequenceMessage(
   // Route to appropriate channel handler
   switch (channel) {
     case 'email':
-      result = await sendEmail(supabase, to, subject, body);
+      result = await sendEmail(supabase, to, subject, body, account_id, owner_id);
       externalMessageId = result.messageId;
       break;
     case 'sms':
@@ -497,7 +594,7 @@ async function sendSequenceMessage(
     sent_at: new Date().toISOString(),
     external_message_id: externalMessageId,
     external_conversation_id: externalConversationId,
-    provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+    provider: channel === 'email' ? 'microsoft' : channel === 'sms' ? 'ringcentral' : 'unipile',
     owner_id,
   };
 
@@ -526,47 +623,43 @@ async function sendEmail(
   supabase: any,
   to: string,
   subject: string | undefined,
-  body: string
+  body: string,
+  accountId?: string,
+  ownerId?: string,
 ): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
+  const sender = await getMicrosoftSenderConfig(supabase, accountId, ownerId);
+  if (!sender?.accessToken) {
+    throw new Error("No active Microsoft/Outlook sender account available");
+  }
+
+  const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sender.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: {
+        subject: subject || "",
+        body: {
+          contentType: "HTML",
+          content: body,
+        },
+        toRecipients: [{ emailAddress: { address: to } }],
       },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || '',
-        html: body,
-      }),
-    });
+      saveToSentItems: true,
+    }),
+  });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend API error: ${error}`);
-    }
-
-    const data = await response.json();
-    return { messageId: data.id, sender: fromEmail };
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Microsoft Graph sendMail failed: ${errorText}`);
   }
 
-  // Fallback to SMTP
-  const smtpConfig = await getSmtpConfig(supabase);
-  if (!smtpConfig) {
-    throw new Error('No email configuration found');
-  }
-
-  // Use a simple SMTP send (would need to implement SMTP client)
-  // For now, throw error
-  throw new Error('SMTP not implemented yet');
+  return {
+    messageId: crypto.randomUUID(),
+    sender: sender.fromAddress,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -677,19 +770,42 @@ async function sendLinkedIn(
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-async function getSmtpConfig(supabase: any): Promise<any> {
-  // Get SMTP config from integration_accounts or env
-  const smtpHost = Deno.env.get('SMTP_HOST');
-  if (smtpHost) {
-    return {
-      smtp_host: smtpHost,
-      smtp_port: parseInt(Deno.env.get('SMTP_PORT') || '587'),
-      smtp_user: Deno.env.get('SMTP_USER'),
-      smtp_pass: Deno.env.get('SMTP_PASS'),
-      from_email: Deno.env.get('SMTP_FROM_EMAIL'),
-      from_name: Deno.env.get('SMTP_FROM_NAME'),
-    };
+async function getMicrosoftSenderConfig(supabase: any, accountId?: string, ownerId?: string): Promise<{ accessToken: string; fromAddress: string } | null> {
+  if (accountId) {
+    const { data: account } = await supabase
+      .from("integration_accounts")
+      .select("id, provider, provider_config, account_label")
+      .eq("id", accountId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    const cfg = account?.provider_config ?? {};
+    if ((account?.provider === "outlook" || account?.provider === "microsoft" || account?.provider === "email") && cfg.access_token) {
+      return {
+        accessToken: cfg.access_token,
+        fromAddress: cfg.email_address || account?.account_label || "microsoft",
+      };
+    }
   }
+
+  if (ownerId) {
+    const { data: fallback } = await supabase
+      .from("user_integrations")
+      .select("config")
+      .eq("user_id", ownerId)
+      .eq("integration_type", "outlook")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    const cfg = fallback?.config ?? {};
+    if (cfg.access_token) {
+      return {
+        accessToken: cfg.access_token,
+        fromAddress: cfg.email || "outlook",
+      };
+    }
+  }
+
   return null;
 }
 
@@ -800,4 +916,16 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
   } catch (err) {
     console.error("Tracking update error:", err);
   }
+}
+
+
+async function markEnrollmentFailed(supabase: any, enrollmentId: string, reason: string) {
+  await supabase
+    .from("sequence_enrollments")
+    .update({
+      status: "failed",
+      stopped_reason: reason,
+      completed_at: new Date().toISOString(),
+    } as any)
+    .eq("id", enrollmentId);
 }

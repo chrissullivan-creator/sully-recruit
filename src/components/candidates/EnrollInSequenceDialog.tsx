@@ -114,13 +114,28 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const candidateIdSet = new Set(candidates.map(c => c.id));
 
+      const selectedSeq = sequences.find((s) => s.id === selectedSequenceId) as any;
+      const sequenceChannel = selectedSeq?.channel ?? 'email';
+
       const enrollments = idsToEnroll.map((personId) => {
         const isCand = candidateIdSet.has(personId);
+        const personRecord: any = isCand
+          ? candidates.find(c => c.id === personId)
+          : contacts.find(c => c.id === personId);
+
+        if (sequenceChannel === 'email' && !personRecord?.email) {
+          throw new Error(`Cannot enroll ${personRecord?.full_name || 'recipient'}: missing email`);
+        }
+        if (sequenceChannel === 'sms' && !personRecord?.phone) {
+          throw new Error(`Cannot enroll ${personRecord?.full_name || 'recipient'}: missing phone`);
+        }
+
         return {
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 1,
+          current_step_order: 0,
+          next_step_at: new Date().toISOString(),
           enrolled_by: userId,
           integration_account_id: selectedAccountId || null,
         };
