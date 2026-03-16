@@ -11,6 +11,7 @@ import {
   Upload, CheckCircle2, AlertCircle, Loader2, FileText,
   ChevronRight, X, ArrowLeft,
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ interface ParsedResult {
   raw: Record<string, string>;
   idx: number;
 }
+
+type FieldMappings = Record<string, string | null>;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -102,7 +105,7 @@ const FIELD_ALIASES = { ...CANDIDATE_ALIASES, ...JOB_ALIASES, ...CONTACT_ALIASES
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { headers: [], rows: [] };
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
   const rows = lines.slice(1).map((line) => {
     const cols: string[] = [];
     let cur = '', inQ = false;
@@ -118,15 +121,33 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   return { headers, rows };
 }
 
-function mapRow(row: Record<string, string>, entityType: string): MappedRow {
-  const aliases = entityType === 'jobs' ? JOB_ALIASES : entityType === 'contacts' ? CONTACT_ALIASES : CANDIDATE_ALIASES;
-  const mapped: Partial<MappedRow> = {};
+function normalizeColumnName(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function buildInitialMappings(headers: string[], aliases: Record<string, string[]>): FieldMappings {
+  const normalizedHeaders = headers.map((header) => ({ header, normalized: normalizeColumnName(header) }));
+  const mappings: FieldMappings = {};
+
   for (const [field, aliasList] of Object.entries(aliases)) {
-    for (const alias of aliasList) {
-      if (row[alias] !== undefined && row[alias] !== '') {
-        (mapped as any)[field] = row[alias];
-        break;
-      }
+    const aliasSet = new Set(aliasList.map(normalizeColumnName));
+    const matchedHeader = normalizedHeaders.find(({ normalized }) => aliasSet.has(normalized))?.header ?? null;
+    mappings[field] = matchedHeader;
+  }
+
+  return mappings;
+}
+
+function mapRow(row: Record<string, string>, fieldMappings: FieldMappings): MappedRow {
+  const mapped: Partial<MappedRow> = {};
+  for (const [field, csvHeader] of Object.entries(fieldMappings)) {
+    if (!csvHeader) continue;
+    const value = row[csvHeader];
+    if (value !== undefined && value !== '') {
+      (mapped as any)[field] = value;
     }
   }
   return mapped as MappedRow;
@@ -175,6 +196,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState('');
   const [headers, setHeaders] = useState<string[]>([]);
+  const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
+  const [fieldMappings, setFieldMappings] = useState<FieldMappings>({});
   const [results, setResults] = useState<ParsedResult[]>([]);
   const [activeTab, setActiveTab] = useState<'valid' | 'issues' | 'mapping'>('valid');
   const [importing, setImporting] = useState(false);
@@ -187,6 +210,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     setStep('upload');
     setFileName('');
     setHeaders([]);
+    setRawRows([]);
+    setFieldMappings({});
     setResults([]);
     setActiveTab('valid');
     setImportedCount(0);
@@ -207,11 +232,17 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     reader.onload = (e) => {
       const text = e.target?.result as string;
       const { headers: h, rows } = parseCSV(text);
+      const aliases = entityType === 'jobs' ? JOB_ALIASES : entityType === 'contacts' ? CONTACT_ALIASES : CANDIDATE_ALIASES;
+      const initialMappings = buildInitialMappings(h, aliases);
+
       setHeaders(h);
+      setRawRows(rows);
+      setFieldMappings(initialMappings);
+
       const parsed = rows
         .filter((row) => Object.values(row).some((v) => v !== ''))
         .map((row, i) => {
-          const mapped = mapRow(row, entityType);
+          const mapped = mapRow(row, initialMappings);
           const errors = validateRow(mapped, entityType);
           return { raw: row, mapped, errors, idx: i + 2 };
         });
@@ -219,7 +250,24 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
       setStep('preview');
     };
     reader.readAsText(file);
-  }, []);
+  }, [entityType]);
+
+  const handleMappingChange = (field: string, header: string) => {
+    const nextMappings = {
+      ...fieldMappings,
+      [field]: header === '__skip__' ? null : header,
+    };
+    setFieldMappings(nextMappings);
+
+    const parsed = rawRows
+      .filter((row) => Object.values(row).some((v) => v !== ''))
+      .map((row, i) => {
+        const mapped = mapRow(row, nextMappings);
+        const errors = validateRow(mapped, entityType);
+        return { raw: row, mapped, errors, idx: i + 2 };
+      });
+    setResults(parsed);
+  };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -348,7 +396,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   // ── Column mapping display ──
   const activeAliases = entityType === 'jobs' ? JOB_ALIASES : entityType === 'contacts' ? CONTACT_ALIASES : CANDIDATE_ALIASES;
   const columnMappings = headers.map((h) => {
-    const match = Object.entries(activeAliases).find(([, aliases]) => aliases.includes(h));
+    const match = Object.entries(fieldMappings).find(([, header]) => header === h);
     return { header: h, field: match?.[0] ?? null };
   });
 
@@ -609,30 +657,67 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
                 {/* Column mapping */}
                 {activeTab === 'mapping' && (
-                  <table className="w-full text-xs">
-                    <thead className="bg-secondary sticky top-0">
-                      <tr>
-                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Your CSV Column</th>
-                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Maps To</th>
-                        <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {columnMappings.map(({ header, field }, i) => (
-                        <tr key={i} className="hover:bg-muted/40">
-                          <td className="px-4 py-2.5 font-mono text-foreground">{header}</td>
-                          <td className="px-4 py-2.5 font-mono text-accent">{field ?? <span className="text-muted-foreground">—</span>}</td>
-                          <td className="px-4 py-2.5">
-                            {field ? (
-                              <span className="stage-badge bg-success/10 text-success border border-success/20">matched</span>
-                            ) : (
-                              <span className="stage-badge bg-muted text-muted-foreground border border-border">skipped</span>
-                            )}
-                          </td>
+                  <div className="p-4 space-y-6">
+                    <div>
+                      <p className="text-sm font-medium text-foreground mb-1">Match CSV columns</p>
+                      <p className="text-xs text-muted-foreground">Pick which CSV column should populate each field. This updates the import preview instantly.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {Object.entries(activeAliases).map(([field, aliases]) => {
+                        const selectedHeader = fieldMappings[field] ?? null;
+                        return (
+                          <div key={field} className="rounded-lg border border-border p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-medium text-foreground">{field}</p>
+                              {selectedHeader ? (
+                                <Badge variant="secondary" className="text-[10px]">mapped</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px]">skipped</Badge>
+                              )}
+                            </div>
+                            <Select value={selectedHeader ?? '__skip__'} onValueChange={(value) => handleMappingChange(field, value)}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Skip this field" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__skip__">Skip this field</SelectItem>
+                                {headers.map((header) => (
+                                  <SelectItem key={`${field}-${header}`} value={header}>{header}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[11px] text-muted-foreground truncate">Aliases: {aliases.slice(0, 4).join(', ')}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <table className="w-full text-xs">
+                      <thead className="bg-secondary sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Your CSV Column</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Maps To</th>
+                          <th className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">Status</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {columnMappings.map(({ header, field }, i) => (
+                          <tr key={i} className="hover:bg-muted/40">
+                            <td className="px-4 py-2.5 font-mono text-foreground">{header}</td>
+                            <td className="px-4 py-2.5 font-mono text-accent">{field ?? <span className="text-muted-foreground">—</span>}</td>
+                            <td className="px-4 py-2.5">
+                              {field ? (
+                                <span className="stage-badge bg-success/10 text-success border border-success/20">matched</span>
+                              ) : (
+                                <span className="stage-badge bg-muted text-muted-foreground border border-border">skipped</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>
