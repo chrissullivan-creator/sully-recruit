@@ -296,6 +296,30 @@ Deno.serve(async (req: Request) => {
 
       for (const exec of scheduledExecutions) {
         try {
+          const { data: freshEnrollment, error: freshEnrollmentError } = await supabase
+            .from('sequence_enrollments')
+            .select('status')
+            .eq('id', exec.enrollment_id)
+            .maybeSingle();
+
+          if (freshEnrollmentError) {
+            console.error('Error re-checking enrollment status:', freshEnrollmentError);
+            failed++;
+            continue;
+          }
+
+          if (!freshEnrollment || freshEnrollment.status !== 'active') {
+            await supabase
+              .from('sequence_step_executions')
+              .update({
+                status: 'skipped',
+                error_message: `Enrollment no longer active (status=${freshEnrollment?.status ?? 'unknown'})`,
+              } as any)
+              .eq('id', exec.id);
+            skipped++;
+            continue;
+          }
+
           const enrollment = exec.sequence_enrollments as any;
           const step = enrollment.sequence_steps as any;
           
@@ -497,7 +521,7 @@ async function sendSequenceMessage(
     sent_at: new Date().toISOString(),
     external_message_id: externalMessageId,
     external_conversation_id: externalConversationId,
-    provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+    provider: channel === 'email' ? 'microsoft' : channel === 'sms' ? 'ringcentral' : 'unipile',
     owner_id,
   };
 

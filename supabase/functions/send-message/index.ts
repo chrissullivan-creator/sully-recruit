@@ -96,7 +96,7 @@ serve(async (req) => {
       recipient_address: to,
       sent_at: new Date().toISOString(),
       external_message_id: externalMessageId,
-      provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+      provider: channel === 'email' ? 'microsoft' : channel === 'sms' ? 'ringcentral' : 'unipile',
       owner_id: user.id,
     };
 

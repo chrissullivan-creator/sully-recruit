@@ -17,3 +17,11 @@ verify_jwt = false
 
 [functions.parse-resume]
 verify_jwt = false
+[functions.inbound-microsoft-webhook]
+verify_jwt = false
+
+[functions.inbound-ringcentral-webhook]
+verify_jwt = false
+
+[functions.inbound-unipile-webhook]
+verify_jwt = false
