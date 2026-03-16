@@ -13,6 +13,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
@@ -35,6 +36,8 @@ const JOB_STATUSES = [
   { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
+
+const EMERALD_RECRUIT_USER_ID = '83a7b48d-0220-4407-a494-3d982a8446db';
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
@@ -118,6 +121,7 @@ const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
 const CandidateDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
@@ -195,9 +199,40 @@ const CandidateDetail = () => {
   const handleSaveNote = async () => {
     if (!noteText.trim() || !id) return;
     setSavingNote(true);
-    const { error } = await supabase.from('notes').insert({ entity_id: id, entity_type: 'candidate', note: noteText.trim() });
-    if (error) toast.error('Failed to save note');
-    else { toast.success('Note saved'); setNoteText(''); queryClient.invalidateQueries({ queryKey: ['notes', 'candidate', id] }); }
+
+    const newNotes = noteText.trim();
+    const { error: noteError } = await supabase.from('notes').insert({ entity_id: id, entity_type: 'candidate', note: newNotes });
+
+    if (noteError) {
+      toast.error('Failed to save note');
+      setSavingNote(false);
+      return;
+    }
+
+    const shouldClaim =
+      !!user?.id &&
+      c.owner_user_id === EMERALD_RECRUIT_USER_ID &&
+      newNotes.length > 0;
+
+    const updatePayload = {
+      notes: newNotes,
+      owner_user_id: shouldClaim ? user!.id : c.owner_user_id,
+      claimed_at: shouldClaim ? new Date().toISOString() : c.claimed_at,
+    };
+
+    const { error: updateError } = await supabase.from('candidates').update(updatePayload).eq('id', id);
+
+    if (updateError) {
+      toast.error('Note saved, but failed to update candidate ownership');
+      setSavingNote(false);
+      return;
+    }
+
+    toast.success('Note saved');
+    setNoteText('');
+    queryClient.invalidateQueries({ queryKey: ['notes', 'candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['candidates'] });
     setSavingNote(false);
   };
 
