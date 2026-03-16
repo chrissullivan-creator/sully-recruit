@@ -236,28 +236,18 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
       if (entityType === 'candidates') {
         const rows = valid.map((r) => {
           const c = r.mapped;
-          const stage = c.stage
-            ? c.stage.toLowerCase().replace(/\s/g, '_')
-            : 'back_of_resume';
-          const safeStage = VALID_CANDIDATE_STAGES.includes(stage) ? stage : 'back_of_resume';
-          const skills = c.skills
-            ? c.skills.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
-            : [];
+          const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
           const row: Record<string, any> = {
-            user_id: user.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
-            stage: safeStage,
             status: 'new',
-            skills,
           };
+          if (fullName) row.full_name = fullName;
           if (c.phone) row.phone = c.phone;
           if (c.current_title) row.current_title = c.current_title;
           if (c.current_company) row.current_company = c.current_company;
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
-          if (c.source) row.source = c.source;
-          if (c.notes) row.notes = c.notes;
           return row;
         });
 
