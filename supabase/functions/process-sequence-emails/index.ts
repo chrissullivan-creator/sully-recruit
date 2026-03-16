@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const WORKER_VERSION = "2026-03-16-recipient-schema-fix";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -421,9 +423,10 @@ Deno.serve(async (req: Request) => {
       sent: scheduledExecutions?.length || 0,
       total: enrollments.length,
       timestamp: now.toISOString(),
+      worker_version: WORKER_VERSION,
     };
 
-    console.log("Process result:", result);
+    console.log("Process result:", { ...result, worker_version: WORKER_VERSION });
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -431,7 +434,7 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     console.error("Process error:", err);
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: err.message, worker_version: WORKER_VERSION }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
