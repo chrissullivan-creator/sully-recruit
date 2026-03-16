@@ -57,6 +57,7 @@ const VALID_JOB_STAGES = [
 ];
 
 const VALID_PRIORITIES = ['low', 'medium', 'high'];
+const EMERALD_RECRUIT_USER_ID = '83a7b48d-0220-4407-a494-3d982a8446db';
 
 // Alias map: schema_field → accepted CSV column names (lowercase)
 const CANDIDATE_ALIASES: Record<string, string[]> = {
@@ -234,7 +235,16 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
     try {
       if (entityType === 'candidates') {
-        const rows = valid.map((r) => {
+        const {
+          data: { user: authUser },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !authUser) {
+          throw new Error('No authenticated user found');
+        }
+
+        const rowsToInsert = valid.map((r) => {
           const c = r.mapped;
           const stage = c.stage
             ? c.stage.toLowerCase().replace(/\s/g, '_')
@@ -258,13 +268,17 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
           if (c.source) row.source = c.source;
           if (c.notes) row.notes = c.notes;
-          return row;
+          return {
+            ...row,
+            owner_user_id: EMERALD_RECRUIT_USER_ID,
+            created_by_user_id: authUser.id,
+          };
         });
 
         const BATCH = 100;
         let inserted = 0;
-        for (let i = 0; i < rows.length; i += BATCH) {
-          const batch = rows.slice(i, i + BATCH);
+        for (let i = 0; i < rowsToInsert.length; i += BATCH) {
+          const batch = rowsToInsert.slice(i, i + BATCH);
           const { error } = await supabase.from('candidates').insert(batch as any);
           if (error) throw error;
           inserted += batch.length;
