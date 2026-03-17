@@ -6,16 +6,20 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const CHICAGO_TIMEZONE = "America/Chicago";
+const OUTBOUND_WINDOW_START_HOUR = 6;
+const OUTBOUND_WINDOW_END_HOUR = 21;
+const MIN_PACING_MINUTES = 3;
+const MAX_PACING_MINUTES = 15;
+
 /**
  * process-sequence-emails
- * 
- * Called by pg_cron every minute. For each active email enrollment due now:
- * - Checks the step's send_window_start / send_window_end
- * - Randomises send timing: 3–9 min jitter per email
- * - Enforces a hard cap of 180 emails / day / user (across all sequences)
- * - If stop_on_reply is true and a reply exists, marks enrollment stopped
- *   AND updates the relevant execution to 'replied'
- * - Creates execution records and queues the email
+ *
+ * Called by pg_cron every minute. For each active enrollment due now:
+ * - Enforces outbound pacing across the same account for paced channels (3-15 min random spacing)
+ * - Uses America/Chicago for all send-window decisions (6:00 AM - 9:00 PM)
+ * - Keeps recruiter/InMail channels exempt from paced outbound logic
+ * - Creates execution records and queues sends
  * - Checks for open/reply signals in messages table and updates executions
  */
 Deno.serve(async (req: Request) => {
@@ -29,7 +33,6 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, serviceKey);
 
     const now = new Date();
-    const currentHour = now.getUTCHours();
 
     // ── 0. Update open/reply statuses for pending executions ──────────
     await updateTrackingStatuses(supabase, now);
@@ -146,43 +149,29 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // ── 4. Check send window ────────────────────────────────────────
-      const sendStart = step.send_window_start ?? 6;
-      const sendEnd = step.send_window_end ?? 23;
-
-      if (currentHour < sendStart || currentHour >= sendEnd) {
-        const nextWindow = new Date(now);
-        if (currentHour >= sendEnd) {
-          nextWindow.setDate(nextWindow.getDate() + 1);
-        }
-        nextWindow.setHours(sendStart, 0, 0, 0);
-        const jitterMinutes = Math.floor(Math.random() * 10);
-        nextWindow.setMinutes(jitterMinutes);
-
-        await supabase
-          .from("sequence_enrollments")
-          .update({ next_step_at: nextWindow.toISOString() } as any)
-          .eq("id", enrollment.id);
-
-        skipped++;
-        continue;
-      }
-
-      // ── 5. Determine channel type for rate limiting ─────────────────
+      // ── 4. Determine channel type for pacing/window behavior ───────
       const stepChannel = step.channel || step.step_type || sequence.channel || "";
       const isConnection = stepChannel === "linkedin_connection";
       const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav";
+      const isPacedChannel = !isInMail;
 
-      // ── 5a. Daily cap: 40/day for connections, no cap for InMails ──
+      // ── 5. Daily cap: 40/day for non-InMail channels ────────────────
       if (!isInMail) {
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
+        const chicagoNowParts = getChicagoDateParts(now);
+        const chicagoTodayStart = chicagoLocalToUtc(
+          chicagoNowParts.year,
+          chicagoNowParts.month,
+          chicagoNowParts.day,
+          0,
+          0,
+          0,
+        );
 
         // For connections, count only connection executions; otherwise count all non-inmail
         const { data: todayExecs } = await supabase
           .from("sequence_step_executions")
           .select("id, sequence_step_id")
-          .gte("executed_at", todayStart.toISOString())
+          .gte("executed_at", chicagoTodayStart.toISOString())
           .in("status", ["sent", "scheduled"]);
 
         let relevantCount = 0;
@@ -203,13 +192,20 @@ Deno.serve(async (req: Request) => {
         }
 
         if (relevantCount >= 40) {
-          const tomorrow = new Date(now);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+          const tomorrowAtWindowStart = moveToNextChicagoWindow(
+            chicagoLocalToUtc(
+              chicagoNowParts.year,
+              chicagoNowParts.month,
+              chicagoNowParts.day + 1,
+              OUTBOUND_WINDOW_START_HOUR,
+              0,
+              0,
+            )
+          );
 
           await supabase
             .from("sequence_enrollments")
-            .update({ next_step_at: tomorrow.toISOString() } as any)
+            .update({ next_step_at: tomorrowAtWindowStart.toISOString() } as any)
             .eq("id", enrollment.id);
 
           skipped++;
@@ -217,9 +213,46 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // ── 6. Delay: 2–9 min for connections/messages, instant for InMails
-      const randomDelayMinutes = isInMail ? 0 : 2 + Math.floor(Math.random() * 8);
-      const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
+      // ── 6. Calculate outbound schedule time ─────────────────────────
+      let scheduledSendAt = new Date(now);
+
+      if (isPacedChannel) {
+        const accountId = step.account_id || enrollment.account_id;
+        const nowDelayMinutes = randomInt(MIN_PACING_MINUTES, MAX_PACING_MINUTES);
+        const fromNowCandidate = new Date(now.getTime() + nowDelayMinutes * 60 * 1000);
+
+        let fromLatestOutboundCandidate = new Date(fromNowCandidate);
+        if (accountId) {
+          const { data: latestOutbound } = await supabase
+            .from("sequence_step_executions")
+            .select(`
+              executed_at,
+              sequence_enrollments!inner (
+                account_id
+              )
+            `)
+            .eq("sequence_enrollments.account_id", accountId)
+            .in("status", ["scheduled", "sent"])
+            .order("executed_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (latestOutbound?.executed_at) {
+            const latestDelayMinutes = randomInt(MIN_PACING_MINUTES, MAX_PACING_MINUTES);
+            const latestOutboundAt = new Date(latestOutbound.executed_at);
+            fromLatestOutboundCandidate = new Date(
+              latestOutboundAt.getTime() + latestDelayMinutes * 60 * 1000,
+            );
+          }
+        }
+
+        scheduledSendAt = new Date(
+          Math.max(fromNowCandidate.getTime(), fromLatestOutboundCandidate.getTime()),
+        );
+
+        // Always enforce 6:00 AM - 9:00 PM America/Chicago send window for paced outbound
+        scheduledSendAt = moveToNextChicagoWindow(scheduledSendAt);
+      }
 
       // ── 7. Create execution record ──────────────────────────────────
       const { error: execError } = await supabase
@@ -241,14 +274,10 @@ Deno.serve(async (req: Request) => {
         ((step.delay_days ?? 0) * 24 * 60 + (step.delay_hours ?? 0) * 60) *
         60 *
         1000;
-      const nextStepAt = new Date(scheduledSendAt.getTime() + nextDelayMs);
+      let nextStepAt = new Date(scheduledSendAt.getTime() + nextDelayMs);
 
-      const nextHour = nextStepAt.getHours();
-      if (nextHour < sendStart || nextHour >= sendEnd) {
-        if (nextHour >= sendEnd) {
-          nextStepAt.setDate(nextStepAt.getDate() + 1);
-        }
-        nextStepAt.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+      if (isPacedChannel) {
+        nextStepAt = moveToNextChicagoWindow(nextStepAt);
       }
 
       await supabase
@@ -298,7 +327,7 @@ Deno.serve(async (req: Request) => {
         try {
           const enrollment = exec.sequence_enrollments as any;
           const step = enrollment.sequence_steps as any;
-          
+
           // Determine recipient
           const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
           if (!entityId) {
@@ -310,7 +339,7 @@ Deno.serve(async (req: Request) => {
           // Get recipient address based on channel
           let to: string;
           let conversation_id: string;
-          
+
           // Ensure conversation exists
           conversation_id = `seq_${exec.enrollment_id}`;
           const { data: existingConv } = await supabase
@@ -318,7 +347,7 @@ Deno.serve(async (req: Request) => {
             .select("id")
             .eq("id", conversation_id)
             .single();
-          
+
           if (!existingConv) {
             await supabase
               .from("conversations")
@@ -331,8 +360,8 @@ Deno.serve(async (req: Request) => {
                 last_message_at: now.toISOString(),
               } as any);
           }
-          
-          if (step.channel === 'email') {
+
+          if (step.channel === "email") {
             // For email, need to get email address
             const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
             const { data: entity } = await supabase
@@ -341,7 +370,7 @@ Deno.serve(async (req: Request) => {
               .eq("id", entityId)
               .single();
             to = entity?.email;
-          } else if (step.channel === 'sms') {
+          } else if (step.channel === "sms") {
             // For SMS, need phone number
             const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
             const { data: entity } = await supabase
@@ -350,7 +379,7 @@ Deno.serve(async (req: Request) => {
               .eq("id", entityId)
               .single();
             to = entity?.phone;
-          } else if (step.channel.startsWith('linkedin')) {
+          } else if (step.channel.startsWith("linkedin")) {
             // For LinkedIn, use the provider_id from candidate_channels
             const { data: channel } = await supabase
               .from("candidate_channels")
@@ -380,7 +409,7 @@ Deno.serve(async (req: Request) => {
             subject: step.subject,
             body: step.body,
             account_id: step.account_id || enrollment.account_id,
-            owner_id: enrollment.enrolled_by
+            owner_id: enrollment.enrolled_by,
           });
 
           // Update execution
@@ -463,18 +492,18 @@ async function sendSequenceMessage(
 
   // Route to appropriate channel handler
   switch (channel) {
-    case 'email':
+    case "email":
       result = await sendEmail(supabase, to, subject, body);
       externalMessageId = result.messageId;
       break;
-    case 'sms':
+    case "sms":
       result = await sendSms(supabase, to, body);
       externalMessageId = result.id?.toString();
       break;
-    case 'linkedin':
-    case 'linkedin_connection':
-    case 'linkedin_recruiter':
-    case 'sales_nav':
+    case "linkedin":
+    case "linkedin_connection":
+    case "linkedin_recruiter":
+    case "sales_nav":
       result = await sendLinkedIn(supabase, to, body, account_id);
       externalMessageId = result.message_id;
       externalConversationId = result.conversation_id;
@@ -489,7 +518,7 @@ async function sendSequenceMessage(
     candidate_id: candidate_id || null,
     contact_id: contact_id || null,
     channel,
-    direction: 'outbound',
+    direction: "outbound",
     subject: subject || null,
     body,
     sender_address: result.sender || null,
@@ -497,307 +526,119 @@ async function sendSequenceMessage(
     sent_at: new Date().toISOString(),
     external_message_id: externalMessageId,
     external_conversation_id: externalConversationId,
-    provider: channel === 'email' ? 'smtp' : channel === 'sms' ? 'ringcentral' : 'unipile',
+    provider: channel === "email" ? "smtp" : channel === "sms" ? "ringcentral" : "unipile",
     owner_id,
   };
 
-  const { error: msgError } = await supabase.from('messages').insert(messageInsert);
+  const { error: msgError } = await supabase.from("messages").insert(messageInsert);
   if (msgError) {
-    console.error('Failed to log message:', msgError);
+    console.error("Failed to log message:", msgError);
   }
 
   // Update conversation's last_message_at
   await supabase
-    .from('conversations')
+    .from("conversations")
     .update({
       last_message_at: new Date().toISOString(),
       last_message_preview: body.substring(0, 100),
       is_read: true,
     })
-    .eq('id', conversation_id);
+    .eq("id", conversation_id);
 
   return { externalMessageId, externalConversationId };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EMAIL via SMTP (using Resend or generic SMTP)
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendEmail(
-  supabase: any,
-  to: string,
-  subject: string | undefined,
-  body: string
-): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || '',
-        html: body,
-      }),
-    });
+function randomInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend API error: ${error}`);
+function getChicagoDateParts(date: Date): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+} {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: CHICAGO_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const map: Record<string, string> = {};
+
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      map[part.type] = part.value;
     }
-
-    const data = await response.json();
-    return { messageId: data.id, sender: fromEmail };
   }
 
-  // Fallback to SMTP
-  const smtpConfig = await getSmtpConfig(supabase);
-  if (!smtpConfig) {
-    throw new Error('No email configuration found');
-  }
-
-  // Use a simple SMTP send (would need to implement SMTP client)
-  // For now, throw error
-  throw new Error('SMTP not implemented yet');
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SMS via RingCentral
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendSms(
-  supabase: any,
-  to: string,
-  body: string
-): Promise<{ id: string; sender: string }> {
-  const ringcentralConfig = await getRingCentralConfig(supabase);
-  if (!ringcentralConfig) {
-    throw new Error('RingCentral not configured');
-  }
+function chicagoLocalToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): Date {
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
 
-  const authResponse = await fetch(`https://platform.ringcentral.com/restapi/oauth/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${btoa(`${ringcentralConfig.client_id}:${ringcentralConfig.client_secret}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'password',
-      username: ringcentralConfig.phone_number,
-      password: ringcentralConfig.jwt_token,
-      extension: '',
-    }),
-  });
+  const localized = new Date(
+    utcGuess.toLocaleString("en-US", {
+      timeZone: CHICAGO_TIMEZONE,
+    })
+  );
 
-  if (!authResponse.ok) {
-    throw new Error('RingCentral auth failed');
-  }
-
-  const authData = await authResponse.json();
-  const accessToken = authData.access_token;
-
-  const smsResponse = await fetch(`https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/sms`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      to: [{ phoneNumber: to }],
-      from: { phoneNumber: ringcentralConfig.phone_number },
-      text: body,
-    }),
-  });
-
-  if (!smsResponse.ok) {
-    const error = await smsResponse.text();
-    throw new Error(`RingCentral SMS error: ${error}`);
-  }
-
-  const smsData = await smsResponse.json();
-  return { id: smsData.id, sender: ringcentralConfig.phone_number };
+  const offsetMs = localized.getTime() - utcGuess.getTime();
+  return new Date(utcGuess.getTime() - offsetMs);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LINKEDIN via Unipile
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendLinkedIn(
-  supabase: any,
-  to: string,
-  body: string,
-  account_id?: string
-): Promise<{ message_id: string; conversation_id: string }> {
-  if (!account_id) {
-    throw new Error('LinkedIn account_id required');
+function moveToNextChicagoWindow(input: Date): Date {
+  const chicagoParts = getChicagoDateParts(input);
+
+  if (
+    chicagoParts.hour >= OUTBOUND_WINDOW_START_HOUR &&
+    chicagoParts.hour < OUTBOUND_WINDOW_END_HOUR
+  ) {
+    return input;
   }
 
-  const { data: account } = await supabase
-    .from('integration_accounts')
-    .select('provider_config')
-    .eq('id', account_id)
-    .single();
-
-  if (!account?.provider_config?.unipile_api_key) {
-    throw new Error('Unipile API key not found');
+  if (chicagoParts.hour < OUTBOUND_WINDOW_START_HOUR) {
+    return chicagoLocalToUtc(
+      chicagoParts.year,
+      chicagoParts.month,
+      chicagoParts.day,
+      OUTBOUND_WINDOW_START_HOUR,
+      0,
+      0,
+    );
   }
 
-  const apiKey = account.provider_config.unipile_api_key;
-  const baseUrl = 'https://api.unipile.com:13111/api/v1';
+  const nextChicagoDayStartUtc = chicagoLocalToUtc(
+    chicagoParts.year,
+    chicagoParts.month,
+    chicagoParts.day + 1,
+    OUTBOUND_WINDOW_START_HOUR,
+    0,
+    0,
+  );
 
-  // Send message
-  const response = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'X-UNIPILE-CLIENT': 'sully-recruit',
-    },
-    body: JSON.stringify({
-      provider_id: to,
-      text: body,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Unipile error: ${error}`);
-  }
-
-  const data = await response.json();
-  return { message_id: data.id, conversation_id: data.conversation_id };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIG HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-async function getSmtpConfig(supabase: any): Promise<any> {
-  // Get SMTP config from integration_accounts or env
-  const smtpHost = Deno.env.get('SMTP_HOST');
-  if (smtpHost) {
-    return {
-      smtp_host: smtpHost,
-      smtp_port: parseInt(Deno.env.get('SMTP_PORT') || '587'),
-      smtp_user: Deno.env.get('SMTP_USER'),
-      smtp_pass: Deno.env.get('SMTP_PASS'),
-      from_email: Deno.env.get('SMTP_FROM_EMAIL'),
-      from_name: Deno.env.get('SMTP_FROM_NAME'),
-    };
-  }
-  return null;
-}
-
-async function getRingCentralConfig(supabase: any): Promise<any> {
-  const clientId = Deno.env.get('RINGCENTRAL_CLIENT_ID');
-  if (clientId) {
-    return {
-      client_id: clientId,
-      client_secret: Deno.env.get('RINGCENTRAL_CLIENT_SECRET'),
-      jwt_token: Deno.env.get('RINGCENTRAL_JWT_TOKEN'),
-      server_url: Deno.env.get('RINGCENTRAL_SERVER_URL'),
-      phone_number: Deno.env.get('RINGCENTRAL_PHONE_NUMBER'),
-    };
-  }
-  return null;
-}
-
-/**
- * Scan recent executions with status 'sent' or 'delivered' and check
- * the messages table for open/reply signals. Updates execution statuses:
- * - sent → delivered (if external_message_id is set)
- * - sent/delivered → opened (if message has been read/opened)
- * - any → replied (if an inbound reply exists in the conversation)
- */
-async function updateTrackingStatuses(supabase: any, now: Date) {
-  try {
-    // Get executions from the last 14 days that could still be tracked
-    const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-
-    const { data: executions, error } = await supabase
-      .from("sequence_step_executions")
-      .select(`
-        id,
-        enrollment_id,
-        sequence_step_id,
-        status,
-        external_message_id,
-        external_conversation_id,
-        executed_at
-      `)
-      .in("status", ["sent", "delivered"])
-      .gte("executed_at", cutoff.toISOString())
-      .order("executed_at", { ascending: false })
-      .limit(200);
-
-    if (error || !executions || executions.length === 0) return;
-
-    // Get enrollment details for entity lookups
-    const enrollmentIds = [...new Set(executions.map((e: any) => e.enrollment_id))];
-    const { data: enrollments } = await supabase
-      .from("sequence_enrollments")
-      .select("id, candidate_id, contact_id, prospect_id")
-      .in("id", enrollmentIds);
-
-    const enrollmentMap = new Map((enrollments ?? []).map((e: any) => [e.id, e]));
-
-    for (const exec of executions) {
-      const enrollment = enrollmentMap.get(exec.enrollment_id);
-      if (!enrollment) continue;
-
-      const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
-      if (!entityId) continue;
-
-      // Check for inbound reply after this execution
-      const { data: replies } = await supabase
-        .from("messages")
-        .select("id")
-        .eq("candidate_id", entityId)
-        .eq("direction", "inbound")
-        .gte("created_at", exec.executed_at)
-        .limit(1);
-
-      if (replies && replies.length > 0) {
-        await supabase
-          .from("sequence_step_executions")
-          .update({ status: "replied" } as any)
-          .eq("id", exec.id);
-        continue;
-      }
-
-      // Check if the conversation has been read (proxy for "opened")
-      if (exec.external_conversation_id) {
-        const { data: conv } = await supabase
-          .from("conversations")
-          .select("is_read")
-          .eq("external_conversation_id", exec.external_conversation_id)
-          .maybeSingle();
-
-        if (conv?.is_read && exec.status === "sent") {
-          await supabase
-            .from("sequence_step_executions")
-            .update({ status: "opened" } as any)
-            .eq("id", exec.id);
-          continue;
-        }
-      }
-
-      // If we have an external_message_id but status is still 'sent', mark delivered
-      if (exec.status === "sent" && exec.external_message_id) {
-        await supabase
-          .from("sequence_step_executions")
-          .update({ status: "delivered" } as any)
-          .eq("id", exec.id);
-      }
-    }
-
-    console.log(`Tracking update: checked ${executions.length} executions`);
-  } catch (err) {
-    console.error("Tracking update error:", err);
-  }
+  return nextChicagoDayStartUtc;
 }
