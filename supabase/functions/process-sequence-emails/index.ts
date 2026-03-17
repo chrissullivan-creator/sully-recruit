@@ -65,20 +65,16 @@ Deno.serve(async (req: Request) => {
       throw enrollError;
     }
 
-    if (!enrollments || enrollments.length === 0) {
-      return new Response(
-        JSON.stringify({ processed: 0, message: "No enrollments due" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const dueEnrollments = enrollments ?? [];
 
     let processed = 0;
     let skipped = 0;
     let stopped = 0;
 
-    for (const enrollment of enrollments) {
-      const sequence = enrollment.sequences as any;
-      const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
+    if (dueEnrollments.length > 0) {
+      for (const enrollment of dueEnrollments) {
+        const sequence = enrollment.sequences as any;
+        const nextStepOrder = (enrollment.current_step_order ?? 0) + 1;
 
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
@@ -288,7 +284,8 @@ Deno.serve(async (req: Request) => {
         } as any)
         .eq("id", enrollment.id);
 
-      processed++;
+        processed++;
+      }
     }
 
     // ── 9. Send scheduled executions ───────────────────────────────
@@ -362,6 +359,38 @@ Deno.serve(async (req: Request) => {
           }
 
           if (step.channel === "email") {
+            // Validate email configuration before attempting send
+            const resendApiKey = Deno.env.get("RESEND_API_KEY");
+            if (!resendApiKey) {
+              const { data: smtpIntegration } = await supabase
+                .from("user_integrations")
+                .select("id")
+                .eq("user_id", enrollment.enrolled_by)
+                .eq("integration_type", "smtp")
+                .eq("is_active", true)
+                .maybeSingle();
+
+              if (!smtpIntegration) {
+                const errorMessage = `No email configuration found for enrolled_by=${enrollment.enrolled_by}`;
+                console.error(errorMessage, {
+                  executionId: exec.id,
+                  accountId: enrollment.account_id,
+                });
+
+                await supabase
+                  .from("sequence_step_executions")
+                  .update({
+                    status: "failed",
+                    error_message: errorMessage,
+                    executed_at: now.toISOString(),
+                  } as any)
+                  .eq("id", exec.id);
+
+                failed++;
+                continue;
+              }
+            }
+
             // For email, need to get email address
             const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
             const { data: entity } = await supabase
@@ -446,7 +475,7 @@ Deno.serve(async (req: Request) => {
       skipped,
       stopped,
       sent: scheduledExecutions?.length || 0,
-      total: enrollments.length,
+      total: dueEnrollments.length,
       timestamp: now.toISOString(),
     };
 
