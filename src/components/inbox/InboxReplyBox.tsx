@@ -27,6 +27,10 @@ export interface InboxReplyBoxProps {
   integrationAccountId: string | null;
   candidateId: string | null;
   messages: MessageLike[];
+  /** From sequence_enrollments.email_last_message_id — used for email threading */
+  emailLastMessageId?: string | null;
+  /** From sequence_enrollments.email_thread_subject — used for email threading */
+  emailThreadSubject?: string | null;
   onSent?: () => void;
 }
 
@@ -75,6 +79,8 @@ export function InboxReplyBox({
   integrationAccountId,
   candidateId,
   messages,
+  emailLastMessageId,
+  emailThreadSubject,
   onSent,
 }: InboxReplyBoxProps) {
   const [body, setBody] = useState('');
@@ -102,18 +108,10 @@ export function InboxReplyBox({
       };
 
       if (channel === 'email') {
-        // Thread the reply onto the last message
-        if (lastMessage) {
-          payload.reply_to_message_id = lastMessage.id;
-          if (lastMessage.provider_message_id) {
-            payload.provider_message_id = lastMessage.provider_message_id;
-          }
-        }
-        // Prefix Re: if needed
-        if (lastMessage?.subject) {
-          const s = String(lastMessage.subject);
-          payload.subject = s.toLowerCase().startsWith('re:') ? s : `Re: ${s}`;
-        }
+        // Prefer enrollment threading fields (from sequence_enrollments)
+        payload.reply_to_message_id = emailLastMessageId ?? lastMessage?.id ?? null;
+        payload.thread_subject = emailThreadSubject
+          ?? (lastMessage?.subject ? (String(lastMessage.subject).toLowerCase().startsWith('re:') ? String(lastMessage.subject) : `Re: ${lastMessage.subject}`) : null);
         // Send to whoever wrote inbound
         if (lastInbound?.sender_address) {
           payload.to = lastInbound.sender_address;
@@ -176,6 +174,8 @@ export function InboxReplyBox({
     integrationAccountId,
     lastMessage,
     lastInbound,
+    emailLastMessageId,
+    emailThreadSubject,
     meta.label,
     onSent,
   ]);
