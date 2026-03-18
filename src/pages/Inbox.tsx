@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -19,8 +19,36 @@ import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { InboxReplyBox } from '@/components/inbox/InboxReplyBox';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MARKETING_ACCOUNT_ID = '1b43351d-dcb4-4977-8872-7027ae1ccc83';
+const MARKETING_USER_ID    = 'fc07e240-0e31-45d4-a8f1-ddec1042dd5f';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** A single row returned from the messages table (with joined names). */
+interface MsgRow {
+  id: string;
+  conversation_id: string;
+  direction: 'inbound' | 'outbound' | string;
+  channel: string;
+  subject: string | null;
+  body: string | null;
+  sent_at: string | null;
+  received_at: string | null;
+  created_at: string;
+  sender_name: string | null;
+  sender_address: string | null;
+  recipient_address: string | null;
+  candidate_id: string | null;
+  contact_id: string | null;
+  integration_account_id: string | null;
+  candidate_name: string | null;
+  contact_name: string | null;
+  [key: string]: unknown; // unipile_chat_id, etc.
+}
+
+/** Thread metadata fetched via inbox_threads view for the detail pane. */
 interface InboxThread {
   id: string;
   channel: string;
@@ -37,6 +65,7 @@ interface InboxThread {
   account_id: string | null;
 }
 
+/** Full message row as used inside the thread detail pane. */
 interface Message {
   id: string;
   conversation_id: string;
@@ -55,53 +84,84 @@ interface Message {
   [key: string]: unknown;
 }
 
-interface SentMessage {
-  id: string;
-  conversation_id: string;
-  channel: string;
-  subject: string | null;
-  body: string | null;
-  sent_at: string | null;
-  candidate_id: string | null;
-  contact_id: string | null;
-  candidate_name: string | null;
-  contact_name: string | null;
+// ─── Channel display helpers ──────────────────────────────────────────────────
+
+const CH_ICON: Record<string, React.ElementType> = {
+  email: Mail, sms: MessageSquare, linkedin: Linkedin, phone: Phone,
+};
+const CH_LABEL: Record<string, string> = {
+  email: 'Email', sms: 'SMS', linkedin: 'LinkedIn', phone: 'Phone',
+};
+// pill colour used in list items
+const CH_PILL: Record<string, string> = {
+  email:    'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400',
+  linkedin: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400',
+  sms:      'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400',
+  phone:    'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400',
+};
+// avatar/icon background colour used in detail pane header
+const CH_BG: Record<string, string> = {
+  email:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  linkedin: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  sms:      'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  phone:    'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+};
+
+function channelIcon(ch: string) {
+  return CH_ICON[ch] ?? Mail;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const MARKETING_ACCOUNT_ID = '1b43351d-dcb4-4977-8872-7027ae1ccc83';
-const MARKETING_USER_ID = 'fc07e240-0e31-45d4-a8f1-ddec1042dd5f';
+/**
+ * Given a list of message rows, keeps only the most-recent row per
+ * conversation_id, then sorts newest-first.
+ */
+function dedupeByConversation(rows: MsgRow[]): MsgRow[] {
+  const map = new Map<string, MsgRow>();
+  for (const row of rows) {
+    const existing = map.get(row.conversation_id);
+    const t = (r: MsgRow) => new Date(r.sent_at ?? r.received_at ?? r.created_at).getTime();
+    if (!existing || t(row) > t(existing)) map.set(row.conversation_id, row);
+  }
+  return [...map.values()].sort(
+    (a, b) =>
+      new Date(b.sent_at ?? b.received_at ?? b.created_at).getTime() -
+      new Date(a.sent_at ?? a.received_at ?? a.created_at).getTime()
+  );
+}
 
-const CHANNEL_ICONS: Record<string, React.ElementType> = {
-  email: Mail,
-  sms: MessageSquare,
-  linkedin: Linkedin,
-  phone: Phone,
-};
-const CHANNEL_LABELS: Record<string, string> = {
-  email: 'Email',
-  sms: 'SMS',
-  linkedin: 'LinkedIn',
-  phone: 'Phone',
-};
-const CHANNEL_COLORS: Record<string, string> = {
-  email: 'bg-info/10 text-info',
-  linkedin: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
-  sms: 'bg-success/10 text-success',
-  phone: 'bg-accent/10 text-accent',
-};
+const MSG_SELECT = [
+  'id', 'conversation_id', 'direction', 'channel', 'subject', 'body',
+  'sent_at', 'received_at', 'created_at',
+  'sender_name', 'sender_address', 'recipient_address',
+  'candidate_id', 'contact_id', 'integration_account_id',
+  'candidates(full_name)', 'contacts(full_name)',
+].join(', ');
 
-// ─── Thread Item (Inbox / Marketing tabs) ─────────────────────────────────────
+function flattenRow(raw: any): MsgRow {
+  return {
+    ...raw,
+    candidate_name: raw.candidates?.full_name ?? null,
+    contact_name:   raw.contacts?.full_name   ?? null,
+  };
+}
 
-function ThreadItem({
-  thread, isSelected, onClick,
+// ─── Message list item ────────────────────────────────────────────────────────
+
+function MsgListItem({
+  row, isSelected, isSent, onClick,
 }: {
-  thread: InboxThread; isSelected: boolean; onClick: () => void;
+  row: MsgRow; isSelected: boolean; isSent?: boolean; onClick: () => void;
 }) {
-  const Icon = CHANNEL_ICONS[thread.channel] || Mail;
-  const entityName = thread.candidate_name || thread.contact_name;
-  const isLinked = !!(thread.candidate_id || thread.contact_id);
+  const Icon = channelIcon(row.channel);
+  const name = row.candidate_name ?? row.contact_name
+    ?? (isSent ? row.recipient_address : row.sender_address)
+    ?? row.sender_name
+    ?? 'Unknown';
+  const preview = row.subject || row.body?.replace(/\n/g, ' ')?.slice(0, 100) || '—';
+  const ts = row.sent_at ?? row.received_at ?? row.created_at;
+  const pillClass = CH_PILL[row.channel] ?? 'bg-muted text-muted-foreground border-border';
 
   return (
     <button
@@ -109,39 +169,36 @@ function ThreadItem({
       className={cn(
         'w-full text-left px-4 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors',
         isSelected && 'bg-accent/8 border-l-2 border-l-accent',
-        !thread.is_read && !isSelected && 'bg-muted/20'
       )}
     >
       <div className="flex items-start gap-3">
-        <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
+        {/* Channel avatar */}
+        <div className={cn(
+          'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+          CH_BG[row.channel] ?? 'bg-muted text-muted-foreground'
+        )}>
           <Icon className="h-4 w-4" />
         </div>
+
         <div className="flex-1 min-w-0">
+          {/* Name + timestamp */}
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {entityName
-                ? <span className={cn('text-sm truncate', !thread.is_read ? 'font-semibold' : 'font-medium text-foreground/90')}>{entityName}</span>
-                : <span className="text-sm font-medium text-warning italic">Unlinked</span>}
-              {!thread.is_read && <Circle className="h-1.5 w-1.5 fill-accent text-accent shrink-0" />}
-            </div>
+            <span className="text-sm font-medium text-foreground truncate">{name}</span>
             <span className="text-[10px] text-muted-foreground shrink-0">
-              {thread.last_message_at ? formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: true }) : ''}
+              {ts ? formatDistanceToNow(new Date(ts), { addSuffix: true }) : ''}
             </span>
           </div>
-          {thread.subject && (
-            <p className={cn('text-xs truncate mb-0.5', !thread.is_read ? 'text-foreground/80 font-medium' : 'text-foreground/70')}>
-              {thread.subject}
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground truncate">{thread.last_message_preview || '—'}</p>
+
+          {/* Preview */}
+          <p className="text-xs text-muted-foreground truncate">{preview}</p>
+
+          {/* Pills */}
           <div className="flex items-center gap-1.5 mt-1.5">
-            <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
-              {CHANNEL_LABELS[thread.channel] || thread.channel}
-            </Badge>
-            {!isLinked && (
-              <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide border-warning/40 text-warning">
-                Unlinked
-              </Badge>
+            <span className={cn('inline-flex items-center rounded border px-1.5 h-4 text-[9px] uppercase tracking-wide font-medium', pillClass)}>
+              {CH_LABEL[row.channel] ?? row.channel}
+            </span>
+            {row.direction === 'inbound' && !isSent && (
+              <Circle className="h-1.5 w-1.5 fill-emerald-500 text-emerald-500 shrink-0" />
             )}
           </div>
         </div>
@@ -150,54 +207,7 @@ function ThreadItem({
   );
 }
 
-// ─── Sent Message Row ─────────────────────────────────────────────────────────
-
-function SentMessageRow({
-  msg, isSelected, onClick,
-}: {
-  msg: SentMessage; isSelected: boolean; onClick: () => void;
-}) {
-  const Icon = CHANNEL_ICONS[msg.channel] || Mail;
-  const entityName = msg.candidate_name || msg.contact_name;
-  const preview = msg.subject || msg.body?.slice(0, 80) || '—';
-
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full text-left px-4 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors',
-        isSelected && 'bg-accent/8 border-l-2 border-l-accent'
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[msg.channel] || 'bg-muted text-muted-foreground')}>
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2 mb-0.5">
-            <span className="text-sm font-medium text-foreground/90 truncate">
-              {entityName || 'Unknown'}
-            </span>
-            <span className="text-[10px] text-muted-foreground shrink-0">
-              {msg.sent_at ? formatDistanceToNow(new Date(msg.sent_at), { addSuffix: true }) : '—'}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground truncate">{preview}</p>
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
-              {CHANNEL_LABELS[msg.channel] || msg.channel}
-            </Badge>
-            <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide text-muted-foreground">
-              Sent
-            </Badge>
-          </div>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-// ─── Entity Panel ─────────────────────────────────────────────────────────────
+// ─── Entity side panel ────────────────────────────────────────────────────────
 
 function EntityPanel({ thread }: { thread: InboxThread | null }) {
   const queryClient = useQueryClient();
@@ -230,7 +240,9 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     queryKey: ['notes', 'candidate', thread?.candidate_id],
     enabled: !!thread?.candidate_id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('notes').select('*').eq('entity_id', thread!.candidate_id!).eq('entity_type', 'candidate').order('created_at', { ascending: false }).limit(5);
+      const { data, error } = await supabase.from('notes').select('*')
+        .eq('entity_id', thread!.candidate_id!).eq('entity_type', 'candidate')
+        .order('created_at', { ascending: false }).limit(5);
       if (error) throw error;
       return data;
     },
@@ -268,7 +280,6 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
   };
 
   if (!thread) return null;
-
   const entity = candidate || contact;
   const entityType = thread.candidate_id ? 'candidate' : thread.contact_id ? 'contact' : null;
   const isLinked = !!(thread.candidate_id || thread.contact_id);
@@ -277,6 +288,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="p-5 border-b border-border">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Linked Record</h3>
+
         {isLinked && entity ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3">
@@ -293,51 +305,14 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
               </div>
             </div>
             <div className="space-y-1.5">
-              {entity.email && (
-                <div className="flex items-center gap-2 text-xs text-foreground/80">
-                  <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{entity.email}</span>
-                </div>
-              )}
-              {entity.phone && (
-                <div className="flex items-center gap-2 text-xs text-foreground/80">
-                  <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>{entity.phone}</span>
-                </div>
-              )}
-              {entity.linkedin_url && (
-                <div className="flex items-center gap-2 text-xs text-foreground/80">
-                  <Linkedin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">LinkedIn</a>
-                </div>
-              )}
-              {(entity as any).current_company && (
-                <div className="flex items-center gap-2 text-xs text-foreground/80">
-                  <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{(entity as any).current_company}</span>
-                </div>
-              )}
-              {(entity as any).companies?.name && (
-                <div className="flex items-center gap-2 text-xs text-foreground/80">
-                  <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{(entity as any).companies.name}</span>
-                </div>
-              )}
+              {entity.email && <div className="flex items-center gap-2 text-xs text-foreground/80"><Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="truncate">{entity.email}</span></div>}
+              {entity.phone && <div className="flex items-center gap-2 text-xs text-foreground/80"><Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span>{entity.phone}</span></div>}
+              {entity.linkedin_url && <div className="flex items-center gap-2 text-xs text-foreground/80"><Linkedin className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">LinkedIn</a></div>}
+              {(entity as any).current_company && <div className="flex items-center gap-2 text-xs text-foreground/80"><Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="truncate">{(entity as any).current_company}</span></div>}
+              {(entity as any).companies?.name && <div className="flex items-center gap-2 text-xs text-foreground/80"><Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="truncate">{(entity as any).companies.name}</span></div>}
             </div>
-            {entityType === 'candidate' && (
-              <Link to={`/candidates/${thread.candidate_id}`}>
-                <Button variant="outline" size="sm" className="w-full gap-1.5">
-                  <UserCheck className="h-3.5 w-3.5" /> View Candidate <ArrowRight className="h-3 w-3 ml-auto" />
-                </Button>
-              </Link>
-            )}
-            {entityType === 'contact' && (
-              <Link to={`/contacts/${thread.contact_id}`}>
-                <Button variant="outline" size="sm" className="w-full gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> View Contact <ArrowRight className="h-3 w-3 ml-auto" />
-                </Button>
-              </Link>
-            )}
+            {entityType === 'candidate' && <Link to={`/candidates/${thread.candidate_id}`}><Button variant="outline" size="sm" className="w-full gap-1.5"><UserCheck className="h-3.5 w-3.5" />View Candidate<ArrowRight className="h-3 w-3 ml-auto" /></Button></Link>}
+            {entityType === 'contact' && <Link to={`/contacts/${thread.contact_id}`}><Button variant="outline" size="sm" className="w-full gap-1.5"><Users className="h-3.5 w-3.5" />View Contact<ArrowRight className="h-3 w-3 ml-auto" /></Button></Link>}
           </div>
         ) : (
           <div className="space-y-3">
@@ -346,7 +321,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
               <p className="text-xs text-warning leading-relaxed">Not linked to any record. Search to link manually.</p>
             </div>
             <div className="flex gap-2">
-              <Input placeholder="Search name..." value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} className="h-8 text-xs" />
+              <Input placeholder="Search name…" value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} className="h-8 text-xs" />
               <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
                 {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
               </Button>
@@ -369,6 +344,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
           </div>
         )}
       </div>
+
       {notes.length > 0 && (
         <div className="p-5">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Recent Notes</h3>
@@ -386,7 +362,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
   );
 }
 
-// ─── Message Pane ─────────────────────────────────────────────────────────────
+// ─── Thread detail pane ───────────────────────────────────────────────────────
 
 function MessagePane({ threadId }: { threadId: string | null }) {
   const queryClient = useQueryClient();
@@ -447,34 +423,30 @@ function MessagePane({ threadId }: { threadId: string | null }) {
     );
   }
 
-  if (threadLoading) {
-    return <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  }
+  if (threadLoading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (!thread) return <div className="flex items-center justify-center h-full text-muted-foreground"><p className="text-sm">Conversation not found</p></div>;
 
-  if (!thread) {
-    return <div className="flex items-center justify-center h-full text-muted-foreground"><p className="text-sm">Conversation not found</p></div>;
-  }
-
-  const Icon = CHANNEL_ICONS[thread.channel] || Mail;
+  const Icon = channelIcon(thread.channel);
   const entityName = thread.candidate_name || thread.contact_name;
 
-  // Derive channel from last message's channel field (falls back to thread channel)
+  // Channel comes from the last message — not the thread — for accurate reply routing
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
   const replyChannel = lastMsg?.channel || thread.channel;
 
   return (
     <div className="flex h-full">
+      {/* Messages column */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-          <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
+          <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CH_BG[thread.channel] ?? 'bg-muted text-muted-foreground')}>
             <Icon className="h-4 w-4" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-foreground truncate">{entityName || 'Unknown Sender'}</h2>
+              <h2 className="text-sm font-semibold text-foreground truncate">{entityName || 'Unknown'}</h2>
               <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
-                {CHANNEL_LABELS[thread.channel] || thread.channel}
+                {CH_LABEL[thread.channel] ?? thread.channel}
               </Badge>
             </div>
             {thread.subject && <p className="text-xs text-muted-foreground truncate">{thread.subject}</p>}
@@ -491,7 +463,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           </div>
         </div>
 
-        {/* Messages */}
+        {/* Messages scroll */}
         <ScrollArea className="flex-1 p-6">
           {msgsLoading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -513,7 +485,9 @@ function MessagePane({ threadId }: { threadId: string | null }) {
                         </span>
                       </div>
                     )}
-                    <div className={cn('max-w-[78%] rounded-2xl px-4 py-3', isInbound ? 'bg-muted rounded-tl-sm' : 'bg-accent/10 border border-accent/20 rounded-tr-sm')}>
+                    <div className={cn('max-w-[78%] rounded-2xl px-4 py-3',
+                      isInbound ? 'bg-muted rounded-tl-sm' : 'bg-accent/10 border border-accent/20 rounded-tr-sm'
+                    )}>
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs font-medium text-foreground/80">
                           {isInbound ? (msg.sender_name || entityName || 'Sender') : 'You'}
@@ -538,7 +512,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           )}
         </ScrollArea>
 
-        {/* Reply box — channel from last message, threading from enrollment */}
+        {/* Reply box — channel from last message, enrollment threading for email */}
         <InboxReplyBox
           threadId={threadId}
           channel={replyChannel}
@@ -550,7 +524,9 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           onSent={() => {
             queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
             queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-            queryClient.invalidateQueries({ queryKey: ['sent_messages'] });
+            queryClient.invalidateQueries({ queryKey: ['inbox_msgs'] });
+            queryClient.invalidateQueries({ queryKey: ['sent_msgs'] });
+            queryClient.invalidateQueries({ queryKey: ['marketing_msgs'] });
           }}
         />
       </div>
@@ -564,139 +540,126 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   );
 }
 
-// ─── Tab pill helper ──────────────────────────────────────────────────────────
+// ─── Empty state ──────────────────────────────────────────────────────────────
 
-function TabPill({
-  active, onClick, children, count,
-}: {
-  active: boolean; onClick: () => void; children: React.ReactNode; count?: number;
-}) {
+function EmptyState({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub: string }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap',
-        active
-          ? 'bg-accent text-accent-foreground border-accent'
-          : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-      )}
-    >
-      {children}
-      {count !== undefined && <span className="ml-1 opacity-70">{count}</span>}
-    </button>
+    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground px-6 text-center">
+      <Icon className="h-10 w-10 mb-3 opacity-25" />
+      <p className="text-sm font-medium mb-1">{title}</p>
+      <p className="text-xs opacity-70">{sub}</p>
+    </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+type TabId = 'inbox' | 'sent' | 'marketing';
 
 export default function Inbox() {
-  const [activeTab, setActiveTab] = useState<'inbox' | 'sent' | 'marketing'>('inbox');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState('all');
+  const [activeTab, setActiveTab]   = useState<TabId>('inbox');
+  const [selectedId, setSelectedId] = useState<string | null>(null); // conversation_id
+  const [search, setSearch]         = useState('');
   const [composeOpen, setComposeOpen] = useState(false);
   const [isMarketingUser, setIsMarketingUser] = useState(false);
 
+  // Check if current user is Chris (marketing tab gating)
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user?.id === MARKETING_USER_ID) setIsMarketingUser(true);
     });
   }, []);
 
-  // ── Inbox + Marketing threads ──
-  const { data: allThreads = [], isLoading: threadsLoading } = useQuery({
-    queryKey: ['inbox_threads'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inbox_threads').select('*')
-        .order('last_message_at', { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      return data as InboxThread[];
-    },
-  });
-
-  // ── Sent / Outbox messages ──
-  const { data: sentMessages = [], isLoading: sentLoading } = useQuery({
-    queryKey: ['sent_messages'],
-    enabled: activeTab === 'sent',
+  // ── Inbox: inbound messages scoped to current user ──
+  const { data: rawInbox = [], isLoading: inboxLoading } = useQuery({
+    queryKey: ['inbox_msgs'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
       const { data, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, channel, subject, body, sent_at, candidate_id, contact_id, candidates(full_name), contacts(full_name)')
-        .eq('direction', 'outbound')
+        .select(MSG_SELECT)
+        .eq('direction', 'inbound')
         .eq('owner_id', user.id)
-        .order('sent_at', { ascending: false, nullsFirst: false })
-        .limit(200);
+        .order('received_at', { ascending: false, nullsFirst: false })
+        .limit(500);
       if (error) throw error;
-      return (data || []).map((m: any) => ({
-        id: m.id,
-        conversation_id: m.conversation_id,
-        channel: m.channel,
-        subject: m.subject,
-        body: m.body,
-        sent_at: m.sent_at,
-        candidate_id: m.candidate_id,
-        contact_id: m.contact_id,
-        candidate_name: m.candidates?.full_name ?? null,
-        contact_name: m.contacts?.full_name ?? null,
-      })) as SentMessage[];
+      return (data ?? []).map(flattenRow) as MsgRow[];
     },
   });
 
-  // ── Filter logic ──
-  const inboxThreads = allThreads.filter((t) => {
-    if (t.account_id === MARKETING_ACCOUNT_ID) return false;
-    if (filterTab === 'email' && t.channel !== 'email') return false;
-    if (filterTab === 'sms' && t.channel !== 'sms') return false;
-    if (filterTab === 'linkedin' && t.channel !== 'linkedin') return false;
-    if (filterTab === 'candidates' && !t.candidate_id) return false;
-    if (filterTab === 'contacts' && !t.contact_id) return false;
-    if (filterTab === 'unlinked' && (t.candidate_id || t.contact_id)) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return t.subject?.toLowerCase().includes(q) || t.last_message_preview?.toLowerCase().includes(q)
-        || t.candidate_name?.toLowerCase().includes(q) || t.contact_name?.toLowerCase().includes(q);
-    }
-    return true;
+  // ── Sent: outbound messages scoped to current user ──
+  const { data: rawSent = [], isLoading: sentLoading } = useQuery({
+    queryKey: ['sent_msgs'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('messages')
+        .select(MSG_SELECT)
+        .eq('direction', 'outbound')
+        .eq('owner_id', user.id)
+        .order('sent_at', { ascending: false, nullsFirst: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []).map(flattenRow) as MsgRow[];
+    },
   });
 
-  const marketingThreads = allThreads.filter((t) => {
-    if (t.account_id !== MARKETING_ACCOUNT_ID) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return t.subject?.toLowerCase().includes(q) || t.last_message_preview?.toLowerCase().includes(q)
-        || t.candidate_name?.toLowerCase().includes(q) || t.contact_name?.toLowerCase().includes(q);
-    }
-    return true;
+  // ── Marketing: all messages for the marketing account (Chris only) ──
+  const { data: rawMarketing = [], isLoading: mktLoading } = useQuery({
+    queryKey: ['marketing_msgs'],
+    enabled: isMarketingUser,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select(MSG_SELECT)
+        .eq('integration_account_id', MARKETING_ACCOUNT_ID)
+        .order('sent_at', { ascending: false, nullsFirst: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []).map(flattenRow) as MsgRow[];
+    },
   });
 
-  const filteredSent = sentMessages.filter((m) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return m.candidate_name?.toLowerCase().includes(q) || m.contact_name?.toLowerCase().includes(q)
-      || m.subject?.toLowerCase().includes(q) || m.body?.toLowerCase().includes(q);
-  });
-
-  const unreadCount = allThreads.filter(t => !t.is_read && t.account_id !== MARKETING_ACCOUNT_ID).length;
-
-  const switchTab = (tab: typeof activeTab) => {
-    setActiveTab(tab);
-    setSelectedId(null);
-    setFilterTab('all');
-    setSearchQuery('');
+  // Deduplicate and filter by search
+  const apply = (rows: MsgRow[]) => {
+    const deduped = dedupeByConversation(rows);
+    if (!search.trim()) return deduped;
+    const q = search.toLowerCase();
+    return deduped.filter(r =>
+      r.candidate_name?.toLowerCase().includes(q) ||
+      r.contact_name?.toLowerCase().includes(q) ||
+      r.sender_name?.toLowerCase().includes(q) ||
+      r.subject?.toLowerCase().includes(q) ||
+      r.body?.toLowerCase().includes(q)
+    );
   };
 
-  // Determine which list is active and its loading state
-  const activeList = activeTab === 'inbox' ? inboxThreads : activeTab === 'marketing' ? marketingThreads : [];
-  const isLoading = activeTab === 'sent' ? sentLoading : threadsLoading;
+  const inboxRows    = useMemo(() => apply(rawInbox),    [rawInbox, search]);
+  const sentRows     = useMemo(() => apply(rawSent),     [rawSent, search]);
+  const marketingRows = useMemo(() => apply(rawMarketing), [rawMarketing, search]);
+
+  const activeRows    = activeTab === 'inbox' ? inboxRows : activeTab === 'sent' ? sentRows : marketingRows;
+  const activeLoading = activeTab === 'inbox' ? inboxLoading : activeTab === 'sent' ? sentLoading : mktLoading;
+
+  const switchTab = (tab: TabId) => {
+    setActiveTab(tab);
+    setSelectedId(null);
+    setSearch('');
+  };
+
+  const tabs: { id: TabId; label: string; Icon: React.ElementType; count?: number }[] = [
+    { id: 'inbox',   label: 'Inbox',   Icon: Mail,  count: inboxRows.length },
+    { id: 'sent',    label: 'Sent',    Icon: Send },
+    ...(isMarketingUser ? [{ id: 'marketing' as TabId, label: 'Marketing', Icon: Linkedin }] : []),
+  ];
 
   return (
     <MainLayout>
       <PageHeader
         title="Inbox"
-        description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
+        description="All channels · Unified"
       />
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
@@ -705,52 +668,28 @@ export default function Inbox() {
         {/* ── Left panel ── */}
         <div className="w-96 border-r border-border flex flex-col bg-background">
 
-          {/* Top tabs: Inbox / Sent / Marketing */}
-          <div className="px-3 pt-3 pb-0 border-b border-border/60">
-            <div className="flex gap-1">
+          {/* Tab bar */}
+          <div className="flex border-b border-border/60 px-1 pt-1">
+            {tabs.map(({ id, label, Icon, count }) => (
               <button
-                onClick={() => switchTab('inbox')}
+                key={id}
+                onClick={() => switchTab(id)}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors',
-                  activeTab === 'inbox'
+                  'flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
+                  activeTab === id
                     ? 'border-accent text-accent'
                     : 'border-transparent text-muted-foreground hover:text-foreground'
                 )}
               >
-                <Mail className="h-3.5 w-3.5" />
-                Inbox
-                {unreadCount > 0 && (
-                  <span className="ml-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground px-1">
-                    {unreadCount}
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+                {count !== undefined && count > 0 && (
+                  <span className="ml-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent/15 text-accent text-[9px] font-bold px-1">
+                    {count}
                   </span>
                 )}
               </button>
-              <button
-                onClick={() => switchTab('sent')}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors',
-                  activeTab === 'sent'
-                    ? 'border-accent text-accent'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Send className="h-3.5 w-3.5" />
-                Sent
-              </button>
-              {isMarketingUser && (
-                <button
-                  onClick={() => switchTab('marketing')}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors',
-                    activeTab === 'marketing'
-                      ? 'border-accent text-accent'
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  Marketing
-                </button>
-              )}
-            </div>
+            ))}
           </div>
 
           {/* Search + Compose */}
@@ -758,9 +697,9 @@ export default function Inbox() {
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name, subject…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 className="pl-8 h-8 text-xs"
               />
             </div>
@@ -769,70 +708,27 @@ export default function Inbox() {
             </Button>
           </div>
 
-          {/* Sub-filters — inbox + marketing only */}
-          {activeTab !== 'sent' && (
-            <>
-              <div className="px-3 pt-2.5">
-                <div className="flex gap-1 flex-wrap">
-                  {[
-                    { key: 'all', label: 'All', count: (activeTab === 'inbox' ? inboxThreads : marketingThreads).length },
-                    { key: 'candidates', label: 'Candidates' },
-                    { key: 'contacts', label: 'Contacts' },
-                    { key: 'unlinked', label: 'Unlinked' },
-                  ].map((tab) => (
-                    <TabPill key={tab.key} active={filterTab === tab.key} onClick={() => setFilterTab(tab.key)} count={tab.count}>
-                      {tab.label}
-                    </TabPill>
-                  ))}
-                </div>
-              </div>
-              <div className="px-3 pt-1.5 pb-2.5">
-                <div className="flex gap-1">
-                  {[
-                    { key: 'email', label: 'Email', Icon: Mail },
-                    { key: 'sms', label: 'SMS', Icon: MessageSquare },
-                    { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
-                  ].map(({ key, label, Icon: Ico }) => (
-                    <TabPill key={key} active={filterTab === key} onClick={() => setFilterTab(filterTab === key ? 'all' : key)}>
-                      <span className="flex items-center gap-1"><Ico className="h-3 w-3" />{label}</span>
-                    </TabPill>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
           {/* List */}
           <ScrollArea className="flex-1">
-            {isLoading ? (
+            {activeLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : activeTab === 'sent' ? (
-              filteredSent.length === 0 ? (
-                <EmptyState icon={Send} title="No sent messages" subtitle={searchQuery ? 'No results' : 'Messages you send will appear here'} />
-              ) : (
-                <div>
-                  {filteredSent.map((msg) => (
-                    <SentMessageRow
-                      key={msg.id}
-                      msg={msg}
-                      isSelected={selectedId === msg.conversation_id}
-                      onClick={() => setSelectedId(msg.conversation_id)}
-                    />
-                  ))}
-                </div>
-              )
-            ) : activeList.length === 0 ? (
-              <EmptyState icon={Mail} title="No conversations" subtitle={searchQuery ? 'No results for your search' : 'Incoming messages will appear here'} />
+            ) : activeRows.length === 0 ? (
+              <EmptyState
+                icon={activeTab === 'sent' ? Send : Mail}
+                title={activeTab === 'sent' ? 'No sent messages' : 'No messages'}
+                sub={search ? 'No results for your search' : activeTab === 'sent' ? 'Messages you send will appear here' : 'Incoming messages will appear here'}
+              />
             ) : (
               <div>
-                {activeList.map((thread) => (
-                  <ThreadItem
-                    key={thread.id}
-                    thread={thread}
-                    isSelected={selectedId === thread.id}
-                    onClick={() => setSelectedId(thread.id)}
+                {activeRows.map((row) => (
+                  <MsgListItem
+                    key={row.id}
+                    row={row}
+                    isSelected={selectedId === row.conversation_id}
+                    isSent={activeTab === 'sent'}
+                    onClick={() => setSelectedId(row.conversation_id)}
                   />
                 ))}
               </div>
@@ -840,21 +736,11 @@ export default function Inbox() {
           </ScrollArea>
         </div>
 
-        {/* ── Right: Message pane ── */}
+        {/* ── Right: thread detail ── */}
         <div className="flex-1 min-w-0">
           <MessagePane threadId={selectedId} />
         </div>
       </div>
     </MainLayout>
-  );
-}
-
-function EmptyState({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground px-6 text-center">
-      <Icon className="h-10 w-10 mb-3 opacity-25" />
-      <p className="text-sm font-medium mb-1">{title}</p>
-      <p className="text-xs opacity-70">{subtitle}</p>
-    </div>
   );
 }

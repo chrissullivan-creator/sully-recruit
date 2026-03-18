@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Send, Loader2, Mail, MessageSquare, Linkedin } from 'lucide-react';
 
-// Mirrors the Message type from Inbox — kept local to avoid cross-import issues
 interface MessageLike {
   id: string;
   conversation_id: string;
@@ -18,7 +17,7 @@ interface MessageLike {
   recipient_address?: string | null;
   created_at: string;
   candidate_id?: string | null;
-  [key: string]: unknown; // allows unipile_chat_id / provider_message_id extra fields
+  [key: string]: unknown;
 }
 
 export interface InboxReplyBoxProps {
@@ -27,45 +26,56 @@ export interface InboxReplyBoxProps {
   integrationAccountId: string | null;
   candidateId: string | null;
   messages: MessageLike[];
-  /** From sequence_enrollments.email_last_message_id — used for email threading */
   emailLastMessageId?: string | null;
-  /** From sequence_enrollments.email_thread_subject — used for email threading */
   emailThreadSubject?: string | null;
   onSent?: () => void;
 }
 
-// ---- channel metadata ----
-const CHANNEL_META: Record<
-  string,
-  { label: string; Icon: React.ElementType; ringClass: string; badgeClass: string }
-> = {
+const CHANNEL_META: Record<string, {
+  label: string;
+  placeholder: string;
+  Icon: React.ElementType;
+  iconClass: string;
+  ringClass: string;
+  badgeClass: string;
+}> = {
   email: {
     label: 'Email',
+    placeholder: 'Write your email reply…',
     Icon: Mail,
+    iconClass: 'text-emerald-600',
     ringClass: 'focus:ring-emerald-400/40',
     badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
   },
   linkedin: {
     label: 'LinkedIn',
+    placeholder: 'Write your LinkedIn message…',
     Icon: Linkedin,
+    iconClass: 'text-blue-600',
     ringClass: 'focus:ring-blue-400/40',
     badgeClass: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
   },
   linkedin_recruiter: {
     label: 'LinkedIn Recruiter',
+    placeholder: 'Write your LinkedIn Recruiter message…',
     Icon: Linkedin,
+    iconClass: 'text-blue-600',
     ringClass: 'focus:ring-blue-400/40',
     badgeClass: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
   },
   linkedin_sales_nav: {
     label: 'LinkedIn Sales Nav',
+    placeholder: 'Write your Sales Navigator message…',
     Icon: Linkedin,
+    iconClass: 'text-blue-600',
     ringClass: 'focus:ring-blue-400/40',
     badgeClass: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
   },
   sms: {
     label: 'SMS',
+    placeholder: 'Write your text message…',
     Icon: MessageSquare,
+    iconClass: 'text-amber-600',
     ringClass: 'focus:ring-amber-400/40',
     badgeClass: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
   },
@@ -90,7 +100,6 @@ export function InboxReplyBox({
   const meta = CHANNEL_META[channel] ?? fallbackMeta;
   const Icon = meta.Icon;
 
-  // Threading helpers — derived once per render, cheap
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
   const lastInbound = [...messages].reverse().find((m) => m.direction === 'inbound') ?? null;
 
@@ -99,34 +108,30 @@ export function InboxReplyBox({
     setSending(true);
 
     try {
+      // Base payload — field names match send-reply edge function contract
       const payload: Record<string, unknown> = {
         conversation_id: threadId,
         candidate_id: candidateId,
         channel,
         integration_account_id: integrationAccountId,
-        body: body.trim(),
+        message_body: body.trim(),
       };
 
       if (channel === 'email') {
-        // Prefer enrollment threading fields (from sequence_enrollments)
+        // Threading: prefer enrollment fields, fall back to last message
         payload.reply_to_message_id = emailLastMessageId ?? lastMessage?.id ?? null;
-        payload.thread_subject = emailThreadSubject
-          ?? (lastMessage?.subject ? (String(lastMessage.subject).toLowerCase().startsWith('re:') ? String(lastMessage.subject) : `Re: ${lastMessage.subject}`) : null);
-        // Send to whoever wrote inbound
+        const rawSubject = emailThreadSubject ?? lastMessage?.subject ?? null;
+        if (rawSubject) {
+          const s = String(rawSubject);
+          payload.thread_subject = s.toLowerCase().startsWith('re:') ? s : `Re: ${s}`;
+        }
         if (lastInbound?.sender_address) {
           payload.to = lastInbound.sender_address;
         }
-      } else if (
-        channel === 'linkedin' ||
-        channel === 'linkedin_recruiter' ||
-        channel === 'linkedin_sales_nav'
-      ) {
-        // Prefer chat id baked into the message row, fall back to candidate_channels lookup
-        const chatId =
-          lastMessage?.unipile_chat_id ??
-          lastMessage?.chat_id ??
-          null;
 
+      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter' || channel === 'linkedin_sales_nav') {
+        // Prefer chat id on the message row; fall back to candidate_channels lookup
+        const chatId = lastMessage?.unipile_chat_id ?? lastMessage?.chat_id ?? null;
         if (chatId) {
           payload.unipile_chat_id = chatId;
         } else if (candidateId) {
@@ -136,22 +141,18 @@ export function InboxReplyBox({
             .eq('candidate_id', candidateId)
             .eq('channel', 'linkedin')
             .maybeSingle();
-          if (ch) {
-            payload.unipile_chat_id = ch.chat_id ?? ch.unipile_id ?? ch.provider_id;
-          }
+          if (ch) payload.unipile_chat_id = ch.chat_id ?? ch.unipile_id ?? ch.provider_id;
         }
+
       } else if (channel === 'sms') {
-        // Reply to the inbound sender number, or the outbound recipient
-        payload.to =
+        // Phone number of the other party
+        payload.recipient_address =
           lastInbound?.sender_address ??
           lastMessage?.recipient_address ??
           null;
       }
 
-      const { data, error } = await supabase.functions.invoke('send-reply', {
-        body: payload,
-      });
-
+      const { data, error } = await supabase.functions.invoke('send-reply', { body: payload });
       if (error) throw error;
       if (data && data.success === false) throw new Error(data.error ?? 'Send failed');
 
@@ -165,20 +166,8 @@ export function InboxReplyBox({
     } finally {
       setSending(false);
     }
-  }, [
-    body,
-    sending,
-    threadId,
-    channel,
-    candidateId,
-    integrationAccountId,
-    lastMessage,
-    lastInbound,
-    emailLastMessageId,
-    emailThreadSubject,
-    meta.label,
-    onSent,
-  ]);
+  }, [body, sending, threadId, channel, candidateId, integrationAccountId,
+      lastMessage, lastInbound, emailLastMessageId, emailThreadSubject, meta.label, onSent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -189,23 +178,19 @@ export function InboxReplyBox({
 
   return (
     <div className="border-t border-border bg-background px-4 pt-3 pb-4 space-y-2">
-      {/* Channel pill + shortcut hint */}
       <div className="flex items-center gap-2">
-        <Icon className={cn('h-3.5 w-3.5', channel === 'email' ? 'text-emerald-600' : channel.startsWith('linkedin') ? 'text-blue-600' : 'text-amber-600')} />
+        <Icon className={cn('h-3.5 w-3.5', meta.iconClass)} />
         <span className="text-xs text-muted-foreground">Reply via</span>
         <Badge variant="outline" className={cn('text-[10px] h-5 px-2 py-0 font-medium', meta.badgeClass)}>
           {meta.label}
         </Badge>
-        <span className="ml-auto text-[10px] text-muted-foreground select-none">
-          ⌘↵ to send
-        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground select-none">⌘↵ to send</span>
       </div>
 
-      {/* Textarea + Send */}
       <div className="flex gap-2 items-end">
         <textarea
           ref={textareaRef}
-          placeholder={`Write your reply…`}
+          placeholder={meta.placeholder}
           value={body}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -225,11 +210,7 @@ export function InboxReplyBox({
           className="h-[76px] w-11 px-0 shrink-0"
           title="Send (⌘↵)"
         >
-          {sending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
     </div>
