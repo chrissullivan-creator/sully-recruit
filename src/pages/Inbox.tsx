@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -57,6 +57,9 @@ interface Message {
 }
 
 // ---------- Constants ----------
+const MARKETING_ACCOUNT_ID = '1b43351d-dcb4-4977-8872-7027ae1ccc83';
+const MARKETING_USER_ID = 'fc07e240-0e31-45d4-a8f1-ddec1042dd5f';
+
 const CHANNEL_ICONS: Record<string, React.ElementType> = {
   email: Mail,
   sms: MessageSquare,
@@ -565,6 +568,14 @@ export default function Inbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
+  const [isMarketingUser, setIsMarketingUser] = useState(false);
+  const [inboxMode, setInboxMode] = useState<'inbox' | 'marketing'>('inbox');
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.id === MARKETING_USER_ID) setIsMarketingUser(true);
+    });
+  }, []);
 
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads'],
@@ -578,7 +589,15 @@ export default function Inbox() {
   });
 
   const filtered = allThreads.filter((t) => {
-    // Channel filter
+    // Marketing mode: only show marketing account threads
+    if (inboxMode === 'marketing') {
+      if (t.account_id !== MARKETING_ACCOUNT_ID) return false;
+    } else {
+      // Standard inbox: hide marketing account threads
+      if (t.account_id === MARKETING_ACCOUNT_ID) return false;
+    }
+
+    // Channel / record filters
     if (filterTab === 'email' && t.channel !== 'email') return false;
     if (filterTab === 'sms' && t.channel !== 'sms') return false;
     if (filterTab === 'linkedin' && t.channel !== 'linkedin') return false;
@@ -606,6 +625,24 @@ export default function Inbox() {
       <PageHeader
         title="Inbox"
         description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
+        actions={isMarketingUser ? (
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1">
+            {(['inbox', 'marketing'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => { setInboxMode(mode); setSelectedId(null); setFilterTab('all'); }}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
+                  inboxMode === mode
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {mode === 'marketing' ? 'Marketing' : 'My Inbox'}
+              </button>
+            ))}
+          </div>
+        ) : undefined}
       />
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />

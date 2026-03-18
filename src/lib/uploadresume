@@ -1,0 +1,14 @@
+import { supabase } from "@/lib/supabase"
+
+export async function uploadResume(candidateId: string, file: File) {
+  const path = `resumes/${candidateId}/${file.name}`
+
+  await supabase.storage
+    .from("resumes")
+    .upload(path, file)
+
+  await supabase
+    .from("candidates")
+    .update({ resume_url: path })
+    .eq("id", candidateId)
+}

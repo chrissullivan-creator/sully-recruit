@@ -1,0 +1,7 @@
+<div className="flex gap-2">
+  <Button>Edit</Button>
+  <Button>Email</Button>
+  <Button onClick={markBackOfResume}>
+    Mark Back of Resume
+  </Button>
+</div>

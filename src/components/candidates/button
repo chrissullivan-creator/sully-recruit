@@ -1,0 +1,4 @@
+<div className="flex gap-2">
+  <Button>Edit</Button>
+  <Button>Email</Button>
+</div>

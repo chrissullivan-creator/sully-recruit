@@ -1,0 +1,277 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sully Recruit Design System - Wall Street Aesthetic */
+/* Dark forest green, warm cream, burnished gold */
+
+@layer base {
+  :root {
+    /* Core palette - Dark green foundation with cream and gold */
+    --background: 0 0% 100%;
+    --foreground: 124 55% 24%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 124 55% 24%;
+
+    --popover: 124 55% 24%;
+    --popover-foreground: 46 65% 52%;
+
+    /* Deep forest green primary */
+    --primary: 46 65% 52%;
+    --primary-foreground: 124 55% 24%;
+
+    /* Slightly lighter green for secondary surfaces */
+    --secondary: 46 65% 52%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Muted dark green tones */
+    --muted: 46 65% 52%;
+    --muted-foreground: 124 54% 24%;
+
+    /* Burnished gold accent */
+    --accent: 46 65% 52%;
+    --accent-foreground: 124 54% 24%;
+
+    --destructive: 46 65% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Subtle green-tinted borders */
+    --border: 124 55% 24%;
+    --input: 46 65% 52%;
+    --ring: 257 4% 70.4%;
+
+    --radius: 0.375rem;
+
+    /* Sidebar - white with green text and gold highlights */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 124 55% 24%;
+    --sidebar-primary: 46 65% 52%;
+    --sidebar-primary-foreground: 124 55% 24%;
+    --sidebar-accent: 46 65% 52% / 0.15;
+    --sidebar-accent-foreground: 124 55% 24%;
+    --sidebar-border: 124 20% 90%;
+    --sidebar-ring: 46 65% 52%;
+
+    /* Extended palette for status and pipelines */
+    --success: 142 71% 45%;
+    --success-foreground: 150 25% 9%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 150 25% 9%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 40 33% 94%;
+
+    /* Pipeline stage colors */
+    --stage-warm: 38 70% 50%;
+    --stage-hot: 0 72% 51%;
+    --stage-interview: 199 89% 48%;
+    --stage-offer: 142 71% 45%;
+    --stage-hold: 40 15% 50%;
+
+    /* Gold gradient for premium elements */
+    --gradient-gold: linear-gradient(135deg, hsl(43 55% 55%), hsl(38 60% 45%));
+    --gradient-dark: linear-gradient(180deg, hsl(150 25% 12%), hsl(150 28% 7%));
+    --chart-1: 41 22.2% 64.6%;
+    --chart-2: 185 11.8% 60%;
+    --chart-3: 227 7% 39.8%;
+    --chart-4: 84 18.9% 82.8%;
+    --chart-5: 70 18.8% 76.9%;
+    --sidebar: 248 0.3% 98.4%;
+    --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
+    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+    --tracking-normal: 0em;
+    --spacing: 0.25rem;
+    --color-hover: 123.0380 46.1988% 33.5294%;
+    --color-success: 124.4776 55.3719% 23.7255%;
+    --color-error: 0 66.3866% 46.6667%;
+  }
+
+  .dark {
+    /* Same as root - this is a dark-first design */
+    --background: 0 0% 15%;
+    --foreground: 248 0.3% 98.4%;
+    --card: 266 4% 20.8%;
+    --card-foreground: 46 65% 52%;
+    --popover: 266 4% 20.8%;
+    --popover-foreground: 248 0.3% 98.4%;
+    --primary: 256 1.3% 92.9%;
+    --primary-foreground: 266 4% 20.8%;
+    --secondary: 260 4.1% 27.9%;
+    --secondary-foreground: 248 0.3% 98.4%;
+    --muted: 260 4.1% 27.9%;
+    --muted-foreground: 257 4% 70.4%;
+    --accent: 260 4.1% 27.9%;
+    --accent-foreground: 248 0.3% 98.4%;
+    --destructive: 22 19.1% 70.4%;
+    --destructive-foreground: 248 0.3% 98.4%;
+    --border: 0 0% 100% / 10%;
+    --input: 0 0% 100% / 15%;
+    --ring: 264 2.7% 55.1%;
+    --sidebar-background: 150 28% 7%;
+    --sidebar-foreground: 248 0.3% 98.4%;
+    --sidebar-primary: 264 24.3% 48.8%;
+    --sidebar-primary-foreground: 248 0.3% 98.4%;
+    --sidebar-accent: 260 4.1% 27.9%;
+    --sidebar-accent-foreground: 248 0.3% 98.4%;
+    --sidebar-border: 0 0% 100% / 10%;
+    --sidebar-ring: 264 2.7% 55.1%;
+    --chart-1: 264 24.3% 48.8%;
+    --chart-2: 162 17% 69.6%;
+    --chart-3: 70 18.8% 76.9%;
+    --chart-4: 304 26.5% 62.7%;
+    --chart-5: 16 24.6% 64.5%;
+    --sidebar: 266 4% 20.8%;
+    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
+    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Smooth scrollbars matching dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer components {
+  /* Gold accent text */
+  .text-gold {
+    @apply text-accent;
+  }
+
+  /* Card with subtle gradient */
+  .card-elevated {
+    background: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--background)) 100%);
+    @apply border border-border;
+  }
+
+  /* Pipeline stage badges */
+  .stage-badge {
+    @apply px-2.5 py-1 rounded text-xs font-medium uppercase tracking-wide;
+  }
+
+  .stage-warm {
+    background: hsl(var(--stage-warm) / 0.15);
+    color: hsl(var(--stage-warm));
+    border: 1px solid hsl(var(--stage-warm) / 0.3);
+  }
+
+  .stage-hot {
+    background: hsl(var(--stage-hot) / 0.15);
+    color: hsl(var(--stage-hot));
+    border: 1px solid hsl(var(--stage-hot) / 0.3);
+  }
+
+  .stage-interview {
+    background: hsl(var(--stage-interview) / 0.15);
+    color: hsl(var(--stage-interview));
+    border: 1px solid hsl(var(--stage-interview) / 0.3);
+  }
+
+  .stage-offer {
+    background: hsl(var(--stage-offer) / 0.15);
+    color: hsl(var(--stage-offer));
+    border: 1px solid hsl(var(--stage-offer) / 0.3);
+  }
+
+  .stage-hold {
+    background: hsl(var(--stage-hold) / 0.15);
+    color: hsl(var(--stage-hold));
+    border: 1px solid hsl(var(--stage-hold) / 0.3);
+  }
+
+  /* Timeline connector */
+  .timeline-connector {
+    @apply absolute left-4 top-10 bottom-0 w-px bg-border;
+  }
+
+  /* Metric cards */
+  .metric-card {
+    @apply p-4 rounded-lg bg-card border border-border;
+  }
+
+  .metric-value {
+    @apply text-3xl font-bold text-foreground tabular-nums;
+  }
+
+  .metric-label {
+    @apply text-sm text-muted-foreground uppercase tracking-wide mt-1;
+  }
+
+  /* Action button with gold accent */
+  .btn-gold {
+    @apply bg-accent text-accent-foreground hover:bg-accent/90 font-medium;
+  }
+
+  /* Subtle hover states */
+  .hover-lift {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg;
+  }
+
+  /* Fast transitions */
+  .transition-fast {
+    @apply transition-all duration-150 ease-out;
+  }
+}
+
+@layer utilities {
+  /* Gold gradient text */
+  .gradient-gold-text {
+    background: linear-gradient(135deg, hsl(43 55% 55%), hsl(38 70% 50%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glow effect for important elements */
+  .glow-gold {
+    box-shadow: 0 0 20px hsl(43 55% 55% / 0.15);
+  }
+
+  /* Glass effect for overlays */
+  .glass {
+    backdrop-filter: blur(12px);
+    background: hsl(var(--background) / 0.8);
+  }
+}
