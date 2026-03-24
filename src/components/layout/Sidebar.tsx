@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone, ListTodo, FileText } from 'lucide-react';
+import { LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone, ListTodo, FileText, Linkedin } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -11,6 +11,7 @@ const navigation = [
   { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Candidates', href: '/candidates', icon: UserCheck },
   { name: 'Resume Search', href: '/resume-search', icon: FileText },
+  { name: 'LinkedIn Search', href: '/linkedin-search', icon: Linkedin },
   { name: 'Contacts', href: '/contacts', icon: Users },
   { name: 'Companies', href: '/companies', icon: Building2 },
   { name: 'Sequences', href: '/campaigns', icon: Megaphone },

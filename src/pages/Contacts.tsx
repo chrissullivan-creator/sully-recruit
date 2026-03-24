@@ -33,9 +33,10 @@ const Contacts = () => {
 
   const filteredContacts = useMemo(() => {
     let list = contacts.filter((contact) => {
-      const matchesSearch = 
+      const companyDisplay = ((contact as any).company_name || (contact.companies as any)?.name || '');
+      const matchesSearch =
         (contact.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ((contact.companies as any)?.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        companyDisplay.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (contact.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesFilter = filter === 'all' || contact.status === filter;
       return matchesSearch && matchesFilter;
@@ -54,8 +55,8 @@ const Contacts = () => {
           bVal = (b.title || '').toLowerCase();
           break;
         case 'company':
-          aVal = ((a.companies as any)?.name || '').toLowerCase();
-          bVal = ((b.companies as any)?.name || '').toLowerCase();
+          aVal = ((a as any).company_name || (a.companies as any)?.name || '').toLowerCase();
+          bVal = ((b as any).company_name || (b.companies as any)?.name || '').toLowerCase();
           break;
         case 'status':
           aVal = a.status || '';
@@ -239,7 +240,7 @@ const Contacts = () => {
                     <td className="px-4 py-3">
                       <span className="text-sm text-muted-foreground flex items-center gap-1">
                         <Building className="h-3.5 w-3.5" />
-                        {(contact.companies as any)?.name ?? '-'}
+                        {(contact as any).company_name || (contact.companies as any)?.name || '-'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
