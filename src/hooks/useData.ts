@@ -174,7 +174,7 @@ export function useContacts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('contacts')
-        .select('*, company_name, companies(name)')
+        .select('*, companies(name)')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
