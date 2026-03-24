@@ -9,15 +9,16 @@ import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
+import { useProfiles } from '@/hooks/useProfiles';
 import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
-  DollarSign, ChevronDown, ChevronUp,
+  DollarSign, ChevronDown, ChevronUp, PhoneCall,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -121,9 +122,23 @@ const CandidateDetail = () => {
   const queryClient = useQueryClient();
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
+  const { data: profiles = [] } = useProfiles();
   const openJobs = (jobs as any[]).filter(j => ['open','warm','hot'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
+  const { data: callNotes = [] } = useQuery({
+    queryKey: ['ai_call_notes', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ai_call_notes')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('updated_candidates_at', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
@@ -295,6 +310,23 @@ const CandidateDetail = () => {
             </div>
 
             <div className="space-y-2">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Owner</h3>
+              <Select value={candidate.owner_id ?? 'none'} onValueChange={async (val) => {
+                const newOwnerId = val === 'none' ? null : val;
+                await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+              }}>
+                <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Unassigned —</SelectItem>
+                  {profiles.filter(p => p.full_name).map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Active Job</h3>
               <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
                 const newJobId = val === 'none' ? null : val;
@@ -335,6 +367,7 @@ const CandidateDetail = () => {
                 <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+                <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Call Notes</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
               </TabsList>
             </div>
@@ -427,6 +460,67 @@ const CandidateDetail = () => {
                     ))}
                   </div>
                 ) : <p className="text-sm text-muted-foreground">No notes yet.</p>}
+              </TabsContent>
+
+              <TabsContent value="call-notes" className="px-8 py-5 mt-0">
+                <div className="flex items-center gap-2 mb-5">
+                  <PhoneCall className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">AI Call Notes</h2>
+                </div>
+                {(callNotes as any[]).length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <PhoneCall className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No call notes yet</p>
+                    <p className="text-xs text-muted-foreground">AI-extracted notes from calls will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {(callNotes as any[]).map((note: any, idx: number) => (
+                      <div key={note.id ?? idx} className="rounded-xl border border-border bg-secondary/30 p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <PhoneCall className="h-4 w-4 text-accent" />
+                            <span className="text-sm font-semibold text-foreground">Call Notes</span>
+                          </div>
+                          {note.updated_candidates_at && (
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(note.updated_candidates_at), 'MMM d, yyyy h:mm a')}
+                            </span>
+                          )}
+                        </div>
+
+                        {note.extracted_notes && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Notes</p>
+                            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{note.extracted_notes}</p>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          {note.extracted_current_base != null && (
+                            <div>
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Current Base</p>
+                              <p className="text-sm text-foreground">{typeof note.extracted_current_base === 'number' ? `$${note.extracted_current_base.toLocaleString()}` : note.extracted_current_base}</p>
+                            </div>
+                          )}
+                          {note.extracted_target_base != null && (
+                            <div>
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Target Base</p>
+                              <p className="text-sm text-foreground">{typeof note.extracted_target_base === 'number' ? `$${note.extracted_target_base.toLocaleString()}` : note.extracted_target_base}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {note.extracted_reason_for_leaving && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Reason for Leaving</p>
+                            <p className="text-sm text-foreground leading-relaxed">{note.extracted_reason_for_leaving}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0">

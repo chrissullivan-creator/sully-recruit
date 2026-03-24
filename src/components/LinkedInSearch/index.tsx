@@ -29,6 +29,7 @@ interface AccountOption {
   label: string;
   mode: ApiMode;
   accountId: string | null;
+  ownerUserId: string | null;
 }
 
 interface SearchResult {
@@ -98,7 +99,7 @@ export default function LinkedInSearch() {
         // 2) Nancy Eberlein → Recruiter
         const { data: nancyRow } = await supabase
           .from('integration_accounts')
-          .select('unipile_account_id')
+          .select('unipile_account_id, owner_user_id')
           .ilike('account_label', '%Nancy Eberlein%')
           .eq('is_active', true)
           .maybeSingle();
@@ -106,15 +107,15 @@ export default function LinkedInSearch() {
         // 3) Chris Sullivan → Sales Navigator
         const { data: chrisRow } = await supabase
           .from('integration_accounts')
-          .select('unipile_account_id')
+          .select('unipile_account_id, owner_user_id')
           .ilike('account_label', '%Chris Sullivan%')
           .eq('is_active', true)
           .maybeSingle();
 
         setAccounts([
-          { label: 'Classic (My Account)', mode: 'classic', accountId: classicId },
-          { label: 'Recruiter — Nancy Eberlein', mode: 'recruiter', accountId: nancyRow?.unipile_account_id ?? null },
-          { label: 'Sales Nav — Chris Sullivan', mode: 'sales_navigator', accountId: chrisRow?.unipile_account_id ?? null },
+          { label: 'Classic (My Account)', mode: 'classic', accountId: classicId, ownerUserId: user.id },
+          { label: 'Recruiter — Nancy Eberlein', mode: 'recruiter', accountId: nancyRow?.unipile_account_id ?? null, ownerUserId: nancyRow?.owner_user_id ?? null },
+          { label: 'Sales Nav — Chris Sullivan', mode: 'sales_navigator', accountId: chrisRow?.unipile_account_id ?? null, ownerUserId: chrisRow?.owner_user_id ?? null },
         ]);
       } catch (err) {
         console.error('Failed to load LinkedIn accounts', err);
@@ -226,6 +227,7 @@ export default function LinkedInSearch() {
   const addAsCandidate = async (r: SearchResult) => {
     setActionLoading((prev) => ({ ...prev, [`cand-${r.id}`]: true }));
     try {
+      const ownerId = activeAccount?.ownerUserId || user?.id || null;
       const { error } = await supabase.from('candidates').insert({
         first_name: r.first_name,
         last_name: r.last_name,
@@ -235,6 +237,7 @@ export default function LinkedInSearch() {
         linkedin_url: r.linkedin_url || null,
         source: 'linkedin_search',
         status: 'new',
+        owner_id: ownerId,
       } as any);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -293,6 +296,7 @@ export default function LinkedInSearch() {
 
       let candidateId = existing?.id;
       if (!candidateId) {
+        const ownerId = activeAccount?.ownerUserId || user?.id || null;
         const { data: inserted, error } = await supabase
           .from('candidates')
           .insert({
@@ -304,6 +308,7 @@ export default function LinkedInSearch() {
             linkedin_url: r.linkedin_url || null,
             source: 'linkedin_search',
             status: 'new',
+            owner_id: ownerId,
           } as any)
           .select('id')
           .single();

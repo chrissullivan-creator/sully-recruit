@@ -13,7 +13,9 @@ import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
 import { useCandidates, useJobs } from '@/hooks/useData';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target } from 'lucide-react';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useAuth } from '@/contexts/AuthContext';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
@@ -52,16 +54,20 @@ const statusColors: Record<string, string> = {
 
 const Candidates = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [view, setView] = useState<'pipeline' | 'list'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTagFilter, setJobTagFilter] = useState('all');
+  const [ownerFilter, setOwnerFilter] = useState('all');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
   const { data: jobs = [] } = useJobs();
+  const { data: profiles = [] } = useProfiles();
+  const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
@@ -78,7 +84,8 @@ const Candidates = () => {
         (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
       const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
-      return matchesSearch && matchesStatus && matchesJobTag;
+      const matchesOwner = ownerFilter === 'all' ? true : ownerFilter === 'mine' ? c.owner_id === user?.id : c.owner_id === ownerFilter;
+      return matchesSearch && matchesStatus && matchesJobTag && matchesOwner;
     });
 
     list.sort((a, b) => {
@@ -95,7 +102,7 @@ const Candidates = () => {
     });
 
     return list;
-  }, [candidates, searchQuery, statusFilter, jobTagFilter, sortField, sortDir]);
+  }, [candidates, searchQuery, statusFilter, jobTagFilter, ownerFilter, sortField, sortDir, user?.id]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -218,6 +225,19 @@ const Candidates = () => {
                   ))}
               </SelectContent>
             </Select>
+
+            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue placeholder="All Owners" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Owners</SelectItem>
+                <SelectItem value="mine">My Candidates</SelectItem>
+                {profiles.filter(p => p.full_name).map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {selectedIds.length > 0 && (
@@ -273,6 +293,7 @@ const Candidates = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
                     <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
                   </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Owner</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Job</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Added <SortIcon field="created" /></span>
@@ -318,6 +339,19 @@ const Candidates = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
+                      {(() => {
+                        const ownerProfile = candidate.owner_id ? profileMap[candidate.owner_id] : null;
+                        const ownerName = ownerProfile?.full_name;
+                        const ownerInitials = ownerName ? ownerName.split(' ').map((n: string) => n[0]).join('').slice(0, 2) : '';
+                        return ownerName ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[9px] font-medium text-accent">{ownerInitials}</div>
+                            <span className="text-xs text-muted-foreground truncate max-w-[80px]">{ownerName.split(' ')[0]}</span>
+                          </div>
+                        ) : <span className="text-xs text-muted-foreground">—</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       {(candidate as any).job_id ? (
                         <div className="flex flex-col gap-0.5">
                           <span className="text-xs text-foreground truncate max-w-[140px]">
@@ -339,7 +373,7 @@ const Candidates = () => {
                   </tr>
                 ))}
                 {filteredCandidates.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
             </table>

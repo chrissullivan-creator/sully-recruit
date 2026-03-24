@@ -8,17 +8,18 @@ import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
 import { useDashboardMetrics } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  Briefcase, 
-  Users, 
-  Calendar, 
-  FileText, 
+import {
+  Briefcase,
+  Users,
+  Calendar,
+  FileText,
   Target,
   Phone,
   Mail,
   TrendingUp,
   Plus,
   Sparkles,
+  User,
 } from 'lucide-react';
 
 const getGreeting = () => {
@@ -73,8 +74,9 @@ const Dashboard = () => {
         </div>
 
         {/* Primary Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <MetricCard label="Active Jobs" value={isLoading ? '...' : (metrics?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="My Candidates" value={isLoading ? '...' : (metrics?.myCandidates ?? 0)} icon={<User className="h-5 w-5" />} />
           <MetricCard label="New" value={isLoading ? '...' : (metrics?.newCandidates ?? 0)} icon={<Users className="h-5 w-5" />} />
           <MetricCard label="Contacted" value={isLoading ? '...' : (metrics?.contactedCandidates ?? 0)} icon={<Mail className="h-5 w-5" />} />
           <MetricCard label="Pitched" value={isLoading ? '...' : (metrics?.pitchedCandidates ?? 0)} icon={<Target className="h-5 w-5" />} />

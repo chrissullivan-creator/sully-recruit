@@ -279,9 +279,10 @@ export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
         supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, job_status'),
+        supabase.from('candidates').select('id, job_status, owner_id'),
         supabase.from('send_outs').select('id, stage'),
       ]);
 
@@ -293,6 +294,7 @@ export function useDashboardMetrics() {
       return {
         activeJobs: jobsRes.count ?? 0,
         totalCandidates: candidates.length,
+        myCandidates: user ? candidates.filter(c => c.owner_id === user.id).length : 0,
         newCandidates: countByJobStatus('new'),
         contactedCandidates: countByJobStatus('reached_out'),
         pitchedCandidates: countByJobStatus('pitched'),

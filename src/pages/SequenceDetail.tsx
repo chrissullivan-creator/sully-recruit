@@ -14,6 +14,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIntegrationAccounts, useCandidates, useContacts, useJobs } from '@/hooks/useData';
+import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -76,6 +77,8 @@ const SequenceDetail = () => {
   const { data: allCandidates = [] } = useCandidates();
   const { data: allContacts = [] } = useContacts();
   const { data: jobs = [] } = useJobs();
+  const { data: profiles = [] } = useProfiles();
+  const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,7 +113,7 @@ const SequenceDetail = () => {
     try {
       const [seqRes, enrollRes, execRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
-        supabase.from('sequence_enrollments').select('*, candidates(first_name, last_name, full_name, email, current_title), contacts(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
+        supabase.from('sequence_enrollments').select('*, candidates(first_name, last_name, full_name, email, current_title, owner_id), contacts(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
         supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
 
@@ -474,6 +477,13 @@ const SequenceDetail = () => {
                           <span className="capitalize">{enrollment.status}</span>
                           <span>Step {enrollment.current_step_order ?? 1}</span>
                         </div>
+                        {(() => {
+                          const ownerId = enrollment.candidates?.owner_id;
+                          const ownerName = ownerId ? profileMap[ownerId]?.full_name : null;
+                          return ownerName ? (
+                            <span className="text-[10px] text-muted-foreground bg-muted rounded px-1.5 py-0.5">{ownerName.split(' ')[0]}</span>
+                          ) : null;
+                        })()}
                         <span className="text-xs text-muted-foreground">{enrollment.enrolled_at ? format(new Date(enrollment.enrolled_at), 'MMM d') : ''}</span>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeEnrollment(enrollment.id)}>
                           <Trash2 className="h-3.5 w-3.5" />
