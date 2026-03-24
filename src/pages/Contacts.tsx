@@ -7,7 +7,7 @@ import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
-import { AskJoeCandidateSearch } from '@/components/candidates/AskJoeCandidateSearch';
+import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts, useJobs } from '@/hooks/useData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
@@ -27,7 +27,7 @@ const Contacts = () => {
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
-  const [candidateSearchOpen, setCandidateSearchOpen] = useState(false);
+  const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const { data: contacts = [], isLoading } = useContacts();
   const { data: jobs = [] } = useJobs();
 
@@ -109,6 +109,12 @@ const Contacts = () => {
     .filter((c) => selectedIds.includes(c.id))
     .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
 
+  // Called by AskJoeContactSearch when user clicks "Enroll X Contacts in Sequence"
+  const handleJoeEnroll = (contactIds: string[]) => {
+    setSelectedIds(contactIds);
+    setEnrollOpen(true);
+  };
+
   return (
     <MainLayout>
       <PageHeader 
@@ -126,7 +132,7 @@ const Contacts = () => {
               <Sparkles className="h-4 w-4 mr-1" />
               Ask Joe — Firm & Title Search
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setCandidateSearchOpen(true)}>
+            <Button variant="ghost" size="sm" onClick={() => setContactSearchOpen(true)}>
               <Sparkles className="h-4 w-4 mr-1" />
               Ask Joe — Contacts
             </Button>
@@ -290,7 +296,11 @@ const Contacts = () => {
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
       <AskJoeAdvancedSearch open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen} mode="contact_search" />
-      <AskJoeCandidateSearch open={candidateSearchOpen} onOpenChange={setCandidateSearchOpen} />
+      <AskJoeContactSearch
+        open={contactSearchOpen}
+        onOpenChange={setContactSearchOpen}
+        onEnrollContacts={handleJoeEnroll}
+      />
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}
