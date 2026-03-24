@@ -172,19 +172,12 @@ export function useContacts() {
   const query = useQuery({
     queryKey: ['contacts'],
     queryFn: async () => {
-      // Bare query — no joins, no filters, no ordering
-      const { data, error, count } = await supabase
+      const { data, error } = await supabase
         .from('contacts')
-        .select('*', { count: 'exact' });
-      console.log('[useContacts] count:', count, 'rows:', data?.length, 'error:', error);
-      if (error) {
-        console.error('[useContacts] FULL ERROR:', JSON.stringify(error));
-        throw error;
-      }
-      // Sort client-side for now
-      return (data ?? []).sort((a: any, b: any) =>
-        (b.created_at ?? '').localeCompare(a.created_at ?? '')
-      );
+        .select('*, companies!left(name)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
     },
   });
 
