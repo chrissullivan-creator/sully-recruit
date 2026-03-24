@@ -172,11 +172,19 @@ export function useContacts() {
   const query = useQuery({
     queryKey: ['contacts'],
     queryFn: async () => {
+      // Step 1: raw fetch to diagnose empty results
+      const raw = await supabase.from('contacts').select('*').limit(5);
+      console.log('[useContacts] raw probe:', raw.data?.length, 'rows, error:', raw.error);
+
       const { data, error } = await supabase
         .from('contacts')
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error) {
+        console.error('[useContacts] query error:', error);
+        throw error;
+      }
+      console.log('[useContacts] returned', data?.length, 'contacts');
       return data;
     },
   });
