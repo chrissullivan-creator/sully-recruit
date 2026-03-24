@@ -407,7 +407,10 @@ const JobDetail = () => {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               <div>
                 <span className="text-muted-foreground">Status</span>
-                <div className="mt-1"><Badge variant="secondary">{job.status}</Badge></div>
+                <div className="mt-1"><Badge variant="secondary" className={cn(
+                  job.status === 'win' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
+                  job.status === 'lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
+                )}>{job.status === 'win' ? 'Win' : job.status === 'lost' ? 'Lost' : job.status}</Badge></div>
               </div>
               {companyName && (
                 <div>

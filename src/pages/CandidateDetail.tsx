@@ -123,7 +123,7 @@ const CandidateDetail = () => {
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
-  const openJobs = (jobs as any[]).filter(j => ['open','warm','hot'].includes(j.status));
+  const openJobs = (jobs as any[]).filter(j => ['open','warm','hot','interviewing','offer'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
   const { data: callNotes = [] } = useQuery({

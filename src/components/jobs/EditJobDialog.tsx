@@ -155,8 +155,11 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-                <SelectItem value="on-hold">On Hold</SelectItem>
+                <SelectItem value="interviewing">Interviewing</SelectItem>
+                <SelectItem value="offer">Offer</SelectItem>
+                <SelectItem value="win">Win</SelectItem>
+                <SelectItem value="lost">Lost</SelectItem>
+                <SelectItem value="on_hold">On Hold</SelectItem>
               </SelectContent>
             </Select>
           </div>

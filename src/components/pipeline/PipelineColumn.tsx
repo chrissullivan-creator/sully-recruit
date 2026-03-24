@@ -49,9 +49,9 @@ export const jobStageColors: Record<JobStage, string> = {
   hot: 'bg-stage-hot',
   interviewing: 'bg-stage-interview',
   offer: 'bg-stage-offer',
-  accepted: 'bg-success',
+  win: 'bg-[#1C3D2E]',
   declined: 'bg-destructive',
-  lost: 'bg-muted-foreground',
+  lost: 'bg-[#DC2626]',
   on_hold: 'bg-stage-hold',
 };
 

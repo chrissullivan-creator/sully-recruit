@@ -64,7 +64,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks }: Props) {
         setSearchResults((data || []).map(c => ({ id: c.id, label: c.full_name || 'Unnamed' })));
       } else if (entityType === 'job') {
         // Only show non-closed jobs
-        const { data } = await supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${entitySearch}%`).neq('status', 'closed').limit(8);
+        const { data } = await supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${entitySearch}%`).neq('status', 'lost').limit(8);
         setSearchResults((data || []).map(j => ({ id: j.id, label: `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}` })));
       } else if (entityType === 'contact') {
         const { data } = await supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${entitySearch}%`).limit(8);

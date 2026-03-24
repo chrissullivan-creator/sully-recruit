@@ -53,7 +53,7 @@ const VALID_CANDIDATE_STAGES = [
 ];
 
 const VALID_JOB_STAGES = [
-  'warm', 'hot', 'interviewing', 'offer', 'accepted', 'declined', 'lost', 'on_hold',
+  'warm', 'hot', 'interviewing', 'offer', 'win', 'declined', 'lost', 'on_hold',
 ];
 
 const VALID_PRIORITIES = ['low', 'medium', 'high'];

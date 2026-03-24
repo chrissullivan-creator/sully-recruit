@@ -121,7 +121,7 @@ export function useJobs(includesClosed = false) {
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
       if (!includesClosed) {
-        query = query.neq('status', 'closed');
+        query = query.not('status', 'in', '("lost","closed")');
       }
       const { data, error } = await query;
       if (error) throw error;

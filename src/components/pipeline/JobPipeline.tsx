@@ -7,6 +7,8 @@ const stages = [
   { key: 'open', label: 'Open' },
   { key: 'interviewing', label: 'Interviewing' },
   { key: 'offer', label: 'Offer' },
+  { key: 'win', label: 'Win' },
+  { key: 'lost', label: 'Lost' },
   { key: 'on_hold', label: 'On Hold' },
 ];
 
