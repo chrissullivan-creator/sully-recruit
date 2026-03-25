@@ -114,22 +114,40 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const candidateIdSet = new Set(candidates.map(c => c.id));
 
-      const enrollments = idsToEnroll.map((personId) => {
+      // Check for existing enrollments to prevent duplicates
+      const { data: existingEnrollments } = await supabase
+        .from('sequence_enrollments')
+        .select('candidate_id, contact_id')
+        .eq('sequence_id', selectedSequenceId);
+
+      const existingCandIds = new Set((existingEnrollments ?? []).filter(e => e.candidate_id).map(e => e.candidate_id));
+      const existingContIds = new Set((existingEnrollments ?? []).filter(e => e.contact_id).map(e => e.contact_id));
+
+      let skipped = 0;
+      const enrollments: any[] = [];
+      for (const personId of idsToEnroll) {
         const isCand = candidateIdSet.has(personId);
-        return {
+        if (isCand && existingCandIds.has(personId)) { skipped++; continue; }
+        if (!isCand && existingContIds.has(personId)) { skipped++; continue; }
+        enrollments.push({
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
           current_step_order: 1,
           enrolled_by: userId,
           integration_account_id: selectedAccountId || null,
-        };
-      });
+        });
+      }
 
-      const { error } = await supabase.from('sequence_enrollments').insert(enrollments);
-      if (error) throw error;
+      if (enrollments.length > 0) {
+        const { error } = await supabase.from('sequence_enrollments').insert(enrollments);
+        if (error) throw error;
+      }
 
-      toast.success(`Enrolled ${idsToEnroll.length} ${idsToEnroll.length > 1 ? 'people' : 'person'} in sequence`);
+      const parts: string[] = [];
+      if (enrollments.length > 0) parts.push(`${enrollments.length} enrolled`);
+      if (skipped > 0) parts.push(`${skipped} already in sequence, skipped`);
+      toast.success(parts.join(' · ') || 'No changes');
       queryClient.invalidateQueries({ queryKey: ['sequences'] });
       queryClient.invalidateQueries({ queryKey: ['sequence_enrollments'] });
       onOpenChange(false);

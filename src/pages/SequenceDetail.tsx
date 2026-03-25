@@ -25,8 +25,12 @@ import {
   arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   ArrowLeft, Play, Pause, Plus, Save, Users, UserPlus, Mail, Linkedin, MessageSquare,
   Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle, Copy,
+  MoreHorizontal, Eye, PauseCircle,
 } from 'lucide-react';
 import { SequenceAnalytics } from '@/components/campaigns/SequenceAnalytics';
 import type { CampaignStep, ChannelType } from '@/types';
@@ -113,7 +117,7 @@ const SequenceDetail = () => {
     try {
       const [seqRes, enrollRes, execRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
-        supabase.from('sequence_enrollments').select('*, candidates!left(first_name, last_name, full_name, email, current_title, owner_id), contacts!left(first_name, last_name, full_name, email, title)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
+        supabase.from('sequence_enrollments').select('*, candidates!left(first_name, last_name, full_name, email, current_title, current_company, owner_id), contacts!left(first_name, last_name, full_name, email, title, company_name)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
         supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
 
@@ -447,6 +451,23 @@ const SequenceDetail = () => {
                 </div>
               </div>
 
+              {/* Summary stats */}
+              {enrollments.length > 0 && (() => {
+                const replied = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && (x.status === 'replied' || x.clicked_at))).length;
+                const opened = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && x.opened_at)).length;
+                const bounced = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && x.bounced_at)).length;
+                const noResponse = enrollments.length - replied - bounced;
+                return (
+                  <p className="text-xs text-muted-foreground mb-4">
+                    {enrollments.length} enrolled
+                    {replied > 0 && <> · <span className="text-[#2A5C42] font-medium">{replied} replied</span></>}
+                    {opened > 0 && <> · <span className="text-[#C9A84C] font-medium">{opened} opened</span></>}
+                    {bounced > 0 && <> · <span className="text-[#DC2626] font-medium">{bounced} bounced</span></>}
+                    {noResponse > 0 && <> · {noResponse} no response</>}
+                  </p>
+                );
+              })()}
+
               {enrollments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Users className="h-10 w-10 text-muted-foreground mb-3" />
@@ -454,43 +475,136 @@ const SequenceDetail = () => {
                   <p className="text-sm text-muted-foreground">Add candidates or contacts to start the sequence.</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {enrollments.map((enrollment) => {
-                    const person = enrollment.candidates || enrollment.contacts;
-                    const personName = person?.full_name || `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim() || 'Unknown';
-                    const statusIcon = enrollment.status === 'active'
-                      ? <Clock className="h-3.5 w-3.5 text-warning" />
-                      : enrollment.status === 'completed'
-                        ? <CheckCircle className="h-3.5 w-3.5 text-success" />
-                        : <XCircle className="h-3.5 w-3.5 text-destructive" />;
-                    return (
-                      <div key={enrollment.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-                          {(person?.first_name?.[0] ?? '')}{(person?.last_name?.[0] ?? '')}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{personName}</p>
-                          <p className="text-xs text-muted-foreground truncate">{person?.email || person?.title || ''}</p>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {statusIcon}
-                          <span className="capitalize">{enrollment.status}</span>
-                          <span>Step {enrollment.current_step_order ?? 1}</span>
-                        </div>
-                        {(() => {
-                          const ownerId = enrollment.candidates?.owner_id;
-                          const ownerName = ownerId ? profileMap[ownerId]?.full_name : null;
-                          return ownerName ? (
-                            <span className="text-[10px] text-muted-foreground bg-muted rounded px-1.5 py-0.5">{ownerName.split(' ')[0]}</span>
-                          ) : null;
-                        })()}
-                        <span className="text-xs text-muted-foreground">{enrollment.enrolled_at ? format(new Date(enrollment.enrolled_at), 'MMM d') : ''}</span>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeEnrollment(enrollment.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-secondary">
+                      <tr>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Step</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Sent</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Step</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Result</th>
+                        <th className="w-10 px-4 py-2.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {enrollments.map((enrollment) => {
+                        const person = enrollment.candidates || enrollment.contacts;
+                        const personName = person?.full_name || `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim() || 'Unknown';
+                        const company = enrollment.candidates?.current_company || (enrollment.contacts as any)?.company_name || '';
+                        const isCand = !!enrollment.candidate_id;
+                        const profileUrl = isCand ? `/candidates/${enrollment.candidate_id}` : null;
+
+                        // Find executions for this enrollment
+                        const enrollExecs = executions
+                          .filter(x => x.enrollment_id === enrollment.id)
+                          .sort((a: any, b: any) => (b.executed_at ?? '').localeCompare(a.executed_at ?? ''));
+                        const lastExec = enrollExecs[0];
+
+                        // Last step info
+                        const lastStepOrder = lastExec?.step_order ?? null;
+                        const lastStepChannel = lastExec?.channel ?? null;
+                        const lastSentAt = lastExec?.executed_at ? format(new Date(lastExec.executed_at), 'MMM d') : '—';
+
+                        // Last result
+                        const lastResult = lastExec?.bounced_at ? 'bounced'
+                          : lastExec?.clicked_at ? 'replied'
+                          : lastExec?.opened_at ? 'opened'
+                          : lastExec?.status === 'sent' || lastExec?.delivered_at ? 'sent'
+                          : lastExec ? lastExec.status : null;
+
+                        // Next step
+                        const currentOrder = enrollment.current_step_order ?? 1;
+                        const nextStep = steps.find(s => s.order === currentOrder + (lastExec ? 0 : -1) + 1);
+                        const nextAt = enrollment.next_step_at ? format(new Date(enrollment.next_step_at), 'MMM d') : null;
+
+                        const channelLabel = (ch: string | null) => {
+                          if (!ch) return '';
+                          if (ch === 'linkedin' || ch.startsWith('linkedin')) return 'LinkedIn';
+                          if (ch === 'email') return 'Email';
+                          if (ch === 'sms') return 'SMS';
+                          if (ch === 'phone') return 'Call';
+                          return ch;
+                        };
+
+                        return (
+                          <tr key={enrollment.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[10px] font-medium text-accent">
+                                  {(person?.first_name?.[0] ?? '')}{(person?.last_name?.[0] ?? '')}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{personName}</p>
+                                  {person?.email && <p className="text-[10px] text-muted-foreground truncate">{person.email}</p>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[140px]">{company || '—'}</td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                              {lastStepOrder ? `Step ${lastStepOrder} — ${channelLabel(lastStepChannel)}` : '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground">{lastSentAt}</td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                              {enrollment.status === 'active' && nextStep
+                                ? <>{`Step ${nextStep.order} — ${channelLabel(nextStep.channel)}`}{nextAt && <span className="text-muted-foreground/60 ml-1">{nextAt}</span>}</>
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {enrollment.status === 'active' && <span className="text-xs text-[#2A5C42] font-medium">● Active</span>}
+                              {(enrollment.status === 'completed' || enrollment.status === 'finished') && <span className="text-xs text-muted-foreground font-medium">✓ Finished</span>}
+                              {enrollment.status === 'paused' && <span className="text-xs text-[#C9A84C] font-medium">⏸ Paused</span>}
+                              {enrollment.status === 'stopped' && <span className="text-xs text-[#DC2626] font-medium">✕ Stopped</span>}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {lastResult === 'replied' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#2A5C42', background: '#EAF2EC' }}>Replied ✓</span>}
+                              {lastResult === 'opened' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#C9A84C', background: '#FBF4E3' }}>Opened</span>}
+                              {lastResult === 'bounced' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#DC2626', background: '#FEF2F2' }}>Bounced</span>}
+                              {lastResult === 'sent' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#6B7280', background: '#F3F4F6' }}>Sent</span>}
+                              {!lastResult && <span className="text-xs text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {profileUrl && (
+                                    <DropdownMenuItem onClick={() => navigate(profileUrl)}>
+                                      <Eye className="h-3.5 w-3.5 mr-2" /> View Profile
+                                    </DropdownMenuItem>
+                                  )}
+                                  {enrollment.status === 'active' && (
+                                    <DropdownMenuItem onClick={async () => {
+                                      await supabase.from('sequence_enrollments').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', enrollment.id);
+                                      loadSequence();
+                                      toast.success('Enrollment paused');
+                                    }}>
+                                      <PauseCircle className="h-3.5 w-3.5 mr-2" /> Pause
+                                    </DropdownMenuItem>
+                                  )}
+                                  {enrollment.status === 'paused' && (
+                                    <DropdownMenuItem onClick={async () => {
+                                      await supabase.from('sequence_enrollments').update({ status: 'active', paused_at: null }).eq('id', enrollment.id);
+                                      loadSequence();
+                                      toast.success('Enrollment resumed');
+                                    }}>
+                                      <Play className="h-3.5 w-3.5 mr-2" /> Resume
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem className="text-destructive" onClick={() => removeEnrollment(enrollment.id)}>
+                                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Remove
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </TabsContent>
