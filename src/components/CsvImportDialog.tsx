@@ -92,7 +92,7 @@ const CONTACT_ALIASES: Record<string, string[]> = {
   title:        ['title', 'job_title', 'position', 'role', 'job title'],
   company_name: ['company_name', 'company', 'employer', 'firm', 'organization', 'account'],
   linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin url', 'profile_url'],
-  notes:        ['notes', 'note', 'comments', 'comment', 'bio', 'summary', 'additional_info'],
+  _skip:        ['user_id', 'owner', 'owner_id', 'id', 'created_at', 'updated_at'],
 };
 
 const FIELD_ALIASES = { ...CANDIDATE_ALIASES, ...JOB_ALIASES, ...CONTACT_ALIASES };
@@ -312,16 +312,16 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         const rows = valid.map((r) => {
           const c = r.mapped;
           const row: Record<string, any> = {
-            user_id: user.id,
+            owner_id: user.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
+            status: 'active',
           };
           if (c.phone) row.phone = c.phone;
           if (c.title) row.title = c.title;
           if (c.company_name) row.company_name = c.company_name;
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
-          if (c.notes) row.notes = c.notes;
           return row;
         });
 
