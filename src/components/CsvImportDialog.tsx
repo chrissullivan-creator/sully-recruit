@@ -329,7 +329,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         let inserted = 0;
         for (let i = 0; i < rows.length; i += BATCH) {
           const batch = rows.slice(i, i + BATCH);
-          const { error } = await supabase.from('contacts').insert(batch as any);
+          const { error } = await supabase.from('contacts').upsert(batch as any, { onConflict: 'email', ignoreDuplicates: false });
           if (error) throw error;
           inserted += batch.length;
         }
