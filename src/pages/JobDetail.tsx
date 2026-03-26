@@ -408,9 +408,13 @@ const JobDetail = () => {
               <div>
                 <span className="text-muted-foreground">Status</span>
                 <div className="mt-1"><Badge variant="secondary" className={cn(
-                  job.status === 'win' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
-                  job.status === 'lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
-                )}>{job.status === 'win' ? 'Win' : job.status === 'lost' ? 'Lost' : job.status}</Badge></div>
+                  job.status === 'closed_won' && 'bg-[#1C3D2E] text-white',
+                  job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626]',
+                  job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
+                  job.status === 'offer_made' && 'bg-[#2A5C42]/10 text-[#2A5C42]',
+                )}>
+                  {job.status === 'lead' ? 'Lead' : job.status === 'hot' ? 'Hot' : job.status === 'offer_made' ? 'Offer Made' : job.status === 'closed_won' ? 'Closed Won' : job.status === 'closed_lost' ? 'Closed Lost' : job.status}
+                </Badge></div>
               </div>
               {companyName && (
                 <div>

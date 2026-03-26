@@ -19,7 +19,7 @@ export interface Lead {
 }
 
 // Job pipeline stages
-export type JobStage = 'warm' | 'hot' | 'interviewing' | 'offer' | 'win' | 'declined' | 'lost' | 'on_hold';
+export type JobStage = 'lead' | 'hot' | 'offer_made' | 'closed_won' | 'closed_lost';
 
 export interface Job {
   id: string;

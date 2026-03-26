@@ -112,18 +112,14 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
 }
 
 // Jobs with company info
-export function useJobs(includesClosed = false) {
+export function useJobs() {
   return useQuery({
-    queryKey: ['jobs', includesClosed],
+    queryKey: ['jobs'],
     queryFn: async () => {
-      let query = supabase
+      const { data, error } = await supabase
         .from('jobs')
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
-      if (!includesClosed) {
-        query = query.not('status', 'in', '("lost","closed")');
-      }
-      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
@@ -174,7 +170,7 @@ export function useContacts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('contacts')
-        .select('*, companies!left(name)')
+        .select('*, companies(name)')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -279,10 +275,9 @@ export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
       const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
-        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, job_status, owner_id'),
+        supabase.from('jobs').select('id, status', { count: 'exact' }).in('status', ['lead', 'hot', 'offer_made']),
+        supabase.from('candidates').select('id, job_status'),
         supabase.from('send_outs').select('id, stage'),
       ]);
 
@@ -294,7 +289,6 @@ export function useDashboardMetrics() {
       return {
         activeJobs: jobsRes.count ?? 0,
         totalCandidates: candidates.length,
-        myCandidates: user ? candidates.filter(c => c.owner_id === user.id).length : 0,
         newCandidates: countByJobStatus('new'),
         contactedCandidates: countByJobStatus('reached_out'),
         pitchedCandidates: countByJobStatus('pitched'),

@@ -7,18 +7,20 @@ interface PipelineColumnProps<T> {
   items: T[];
   renderItem: (item: T) => React.ReactNode;
   stageColor?: string;
+  headerClass?: string;
 }
 
-export function PipelineColumn<T>({ 
-  title, 
-  count, 
-  items, 
+export function PipelineColumn<T>({
+  title,
+  count,
+  items,
   renderItem,
-  stageColor = 'bg-muted'
+  stageColor = 'bg-muted',
+  headerClass,
 }: PipelineColumnProps<T>) {
   return (
     <div className="flex flex-col min-w-[280px] max-w-[300px]">
-      <div className="flex items-center justify-between px-3 py-2 rounded-t-lg bg-secondary border border-border border-b-0">
+      <div className={cn("flex items-center justify-between px-3 py-2 rounded-t-lg bg-secondary border border-border border-b-0", headerClass)}>
         <div className="flex items-center gap-2">
           <div className={cn('h-2 w-2 rounded-full', stageColor)} />
           <h3 className="text-sm font-medium text-foreground">{title}</h3>
@@ -45,14 +47,11 @@ export function PipelineColumn<T>({
 
 // Job stage colors
 export const jobStageColors: Record<JobStage, string> = {
-  warm: 'bg-stage-warm',
-  hot: 'bg-stage-hot',
-  interviewing: 'bg-stage-interview',
-  offer: 'bg-stage-offer',
-  win: 'bg-[#1C3D2E]',
-  declined: 'bg-destructive',
-  lost: 'bg-[#DC2626]',
-  on_hold: 'bg-stage-hold',
+  lead: 'bg-gray-400',
+  hot: 'bg-[#C9A84C]',
+  offer_made: 'bg-[#2A5C42]',
+  closed_won: 'bg-[#1C3D2E]',
+  closed_lost: 'bg-[#DC2626]',
 };
 
 // Candidate stage colors

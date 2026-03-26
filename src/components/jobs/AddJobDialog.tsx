@@ -27,7 +27,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     location: '',
     description: '',
     compensation: '',
-    status: 'open',
+    status: 'lead',
   });
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
@@ -62,7 +62,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       toast.success('Job created');
-      setForm({ title: '', company_id: '', company_name: '', location: '', description: '', compensation: '', status: 'open' });
+      setForm({ title: '', company_id: '', company_name: '', location: '', description: '', compensation: '', status: 'lead' });
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create job');
@@ -113,12 +113,11 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
               <Select value={form.status} onValueChange={(v) => update('status', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="interviewing">Interviewing</SelectItem>
-                  <SelectItem value="offer">Offer</SelectItem>
-                  <SelectItem value="win">Win</SelectItem>
-                  <SelectItem value="lost">Lost</SelectItem>
-                  <SelectItem value="on_hold">On Hold</SelectItem>
+                  <SelectItem value="lead">Lead</SelectItem>
+                  <SelectItem value="hot">Hot</SelectItem>
+                  <SelectItem value="offer_made">Offer Made</SelectItem>
+                  <SelectItem value="closed_won">Closed Won</SelectItem>
+                  <SelectItem value="closed_lost">Closed Lost</SelectItem>
                 </SelectContent>
               </Select>
             </div>

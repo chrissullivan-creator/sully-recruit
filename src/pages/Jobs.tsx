@@ -11,17 +11,6 @@ import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
-const JOB_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  open:         { label: 'Open',         color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  warm:         { label: 'Warm',         color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-  hot:          { label: 'Hot',          color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
-  interviewing: { label: 'Interviewing', color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
-  offer:        { label: 'Offer',        color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  win:          { label: 'Win',          color: 'bg-[#1C3D2E] text-white border-[#1C3D2E]' },
-  lost:         { label: 'Lost',         color: 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20' },
-  on_hold:      { label: 'On Hold',      color: 'bg-muted text-muted-foreground border-border' },
-};
-
 const Jobs = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
@@ -114,10 +103,16 @@ const Jobs = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
                     <td className="px-4 py-3">
-                      {(() => {
-                        const cfg = JOB_STATUS_CONFIG[job.status] ?? { label: job.status, color: 'bg-muted text-muted-foreground border-border' };
-                        return <span className={cn('stage-badge border', cfg.color)}>{cfg.label}</span>;
-                      })()}
+                      <span className={cn(
+                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                        job.status === 'lead' && 'bg-gray-100 text-gray-600',
+                        job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
+                        job.status === 'offer_made' && 'bg-[#2A5C42]/10 text-[#2A5C42]',
+                        job.status === 'closed_won' && 'bg-[#1C3D2E] text-white',
+                        job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626]',
+                      )}>
+                        {job.status === 'lead' ? 'Lead' : job.status === 'hot' ? 'Hot' : job.status === 'offer_made' ? 'Offer Made' : job.status === 'closed_won' ? 'Closed Won' : job.status === 'closed_lost' ? 'Closed Lost' : job.status}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTaskPanel({ id: job.id, name: job.title })}>

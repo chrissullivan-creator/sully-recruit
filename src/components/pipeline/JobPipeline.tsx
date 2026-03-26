@@ -4,12 +4,11 @@ import { PipelineColumn, jobStageColors } from './PipelineColumn';
 import { Briefcase, MapPin } from 'lucide-react';
 
 const stages = [
-  { key: 'open', label: 'Open' },
-  { key: 'interviewing', label: 'Interviewing' },
-  { key: 'offer', label: 'Offer' },
-  { key: 'win', label: 'Win' },
-  { key: 'lost', label: 'Lost' },
-  { key: 'on_hold', label: 'On Hold' },
+  { key: 'lead', label: 'Lead', headerClass: '' },
+  { key: 'hot', label: 'Hot', headerClass: '' },
+  { key: 'offer_made', label: 'Offer Made', headerClass: '' },
+  { key: 'closed_won', label: 'Closed Won', headerClass: 'bg-[#1C3D2E] text-white border-[#1C3D2E]' },
+  { key: 'closed_lost', label: 'Closed Lost', headerClass: 'bg-[#FEF2F2] text-[#DC2626] border-[#FEF2F2]' },
 ];
 
 export function JobPipeline() {
@@ -29,6 +28,7 @@ export function JobPipeline() {
             count={stageJobs.length}
             items={stageJobs}
             stageColor={jobStageColors[stage.key as keyof typeof jobStageColors] ?? 'bg-muted text-muted-foreground'}
+            headerClass={stage.headerClass}
             renderItem={(job) => (
               <div onClick={() => navigate(`/jobs/${job.id}`)} className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md">
                 <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">

@@ -53,7 +53,7 @@ const VALID_CANDIDATE_STAGES = [
 ];
 
 const VALID_JOB_STAGES = [
-  'warm', 'hot', 'interviewing', 'offer', 'win', 'declined', 'lost', 'on_hold',
+  'lead', 'hot', 'offer_made', 'closed_won', 'closed_lost',
 ];
 
 const VALID_PRIORITIES = ['low', 'medium', 'high'];
@@ -92,7 +92,7 @@ const CONTACT_ALIASES: Record<string, string[]> = {
   title:        ['title', 'job_title', 'position', 'role', 'job title'],
   company_name: ['company_name', 'company', 'employer', 'firm', 'organization', 'account'],
   linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin url', 'profile_url'],
-  _skip:        ['user_id', 'owner', 'owner_id', 'id', 'created_at', 'updated_at'],
+  notes:        ['notes', 'note', 'comments', 'comment', 'bio', 'summary', 'additional_info'],
 };
 
 const FIELD_ALIASES = { ...CANDIDATE_ALIASES, ...JOB_ALIASES, ...CONTACT_ALIASES };
@@ -277,8 +277,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           const j = r.mapped;
           const stage = j.stage
             ? j.stage.toLowerCase().replace(/\s/g, '_')
-            : 'warm';
-          const safeStage = VALID_JOB_STAGES.includes(stage) ? stage : 'warm';
+            : 'lead';
+          const safeStage = VALID_JOB_STAGES.includes(stage) ? stage : 'lead';
           const priority = j.priority
             ? j.priority.toLowerCase()
             : 'medium';
@@ -288,7 +288,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             title: j.title || '',
             company: j.company || '',
             location: j.location || '',
-            stage: safeStage,
+            status: safeStage,
             priority: safePriority,
           };
           if (j.salary) row.salary = j.salary;
@@ -312,16 +312,16 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         const rows = valid.map((r) => {
           const c = r.mapped;
           const row: Record<string, any> = {
-            owner_id: user.id,
+            user_id: user.id,
             first_name: c.first_name,
             last_name: c.last_name,
             email: c.email || '',
-            status: 'active',
           };
           if (c.phone) row.phone = c.phone;
           if (c.title) row.title = c.title;
           if (c.company_name) row.company_name = c.company_name;
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
+          if (c.notes) row.notes = c.notes;
           return row;
         });
 
@@ -329,7 +329,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         let inserted = 0;
         for (let i = 0; i < rows.length; i += BATCH) {
           const batch = rows.slice(i, i + BATCH);
-          const { error } = await supabase.from('contacts').upsert(batch as any, { onConflict: 'email', ignoreDuplicates: false });
+          const { error } = await supabase.from('contacts').insert(batch as any);
           if (error) throw error;
           inserted += batch.length;
         }
