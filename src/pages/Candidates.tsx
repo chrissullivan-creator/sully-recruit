@@ -277,6 +277,7 @@ const Candidates = () => {
         ) : view === 'pipeline' ? (
           <CandidatePipeline />
         ) : (
+          <>
           <div className="rounded-lg border border-border overflow-x-auto">
             <table className="w-full min-w-[900px]">
               <thead className="bg-secondary">
@@ -398,6 +399,7 @@ const Candidates = () => {
               </div>
             </div>
           )}
+          </>
         )}
       </div>
 
