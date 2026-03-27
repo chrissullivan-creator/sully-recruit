@@ -115,11 +115,31 @@ const SequenceDetail = () => {
   const loadSequence = async () => {
     setLoading(true);
     try {
-      const [seqRes, enrollRes, execRes] = await Promise.all([
+      const [seqRes, enrollRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
         supabase.from('sequence_enrollments').select('*, candidates!left(first_name, last_name, full_name, email, current_title, current_company, owner_id), contacts!left(first_name, last_name, full_name, email, title, company_name)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
-        supabase.from('sequence_step_executions').select('*').in('enrollment_id', (await supabase.from('sequence_enrollments').select('id').eq('sequence_id', id!)).data?.map(e => e.id) ?? []),
       ]);
+
+      // Fetch executions separately — avoid .in() with hundreds of IDs
+      const enrollmentIds = (enrollRes.data ?? []).map((e: any) => e.id);
+      let execRes = { data: [] as any[], error: null as any };
+      if (enrollmentIds.length > 0) {
+        // Batch into chunks of 50 to avoid URL length limits
+        const chunks: string[][] = [];
+        for (let i = 0; i < enrollmentIds.length; i += 50) {
+          chunks.push(enrollmentIds.slice(i, i + 50));
+        }
+        const allExecs: any[] = [];
+        for (const chunk of chunks) {
+          const { data, error } = await supabase
+            .from('sequence_step_executions')
+            .select('*')
+            .in('enrollment_id', chunk);
+          if (error) { execRes.error = error; break; }
+          allExecs.push(...(data ?? []));
+        }
+        execRes.data = allExecs;
+      }
 
       if (seqRes.error) throw seqRes.error;
       const seq = seqRes.data;
