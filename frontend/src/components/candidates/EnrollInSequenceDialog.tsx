@@ -133,7 +133,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 0,
+          current_step_order: 1,
           enrolled_by: userId,
           integration_account_id: selectedAccountId || null,
         });
@@ -232,28 +232,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
 
           {isPeoplePicker && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Search People</Label>
-                {people.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const allIds = people.slice(0, 50).map(p => p.id);
-                      const allSelected = allIds.every(id => selectedPeople.includes(id));
-                      if (allSelected) {
-                        setSelectedPeople(prev => prev.filter(id => !allIds.includes(id)));
-                      } else {
-                        setSelectedPeople(prev => [...new Set([...prev, ...allIds])]);
-                      }
-                    }}
-                    className="text-xs h-7 px-2"
-                  >
-                    {people.slice(0, 50).every(p => selectedPeople.includes(p.id)) ? 'Deselect All' : 'Select All'}
-                  </Button>
-                )}
-              </div>
+              <Label>Search People</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input

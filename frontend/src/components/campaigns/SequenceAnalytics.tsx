@@ -61,12 +61,12 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
       .sort((a, b) => a.order - b.order)
       .map((step) => {
         const stepExecs = executions.filter(e => e.sequence_step_id === step.id);
-        const sent = stepExecs.filter(e => ['sent','delivered','opened','clicked','complained'].includes(e.status)).length;
-        const delivered = stepExecs.filter(e => e.delivered_at || ['delivered','opened','clicked'].includes(e.status)).length;
-        const opened = stepExecs.filter(e => e.opened_at || e.status === 'opened' || e.status === 'clicked').length;
-        const clicked = stepExecs.filter(e => e.clicked_at || e.status === 'clicked').length;
+        const sent = stepExecs.filter(e => ['sent','delivered','opened','clicked','complained','replied'].includes(e.status)).length;
+        const delivered = stepExecs.filter(e => ['delivered','opened','clicked','replied'].includes(e.status)).length;
+        const opened = stepExecs.filter(e => ['opened','clicked','replied'].includes(e.status)).length;
+        const clicked = stepExecs.filter(e => ['clicked','replied'].includes(e.status)).length;
         const replied = stepExecs.filter(e => e.status === 'replied').length;
-        const bounced = stepExecs.filter(e => e.bounced_at || e.status === 'bounced' || e.status === 'failed').length;
+        const bounced = stepExecs.filter(e => e.status === 'bounced' || e.status === 'failed').length;
 
         return {
           name: `Step ${step.order}`,
@@ -95,7 +95,7 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
     // Funnel data: how many reached each step
     const funnelData = perStep.map((step, i) => {
       // Count enrollees whose current_step_order >= this step order, or who completed/sent this step
-      const reached = enrollments.filter(e => (e.current_step_order ?? 1) >= (i + 1)).length;
+      const reached = enrollments.filter(e => (e.current_step_order ?? 0) >= (i + 1)).length;
       return {
         name: step.name,
         value: reached,

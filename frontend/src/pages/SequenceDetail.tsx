@@ -473,9 +473,9 @@ const SequenceDetail = () => {
 
               {/* Summary stats */}
               {enrollments.length > 0 && (() => {
-                const replied = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && (x.status === 'replied' || x.clicked_at))).length;
-                const opened = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && x.opened_at)).length;
-                const bounced = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && x.bounced_at)).length;
+                const replied = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && (x.status === 'replied' || x.status === 'clicked'))).length;
+                const opened = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && (x.status === 'opened'))).length;
+                const bounced = enrollments.filter(e => executions.some(x => x.enrollment_id === e.id && (x.status === 'bounced' || x.status === 'failed'))).length;
                 const noResponse = enrollments.length - replied - bounced;
                 return (
                   <p className="text-xs text-muted-foreground mb-4">
@@ -517,27 +517,35 @@ const SequenceDetail = () => {
                         const isCand = !!enrollment.candidate_id;
                         const profileUrl = isCand ? `/candidates/${enrollment.candidate_id}` : null;
 
+                        // Build a map from step ID → step info for resolving execution metadata
+                        const stepById = Object.fromEntries(steps.map(s => [s.id, s]));
+
                         // Find executions for this enrollment
                         const enrollExecs = executions
                           .filter(x => x.enrollment_id === enrollment.id)
                           .sort((a: any, b: any) => (b.executed_at ?? '').localeCompare(a.executed_at ?? ''));
                         const lastExec = enrollExecs[0];
 
-                        // Last step info
-                        const lastStepOrder = lastExec?.step_order ?? null;
-                        const lastStepChannel = lastExec?.channel ?? null;
+                        // Resolve step metadata from the steps array (executions don't carry step_order/channel)
+                        const lastExecStep = lastExec ? stepById[lastExec.sequence_step_id] : null;
+                        const lastStepOrder = lastExecStep?.order ?? null;
+                        const lastStepChannel = lastExecStep?.channel ?? null;
                         const lastSentAt = lastExec?.executed_at ? format(new Date(lastExec.executed_at), 'MMM d') : '—';
 
-                        // Last result
-                        const lastResult = lastExec?.bounced_at ? 'bounced'
-                          : lastExec?.clicked_at ? 'replied'
-                          : lastExec?.opened_at ? 'opened'
-                          : lastExec?.status === 'sent' || lastExec?.delivered_at ? 'sent'
-                          : lastExec ? lastExec.status : null;
+                        // Last result — use status field (tracking fields may not exist on execution rows)
+                        const execStatus = lastExec?.status ?? null;
+                        const lastResult = execStatus === 'bounced' || execStatus === 'failed' ? 'bounced'
+                          : execStatus === 'replied' || execStatus === 'clicked' ? 'replied'
+                          : execStatus === 'opened' ? 'opened'
+                          : execStatus === 'sent' || execStatus === 'delivered' ? 'sent'
+                          : execStatus;
 
-                        // Next step
-                        const currentOrder = enrollment.current_step_order ?? 1;
-                        const nextStep = steps.find(s => s.order === currentOrder + (lastExec ? 0 : -1) + 1);
+                        // Next step — current_step_order tracks which step is next (1-based)
+                        const currentOrder = enrollment.current_step_order ?? 0;
+                        // If currentOrder is 0 or 1 with no executions, next is step 1
+                        // If currentOrder is N with executions, next is step N+1
+                        const nextStepOrder = lastExec ? (lastStepOrder ?? currentOrder) + 1 : Math.max(currentOrder, 1);
+                        const nextStep = steps.find(s => s.order === nextStepOrder);
                         const nextAt = enrollment.next_step_at ? format(new Date(enrollment.next_step_at), 'MMM d') : null;
 
                         const channelLabel = (ch: string | null) => {
