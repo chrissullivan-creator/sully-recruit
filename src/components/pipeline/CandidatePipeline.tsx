@@ -4,9 +4,13 @@ import { PipelineColumn, candidateStageColors } from './PipelineColumn';
 import { Building } from 'lucide-react';
 
 const stages = [
-  { key: 'active', label: 'Active' },
+  { key: 'new', label: 'Lead' },
+  { key: 'reached_out', label: 'Reached Out' },
+  { key: 'back_of_resume', label: 'Back of Resume' },
+  { key: 'pitched', label: 'Pitch' },
+  { key: 'send_out', label: 'Send Out' },
   { key: 'submitted', label: 'Submitted' },
-  { key: 'interview', label: 'Interview' },
+  { key: 'interviewing', label: 'Interviewing' },
   { key: 'offer', label: 'Offer' },
   { key: 'placed', label: 'Placed' },
 ];

@@ -27,9 +27,9 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 const JOB_STATUSES = [
-  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
+  { value: 'lead',         label: 'Lead',         color: 'bg-gray-500/15 text-gray-400' },
   { value: 'reached_out',  label: 'Reached Out',  color: 'bg-sky-500/15 text-sky-400' },
-  { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'pitch',        label: 'Pitch',        color: 'bg-blue-500/15 text-blue-400' },
   { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
   { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },

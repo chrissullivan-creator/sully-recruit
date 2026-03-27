@@ -19,7 +19,7 @@ interface SendOutRecord {
   candidate_name?: string;
   contact_name?: string;
   company_name?: string;
-  status: 'lead' | 'pitch' | 'sent' | 'interview' | 'offer' | 'placed' | 'rejected' | 'withdrawn';
+  status: 'lead' | 'reached_out' | 'pitch' | 'send_out' | 'submitted' | 'interviewing' | 'offer' | 'placed' | 'rejected' | 'withdrawn';
 }
 
 interface SendOutPipelineProps {
@@ -29,14 +29,16 @@ interface SendOutPipelineProps {
   onRemove?: (id: string) => void;
 }
 
-const pipelineStages = ['lead', 'pitch', 'sent', 'interview', 'offer', 'placed'] as const;
+const pipelineStages = ['lead', 'reached_out', 'pitch', 'send_out', 'submitted', 'interviewing', 'offer', 'placed'] as const;
 const exitLanes = ['rejected', 'withdrawn'] as const;
 
 const statusColors: Record<string, string> = {
   lead: 'bg-slate-100 text-slate-700 border-slate-200',
+  reached_out: 'bg-sky-100 text-sky-700 border-sky-200',
   pitch: 'bg-blue-100 text-blue-700 border-blue-200',
-  sent: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-  interview: 'bg-amber-100 text-amber-700 border-amber-200',
+  send_out: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  submitted: 'bg-purple-100 text-purple-700 border-purple-200',
+  interviewing: 'bg-amber-100 text-amber-700 border-amber-200',
   offer: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   placed: 'bg-green-600 text-white border-green-700',
   rejected: 'bg-destructive/10 text-destructive border-destructive/20',
@@ -45,9 +47,11 @@ const statusColors: Record<string, string> = {
 
 const statusLabels: Record<string, string> = {
   lead: 'Lead',
+  reached_out: 'Reached Out',
   pitch: 'Pitch',
-  sent: 'Sent',
-  interview: 'Interview',
+  send_out: 'Send Out',
+  submitted: 'Submitted',
+  interviewing: 'Interviewing',
   offer: 'Offer',
   placed: 'Placed',
   rejected: 'Rejected',
@@ -114,16 +118,10 @@ export const SendOutPipeline = ({
     );
   }
 
-  const groupedBySendOuts = {
-    lead: sendOuts.filter(s => s.status === 'lead'),
-    pitch: sendOuts.filter(s => s.status === 'pitch'),
-    sent: sendOuts.filter(s => s.status === 'sent'),
-    interview: sendOuts.filter(s => s.status === 'interview'),
-    offer: sendOuts.filter(s => s.status === 'offer'),
-    placed: sendOuts.filter(s => s.status === 'placed'),
-    rejected: sendOuts.filter(s => s.status === 'rejected'),
-    withdrawn: sendOuts.filter(s => s.status === 'withdrawn'),
-  };
+  const groupedBySendOuts: Record<string, SendOutRecord[]> = {};
+  for (const stage of [...pipelineStages, ...exitLanes]) {
+    groupedBySendOuts[stage] = sendOuts.filter(s => s.status === stage);
+  }
 
   const totalCount = sendOuts.length;
   const successCount = (groupedBySendOuts.placed?.length ?? 0);
@@ -161,7 +159,7 @@ export const SendOutPipeline = ({
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Active Pipeline
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-3">
                 {pipelineStages.map((stage) => (
                   <div key={stage} className="space-y-2">
                     <div className="text-xs font-medium text-muted-foreground">
