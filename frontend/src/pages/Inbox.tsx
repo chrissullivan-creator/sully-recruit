@@ -143,12 +143,15 @@ function ThreadItem({
 }
 
 // ---------- Entity Info Panel ----------
-function EntityPanel({ thread }: { thread: InboxThread | null }) {
+function EntityPanel({ thread, messages }: { thread: InboxThread | null; messages: Message[] }) {
   const queryClient = useQueryClient();
   const [linkSearch, setLinkSearch] = useState('');
   const [linkResults, setLinkResults] = useState<any[]>([]);
   const [linkSearching, setLinkSearching] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [createMode, setCreateMode] = useState<'candidate' | 'contact' | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', company: '' });
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -180,13 +183,18 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     },
   });
 
+  // Extract sender info from inbound messages for pre-filling create forms
+  const firstInbound = messages.find(m => m.direction === 'inbound');
+  const senderName = firstInbound?.sender_name || thread?.candidate_name || thread?.contact_name || '';
+  const senderAddress = firstInbound?.sender_address || '';
+
   const handleSearch = async () => {
     if (!linkSearch.trim()) return;
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').ilike('full_name', `%${q}%`).limit(5),
-      supabase.from('contacts').select('id, full_name, email, title').ilike('full_name', `%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     const results = [
       ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
@@ -216,6 +224,82 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     setLinking(false);
   };
 
+  const startCreate = (type: 'candidate' | 'contact') => {
+    // Pre-fill form with sender info
+    const nameParts = senderName.split(' ');
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+    const isEmail = senderAddress.includes('@');
+    setCreateForm({
+      first_name: firstName,
+      last_name: lastName,
+      email: isEmail ? senderAddress : '',
+      phone: '',
+      linkedin_url: thread?.channel === 'linkedin' ? senderAddress : '',
+      title: '',
+      company: '',
+    });
+    setCreateMode(type);
+  };
+
+  const handleCreate = async () => {
+    if (!thread || !createMode) return;
+    if (!createForm.first_name.trim() && !createForm.last_name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    setCreating(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+
+      if (createMode === 'candidate') {
+        const { data: newCandidate, error } = await supabase.from('candidates').insert({
+          first_name: createForm.first_name.trim() || null,
+          last_name: createForm.last_name.trim() || null,
+          email: createForm.email.trim() || null,
+          phone: createForm.phone.trim() || null,
+          linkedin_url: createForm.linkedin_url.trim() || null,
+          current_title: createForm.title.trim() || null,
+          current_company: createForm.company.trim() || null,
+          status: 'new',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        // Auto-link conversation
+        const { error: linkErr } = await supabase.from('conversations').update({ candidate_id: newCandidate.id }).eq('id', thread.id);
+        if (linkErr) throw linkErr;
+        toast.success(`Candidate created & linked: ${newCandidate.full_name || createForm.first_name}`);
+      } else {
+        const { data: newContact, error } = await supabase.from('contacts').insert({
+          first_name: createForm.first_name.trim() || null,
+          last_name: createForm.last_name.trim() || null,
+          email: createForm.email.trim() || null,
+          phone: createForm.phone.trim() || null,
+          linkedin_url: createForm.linkedin_url.trim() || null,
+          title: createForm.title.trim() || null,
+          status: 'active',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        const { error: linkErr } = await supabase.from('conversations').update({ contact_id: newContact.id }).eq('id', thread.id);
+        if (linkErr) throw linkErr;
+        toast.success(`Contact created & linked: ${newContact.full_name || createForm.first_name}`);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setCreateMode(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (!thread) return null;
 
   const entity = candidate || contact;
@@ -226,7 +310,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="p-5 border-b border-border">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-          Linked Record
+          {isLinked ? 'Linked Record' : 'Link or Add Record'}
         </h3>
 
         {isLinked && entity ? (
@@ -269,8 +353,8 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
               {entity.linkedin_url && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Linkedin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                    LinkedIn
+                  <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline truncate">
+                    LinkedIn Profile
                   </a>
                 </div>
               )}
@@ -299,7 +383,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
               </Link>
             )}
             {entityType === 'contact' && (
-              <Link to={`/contacts/${thread.contact_id}`}>
+              <Link to={`/contacts`}>
                 <Button variant="outline" size="sm" className="w-full gap-1.5">
                   <Users className="h-3.5 w-3.5" />
                   View Contact
@@ -308,26 +392,108 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
               </Link>
             )}
           </div>
+        ) : createMode ? (
+          /* ---------- Quick Create Form ---------- */
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-foreground">
+                New {createMode === 'candidate' ? 'Candidate' : 'Contact'}
+              </p>
+              <button onClick={() => setCreateMode(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
+            </div>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  placeholder="First name"
+                  value={createForm.first_name}
+                  onChange={(e) => setCreateForm(f => ({ ...f, first_name: e.target.value }))}
+                  className="h-7 text-xs"
+                />
+                <Input
+                  placeholder="Last name"
+                  value={createForm.last_name}
+                  onChange={(e) => setCreateForm(f => ({ ...f, last_name: e.target.value }))}
+                  className="h-7 text-xs"
+                />
+              </div>
+              <Input
+                placeholder="Email"
+                value={createForm.email}
+                onChange={(e) => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                className="h-7 text-xs"
+              />
+              <Input
+                placeholder="Phone"
+                value={createForm.phone}
+                onChange={(e) => setCreateForm(f => ({ ...f, phone: e.target.value }))}
+                className="h-7 text-xs"
+              />
+              {thread?.channel === 'linkedin' && (
+                <Input
+                  placeholder="LinkedIn URL"
+                  value={createForm.linkedin_url}
+                  onChange={(e) => setCreateForm(f => ({ ...f, linkedin_url: e.target.value }))}
+                  className="h-7 text-xs"
+                />
+              )}
+              <Input
+                placeholder={createMode === 'candidate' ? 'Title' : 'Job Title'}
+                value={createForm.title}
+                onChange={(e) => setCreateForm(f => ({ ...f, title: e.target.value }))}
+                className="h-7 text-xs"
+              />
+              {createMode === 'candidate' && (
+                <Input
+                  placeholder="Company"
+                  value={createForm.company}
+                  onChange={(e) => setCreateForm(f => ({ ...f, company: e.target.value }))}
+                  className="h-7 text-xs"
+                />
+              )}
+            </div>
+            <Button
+              variant="gold"
+              size="sm"
+              onClick={handleCreate}
+              disabled={creating || (!createForm.first_name.trim() && !createForm.last_name.trim())}
+              className="w-full gap-1.5"
+            >
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              Create & Link {createMode === 'candidate' ? 'Candidate' : 'Contact'}
+            </Button>
+          </div>
         ) : (
+          /* ---------- Search & Link / Create New ---------- */
           <div className="space-y-3">
             <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-              <p className="text-xs text-warning leading-relaxed">
-                This conversation is not linked to any record. Search to link it manually.
-              </p>
+              <div>
+                <p className="text-xs font-medium text-warning">Unlinked conversation</p>
+                <p className="text-[10px] text-warning/80 mt-0.5">
+                  {senderName ? `From: ${senderName}` : 'Unknown sender'} via {CHANNEL_LABELS[thread.channel] || thread.channel}
+                </p>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search name..."
-                value={linkSearch}
-                onChange={(e) => setLinkSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="h-8 text-xs"
-              />
-              <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
-                {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              </Button>
+
+            {/* Search existing */}
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Search existing</p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Search by name or email..."
+                  value={linkSearch}
+                  onChange={(e) => setLinkSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
+                  {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
             </div>
+
             {linkResults.length > 0 && (
               <div className="rounded-lg border border-border overflow-hidden">
                 {linkResults.map((r) => (
@@ -343,7 +509,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                       <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {r.entity_type} · {r.current_title || r.title || ''}
+                        {r.entity_type} · {r.current_title || r.title || r.email || ''}
                       </p>
                     </div>
                     <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -351,6 +517,35 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                 ))}
               </div>
             )}
+
+            {/* Divider */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[10px] text-muted-foreground">or create new</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            {/* Create new buttons */}
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => startCreate('candidate')}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-success" />
+                Add Candidate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => startCreate('contact')}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-info" />
+                Add Contact
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -381,6 +576,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
+  const messagesEndRef = { current: null as HTMLDivElement | null };
 
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
@@ -426,17 +622,22 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         toAddress = lastInbound?.sender_address || '';
       } else if (thread.channel === 'linkedin') {
         // For LinkedIn, use the provider_id from candidate_channels
-        const { data: channelData } = await supabase
-          .from('candidate_channels')
-          .select('provider_id, unipile_id')
-          .eq('candidate_id', thread.candidate_id)
-          .eq('channel', 'linkedin')
-          .maybeSingle();
-        toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+        if (thread.candidate_id) {
+          const { data: channelData } = await supabase
+            .from('candidate_channels')
+            .select('provider_id, unipile_id')
+            .eq('candidate_id', thread.candidate_id)
+            .eq('channel', 'linkedin')
+            .maybeSingle();
+          toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+        }
+        if (!toAddress) {
+          toAddress = lastInbound?.sender_address || '';
+        }
       }
 
       if (!toAddress) {
-        toast.error(`No recipient address found for ${thread.channel}`);
+        toast.error(`No recipient address found for ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
         setSending(false);
         return;
       }
@@ -497,6 +698,13 @@ function MessagePane({ threadId }: { threadId: string | null }) {
 
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
   const entityName = thread.candidate_name || thread.contact_name;
+  const isUnlinked = !(thread.candidate_id || thread.contact_id);
+
+  // Group messages by date for date separators
+  const getDateKey = (msg: Message) => {
+    const d = msg.sent_at || msg.received_at || msg.created_at;
+    return format(new Date(d), 'yyyy-MM-dd');
+  };
 
   return (
     <div className="flex h-full">
@@ -515,6 +723,11 @@ function MessagePane({ threadId }: { threadId: string | null }) {
               <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
                 {CHANNEL_LABELS[thread.channel] || thread.channel}
               </Badge>
+              {isUnlinked && (
+                <Badge variant="outline" className="text-[9px] uppercase shrink-0 border-warning/40 text-warning">
+                  Unlinked
+                </Badge>
+              )}
             </div>
             {thread.subject && (
               <p className="text-xs text-muted-foreground truncate">{thread.subject}</p>
@@ -531,6 +744,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
               size="icon"
               onClick={() => setShowEntity((v) => !v)}
               title="Toggle contact panel"
+              className={showEntity ? 'text-accent' : ''}
             >
               <Users className="h-4 w-4" />
             </Button>
@@ -549,53 +763,77 @@ function MessagePane({ threadId }: { threadId: string | null }) {
               <p className="text-sm">No messages in this thread yet</p>
             </div>
           ) : (
-            <div className="space-y-5 max-w-2xl">
-              {messages.map((msg) => {
+            <div className="space-y-1 max-w-2xl mx-auto">
+              {messages.map((msg, idx) => {
                 const isInbound = msg.direction === 'inbound';
+                const msgDate = getDateKey(msg);
+                const prevDate = idx > 0 ? getDateKey(messages[idx - 1]) : null;
+                const showDateSep = msgDate !== prevDate;
+                const msgTime = msg.sent_at || msg.received_at || msg.created_at;
+
                 return (
-                  <div key={msg.id} className={cn('flex gap-3', isInbound ? 'justify-start' : 'justify-end')}>
-                    {isInbound && (
-                      <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
-                        <span className="text-[10px] font-semibold text-muted-foreground">
-                          {(msg.sender_name || entityName || '?').slice(0, 2).toUpperCase()}
+                  <div key={msg.id}>
+                    {/* Date separator */}
+                    {showDateSep && (
+                      <div className="flex items-center gap-3 py-3">
+                        <div className="flex-1 h-px bg-border" />
+                        <span className="text-[10px] font-medium text-muted-foreground">
+                          {format(new Date(msgTime), 'EEEE, MMM d')}
                         </span>
+                        <div className="flex-1 h-px bg-border" />
                       </div>
                     )}
-                    <div className={cn(
-                      'max-w-[78%] rounded-2xl px-4 py-3',
-                      isInbound
-                        ? 'bg-muted rounded-tl-sm'
-                        : 'bg-accent/10 border border-accent/20 rounded-tr-sm'
-                    )}>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-xs font-medium text-foreground/80">
-                          {isInbound ? (msg.sender_name || entityName || 'Sender') : 'You'}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {msg.sent_at
-                            ? format(new Date(msg.sent_at), 'MMM d, h:mm a')
-                            : msg.received_at
-                            ? format(new Date(msg.received_at), 'MMM d, h:mm a')
-                            : format(new Date(msg.created_at), 'MMM d, h:mm a')}
-                        </span>
-                      </div>
-                      {msg.subject && thread.channel === 'email' && (
-                        <p className="text-xs font-semibold text-foreground mb-1.5">{msg.subject}</p>
+
+                    {/* Message bubble */}
+                    <div className={cn('flex gap-2.5 mb-3', isInbound ? 'justify-start' : 'justify-end')}>
+                      {isInbound && (
+                        <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
+                          <span className="text-[10px] font-semibold text-muted-foreground">
+                            {(msg.sender_name || entityName || '?').slice(0, 2).toUpperCase()}
+                          </span>
+                        </div>
                       )}
-                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                        {msg.body || '(No content)'}
-                      </p>
+                      <div className={cn(
+                        'max-w-[78%] rounded-2xl px-4 py-3',
+                        isInbound
+                          ? 'bg-muted rounded-tl-sm'
+                          : 'bg-accent/10 border border-accent/20 rounded-tr-sm'
+                      )}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={cn('text-xs font-medium', isInbound ? 'text-foreground/80' : 'text-accent')}>
+                            {isInbound ? (msg.sender_name || entityName || 'Sender') : 'You'}
+                          </span>
+                          {!isInbound && (
+                            <Send className="h-2.5 w-2.5 text-accent/60" />
+                          )}
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            {format(new Date(msgTime), 'h:mm a')}
+                          </span>
+                        </div>
+                        {msg.subject && thread.channel === 'email' && (
+                          <p className="text-xs font-semibold text-foreground mb-1.5">{msg.subject}</p>
+                        )}
+                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                          {msg.body || '(No content)'}
+                        </p>
+                      </div>
+                      {!isInbound && (
+                        <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
+                          <Send className="h-3 w-3 text-accent" />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
               })}
+              <div ref={(el) => { messagesEndRef.current = el; }} />
             </div>
           )}
         </ScrollArea>
 
         {/* Reply */}
         <div className="border-t border-border p-4">
-          <div className="flex gap-2 items-end">
+          <div className="flex gap-2 items-end max-w-2xl mx-auto">
             <textarea
               placeholder={`Reply via ${CHANNEL_LABELS[thread.channel] || thread.channel}...`}
               value={replyText}
@@ -621,7 +859,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       {/* Entity side panel */}
       {showEntity && (
         <div className="w-72 border-l border-border overflow-hidden">
-          <EntityPanel thread={thread} />
+          <EntityPanel thread={thread} messages={messages} />
         </div>
       )}
     </div>
