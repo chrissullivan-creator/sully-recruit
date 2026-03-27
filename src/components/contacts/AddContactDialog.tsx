@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
@@ -94,15 +95,11 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Company</Label>
-              <Select value={form.company_id || 'none'} onValueChange={(v) => update('company_id', v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No company</SelectItem>
-                  {companies.map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CompanyCombobox
+                companies={companies}
+                value={form.company_id}
+                onChange={(v) => update('company_id', v)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
