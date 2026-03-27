@@ -75,6 +75,8 @@ const Candidates = () => {
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
@@ -103,6 +105,10 @@ const Candidates = () => {
 
     return list;
   }, [candidates, searchQuery, statusFilter, jobTagFilter, ownerFilter, sortField, sortDir, user?.id]);
+
+  // Reset page when filters change
+  const totalPages = Math.ceil(filteredCandidates.length / PAGE_SIZE);
+  const paginatedCandidates = filteredCandidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -191,13 +197,13 @@ const Candidates = () => {
               type="text"
               placeholder="Search candidates..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
               <SelectTrigger className="h-8 w-44 text-xs">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -209,7 +215,7 @@ const Candidates = () => {
               </SelectContent>
             </Select>
 
-            <Select value={jobTagFilter} onValueChange={setJobTagFilter}>
+            <Select value={jobTagFilter} onValueChange={(v) => { setJobTagFilter(v); setPage(1); }}>
               <SelectTrigger className="h-8 w-52 text-xs">
                 <SelectValue placeholder="All Jobs" />
               </SelectTrigger>
@@ -226,7 +232,7 @@ const Candidates = () => {
               </SelectContent>
             </Select>
 
-            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+            <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(1); }}>
               <SelectTrigger className="h-8 w-44 text-xs">
                 <SelectValue placeholder="All Owners" />
               </SelectTrigger>
@@ -271,8 +277,8 @@ const Candidates = () => {
         ) : view === 'pipeline' ? (
           <CandidatePipeline />
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full">
+          <div className="rounded-lg border border-border overflow-x-auto">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-secondary">
                 <tr>
                   <th className="w-10 px-4 py-3">
@@ -301,7 +307,7 @@ const Candidates = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredCandidates.map((candidate) => (
+                {paginatedCandidates.map((candidate) => (
                   <tr key={candidate.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -372,12 +378,26 @@ const Candidates = () => {
                     </td>
                   </tr>
                 ))}
-                {filteredCandidates.length === 0 && (
+                {paginatedCandidates.length === 0 && (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-muted-foreground">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCandidates.length)} of {filteredCandidates.length}
+              </p>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>First</Button>
+                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
+                <span className="text-xs text-muted-foreground px-2">Page {page} of {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+                <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(totalPages)}>Last</Button>
+              </div>
+            </div>
+          )}
         )}
       </div>
 
