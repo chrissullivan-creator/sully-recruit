@@ -80,11 +80,12 @@ Deno.serve(async (req: Request) => {
       // ── 2. Check for replies (stop on any channel) ──────────────────
       if (sequence.stop_on_reply) {
         const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+        const entityColumn = enrollment.candidate_id ? "candidate_id" : enrollment.contact_id ? "contact_id" : "prospect_id";
         if (entityId) {
           const { data: replies } = await supabase
             .from("messages")
             .select("id")
-            .eq("candidate_id", entityId)
+            .eq(entityColumn, entityId)
             .eq("direction", "inbound")
             .gte("created_at", enrollment.enrolled_at || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
             .limit(1);
@@ -751,13 +752,14 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
       if (!enrollment) continue;
 
       const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+      const entityColumn = enrollment.candidate_id ? "candidate_id" : enrollment.contact_id ? "contact_id" : "prospect_id";
       if (!entityId) continue;
 
       // Check for inbound reply after this execution
       const { data: replies } = await supabase
         .from("messages")
         .select("id")
-        .eq("candidate_id", entityId)
+        .eq(entityColumn, entityId)
         .eq("direction", "inbound")
         .gte("created_at", exec.executed_at)
         .limit(1);

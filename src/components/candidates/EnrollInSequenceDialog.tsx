@@ -133,7 +133,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 1,
+          current_step_order: 0,
           enrolled_by: userId,
           integration_account_id: selectedAccountId || null,
         });
