@@ -15,7 +15,13 @@ import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
 import { useCandidates, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
@@ -76,6 +82,9 @@ const Candidates = () => {
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
   const [page, setPage] = useState(1);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
   const PAGE_SIZE = 100;
 
   const filteredCandidates = useMemo(() => {
@@ -141,6 +150,28 @@ const Candidates = () => {
   const selectedNames = candidates
     .filter((c) => selectedIds.includes(c.id))
     .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setDeleting(true);
+    try {
+      // Delete related records first to avoid FK issues
+      await supabase.from('sequence_enrollments').delete().in('candidate_id', selectedIds);
+      await supabase.from('notes').delete().in('entity_id', selectedIds).eq('entity_type', 'candidate');
+
+      const { error } = await supabase.from('candidates').delete().in('id', selectedIds);
+      if (error) throw error;
+
+      toast.success(`Deleted ${selectedIds.length} candidate${selectedIds.length > 1 ? 's' : ''}`);
+      setSelectedIds([]);
+      setDeleteConfirmOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete candidates');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <MainLayout>
@@ -255,6 +286,10 @@ const Candidates = () => {
               <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
                 <Play className="h-3.5 w-3.5" />
                 Enroll in Sequence ({selectedIds.length})
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setDeleteConfirmOpen(true)} className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30">
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete ({selectedIds.length})
               </Button>
             </>
           )}
@@ -421,6 +456,39 @@ const Candidates = () => {
       <AskJoeSearch open={askJoeSearchOpen} onOpenChange={setAskJoeSearchOpen} />
       <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
+
+      {/* Bulk Delete Confirmation */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Candidates
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete {selectedIds.length} candidate{selectedIds.length > 1 ? 's' : ''}? This will also remove their sequence enrollments and notes. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedNames.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 max-h-32 overflow-y-auto">
+              <p className="text-xs text-muted-foreground mb-1 font-medium">Selected:</p>
+              {selectedNames.slice(0, 10).map((name, i) => (
+                <p key={i} className="text-xs text-foreground">{name}</p>
+              ))}
+              {selectedNames.length > 10 && (
+                <p className="text-xs text-muted-foreground mt-1">...and {selectedNames.length - 10} more</p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
+              Delete {selectedIds.length}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };
