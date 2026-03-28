@@ -81,7 +81,7 @@ export default function Tasks() {
 
   return (
     <MainLayout>
-      <PageHeader title="Tasks" description={`${filtered.length} task${filtered.length !== 1 ? 's' : ''}`} actions={
+      <PageHeader title="To-Do's" description={`${filtered.length} task${filtered.length !== 1 ? 's' : ''}`} actions={
         <Button variant="gold" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> New Task
         </Button>

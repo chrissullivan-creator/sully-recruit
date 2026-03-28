@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine, Send } from 'lucide-react';
+import { GripVertical, Mail, MessageSquare, Phone, Linkedin, Users, Trash2, Clock, Timer, Sun, Reply, PenLine, Send, Sparkles, Loader2 } from 'lucide-react';
 import { StepAttachments, type Attachment } from './StepAttachments';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { toast } from 'sonner';
 import type { CampaignStep, ChannelType } from '@/types';
 
 const channelOptions: { value: ChannelType; label: string; icon: React.ReactNode }[] = [
@@ -53,6 +54,9 @@ interface CampaignStepItemProps {
   accounts: IntegrationAccount[];
   onUpdate: (id: string, updates: Partial<CampaignStep>) => void;
   onDelete: (id: string) => void;
+  jobTitle?: string;
+  jobCompany?: string;
+  sequenceName?: string;
 }
 
 const isLinkedInChannel = (ch: ChannelType) =>
@@ -70,7 +74,7 @@ const channelToAccountTypes = (ch: ChannelType): string[] => {
   return [];
 };
 
-export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete }: CampaignStepItemProps) => {
+export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete, jobTitle, jobCompany, sequenceName }: CampaignStepItemProps) => {
   const {
     attributes,
     listeners,
@@ -90,6 +94,48 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
   const isEmail = step.channel === 'email';
 
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  const [askJoeLoading, setAskJoeLoading] = useState(false);
+
+  const handleAskJoe = async (instructions?: string) => {
+    setAskJoeLoading(true);
+    try {
+      const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
+      const resp = await fetch(`${backendUrl}/api/write-sequence-step`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: step.channel,
+          step_number: index + 1,
+          total_steps: allSteps.length,
+          is_reply: step.isReply,
+          existing_content: step.content || undefined,
+          job_title: jobTitle || undefined,
+          job_company: jobCompany || undefined,
+          sequence_name: sequenceName || undefined,
+          instructions: instructions || undefined,
+        }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+
+      let content = data.content || '';
+      let subject = step.subject;
+
+      // Parse subject from response if it's a first-touch email
+      if (step.channel === 'email' && !step.isReply && content.startsWith('Subject:')) {
+        const lines = content.split('\n');
+        subject = lines[0].replace('Subject:', '').trim();
+        content = lines.slice(1).join('\n').trim();
+      }
+
+      onUpdate(step.id, { content, ...(subject ? { subject } : {}) });
+      toast.success('Joe wrote your message');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate content');
+    } finally {
+      setAskJoeLoading(false);
+    }
+  };
 
   const insertAtCursor = (token: string) => {
     if (contentRef.current) {
@@ -399,6 +445,16 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
               onClick={() => insertAtCursor('{{first_name}}')}
             >
               Insert first name
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => handleAskJoe()}
+              disabled={askJoeLoading}
+              className="gap-1 text-accent border-accent/30 hover:bg-accent/10"
+            >
+              {askJoeLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+              {askJoeLoading ? 'Writing...' : 'Ask Joe'}
             </Button>
           </div>
           <Textarea

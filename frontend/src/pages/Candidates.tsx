@@ -204,6 +204,10 @@ const Candidates = () => {
               <Sparkles className="h-4 w-4 mr-1" />
               Ask Joe — Search
             </Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/resume-search')}>
+              <FileSearch className="h-4 w-4 mr-1" />
+              Resume Search
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
               <FileUp className="h-4 w-4 mr-1" />
               Resume Drop

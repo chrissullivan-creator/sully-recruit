@@ -449,6 +449,9 @@ const SequenceDetail = () => {
                           accounts={accounts}
                           onUpdate={updateStep}
                           onDelete={deleteStep}
+                          jobTitle={jobId ? (jobs.find((j: any) => j.id === jobId)?.title ?? undefined) : undefined}
+                          jobCompany={jobId ? (jobs.find((j: any) => j.id === jobId)?.company_name ?? undefined) : undefined}
+                          sequenceName={name}
                         />
                       ))}
                     </div>

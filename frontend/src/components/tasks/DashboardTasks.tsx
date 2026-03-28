@@ -35,7 +35,7 @@ export function DashboardTasks() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <ListTodo className="h-5 w-5 text-accent" />
-          My Tasks
+          My To-Do's
         </h2>
         <Button variant="ghost" size="sm" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> New Task

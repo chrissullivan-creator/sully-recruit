@@ -53,6 +53,18 @@ class ResumeSearchRequest(BaseModel):
     messages: List[ChatMessage] = []
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
+class StepWriteRequest(BaseModel):
+    job_title: Optional[str] = None
+    job_company: Optional[str] = None
+    job_description: Optional[str] = None
+    channel: str  # email, linkedin_recruiter, linkedin_message, linkedin_connection, sms, phone
+    step_number: int
+    total_steps: int
+    is_reply: bool = False
+    existing_content: Optional[str] = None
+    sequence_name: Optional[str] = None
+    instructions: Optional[str] = None
+
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -149,6 +161,74 @@ async def fetch_resume_data() -> list:
             })
 
         return result
+
+
+@api_router.post("/write-sequence-step")
+async def write_sequence_step(request: StepWriteRequest):
+    """Ask Joe to write a sequence step with Emerald Recruiting style."""
+
+    if not EMERGENT_LLM_KEY:
+        return {"error": "LLM key not configured"}
+
+    channel_labels = {
+        'email': 'Email',
+        'linkedin_recruiter': 'LinkedIn Recruiter InMail',
+        'sales_nav': 'Sales Navigator InMail',
+        'linkedin_message': 'LinkedIn Direct Message',
+        'linkedin_connection': 'LinkedIn Connection Request',
+        'sms': 'SMS Text',
+        'phone': 'Phone Call Script',
+    }
+    ch_label = channel_labels.get(request.channel, request.channel)
+
+    job_context = ""
+    if request.job_title:
+        job_context = f"\n\nJob: {request.job_title}"
+        if request.job_company:
+            job_context += f" at {request.job_company}"
+        if request.job_description:
+            job_context += f"\nJob Description: {request.job_description[:500]}"
+
+    system_prompt = f"""You are Joe, the AI writing assistant for Emerald Recruiting Group (also known as Sully Recruit). You write outreach messages in the Emerald style — professional but warm, direct but not pushy, confident but respectful. The tone is polished executive recruiting: personable, succinct, and always focused on the candidate's career opportunity.
+
+Emerald Style Guidelines:
+- Open with something personal or specific — never generic "I came across your profile"
+- Be concise — recruiters are busy, candidates are busy
+- Lead with the opportunity/value, not with yourself
+- Use {{{{first_name}}}}, {{{{company}}}}, {{{{title}}}} for personalization tokens
+- Sound human, not templated
+- For follow-ups/replies: reference the previous touchpoint naturally
+- For LinkedIn connection requests: keep under 300 characters
+- For SMS: keep under 160 characters
+- For phone scripts: bullet points with talking points
+- End with a clear, low-friction CTA (not "let me know if interested" — something specific like "open to a quick 10-min call this week?")
+
+You are writing Step {request.step_number} of {request.total_steps} in a {ch_label} sequence.
+{"This is a follow-up/reply to a previous email in the thread." if request.is_reply else "This is the first touch on this channel."}
+{f"Sequence name: {request.sequence_name}" if request.sequence_name else ""}
+{job_context}
+{f"Additional instructions: {request.instructions}" if request.instructions else ""}
+
+Return ONLY the message body text. No subject line unless this is an email first touch (not a reply). If it's an email first touch, put the subject on the first line prefixed with "Subject: " then a blank line then the body."""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"step-write-{uuid.uuid4()}",
+            system_message=system_prompt,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+        prompt = f"Write a {ch_label} message for step {request.step_number} of {request.total_steps}."
+        if request.existing_content:
+            prompt += f"\n\nCurrent draft to improve:\n{request.existing_content}"
+        if request.instructions:
+            prompt += f"\n\nSpecific request: {request.instructions}"
+
+        response = await chat.send_message(UserMessage(text=prompt))
+        return {"content": response}
+    except Exception as e:
+        logger.error(f"Step write error: {e}")
+        return {"error": str(e)}
 
 
 @api_router.post("/resume-search-ai")

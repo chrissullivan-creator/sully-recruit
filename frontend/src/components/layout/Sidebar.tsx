@@ -3,19 +3,17 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald_gold.png';
-import { LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone, ListTodo, FileText, Linkedin } from 'lucide-react';
+import { LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase, Building2, Settings, LayoutDashboard, Phone, ListTodo } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Inbox', href: '/inbox', icon: Inbox },
   { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Candidates', href: '/candidates', icon: UserCheck },
-  { name: 'Resume Search', href: '/resume-search', icon: FileText },
-  { name: 'LinkedIn Search', href: '/linkedin-search', icon: Linkedin },
   { name: 'Contacts', href: '/contacts', icon: Users },
   { name: 'Companies', href: '/companies', icon: Building2 },
   { name: 'Sequences', href: '/campaigns', icon: Megaphone },
-  { name: 'Tasks', href: '/tasks', icon: ListTodo },
+  { name: "To-Do's", href: '/tasks', icon: ListTodo },
   { name: 'Calls', href: '/calls', icon: Phone },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];

@@ -14,7 +14,7 @@ const TYPE_CONFIG: Record<string, { icon: any; color: string }> = {
 };
 
 export function ActivityFeed() {
-  const { data: activities = [], isLoading } = useActivityFeed(25);
+  const { data: activities = [], isLoading } = useActivityFeed(10);
 
   if (isLoading) {
     return (
