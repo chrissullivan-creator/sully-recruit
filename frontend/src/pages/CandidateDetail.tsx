@@ -246,7 +246,10 @@ const CandidateDetail = () => {
               <FileText className="h-3.5 w-3.5 mr-1" />{showResume ? 'Hide Resume' : 'View Resume'}
             </Button>
           )}
-          <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}>
+          <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
+            <FileText className="h-3.5 w-3.5 mr-1" />Send Out
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
           <Button variant="outline" size="sm" onClick={async () => {

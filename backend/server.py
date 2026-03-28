@@ -807,6 +807,152 @@ async def sync_outlook_events():
         }
 
 
+
+# ── Send-Out: Parse resume text → structured JSON ────────────────────────────
+class ParseResumeRequest(BaseModel):
+    resume_text: str
+    job_title: Optional[str] = None
+    job_description: Optional[str] = None
+
+@api_router.post("/parse-resume-ai")
+async def parse_resume_ai(request: ParseResumeRequest):
+    """Parse resume text into structured JSON using Claude."""
+    if not EMERGENT_LLM_KEY:
+        return {"error": "LLM key not configured"}
+
+    job_context = ""
+    if request.job_title:
+        job_context += f"\nTarget job: {request.job_title}"
+    if request.job_description:
+        job_context += f"\nJob description: {request.job_description[:500]}"
+
+    system_prompt = f"""You are a professional resume parser. Extract the following structured data from the resume text provided. Return ONLY valid JSON, no markdown, no explanation.
+{job_context}
+
+Return this exact JSON structure:
+{{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "phone number",
+  "linkedin": "LinkedIn URL",
+  "location": "City, State",
+  "summary": "2-3 sentence professional summary tailored to the target role if provided",
+  "experience": [
+    {{
+      "company": "Company Name",
+      "title": "Job Title",
+      "start_date": "Month Year",
+      "end_date": "Month Year or Present",
+      "duration": "X years Y months",
+      "responsibilities": ["bullet point 1", "bullet point 2"]
+    }}
+  ],
+  "education": [
+    {{
+      "institution": "School Name",
+      "degree": "Degree Type",
+      "field": "Field of Study",
+      "year": "Graduation Year"
+    }}
+  ],
+  "skills": ["skill1", "skill2"],
+  "certifications": ["cert1", "cert2"],
+  "technical_systems": ["system1", "system2"]
+}}
+
+Group multiple titles at the same company together under one company entry with the company-level total duration. Each title gets its own duration within the company.
+If tailoring to a job, emphasize relevant experience and skills."""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"parse-{uuid.uuid4()}",
+            system_message=system_prompt,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+        response = await chat.send_message(UserMessage(text=f"Parse this resume:\n\n{request.resume_text[:8000]}"))
+
+        # Extract JSON from response
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            text = text.rsplit("```", 1)[0]
+        parsed = json.loads(text)
+        return {"data": parsed}
+    except json.JSONDecodeError:
+        return {"data": None, "raw": response, "error": "Failed to parse JSON from AI response"}
+    except Exception as e:
+        logger.error(f"Parse resume error: {e}")
+        return {"error": str(e)}
+
+
+# ── Send-Out: Generate email body with Claude ────────────────────────────────
+class SendOutEmailRequest(BaseModel):
+    candidate_name: str
+    candidate_title: Optional[str] = None
+    candidate_company: Optional[str] = None
+    candidate_notes: Optional[str] = None
+    compensation: Optional[str] = None
+    job_title: Optional[str] = None
+    job_company: Optional[str] = None
+    job_description: Optional[str] = None
+    contact_names: List[str] = []
+    sender_name: Optional[str] = None
+
+@api_router.post("/generate-sendout-email")
+async def generate_sendout_email(request: SendOutEmailRequest):
+    """Generate a send-out email in Emerald writing style."""
+    if not EMERGENT_LLM_KEY:
+        return {"error": "LLM key not configured"}
+
+    greeting = "Hi,"
+    if request.contact_names:
+        if len(request.contact_names) == 1:
+            greeting = f"Hi {request.contact_names[0].split()[0]},"
+        else:
+            greeting = "Hi,"
+
+    system_prompt = """You are Joe, writing send-out emails for Emerald Recruiting Group. Write in the Emerald style: professional, warm, concise, human. 
+
+Write ONLY the email body (no subject line, no greeting, no signature — those are handled separately). The body should be 3-5 sentences:
+1. Brief candidate summary — who they are, what they do, standout qualities
+2. What they're looking for in their next role + compensation expectations if known
+3. Why they're a good fit for this specific role/company
+4. Why they should be interested
+5. Close with "Let me know your thoughts."
+
+Use notes from the profile to make it personal. Sound like a human recruiter, not a template. Be specific about the candidate's background."""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"sendout-{uuid.uuid4()}",
+            system_message=system_prompt,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+        prompt = f"Write a send-out email body for:\n\nCandidate: {request.candidate_name}"
+        if request.candidate_title:
+            prompt += f"\nTitle: {request.candidate_title}"
+        if request.candidate_company:
+            prompt += f"\nCompany: {request.candidate_company}"
+        if request.candidate_notes:
+            prompt += f"\nNotes: {request.candidate_notes[:500]}"
+        if request.compensation:
+            prompt += f"\nCompensation: {request.compensation}"
+        if request.job_title:
+            prompt += f"\n\nJob: {request.job_title}"
+        if request.job_company:
+            prompt += f" at {request.job_company}"
+        if request.job_description:
+            prompt += f"\nJob details: {request.job_description[:300]}"
+
+        response = await chat.send_message(UserMessage(text=prompt))
+        return {"body": response.strip(), "greeting": greeting}
+    except Exception as e:
+        logger.error(f"Send-out email error: {e}")
+        return {"error": str(e)}
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
