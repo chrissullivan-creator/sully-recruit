@@ -221,6 +221,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
 const Calls = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [logOpen, setLogOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data: calls = [], isLoading } = useQuery({
     queryKey: ['call_logs'],
@@ -364,7 +365,20 @@ const Calls = () => {
                     {/* Notes */}
                     {call.notes && (
                       <div className="mt-3 p-3 rounded-lg bg-muted/50">
-                        <p className="text-sm text-foreground leading-relaxed">{call.notes}</p>
+                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{call.notes}</p>
+                      </div>
+                    )}
+
+                    {/* Audio Recording */}
+                    {call.audio_url && (
+                      <div className="mt-2 p-3 rounded-lg bg-muted/30 border border-border">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium text-muted-foreground">Recording</span>
+                        </div>
+                        <audio controls className="w-full h-8" preload="none">
+                          <source src={call.audio_url} />
+                        </audio>
                       </div>
                     )}
 
@@ -375,7 +389,52 @@ const Calls = () => {
                           <FileText className="h-3.5 w-3.5 text-accent" />
                           <span className="text-xs font-medium text-accent">Summary</span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{call.summary}</p>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">{call.summary}</p>
+                      </div>
+                    )}
+
+                    {/* Tag to record if not linked */}
+                    {!call.linked_entity_id && (
+                      <div className="mt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs gap-1"
+                          onClick={async () => {
+                            const normalized = call.phone_number.replace(/[^0-9+]/g, '');
+                            const [cRes, ctRes] = await Promise.all([
+                              supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
+                              supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
+                            ]);
+                            const norm = (p: string) => p.replace(/[^0-9+]/g, '');
+                            const cand = cRes.data?.find(r => r.phone && norm(r.phone) === normalized);
+                            const cont = ctRes.data?.find(r => r.phone && norm(r.phone) === normalized);
+                            const match = cand ? { type: 'candidate', id: cand.id, name: cand.full_name } : cont ? { type: 'contact', id: cont.id, name: cont.full_name } : null;
+                            if (match) {
+                              await supabase.from('call_logs' as any).update({
+                                linked_entity_type: match.type,
+                                linked_entity_id: match.id,
+                                linked_entity_name: match.name,
+                              }).eq('id', call.id);
+                              if (call.notes) {
+                                const userId = (await supabase.auth.getUser()).data.user?.id;
+                                await supabase.from('notes').insert({
+                                  entity_id: match.id,
+                                  entity_type: match.type,
+                                  note: `📞 Call Notes (${format(new Date(call.started_at), 'MMM d')}): ${call.notes}`,
+                                  created_by: userId,
+                                });
+                              }
+                              queryClient.invalidateQueries({ queryKey: ['call_logs'] });
+                              toast.success(`Tagged to ${match.name}`);
+                            } else {
+                              toast.info('No matching candidate or contact found for this number');
+                            }
+                          }}
+                        >
+                          <UserPlus className="h-3 w-3" />
+                          Auto-Tag to Record
+                        </Button>
                       </div>
                     )}
                   </div>
