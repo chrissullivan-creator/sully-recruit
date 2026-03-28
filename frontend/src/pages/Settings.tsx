@@ -75,6 +75,10 @@ const Settings = () => {
   });
   const [ringcentralActive, setRingcentralActive] = useState(false);
 
+  // Outlook state
+  const [outlookConfig, setOutlookConfig] = useState<IntegrationConfig>({});
+  const [outlookActive, setOutlookActive] = useState(false);
+
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
     signature_html: '',
