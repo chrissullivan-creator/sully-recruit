@@ -26,7 +26,7 @@ interface SearchResult {
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ask-joe`;
+const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
 
 const visaOptions = [
   'Citizen', 'Green Card', 'H1-B', 'L1', 'O1', 'TN', 'Sponsorship Required', 'Visa Verified',
@@ -44,6 +44,7 @@ function AskJoeResumeChat() {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [sessionId] = useState(() => `resume-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,15 +65,13 @@ function AskJoeResumeChat() {
     let assistantSoFar = '';
 
     try {
-      const resp = await fetch(CHAT_URL, {
+      const resp = await fetch(`${BACKEND_URL}/api/resume-search-ai`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          query: userMsg.content,
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
-          mode: 'resume_search',
+          session_id: sessionId,
         }),
       });
 

@@ -1,14 +1,18 @@
 from fastapi import FastAPI, APIRouter
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import json
+import httpx
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 import uuid
 from datetime import datetime
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 
 ROOT_DIR = Path(__file__).parent
@@ -18,6 +22,11 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Supabase config
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -35,6 +44,16 @@ class StatusCheck(BaseModel):
 class StatusCheckCreate(BaseModel):
     client_name: str
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ResumeSearchRequest(BaseModel):
+    query: str
+    messages: List[ChatMessage] = []
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
 async def root():
@@ -51,6 +70,171 @@ async def create_status_check(input: StatusCheckCreate):
 async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
+
+
+async def fetch_resume_data() -> list:
+    """Fetch candidate resumes with candidate info from Supabase."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        # Fetch resumes with summaries
+        resumes_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/candidate_resumes",
+            headers=headers,
+            params={
+                "select": "candidate_id,ai_summary,raw_text,file_name",
+                "order": "created_at.desc",
+                "limit": "500",
+            },
+        )
+        if resumes_resp.status_code != 200:
+            logger.error(f"Failed to fetch resumes: {resumes_resp.status_code} {resumes_resp.text}")
+            return []
+        resumes = resumes_resp.json()
+
+        # Get unique candidate IDs
+        cand_ids = list(set(r["candidate_id"] for r in resumes if r.get("candidate_id")))
+        if not cand_ids:
+            return []
+
+        # Fetch candidate details in batches
+        candidates_map = {}
+        batch_size = 50
+        for i in range(0, len(cand_ids), batch_size):
+            batch = cand_ids[i:i + batch_size]
+            ids_filter = ",".join(f'"{cid}"' for cid in batch)
+            cands_resp = await http.get(
+                f"{SUPABASE_URL}/rest/v1/candidates",
+                headers=headers,
+                params={
+                    "select": "id,full_name,first_name,last_name,current_title,current_company,email,location,status",
+                    "id": f"in.({ids_filter})",
+                },
+            )
+            if cands_resp.status_code == 200:
+                for c in cands_resp.json():
+                    candidates_map[c["id"]] = c
+
+        # Merge resume + candidate data
+        result = []
+        for r in resumes:
+            cid = r.get("candidate_id")
+            cand = candidates_map.get(cid, {})
+            name = cand.get("full_name") or f"{cand.get('first_name', '')} {cand.get('last_name', '')}".strip() or "Unknown"
+
+            # Use ai_summary if available, otherwise truncate raw_text
+            summary = r.get("ai_summary") or ""
+            if not summary and r.get("raw_text"):
+                summary = r["raw_text"][:2000]
+
+            if not summary:
+                continue
+
+            result.append({
+                "candidate_id": cid,
+                "name": name,
+                "title": cand.get("current_title", ""),
+                "company": cand.get("current_company", ""),
+                "email": cand.get("email", ""),
+                "location": cand.get("location", ""),
+                "status": cand.get("status", ""),
+                "summary": summary,
+            })
+
+        return result
+
+
+@api_router.post("/resume-search-ai")
+async def resume_search_ai(request: ResumeSearchRequest):
+    """AI-powered resume search using Claude to analyze candidate resumes."""
+
+    if not EMERGENT_LLM_KEY:
+        return {"error": "LLM key not configured"}
+
+    # Fetch resume data
+    resume_data = await fetch_resume_data()
+
+    if not resume_data:
+        async def empty_stream():
+            yield f"data: {json.dumps({'content': 'No resumes found in the database. Upload some resumes first, then try again.'})}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    # Build resume context - keep it concise
+    resume_entries = []
+    for i, r in enumerate(resume_data):
+        entry = f"**Candidate #{i+1}: {r['name']}**"
+        if r['title']:
+            entry += f"\nTitle: {r['title']}"
+        if r['company']:
+            entry += f"\nCompany: {r['company']}"
+        if r['location']:
+            entry += f"\nLocation: {r['location']}"
+        if r['email']:
+            entry += f"\nEmail: {r['email']}"
+        entry += f"\nResume Summary:\n{r['summary'][:1500]}"
+        resume_entries.append(entry)
+
+    resume_context = "\n\n---\n\n".join(resume_entries)
+
+    # Truncate if too long (keep under ~100k chars for Claude)
+    if len(resume_context) > 100000:
+        resume_context = resume_context[:100000] + "\n\n[... additional resumes truncated due to length ...]"
+
+    system_prompt = f"""You are Joe, a senior recruiting assistant at Sully Recruit. You have access to {len(resume_data)} candidate resumes in the database.
+
+Your job is to search through these resumes and find the best matches for what the recruiter asks. When answering:
+
+1. **Rank candidates by fit** — best matches first, with a confidence percentage (e.g., "95% match")
+2. **Show ALL relevant candidates** — don't limit to just a few. If 20 people match, show all 20.
+3. **Explain why each person matches** — reference specific skills, experience, or background from their resume
+4. **Be specific** — mention actual companies, years of experience, technologies, certifications
+5. **Format clearly** — use numbered lists with candidate name, title, company, match %, and reasoning
+6. **If asked follow-ups**, remember the context and refine your search
+
+Here are the candidate resumes:
+
+{resume_context}
+
+Remember: Show ALL matching candidates ranked from highest to lowest confidence. Don't artificially limit results."""
+
+    # Build conversation
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=request.session_id,
+        system_message=system_prompt,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    # Build full message from history + new query
+    full_query = ""
+    for msg in request.messages:
+        if msg.role == "user":
+            full_query = msg.content
+    if request.query:
+        full_query = request.query
+
+    user_msg = UserMessage(text=full_query)
+
+    async def stream_response():
+        try:
+            response = await chat.send_message(user_msg)
+            # Send the full response as a stream of chunks
+            chunk_size = 50
+            for i in range(0, len(response), chunk_size):
+                chunk = response[i:i + chunk_size]
+                yield f"data: {json.dumps({'content': chunk})}\n\n"
+        except Exception as e:
+            logger.error(f"Claude error: {e}")
+            yield f"data: {json.dumps({'content': f'Error: {str(e)}'})}\n\n"
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
+
 
 # Include the router in the main app
 app.include_router(api_router)
