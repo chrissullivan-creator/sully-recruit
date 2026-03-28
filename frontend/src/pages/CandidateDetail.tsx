@@ -175,8 +175,17 @@ const CandidateDetail = () => {
   const updateComp = async (field: string, value: string) => {
     if (!id) return;
     const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
-    await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
+    const updates: any = { [field]: isNaN(num as number) ? null : num };
+
+    // Auto-move to "back_of_resume" when compensation is entered and status is "new"
+    if (num && !isNaN(num) && candidate?.status === 'new') {
+      updates.status = 'back_of_resume';
+      toast.success('Compensation added — status moved to Back of Resume');
+    }
+
+    await supabase.from('candidates').update(updates).eq('id', id);
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['candidates'] });
   };
 
   const updateJobStatus = async (newStatus: string) => {

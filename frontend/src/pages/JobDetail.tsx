@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
@@ -21,7 +23,7 @@ import { Label } from '@/components/ui/label';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, ChevronRight,
+  Search, ChevronRight, Sparkles,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -228,6 +230,9 @@ const JobDetail = () => {
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [editJobOpen, setEditJobOpen] = useState(false);
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [matchResults, setMatchResults] = useState<string>('');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
   const [instructionsLoaded, setInstructionsLoaded] = useState(false);
@@ -388,6 +393,10 @@ const JobDetail = () => {
             <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
               <ListTodo className="h-4 w-4 mr-1" />
               Tasks
+            </Button>
+            <Button variant="gold" size="sm" onClick={() => setMatchOpen(true)}>
+              <Sparkles className="h-4 w-4 mr-1" />
+              Match Candidates
             </Button>
           </div>
         }
@@ -776,6 +785,69 @@ const JobDetail = () => {
         />
       )}
       <EditJobDialog open={editJobOpen} onOpenChange={setEditJobOpen} job={job} />
+
+      {/* Match Candidates Dialog */}
+      <Dialog open={matchOpen} onOpenChange={(v) => { setMatchOpen(v); if (!v) setMatchResults(''); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-accent" />
+              Match Candidates — {job.title}
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="flex-1 min-h-[200px]">
+            {matching ? (
+              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Joe is analyzing your candidate database...</span>
+              </div>
+            ) : matchResults ? (
+              <div className="prose prose-sm max-w-none text-foreground whitespace-pre-wrap px-1">
+                {matchResults}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+                <Sparkles className="h-10 w-10 opacity-30" />
+                <p className="text-sm text-center max-w-md">
+                  Joe will search your candidate database and rank the best matches for this role based on skills, experience, and background.
+                </p>
+                <Button
+                  variant="gold"
+                  onClick={async () => {
+                    setMatching(true);
+                    try {
+                      const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
+                      const resp = await fetch(`${backendUrl}/api/match-candidates-to-job`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          job_title: job.title,
+                          job_company: companyName || (job as any).company_name,
+                          job_location: job.location,
+                          job_description: (job as any).description || (job as any).notes,
+                          job_salary: (job as any).salary_range || (job as any).salary,
+                        }),
+                      });
+                      const data = await resp.json();
+                      if (data.error) throw new Error(data.error);
+                      setMatchResults(data.content || 'No matches found.');
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to match');
+                      setMatchResults('');
+                    } finally {
+                      setMatching(false);
+                    }
+                  }}
+                  className="gap-1.5"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Find Matching Candidates
+                </Button>
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };

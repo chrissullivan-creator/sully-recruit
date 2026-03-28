@@ -65,6 +65,14 @@ class StepWriteRequest(BaseModel):
     sequence_name: Optional[str] = None
     instructions: Optional[str] = None
 
+class MatchCandidatesRequest(BaseModel):
+    job_title: str
+    job_company: Optional[str] = None
+    job_location: Optional[str] = None
+    job_description: Optional[str] = None
+    job_salary: Optional[str] = None
+
+
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -229,6 +237,103 @@ Return ONLY the message body text. No subject line unless this is an email first
     except Exception as e:
         logger.error(f"Step write error: {e}")
         return {"error": str(e)}
+
+
+async def fetch_candidates_for_matching() -> list:
+    """Fetch candidate summaries for job matching."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30) as http:
+        resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/candidates",
+            headers=headers,
+            params={
+                "select": "id,full_name,first_name,last_name,current_title,current_company,email,location_text,status,skills,current_base_comp,target_roles,work_authorization",
+                "order": "created_at.desc",
+                "limit": "500",
+            },
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json()
+
+
+@api_router.post("/match-candidates-to-job")
+async def match_candidates_to_job(request: MatchCandidatesRequest):
+    """Use Claude to match existing candidates to a job."""
+    if not EMERGENT_LLM_KEY:
+        return {"error": "LLM key not configured"}
+
+    candidates = await fetch_candidates_for_matching()
+    if not candidates:
+        return {"content": "No candidates found in the database to match against."}
+
+    # Build candidate summaries
+    cand_entries = []
+    for c in candidates:
+        name = c.get("full_name") or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+        if not name:
+            continue
+        parts = [f"**{name}**"]
+        if c.get("current_title"):
+            parts.append(f"Title: {c['current_title']}")
+        if c.get("current_company"):
+            parts.append(f"Company: {c['current_company']}")
+        if c.get("location_text"):
+            parts.append(f"Location: {c['location_text']}")
+        if c.get("target_roles"):
+            parts.append(f"Target Roles: {c['target_roles']}")
+        if c.get("work_authorization"):
+            parts.append(f"Work Auth: {c['work_authorization']}")
+        if c.get("status"):
+            parts.append(f"Status: {c['status']}")
+        cand_entries.append("\n".join(parts))
+
+    cand_context = "\n\n---\n\n".join(cand_entries[:200])
+
+    job_desc = f"Job: {request.job_title}"
+    if request.job_company:
+        job_desc += f" at {request.job_company}"
+    if request.job_location:
+        job_desc += f"\nLocation: {request.job_location}"
+    if request.job_salary:
+        job_desc += f"\nSalary: {request.job_salary}"
+    if request.job_description:
+        job_desc += f"\nDescription: {request.job_description[:1000]}"
+
+    system_prompt = f"""You are Joe, the AI recruiting assistant for Emerald Recruiting Group. You analyze candidates in the database to find the best matches for a specific job.
+
+Instructions:
+1. Rank ALL potential matches from highest confidence to lowest
+2. Show confidence percentage for each (e.g., "92% match")
+3. Explain WHY each person is a good fit — reference their title, company, skills, location
+4. Flag any concerns (location mismatch, overqualified, etc.)
+5. Group into tiers: Strong Match (80%+), Good Match (60-79%), Worth Considering (40-59%)
+6. Be thorough — show everyone who could potentially fit, not just top 5
+
+{job_desc}
+
+Candidates in database:
+{cand_context}"""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"match-{uuid.uuid4()}",
+            system_message=system_prompt,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+        response = await chat.send_message(UserMessage(text=f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")))
+        return {"content": response}
+    except Exception as e:
+        logger.error(f"Match error: {e}")
+        return {"error": str(e)}
+
 
 
 @api_router.post("/resume-search-ai")
