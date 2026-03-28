@@ -3,9 +3,13 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -16,7 +20,7 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare,
+  PenSquare, Plus,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
@@ -142,6 +146,246 @@ function ThreadItem({
   );
 }
 
+// ---------- Create Person Dialog ----------
+function CreatePersonDialog({
+  open,
+  onOpenChange,
+  threadId,
+  defaultType,
+  prefill,
+  channel,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  threadId: string;
+  defaultType: 'candidate' | 'contact';
+  prefill: { name: string; address: string };
+  channel: string;
+}) {
+  const queryClient = useQueryClient();
+  const [type, setType] = useState<'candidate' | 'contact'>(defaultType);
+  const nameParts = prefill.name.split(' ');
+  const isEmail = prefill.address.includes('@');
+  const [form, setForm] = useState({
+    first_name: nameParts[0] || '',
+    last_name: nameParts.slice(1).join(' ') || '',
+    email: isEmail ? prefill.address : '',
+    phone: '',
+    linkedin_url: channel === 'linkedin' ? prefill.address : '',
+    title: '',
+    company: '',
+  });
+  const [creating, setCreating] = useState(false);
+
+  // Reset form when dialog opens with new prefill
+  const resetForm = () => {
+    const parts = prefill.name.split(' ');
+    const emailAddr = prefill.address.includes('@');
+    setForm({
+      first_name: parts[0] || '',
+      last_name: parts.slice(1).join(' ') || '',
+      email: emailAddr ? prefill.address : '',
+      phone: '',
+      linkedin_url: channel === 'linkedin' ? prefill.address : '',
+      title: '',
+      company: '',
+    });
+    setType(defaultType);
+  };
+
+  const handleCreate = async () => {
+    if (!form.first_name.trim() && !form.last_name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    setCreating(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+
+      if (type === 'candidate') {
+        const { data: newRecord, error } = await supabase.from('candidates').insert({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          email: form.email.trim() || null,
+          phone: form.phone.trim() || null,
+          linkedin_url: form.linkedin_url.trim() || null,
+          current_title: form.title.trim() || null,
+          current_company: form.company.trim() || null,
+          status: 'new',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        // Auto-link conversation
+        const { error: linkErr } = await supabase.from('conversations').update({ candidate_id: newRecord.id } as any).eq('id', threadId);
+        if (linkErr) throw linkErr;
+        toast.success(`Candidate "${newRecord.full_name || form.first_name}" created & linked`);
+      } else {
+        const { data: newRecord, error } = await supabase.from('contacts').insert({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          email: form.email.trim() || null,
+          phone: form.phone.trim() || null,
+          linkedin_url: form.linkedin_url.trim() || null,
+          title: form.title.trim() || null,
+          status: 'active',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        const { error: linkErr } = await supabase.from('conversations').update({ contact_id: newRecord.id } as any).eq('id', threadId);
+        if (linkErr) throw linkErr;
+        toast.success(`Contact "${newRecord.full_name || form.first_name}" created & linked`);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create record');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            Add New {type === 'candidate' ? 'Candidate' : 'Contact'}
+          </DialogTitle>
+          <DialogDescription>
+            Create a new record and automatically link this conversation to it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* Type toggle */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setType('candidate')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                type === 'candidate'
+                  ? 'bg-success/10 text-success border-success/30'
+                  : 'border-border text-muted-foreground hover:border-success/30 hover:text-foreground'
+              )}
+            >
+              <UserCheck className="h-4 w-4" />
+              Candidate
+            </button>
+            <button
+              onClick={() => setType('contact')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                type === 'contact'
+                  ? 'bg-info/10 text-info border-info/30'
+                  : 'border-border text-muted-foreground hover:border-info/30 hover:text-foreground'
+              )}
+            >
+              <Users className="h-4 w-4" />
+              Contact
+            </button>
+          </div>
+
+          {/* Form fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">First Name</Label>
+              <Input
+                value={form.first_name}
+                onChange={(e) => setForm(f => ({ ...f, first_name: e.target.value }))}
+                placeholder="First name"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Last Name</Label>
+              <Input
+                value={form.last_name}
+                onChange={(e) => setForm(f => ({ ...f, last_name: e.target.value }))}
+                placeholder="Last name"
+                className="h-9"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Email</Label>
+            <Input
+              value={form.email}
+              onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+              placeholder="email@example.com"
+              className="h-9"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Phone</Label>
+            <Input
+              value={form.phone}
+              onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+              placeholder="Phone number"
+              className="h-9"
+            />
+          </div>
+
+          {channel === 'linkedin' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">LinkedIn URL</Label>
+              <Input
+                value={form.linkedin_url}
+                onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+                placeholder="https://linkedin.com/in/..."
+                className="h-9"
+              />
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
+            <Input
+              value={form.title}
+              onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="Job title"
+              className="h-9"
+            />
+          </div>
+
+          {type === 'candidate' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Current Company</Label>
+              <Input
+                value={form.company}
+                onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
+                placeholder="Company name"
+                className="h-9"
+              />
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="gold"
+            onClick={handleCreate}
+            disabled={creating || (!form.first_name.trim() && !form.last_name.trim())}
+            className="gap-1.5"
+          >
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Create & Link
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---------- Entity Info Panel ----------
 function EntityPanel({ thread, messages }: { thread: InboxThread | null; messages: Message[] }) {
   const queryClient = useQueryClient();
@@ -149,9 +393,8 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
   const [linkResults, setLinkResults] = useState<any[]>([]);
   const [linkSearching, setLinkSearching] = useState(false);
   const [linking, setLinking] = useState(false);
-  const [createMode, setCreateMode] = useState<'candidate' | 'contact' | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', company: '' });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createType, setCreateType] = useState<'candidate' | 'contact'>('candidate');
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -224,82 +467,6 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     setLinking(false);
   };
 
-  const startCreate = (type: 'candidate' | 'contact') => {
-    // Pre-fill form with sender info
-    const nameParts = senderName.split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-    const isEmail = senderAddress.includes('@');
-    setCreateForm({
-      first_name: firstName,
-      last_name: lastName,
-      email: isEmail ? senderAddress : '',
-      phone: '',
-      linkedin_url: thread?.channel === 'linkedin' ? senderAddress : '',
-      title: '',
-      company: '',
-    });
-    setCreateMode(type);
-  };
-
-  const handleCreate = async () => {
-    if (!thread || !createMode) return;
-    if (!createForm.first_name.trim() && !createForm.last_name.trim()) {
-      toast.error('Name is required');
-      return;
-    }
-    setCreating(true);
-    try {
-      const userId = (await supabase.auth.getUser()).data.user?.id;
-
-      if (createMode === 'candidate') {
-        const { data: newCandidate, error } = await supabase.from('candidates').insert({
-          first_name: createForm.first_name.trim() || null,
-          last_name: createForm.last_name.trim() || null,
-          email: createForm.email.trim() || null,
-          phone: createForm.phone.trim() || null,
-          linkedin_url: createForm.linkedin_url.trim() || null,
-          current_title: createForm.title.trim() || null,
-          current_company: createForm.company.trim() || null,
-          status: 'new',
-          owner_id: userId,
-        } as any).select('id, full_name').single();
-        if (error) throw error;
-
-        // Auto-link conversation
-        const { error: linkErr } = await supabase.from('conversations').update({ candidate_id: newCandidate.id }).eq('id', thread.id);
-        if (linkErr) throw linkErr;
-        toast.success(`Candidate created & linked: ${newCandidate.full_name || createForm.first_name}`);
-      } else {
-        const { data: newContact, error } = await supabase.from('contacts').insert({
-          first_name: createForm.first_name.trim() || null,
-          last_name: createForm.last_name.trim() || null,
-          email: createForm.email.trim() || null,
-          phone: createForm.phone.trim() || null,
-          linkedin_url: createForm.linkedin_url.trim() || null,
-          title: createForm.title.trim() || null,
-          status: 'active',
-          owner_id: userId,
-        } as any).select('id, full_name').single();
-        if (error) throw error;
-
-        const { error: linkErr } = await supabase.from('conversations').update({ contact_id: newContact.id }).eq('id', thread.id);
-        if (linkErr) throw linkErr;
-        toast.success(`Contact created & linked: ${newContact.full_name || createForm.first_name}`);
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-      queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
-      setCreateMode(null);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create');
-    } finally {
-      setCreating(false);
-    }
-  };
-
   if (!thread) return null;
 
   const entity = candidate || contact;
@@ -315,7 +482,6 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
 
         {isLinked && entity ? (
           <div className="space-y-3">
-            {/* Entity header */}
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent">
                 {entity.full_name?.slice(0, 2).toUpperCase() || '??'}
@@ -323,20 +489,12 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className="text-sm font-semibold text-foreground truncate">{entity.full_name}</p>
-                  <Badge variant="outline" className="text-[9px] capitalize">
-                    {entityType}
-                  </Badge>
+                  <Badge variant="outline" className="text-[9px] capitalize">{entityType}</Badge>
                 </div>
-                {(entity as any).current_title && (
-                  <p className="text-xs text-muted-foreground truncate">{(entity as any).current_title}</p>
-                )}
-                {(entity as any).title && (
-                  <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>
-                )}
+                {(entity as any).current_title && <p className="text-xs text-muted-foreground truncate">{(entity as any).current_title}</p>}
+                {(entity as any).title && <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>}
               </div>
             </div>
-
-            {/* Contact info */}
             <div className="space-y-1.5">
               {entity.email && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
@@ -353,9 +511,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               {entity.linkedin_url && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Linkedin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline truncate">
-                    LinkedIn Profile
-                  </a>
+                  <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline truncate">LinkedIn Profile</a>
                 </div>
               )}
               {(entity as any).current_company && (
@@ -371,101 +527,22 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
                 </div>
               )}
             </div>
-
-            {/* Link to full record */}
             {entityType === 'candidate' && (
               <Link to={`/candidates/${thread.candidate_id}`}>
                 <Button variant="outline" size="sm" className="w-full gap-1.5">
-                  <UserCheck className="h-3.5 w-3.5" />
-                  View Candidate
-                  <ArrowRight className="h-3 w-3 ml-auto" />
+                  <UserCheck className="h-3.5 w-3.5" /> View Candidate <ArrowRight className="h-3 w-3 ml-auto" />
                 </Button>
               </Link>
             )}
             {entityType === 'contact' && (
               <Link to={`/contacts`}>
                 <Button variant="outline" size="sm" className="w-full gap-1.5">
-                  <Users className="h-3.5 w-3.5" />
-                  View Contact
-                  <ArrowRight className="h-3 w-3 ml-auto" />
+                  <Users className="h-3.5 w-3.5" /> View Contact <ArrowRight className="h-3 w-3 ml-auto" />
                 </Button>
               </Link>
             )}
           </div>
-        ) : createMode ? (
-          /* ---------- Quick Create Form ---------- */
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-foreground">
-                New {createMode === 'candidate' ? 'Candidate' : 'Contact'}
-              </p>
-              <button onClick={() => setCreateMode(null)} className="text-xs text-muted-foreground hover:text-foreground">
-                Cancel
-              </button>
-            </div>
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="First name"
-                  value={createForm.first_name}
-                  onChange={(e) => setCreateForm(f => ({ ...f, first_name: e.target.value }))}
-                  className="h-7 text-xs"
-                />
-                <Input
-                  placeholder="Last name"
-                  value={createForm.last_name}
-                  onChange={(e) => setCreateForm(f => ({ ...f, last_name: e.target.value }))}
-                  className="h-7 text-xs"
-                />
-              </div>
-              <Input
-                placeholder="Email"
-                value={createForm.email}
-                onChange={(e) => setCreateForm(f => ({ ...f, email: e.target.value }))}
-                className="h-7 text-xs"
-              />
-              <Input
-                placeholder="Phone"
-                value={createForm.phone}
-                onChange={(e) => setCreateForm(f => ({ ...f, phone: e.target.value }))}
-                className="h-7 text-xs"
-              />
-              {thread?.channel === 'linkedin' && (
-                <Input
-                  placeholder="LinkedIn URL"
-                  value={createForm.linkedin_url}
-                  onChange={(e) => setCreateForm(f => ({ ...f, linkedin_url: e.target.value }))}
-                  className="h-7 text-xs"
-                />
-              )}
-              <Input
-                placeholder={createMode === 'candidate' ? 'Title' : 'Job Title'}
-                value={createForm.title}
-                onChange={(e) => setCreateForm(f => ({ ...f, title: e.target.value }))}
-                className="h-7 text-xs"
-              />
-              {createMode === 'candidate' && (
-                <Input
-                  placeholder="Company"
-                  value={createForm.company}
-                  onChange={(e) => setCreateForm(f => ({ ...f, company: e.target.value }))}
-                  className="h-7 text-xs"
-                />
-              )}
-            </div>
-            <Button
-              variant="gold"
-              size="sm"
-              onClick={handleCreate}
-              disabled={creating || (!createForm.first_name.trim() && !createForm.last_name.trim())}
-              className="w-full gap-1.5"
-            >
-              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-              Create & Link {createMode === 'candidate' ? 'Candidate' : 'Contact'}
-            </Button>
-          </div>
         ) : (
-          /* ---------- Search & Link / Create New ---------- */
           <div className="space-y-3">
             <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
@@ -477,12 +554,12 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               </div>
             </div>
 
-            {/* Search existing */}
+            {/* Search existing records */}
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Search existing</p>
               <div className="flex gap-2">
                 <Input
-                  placeholder="Search by name or email..."
+                  placeholder="Search name or email..."
                   value={linkSearch}
                   onChange={(e) => setLinkSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -518,19 +595,18 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               </div>
             )}
 
-            {/* Divider */}
+            {/* Divider + Create New */}
             <div className="flex items-center gap-2">
               <div className="flex-1 h-px bg-border" />
               <span className="text-[10px] text-muted-foreground">or create new</span>
               <div className="flex-1 h-px bg-border" />
             </div>
 
-            {/* Create new buttons */}
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => startCreate('candidate')}
+                onClick={() => { setCreateType('candidate'); setCreateOpen(true); }}
                 className="flex-1 gap-1.5 text-xs"
               >
                 <UserPlus className="h-3.5 w-3.5 text-success" />
@@ -539,7 +615,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => startCreate('contact')}
+                onClick={() => { setCreateType('contact'); setCreateOpen(true); }}
                 className="flex-1 gap-1.5 text-xs"
               >
                 <UserPlus className="h-3.5 w-3.5 text-info" />
@@ -558,14 +634,22 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
             {notes.slice(0, 3).map((n: any) => (
               <div key={n.id} className="rounded-md border border-border bg-muted/20 p-3">
                 <p className="text-xs text-foreground leading-relaxed">{n.note}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {format(new Date(n.created_at), 'MMM d, yyyy')}
-                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">{format(new Date(n.created_at), 'MMM d, yyyy')}</p>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Create Person Dialog */}
+      <CreatePersonDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        threadId={thread.id}
+        defaultType={createType}
+        prefill={{ name: senderName, address: senderAddress }}
+        channel={thread.channel}
+      />
     </div>
   );
 }
@@ -576,6 +660,8 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createDialogType, setCreateDialogType] = useState<'candidate' | 'contact'>('candidate');
   const messagesEndRef = { current: null as HTMLDivElement | null };
 
   const { data: thread, isLoading: threadLoading } = useQuery({
@@ -700,6 +786,11 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const entityName = thread.candidate_name || thread.contact_name;
   const isUnlinked = !(thread.candidate_id || thread.contact_id);
 
+  // Sender info for create dialog prefill
+  const firstInbound = messages.find(m => m.direction === 'inbound');
+  const senderName = firstInbound?.sender_name || entityName || '';
+  const senderAddress = firstInbound?.sender_address || '';
+
   // Group messages by date for date separators
   const getDateKey = (msg: Message) => {
     const d = msg.sent_at || msg.received_at || msg.created_at;
@@ -750,6 +841,36 @@ function MessagePane({ threadId }: { threadId: string | null }) {
             </Button>
           </div>
         </div>
+
+        {/* Unlinked banner — prominent CTA to add candidate/contact */}
+        {isUnlinked && (
+          <div className="px-6 py-3 bg-warning/5 border-b border-warning/20 flex items-center gap-3">
+            <AlertCircle className="h-4 w-4 text-warning shrink-0" />
+            <p className="text-xs text-warning flex-1">
+              <span className="font-medium">Not in your database.</span> Add this person as a candidate or contact to track them.
+            </p>
+            <div className="flex gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateDialogType('candidate'); setCreateDialogOpen(true); }}
+                className="h-7 text-xs gap-1 border-success/30 text-success hover:bg-success/10"
+              >
+                <UserPlus className="h-3 w-3" />
+                Add Candidate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateDialogType('contact'); setCreateDialogOpen(true); }}
+                className="h-7 text-xs gap-1 border-info/30 text-info hover:bg-info/10"
+              >
+                <UserPlus className="h-3 w-3" />
+                Add Contact
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Messages scroll */}
         <ScrollArea className="flex-1 p-6">
@@ -861,6 +982,18 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         <div className="w-72 border-l border-border overflow-hidden">
           <EntityPanel thread={thread} messages={messages} />
         </div>
+      )}
+
+      {/* Create Person Dialog (from banner or sidebar) */}
+      {isUnlinked && (
+        <CreatePersonDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          threadId={thread.id}
+          defaultType={createDialogType}
+          prefill={{ name: senderName, address: senderAddress }}
+          channel={thread.channel}
+        />
       )}
     </div>
   );
