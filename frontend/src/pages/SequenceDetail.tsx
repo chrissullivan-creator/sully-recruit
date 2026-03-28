@@ -185,11 +185,17 @@ const SequenceDetail = () => {
       } as any).eq('id', id);
       if (seqError) throw seqError;
 
-      const { error: delError } = await supabase.from('sequence_steps').delete().eq('sequence_id', id);
-      if (delError) throw delError;
+      // Get existing step IDs to preserve them (keeps execution history linked)
+      const { data: existingSteps } = await supabase.from('sequence_steps').select('id').eq('sequence_id', id);
+      const existingIds = new Set((existingSteps ?? []).map((s: any) => s.id));
 
-      if (steps.length > 0) {
-        const rows = steps.map((step) => ({
+      // Separate steps into updates (have existing DB id) vs new inserts
+      const stepsToUpdate: any[] = [];
+      const stepsToInsert: any[] = [];
+      const keepIds = new Set<string>();
+
+      for (const step of steps) {
+        const row = {
           sequence_id: id, step_order: step.order,
           step_type: channelToStepType(step.channel), channel: channelToDbChannel(step.channel),
           delay_days: step.delayDays, delay_hours: step.delayHours,
@@ -199,8 +205,33 @@ const SequenceDetail = () => {
           account_id: step.accountId || null,
           is_reply: step.isReply ?? false,
           use_signature: step.useSignature ?? false,
-        } as any));
-        const { error: stepsError } = await supabase.from('sequence_steps').insert(rows);
+        } as any;
+
+        if (existingIds.has(step.id)) {
+          // Existing step — update in place to preserve ID for execution history
+          stepsToUpdate.push({ id: step.id, ...row });
+          keepIds.add(step.id);
+        } else {
+          // New step — insert
+          stepsToInsert.push(row);
+        }
+      }
+
+      // Delete steps that were removed
+      const deleteIds = [...existingIds].filter(eid => !keepIds.has(eid));
+      if (deleteIds.length > 0) {
+        await supabase.from('sequence_steps').delete().in('id', deleteIds);
+      }
+
+      // Update existing steps
+      for (const step of stepsToUpdate) {
+        const { id: stepId, ...updates } = step;
+        await supabase.from('sequence_steps').update(updates).eq('id', stepId);
+      }
+
+      // Insert new steps
+      if (stepsToInsert.length > 0) {
+        const { error: stepsError } = await supabase.from('sequence_steps').insert(stepsToInsert);
         if (stepsError) throw stepsError;
       }
 
@@ -543,13 +574,13 @@ const SequenceDetail = () => {
                           : execStatus === 'sent' || execStatus === 'delivered' ? 'sent'
                           : execStatus;
 
-                        // Next step — current_step_order tracks which step is next (1-based)
+                        // Next step — edge function logic: next = current_step_order + 1
+                        // current_step_order=0 means hasn't started, next is step 1
+                        // current_step_order=N means step N was last executed, next is N+1
                         const currentOrder = enrollment.current_step_order ?? 0;
-                        // If currentOrder is 0 or 1 with no executions, next is step 1
-                        // If currentOrder is N with executions, next is step N+1
-                        const nextStepOrder = lastExec ? (lastStepOrder ?? currentOrder) + 1 : Math.max(currentOrder, 1);
+                        const nextStepOrder = currentOrder + 1;
                         const nextStep = steps.find(s => s.order === nextStepOrder);
-                        const nextAt = enrollment.next_step_at ? format(new Date(enrollment.next_step_at), 'MMM d') : null;
+                        const nextAt = enrollment.next_step_at ? format(new Date(enrollment.next_step_at), 'MMM d, h:mm a') : null;
 
                         const channelLabel = (ch: string | null) => {
                           if (!ch) return '';

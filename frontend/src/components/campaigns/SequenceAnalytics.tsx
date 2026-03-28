@@ -54,13 +54,29 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
     if (totalEnrolled === 0 || steps.length === 0) return null;
 
     // Group executions by step
+    // Build a map from step_id → step_order for both current and historical steps
     const stepIdToOrder = new Map(steps.map(s => [s.id, s.order]));
+
+    // For historical executions with old step IDs, try to infer step_order from enrollment's current_step_order
+    // Also build a reverse map: for each execution, determine its step order
+    const getExecStepOrder = (exec: StepExecution): number | null => {
+      // First try direct match to current steps
+      const order = stepIdToOrder.get(exec.sequence_step_id);
+      if (order !== undefined) return order;
+      // Can't match — step was re-created after save
+      return null;
+    };
 
     // Per-step metrics
     const perStep = steps
       .sort((a, b) => a.order - b.order)
       .map((step) => {
-        const stepExecs = executions.filter(e => e.sequence_step_id === step.id);
+        // Match by current step ID, OR by historical executions that can't be matched (fallback)
+        const stepExecs = executions.filter(e => {
+          if (e.sequence_step_id === step.id) return true;
+          // For orphaned executions, we can't reliably match them
+          return false;
+        });
         const sent = stepExecs.filter(e => ['sent','delivered','opened','clicked','complained','replied'].includes(e.status)).length;
         const delivered = stepExecs.filter(e => ['delivered','opened','clicked','replied'].includes(e.status)).length;
         const opened = stepExecs.filter(e => ['opened','clicked','replied'].includes(e.status)).length;
