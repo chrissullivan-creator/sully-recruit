@@ -352,16 +352,30 @@ Deno.serve(async (req: Request) => {
               .single();
             to = entity?.phone;
           } else if (step.channel.startsWith('linkedin')) {
-            // For LinkedIn, use the provider_id from candidate_channels
-            const { data: channel } = await supabase
-              .from("candidate_channels")
-              .select("provider_id, external_conversation_id")
-              .eq("candidate_id", entityId)
-              .eq("channel", "linkedin")
-              .single();
-            to = channel?.provider_id;
-            if (channel?.external_conversation_id) {
-              conversation_id = channel.external_conversation_id;
+            // For LinkedIn — try candidate_channels first, then fall back to linkedin_url
+            if (enrollment.candidate_id) {
+              const { data: channel } = await supabase
+                .from("candidate_channels")
+                .select("provider_id, external_conversation_id")
+                .eq("candidate_id", entityId)
+                .eq("channel", "linkedin")
+                .maybeSingle();
+              if (channel) {
+                to = channel.provider_id;
+                if (channel.external_conversation_id) {
+                  conversation_id = channel.external_conversation_id;
+                }
+              }
+            }
+            // Fall back: get linkedin_url from entity table (works for contacts + candidates without channels)
+            if (!to) {
+              const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
+              const { data: entity } = await supabase
+                .from(table)
+                .select("linkedin_url")
+                .eq("id", entityId)
+                .single();
+              to = entity?.linkedin_url || null;
             }
           }
 
@@ -636,7 +650,19 @@ async function sendLinkedIn(
   account_id?: string
 ): Promise<{ message_id: string; conversation_id: string }> {
   if (!account_id) {
-    throw new Error('LinkedIn account_id required');
+    // Try to find any active LinkedIn account
+    const { data: accounts } = await supabase
+      .from('integration_accounts')
+      .select('id, provider_config')
+      .or('account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
+      .eq('is_active', true)
+      .limit(1);
+    
+    if (accounts && accounts.length > 0 && accounts[0].provider_config?.unipile_api_key) {
+      account_id = accounts[0].id;
+    } else {
+      throw new Error('No active LinkedIn account found. Connect a LinkedIn account in Settings.');
+    }
   }
 
   const { data: account } = await supabase
@@ -646,11 +672,38 @@ async function sendLinkedIn(
     .single();
 
   if (!account?.provider_config?.unipile_api_key) {
-    throw new Error('Unipile API key not found');
+    throw new Error('Unipile API key not found for this account');
   }
 
   const apiKey = account.provider_config.unipile_api_key;
   const baseUrl = 'https://api.unipile.com:13111/api/v1';
+
+  // If `to` looks like a LinkedIn URL, resolve to provider_id first
+  let providerId = to;
+  if (to.includes('linkedin.com/')) {
+    // Extract the public identifier from the URL
+    const match = to.match(/linkedin\.com\/in\/([^/?]+)/);
+    const publicId = match ? match[1] : to;
+    
+    // Try to resolve via Unipile user lookup
+    try {
+      const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(publicId)}?account_id=${account_id}`, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'X-UNIPILE-CLIENT': 'sully-recruit',
+        },
+      });
+      if (lookupResp.ok) {
+        const userData = await lookupResp.json();
+        providerId = userData.provider_id || userData.id || publicId;
+      } else {
+        // Fall back to using the public ID directly
+        providerId = publicId;
+      }
+    } catch {
+      providerId = publicId;
+    }
+  }
 
   // Send message
   const response = await fetch(`${baseUrl}/messages`, {
@@ -661,7 +714,7 @@ async function sendLinkedIn(
       'X-UNIPILE-CLIENT': 'sully-recruit',
     },
     body: JSON.stringify({
-      provider_id: to,
+      provider_id: providerId,
       text: body,
     }),
   });
