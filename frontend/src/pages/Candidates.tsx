@@ -89,10 +89,15 @@ const Candidates = () => {
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
-      const matchesSearch =
-        (c.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = !q ||
+        (c.full_name ?? '').toLowerCase().includes(q) ||
+        (c.first_name ?? '').toLowerCase().includes(q) ||
+        (c.last_name ?? '').toLowerCase().includes(q) ||
+        (c.current_company ?? '').toLowerCase().includes(q) ||
+        (c.current_title ?? '').toLowerCase().includes(q) ||
+        (c.email ?? '').toLowerCase().includes(q) ||
+        (`${c.first_name ?? ''} ${c.last_name ?? ''}`).toLowerCase().includes(q);
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
       const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
       const matchesOwner = ownerFilter === 'all' ? true : ownerFilter === 'mine' ? c.owner_id === user?.id : c.owner_id === ownerFilter;
