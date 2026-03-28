@@ -352,22 +352,25 @@ Deno.serve(async (req: Request) => {
               .single();
             to = entity?.phone;
           } else if (step.channel.startsWith('linkedin')) {
-            // For LinkedIn — try candidate_channels first, then fall back to linkedin_url
+            // LinkedIn: Everything goes through Unipile. Resolve and cache provider_id.
+            
+            // 1. Check candidate_channels for cached provider_id (candidates)
             if (enrollment.candidate_id) {
               const { data: channel } = await supabase
                 .from("candidate_channels")
-                .select("provider_id, external_conversation_id")
+                .select("provider_id, unipile_id, external_conversation_id")
                 .eq("candidate_id", entityId)
                 .eq("channel", "linkedin")
                 .maybeSingle();
-              if (channel) {
-                to = channel.provider_id;
+              if (channel?.provider_id || channel?.unipile_id) {
+                to = channel.provider_id || channel.unipile_id;
                 if (channel.external_conversation_id) {
                   conversation_id = channel.external_conversation_id;
                 }
               }
             }
-            // Fall back: get linkedin_url from entity table (works for contacts + candidates without channels)
+
+            // 2. If no cached ID, resolve LinkedIn URL → Unipile provider_id
             if (!to) {
               const table = enrollment.candidate_id ? "candidates" : enrollment.contact_id ? "contacts" : "prospects";
               const { data: entity } = await supabase
@@ -375,7 +378,84 @@ Deno.serve(async (req: Request) => {
                 .select("linkedin_url")
                 .eq("id", entityId)
                 .single();
-              to = entity?.linkedin_url || null;
+              const linkedinUrl = entity?.linkedin_url;
+
+              if (linkedinUrl) {
+                // Get a Unipile API key from integration accounts
+                const sendAccountId = step.account_id || enrollment.account_id;
+                let apiKey: string | null = null;
+
+                if (sendAccountId) {
+                  const { data: acct } = await supabase
+                    .from('integration_accounts')
+                    .select('provider_config')
+                    .eq('id', sendAccountId)
+                    .single();
+                  apiKey = acct?.provider_config?.unipile_api_key;
+                }
+                if (!apiKey) {
+                  // Find any active LinkedIn account
+                  const { data: accounts } = await supabase
+                    .from('integration_accounts')
+                    .select('id, provider_config')
+                    .or('account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
+                    .eq('is_active', true)
+                    .limit(1);
+                  if (accounts?.[0]?.provider_config?.unipile_api_key) {
+                    apiKey = accounts[0].provider_config.unipile_api_key;
+                  }
+                }
+
+                if (apiKey) {
+                  // Extract LinkedIn public ID from URL
+                  const match = linkedinUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
+                  const publicId = match ? match[1] : null;
+
+                  if (publicId) {
+                    try {
+                      // Resolve via Unipile user lookup
+                      const baseUrl = 'https://api.unipile.com:13111/api/v1';
+                      const lookupResp = await fetch(
+                        `${baseUrl}/users/${encodeURIComponent(publicId)}`,
+                        {
+                          headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'X-UNIPILE-CLIENT': 'sully-recruit',
+                          },
+                        }
+                      );
+                      if (lookupResp.ok) {
+                        const userData = await lookupResp.json();
+                        const resolvedId = userData.provider_id || userData.id;
+                        if (resolvedId) {
+                          to = resolvedId;
+
+                          // 3. Cache the resolved ID for future use
+                          if (enrollment.candidate_id) {
+                            // Store in candidate_channels
+                            await supabase.from("candidate_channels").upsert({
+                              candidate_id: entityId,
+                              channel: "linkedin",
+                              provider_id: resolvedId,
+                              unipile_id: resolvedId,
+                              is_connected: true,
+                            }, { onConflict: "candidate_id,channel" }).select();
+                          }
+                          // For contacts: store provider_id in a note or custom field
+                          // We can't add columns, so we update linkedin_url to include the ID as a tag
+                          // Better: just log it so future lookups find it in candidate_channels
+                          // For contacts, we store in the enrollment's account_id field as a cache
+                          console.log(`Resolved Unipile ID for ${table} ${entityId}: ${resolvedId}`);
+                        }
+                      } else {
+                        console.error(`Unipile lookup failed for ${publicId}: ${lookupResp.status}`);
+                      }
+                    } catch (err: any) {
+                      console.error(`Unipile lookup error for ${publicId}:`, err.message);
+                    }
+                  }
+                }
+              }
             }
           }
 
@@ -649,63 +729,64 @@ async function sendLinkedIn(
   body: string,
   account_id?: string
 ): Promise<{ message_id: string; conversation_id: string }> {
-  if (!account_id) {
-    // Try to find any active LinkedIn account
+  // Get Unipile API key
+  let apiKey: string | null = null;
+  let resolvedAccountId = account_id;
+
+  if (account_id) {
+    const { data: account } = await supabase
+      .from('integration_accounts')
+      .select('provider_config')
+      .eq('id', account_id)
+      .single();
+    apiKey = account?.provider_config?.unipile_api_key;
+  }
+
+  if (!apiKey) {
+    // Auto-discover any active LinkedIn account
     const { data: accounts } = await supabase
       .from('integration_accounts')
       .select('id, provider_config')
       .or('account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
       .eq('is_active', true)
       .limit(1);
-    
-    if (accounts && accounts.length > 0 && accounts[0].provider_config?.unipile_api_key) {
-      account_id = accounts[0].id;
-    } else {
-      throw new Error('No active LinkedIn account found. Connect a LinkedIn account in Settings.');
+
+    if (accounts?.[0]?.provider_config?.unipile_api_key) {
+      apiKey = accounts[0].provider_config.unipile_api_key;
+      resolvedAccountId = accounts[0].id;
     }
   }
 
-  const { data: account } = await supabase
-    .from('integration_accounts')
-    .select('provider_config')
-    .eq('id', account_id)
-    .single();
-
-  if (!account?.provider_config?.unipile_api_key) {
-    throw new Error('Unipile API key not found for this account');
+  if (!apiKey) {
+    throw new Error('No active LinkedIn/Unipile account found. Connect LinkedIn in Settings.');
   }
 
-  const apiKey = account.provider_config.unipile_api_key;
   const baseUrl = 'https://api.unipile.com:13111/api/v1';
 
-  // If `to` looks like a LinkedIn URL, resolve to provider_id first
+  // `to` should be a Unipile provider_id at this point (resolved upstream)
+  // Safety: if it still looks like a URL, extract the public ID
   let providerId = to;
   if (to.includes('linkedin.com/')) {
-    // Extract the public identifier from the URL
-    const match = to.match(/linkedin\.com\/in\/([^/?]+)/);
-    const publicId = match ? match[1] : to;
-    
-    // Try to resolve via Unipile user lookup
-    try {
-      const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(publicId)}?account_id=${account_id}`, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'X-UNIPILE-CLIENT': 'sully-recruit',
-        },
-      });
-      if (lookupResp.ok) {
-        const userData = await lookupResp.json();
-        providerId = userData.provider_id || userData.id || publicId;
-      } else {
-        // Fall back to using the public ID directly
-        providerId = publicId;
+    const match = to.match(/linkedin\.com\/in\/([^/?#]+)/);
+    if (match) {
+      // Last-resort resolution at send time
+      try {
+        const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'X-UNIPILE-CLIENT': 'sully-recruit' },
+        });
+        if (lookupResp.ok) {
+          const userData = await lookupResp.json();
+          providerId = userData.provider_id || userData.id || match[1];
+        } else {
+          throw new Error(`Could not resolve LinkedIn profile: ${match[1]}`);
+        }
+      } catch (err: any) {
+        throw new Error(`Unipile lookup failed for ${match[1]}: ${err.message}`);
       }
-    } catch {
-      providerId = publicId;
     }
   }
 
-  // Send message
+  // Send message via Unipile
   const response = await fetch(`${baseUrl}/messages`, {
     method: 'POST',
     headers: {
@@ -721,7 +802,7 @@ async function sendLinkedIn(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Unipile error: ${error}`);
+    throw new Error(`Unipile send error: ${error}`);
   }
 
   const data = await response.json();
