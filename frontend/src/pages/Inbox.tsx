@@ -999,6 +999,12 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   );
 }
 
+// ---------- Admin emails — can see all messages ----------
+const ADMIN_EMAILS = [
+  'chris.sullivan@emeraldrecruit.com',
+  'emeraldrecruit@theemeraldrecruitinggroup.com',
+];
+
 // ---------- Main Page ----------
 export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -1006,12 +1012,52 @@ export default function Inbox() {
   const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
 
-  const { data: allThreads = [], isLoading } = useQuery({
-    queryKey: ['inbox_threads'],
+  // Get current user for permission check
+  const { data: currentUser } = useQuery({
+    queryKey: ['current_user'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser();
+      return data.user;
+    },
+  });
+
+  const userEmail = currentUser?.email?.toLowerCase() || '';
+  const userId = currentUser?.id || '';
+  const isAdmin = ADMIN_EMAILS.includes(userEmail);
+
+  // Get the current user's integration accounts (for non-admin filtering)
+  const { data: myAccounts = [] } = useQuery({
+    queryKey: ['my_integration_accounts', userId],
+    enabled: !!userId && !isAdmin,
     queryFn: async () => {
       const { data, error } = await supabase
+        .from('integration_accounts')
+        .select('id')
+        .or(`owner_user_id.eq.${userId},user_id.eq.${userId}`);
+      if (error) throw error;
+      return (data || []).map((a: any) => a.id);
+    },
+  });
+
+  const { data: allThreads = [], isLoading } = useQuery({
+    queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
+    enabled: !!userId,
+    queryFn: async () => {
+      let query = supabase
         .from('inbox_threads').select('*')
         .order('last_message_at', { ascending: false, nullsFirst: false });
+
+      // Non-admin: only show threads owned by this user or using their integration accounts
+      if (!isAdmin && userId) {
+        const filters: string[] = [`owner_id.eq.${userId}`];
+        if (myAccounts.length > 0) {
+          filters.push(`integration_account_id.in.(${myAccounts.join(',')})`);
+          filters.push(`account_id.in.(${myAccounts.join(',')})`);
+        }
+        query = query.or(filters.join(','));
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as InboxThread[];
     },
