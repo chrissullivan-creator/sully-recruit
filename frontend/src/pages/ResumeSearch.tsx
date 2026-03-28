@@ -239,6 +239,8 @@ function KeywordSearch() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
 
   const [location, setLocation] = useState('');
   const [title, setTitle] = useState('');
@@ -246,14 +248,26 @@ function KeywordSearch() {
   const [visa, setVisa] = useState('');
   const [yearsExp, setYearsExp] = useState('');
 
+  // Filter, sort by confidence desc, then paginate
   const filteredResults = useMemo(() => {
-    return results.filter((result) => {
-      if (location && !result.location?.toLowerCase().includes(location.toLowerCase())) return false;
-      if (title && !result.current_title?.toLowerCase().includes(title.toLowerCase())) return false;
-      if (company && !result.current_company?.toLowerCase().includes(company.toLowerCase())) return false;
-      return true;
-    });
+    return results
+      .filter((result) => {
+        if (location && !result.location?.toLowerCase().includes(location.toLowerCase())) return false;
+        if (title && !result.current_title?.toLowerCase().includes(title.toLowerCase())) return false;
+        if (company && !result.current_company?.toLowerCase().includes(company.toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0));
   }, [results, location, title, company]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / PAGE_SIZE));
+  const paginatedResults = filteredResults.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  const updateFilter = (setter: (v: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,6 +278,7 @@ function KeywordSearch() {
 
     setSearching(true);
     setHasSearched(true);
+    setPage(1);
 
     try {
       const response = await fetch(
@@ -274,7 +289,7 @@ function KeywordSearch() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, limit: 200, max_results: 200 }),
         }
       );
 
@@ -284,12 +299,15 @@ function KeywordSearch() {
       }
 
       const data = await response.json();
-      setResults(data.results || []);
+      const sorted = (data.results || []).sort(
+        (a: SearchResult, b: SearchResult) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0)
+      );
+      setResults(sorted);
 
-      if (data.results?.length === 0) {
+      if (sorted.length === 0) {
         toast.info('No resumes matched your search');
       } else {
-        toast.success(`Found ${data.results.length} matching resumes`);
+        toast.success(`Found ${sorted.length} matching resume${sorted.length !== 1 ? 's' : ''}`);
       }
     } catch (err: any) {
       console.error('Search error:', err);
@@ -326,16 +344,16 @@ function KeywordSearch() {
 
       {hasSearched && (
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
-          <Input placeholder="Filter by location..." value={location} onChange={(e) => setLocation(e.target.value)} className="text-sm" />
-          <Input placeholder="Filter by title..." value={title} onChange={(e) => setTitle(e.target.value)} className="text-sm" />
-          <Input placeholder="Filter by company..." value={company} onChange={(e) => setCompany(e.target.value)} className="text-sm" />
-          <Select value={visa} onValueChange={setVisa}>
+          <Input placeholder="Filter by location..." value={location} onChange={(e) => updateFilter(setLocation, e.target.value)} className="text-sm" />
+          <Input placeholder="Filter by title..." value={title} onChange={(e) => updateFilter(setTitle, e.target.value)} className="text-sm" />
+          <Input placeholder="Filter by company..." value={company} onChange={(e) => updateFilter(setCompany, e.target.value)} className="text-sm" />
+          <Select value={visa} onValueChange={(v) => updateFilter(setVisa, v)}>
             <SelectTrigger><SelectValue placeholder="Visa status..." /></SelectTrigger>
             <SelectContent>
               {visaOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
             </SelectContent>
           </Select>
-          <Select value={yearsExp} onValueChange={setYearsExp}>
+          <Select value={yearsExp} onValueChange={(v) => updateFilter(setYearsExp, v)}>
             <SelectTrigger><SelectValue placeholder="Years experience..." /></SelectTrigger>
             <SelectContent>
               {yearsExperienceOptions.map((option) => (<SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>))}
@@ -346,11 +364,17 @@ function KeywordSearch() {
 
       {hasSearched && (
         <div>
-          <p className="text-sm text-muted-foreground mb-4">
-            {filteredResults.length} result{filteredResults.length !== 1 ? 's' : ''} found
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-muted-foreground">
+              {filteredResults.length} result{filteredResults.length !== 1 ? 's' : ''} found
+              {filteredResults.length > PAGE_SIZE && (
+                <span> · Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredResults.length)}</span>
+              )}
+              <span className="ml-2 text-xs opacity-70">Sorted by confidence</span>
+            </p>
+          </div>
 
-          {filteredResults.length === 0 ? (
+          {paginatedResults.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">
@@ -359,67 +383,102 @@ function KeywordSearch() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {filteredResults.map((result) => (
-                <Card key={result.id} className="hover:border-accent/50 transition-colors cursor-pointer">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-foreground">{result.full_name}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {result.current_title && result.current_company
-                            ? `${result.current_title} at ${result.current_company}`
-                            : result.current_title || result.current_company || 'No title'}
-                        </p>
-                      </div>
-                      <Badge variant="secondary" className="text-base">
-                        {Math.round(result.relevance_score * 100)}% Match
-                      </Badge>
-                    </div>
+            <>
+              <div className="space-y-3">
+                {paginatedResults.map((result, idx) => {
+                  const rank = (page - 1) * PAGE_SIZE + idx + 1;
+                  return (
+                    <Card key={result.id} className="hover:border-accent/50 transition-colors cursor-pointer">
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-start gap-3">
+                            <span className="text-xs font-bold text-muted-foreground bg-muted rounded-full h-6 w-6 flex items-center justify-center shrink-0 mt-0.5">
+                              {rank}
+                            </span>
+                            <div>
+                              <h3 className="font-semibold text-foreground">{result.full_name}</h3>
+                              <p className="text-sm text-muted-foreground">
+                                {result.current_title && result.current_company
+                                  ? `${result.current_title} at ${result.current_company}`
+                                  : result.current_title || result.current_company || 'No title'}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={cn(
+                              'text-sm font-semibold shrink-0',
+                              result.relevance_score >= 0.8 ? 'bg-success/10 text-success' :
+                              result.relevance_score >= 0.6 ? 'bg-accent/10 text-accent' :
+                              result.relevance_score >= 0.4 ? 'bg-warning/10 text-warning' :
+                              'bg-muted text-muted-foreground'
+                            )}
+                          >
+                            {Math.round(result.relevance_score * 100)}% Match
+                          </Badge>
+                        </div>
 
-                    <div className="flex flex-wrap gap-3 mb-3 text-xs text-muted-foreground">
-                      {result.location && (
-                        <div className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{result.location}</div>
-                      )}
-                      {result.current_title && (
-                        <div className="flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{result.current_title}</div>
-                      )}
-                      {result.current_company && (
-                        <div className="flex items-center gap-1"><Building className="h-3.5 w-3.5" />{result.current_company}</div>
-                      )}
-                    </div>
-
-                    {result.skills && result.skills.length > 0 && (
-                      <div className="mb-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {result.skills.slice(0, 5).map((skill, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">{skill}</Badge>
-                          ))}
-                          {result.skills.length > 5 && (
-                            <Badge variant="outline" className="text-xs">+{result.skills.length - 5}</Badge>
+                        <div className="flex flex-wrap gap-3 mb-3 text-xs text-muted-foreground">
+                          {result.location && (
+                            <div className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{result.location}</div>
+                          )}
+                          {result.current_title && (
+                            <div className="flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{result.current_title}</div>
+                          )}
+                          {result.current_company && (
+                            <div className="flex items-center gap-1"><Building className="h-3.5 w-3.5" />{result.current_company}</div>
                           )}
                         </div>
-                      </div>
-                    )}
 
-                    {result.match_reasons && result.match_reasons.length > 0 && (
-                      <div className="mb-3 p-2 bg-accent/5 rounded text-xs text-muted-foreground">
-                        <p className="font-medium mb-1">Why this match:</p>
-                        <ul className="space-y-0.5 list-disc list-inside">
-                          {result.match_reasons.slice(0, 3).map((reason, idx) => (
-                            <li key={idx}>{reason}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                        {result.skills && result.skills.length > 0 && (
+                          <div className="mb-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {result.skills.slice(0, 8).map((skill, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs">{skill}</Badge>
+                              ))}
+                              {result.skills.length > 8 && (
+                                <Badge variant="outline" className="text-xs">+{result.skills.length - 8}</Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
 
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/candidates/${result.id}`)} className="w-full">
-                      Open Profile <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                        {result.match_reasons && result.match_reasons.length > 0 && (
+                          <div className="mb-3 p-2 bg-accent/5 rounded text-xs text-muted-foreground">
+                            <p className="font-medium mb-1">Why this match:</p>
+                            <ul className="space-y-0.5 list-disc list-inside">
+                              {result.match_reasons.slice(0, 3).map((reason, idx) => (
+                                <li key={idx}>{reason}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/candidates/${result.id}`)} className="w-full">
+                          Open Profile <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
+                  <p className="text-xs text-muted-foreground">
+                    Page {page} of {totalPages} · {filteredResults.length} total results
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>First</Button>
+                    <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
+                    <span className="text-xs text-muted-foreground px-3">{page} / {totalPages}</span>
+                    <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+                    <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(totalPages)}>Last</Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
