@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Bell } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -220,6 +221,32 @@ export default function Tasks() {
               <Calendar className="h-4 w-4" />
             </button>
           </div>
+          <Button variant="ghost" size="sm" onClick={async () => {
+            toast.info('Syncing Outlook events...');
+            try {
+              const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
+              const resp = await fetch(`${backendUrl}/api/sync-outlook-events`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+              const data = await resp.json();
+              if (data.error) { toast.error(data.error); return; }
+              toast.success(`Synced ${data.events_synced} events, ${data.events_matched} matched to records`);
+            } catch (err: any) { toast.error(err.message || 'Sync failed'); }
+          }}>
+            <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
+          </Button>
+          {isAdmin && (
+            <Button variant="ghost" size="sm" onClick={async () => {
+              toast.info('Running nudge check...');
+              try {
+                const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
+                const resp = await fetch(`${backendUrl}/api/run-nudge-check`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await resp.json();
+                if (data.error) { toast.error(data.error); return; }
+                toast.success(`Found ${data.stagnant_candidates} stagnant, created ${data.tasks_created} tasks${data.nudge_sent ? ', emailed Chris' : ''}`);
+              } catch (err: any) { toast.error(err.message || 'Nudge check failed'); }
+            }}>
+              <Bell className="h-4 w-4 mr-1" /> Run Nudge
+            </Button>
+          )}
           <Button variant="gold" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-1" /> New Task
           </Button>

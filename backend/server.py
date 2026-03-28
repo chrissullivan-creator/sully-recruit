@@ -421,6 +421,392 @@ Remember: Show ALL matching candidates ranked from highest to lowest confidence.
     return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
+
+# ── Helpers for Supabase REST calls ──────────────────────────────────────────
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+
+# ── 1) Sync activity timestamps across all channels ─────────────────────────
+class SyncActivityRequest(BaseModel):
+    entity_type: str  # 'candidate' or 'contact'
+    entity_id: str
+
+@api_router.post("/sync-activity-timestamps")
+async def sync_activity_timestamps(request: SyncActivityRequest):
+    """Recalculate last_reached_out_at and last_responded_at by scanning messages, calls, SMS across all channels."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"error": "Supabase not configured"}
+
+    headers = _sb_headers()
+    etype = request.entity_type
+    eid = request.entity_id
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        # 1. Get entity details (email, phone, linkedin)
+        table = 'candidates' if etype == 'candidate' else 'contacts'
+        entity_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/{table}",
+            headers={**headers, "Prefer": ""},
+            params={"select": "id,email,phone,linkedin_url", "id": f"eq.{eid}"},
+        )
+        if entity_resp.status_code != 200 or not entity_resp.json():
+            return {"error": "Entity not found"}
+        entity = entity_resp.json()[0]
+
+        # 2. Find all messages linked to this entity
+        id_field = 'candidate_id' if etype == 'candidate' else 'contact_id'
+        msgs_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers={**headers, "Prefer": ""},
+            params={
+                "select": "direction,sent_at,received_at,created_at",
+                id_field: f"eq.{eid}",
+                "order": "created_at.desc",
+                "limit": "500",
+            },
+        )
+        messages = msgs_resp.json() if msgs_resp.status_code == 200 else []
+
+        # 3. Find call logs linked to this entity
+        calls_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/call_logs",
+            headers={**headers, "Prefer": ""},
+            params={
+                "select": "direction,started_at,linked_entity_id",
+                "linked_entity_id": f"eq.{eid}",
+                "order": "started_at.desc",
+                "limit": "100",
+            },
+        )
+        calls = calls_resp.json() if calls_resp.status_code == 200 else []
+
+        # 4. Also search messages by email/phone if available
+        extra_messages = []
+        if entity.get("email"):
+            for field in ["sender_address", "recipient_address"]:
+                resp = await http.get(
+                    f"{SUPABASE_URL}/rest/v1/messages",
+                    headers={**headers, "Prefer": ""},
+                    params={
+                        "select": "direction,sent_at,received_at,created_at",
+                        field: f"eq.{entity['email']}",
+                        "order": "created_at.desc",
+                        "limit": "200",
+                    },
+                )
+                if resp.status_code == 200:
+                    extra_messages.extend(resp.json())
+
+        all_messages = messages + extra_messages
+        # Deduplicate by checking unique combinations
+        seen = set()
+        unique_msgs = []
+        for m in all_messages:
+            key = (m.get("sent_at"), m.get("received_at"), m.get("direction"))
+            if key not in seen:
+                seen.add(key)
+                unique_msgs.append(m)
+
+        # 5. Calculate timestamps
+        last_reached = None
+        last_responded = None
+
+        # Outbound messages = reached out
+        for m in unique_msgs:
+            if m.get("direction") == "outbound":
+                ts = m.get("sent_at") or m.get("created_at")
+                if ts and (not last_reached or ts > last_reached):
+                    last_reached = ts
+            elif m.get("direction") == "inbound":
+                ts = m.get("received_at") or m.get("sent_at") or m.get("created_at")
+                if ts and (not last_responded or ts > last_responded):
+                    last_responded = ts
+
+        # Outbound calls = reached out, inbound = responded
+        for c in calls:
+            ts = c.get("started_at")
+            if not ts:
+                continue
+            if c.get("direction") == "outbound":
+                if not last_reached or ts > last_reached:
+                    last_reached = ts
+            else:
+                if not last_responded or ts > last_responded:
+                    last_responded = ts
+
+        # 6. Update the entity record
+        update_data = {}
+        if etype == 'contact':
+            # contacts have last_reached_out_at and last_responded_at columns
+            if last_reached:
+                update_data["last_reached_out_at"] = last_reached
+            if last_responded:
+                update_data["last_responded_at"] = last_responded
+        else:
+            # candidates might not have these columns - store in updated_at or custom field
+            # We'll try updating and ignore errors for missing columns
+            if last_reached:
+                update_data["last_reached_out_at"] = last_reached
+            if last_responded:
+                update_data["last_responded_at"] = last_responded
+
+        if update_data:
+            await http.patch(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                headers=headers,
+                params={"id": f"eq.{eid}"},
+                json=update_data,
+            )
+
+        return {
+            "last_reached_out_at": last_reached,
+            "last_responded_at": last_responded,
+            "messages_scanned": len(unique_msgs),
+            "calls_scanned": len(calls),
+        }
+
+
+# ── 2) Nudge check — email Chris about stagnant pipeline ────────────────────
+@api_router.post("/run-nudge-check")
+async def run_nudge_check():
+    """Scan pipeline for stagnation, create tasks, and email Chris."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"error": "Supabase not configured"}
+
+    headers = _sb_headers()
+    chris_email = "chris.sullivan@emeraldrecruit.com"
+    stagnation_days = 7
+    cutoff = (datetime.utcnow().replace(hour=0, minute=0, second=0) - __import__('datetime').timedelta(days=stagnation_days)).isoformat()
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        # Find active candidates with no recent activity
+        cands_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/candidates",
+            headers={**headers, "Prefer": ""},
+            params={
+                "select": "id,full_name,current_title,current_company,status,owner_id,updated_at",
+                "status": "in.(new,reached_out,back_of_resume)",
+                "updated_at": f"lt.{cutoff}",
+                "limit": "50",
+            },
+        )
+        stagnant = cands_resp.json() if cands_resp.status_code == 200 else []
+
+        # Find Chris's user ID
+        profiles_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            headers={**headers, "Prefer": ""},
+            params={"select": "id,email", "email": f"eq.{chris_email}"},
+        )
+        chris_id = None
+        if profiles_resp.status_code == 200 and profiles_resp.json():
+            chris_id = profiles_resp.json()[0]["id"]
+
+        # Create tasks for stagnant candidates
+        tasks_created = 0
+        nudge_items = []
+        for c in stagnant[:20]:  # Limit to 20 to avoid spam
+            name = c.get("full_name", "Unknown")
+            title = c.get("current_title", "")
+            company = c.get("current_company", "")
+            nudge_items.append(f"• {name} ({title} at {company}) — status: {c['status']}")
+
+            if chris_id:
+                task_data = {
+                    "title": f"Follow up with {name}",
+                    "description": f"No activity in {stagnation_days}+ days. {title} at {company}. Current status: {c['status']}",
+                    "priority": "high",
+                    "due_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "assigned_to": chris_id,
+                    "created_by": chris_id,
+                }
+                resp = await http.post(
+                    f"{SUPABASE_URL}/rest/v1/tasks",
+                    headers=headers,
+                    json=task_data,
+                )
+                if resp.status_code in (200, 201):
+                    tasks_created += 1
+
+        # Send email nudge to Chris via edge function
+        if nudge_items and chris_id:
+            email_body = f"Hi Chris,\n\n{len(stagnant)} candidates haven't had activity in {stagnation_days}+ days:\n\n" + "\n".join(nudge_items[:20])
+            email_body += f"\n\nI've created {tasks_created} follow-up tasks in your To-Do's.\n\n— Joe (Sully Recruit AI)"
+
+            try:
+                await http.post(
+                    f"{SUPABASE_URL}/functions/v1/send-message",
+                    headers={**headers, "Prefer": ""},
+                    json={
+                        "channel": "email",
+                        "to": chris_email,
+                        "subject": f"🔔 {len(stagnant)} candidates need follow-up",
+                        "body": email_body,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Nudge email failed: {e}")
+
+        return {
+            "stagnant_candidates": len(stagnant),
+            "tasks_created": tasks_created,
+            "nudge_sent": len(nudge_items) > 0,
+        }
+
+
+# ── 3) Outlook calendar sync → To-Do's ──────────────────────────────────────
+@api_router.post("/sync-outlook-events")
+async def sync_outlook_events():
+    """Pull upcoming Outlook events and create/match to-do items linked to candidates."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"error": "Supabase not configured"}
+
+    headers = _sb_headers()
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        # 1. Get Microsoft tokens from integration_accounts
+        accts_resp = await http.get(
+            f"{SUPABASE_URL}/rest/v1/integration_accounts",
+            headers={**headers, "Prefer": ""},
+            params={
+                "select": "id,owner_user_id,user_id,access_token,refresh_token,account_type,provider,account_label",
+                "provider": "eq.microsoft",
+                "is_active": "eq.true",
+            },
+        )
+        ms_accounts = accts_resp.json() if accts_resp.status_code == 200 else []
+
+        if not ms_accounts:
+            return {"error": "No active Microsoft accounts found. Connect Outlook in Settings first."}
+
+        events_synced = 0
+        events_matched = 0
+
+        for acct in ms_accounts:
+            access_token = acct.get("access_token")
+            user_id = acct.get("owner_user_id") or acct.get("user_id")
+            if not access_token or not user_id:
+                continue
+
+            # 2. Fetch upcoming events from Microsoft Graph
+            now = datetime.utcnow().isoformat() + "Z"
+            week_later = (datetime.utcnow() + __import__('datetime').timedelta(days=14)).isoformat() + "Z"
+
+            try:
+                graph_resp = await http.get(
+                    "https://graph.microsoft.com/v1.0/me/calendarview",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={
+                        "startDateTime": now,
+                        "endDateTime": week_later,
+                        "$select": "subject,start,end,attendees,bodyPreview",
+                        "$top": "50",
+                        "$orderby": "start/dateTime",
+                    },
+                )
+                if graph_resp.status_code == 401:
+                    # Token expired — skip this account
+                    logger.info(f"Microsoft token expired for account {acct['id']}")
+                    continue
+                if graph_resp.status_code != 200:
+                    continue
+                events = graph_resp.json().get("value", [])
+            except Exception as e:
+                logger.warning(f"Graph API error: {e}")
+                continue
+
+            # 3. For each event, try to match attendees to candidates/contacts
+            for event in events:
+                subject = event.get("subject", "")
+                start_dt = event.get("start", {}).get("dateTime", "")[:10]  # YYYY-MM-DD
+                attendee_emails = [
+                    a.get("emailAddress", {}).get("address", "").lower()
+                    for a in event.get("attendees", [])
+                    if a.get("emailAddress", {}).get("address")
+                ]
+
+                if not subject or not start_dt:
+                    continue
+
+                # Check if task already exists for this event
+                existing_resp = await http.get(
+                    f"{SUPABASE_URL}/rest/v1/tasks",
+                    headers={**headers, "Prefer": ""},
+                    params={
+                        "select": "id",
+                        "title": f"eq.📅 {subject}",
+                        "due_date": f"eq.{start_dt}",
+                        "created_by": f"eq.{user_id}",
+                        "limit": "1",
+                    },
+                )
+                if existing_resp.status_code == 200 and existing_resp.json():
+                    continue  # Already synced
+
+                # Create task
+                task_resp = await http.post(
+                    f"{SUPABASE_URL}/rest/v1/tasks",
+                    headers={**headers, "Prefer": "return=representation"},
+                    json={
+                        "title": f"📅 {subject}",
+                        "description": event.get("bodyPreview", "")[:500] or f"Outlook event: {subject}",
+                        "priority": "medium",
+                        "due_date": start_dt,
+                        "assigned_to": user_id,
+                        "created_by": user_id,
+                    },
+                )
+                if task_resp.status_code not in (200, 201):
+                    continue
+                task = task_resp.json()
+                task_id = task[0]["id"] if isinstance(task, list) else task.get("id")
+                events_synced += 1
+
+                # 4. Match attendee emails to candidates/contacts
+                if task_id and attendee_emails:
+                    for email_addr in attendee_emails:
+                        # Try candidate match
+                        cand_resp = await http.get(
+                            f"{SUPABASE_URL}/rest/v1/candidates",
+                            headers={**headers, "Prefer": ""},
+                            params={"select": "id", "email": f"eq.{email_addr}", "limit": "1"},
+                        )
+                        if cand_resp.status_code == 200 and cand_resp.json():
+                            await http.post(
+                                f"{SUPABASE_URL}/rest/v1/task_links",
+                                headers=headers,
+                                json={"task_id": task_id, "entity_type": "candidate", "entity_id": cand_resp.json()[0]["id"]},
+                            )
+                            events_matched += 1
+                            continue
+
+                        # Try contact match
+                        cont_resp = await http.get(
+                            f"{SUPABASE_URL}/rest/v1/contacts",
+                            headers={**headers, "Prefer": ""},
+                            params={"select": "id", "email": f"eq.{email_addr}", "limit": "1"},
+                        )
+                        if cont_resp.status_code == 200 and cont_resp.json():
+                            await http.post(
+                                f"{SUPABASE_URL}/rest/v1/task_links",
+                                headers=headers,
+                                json={"task_id": task_id, "entity_type": "contact", "entity_id": cont_resp.json()[0]["id"]},
+                            )
+                            events_matched += 1
+
+        return {
+            "events_synced": events_synced,
+            "events_matched": events_matched,
+            "ms_accounts_checked": len(ms_accounts),
+        }
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
