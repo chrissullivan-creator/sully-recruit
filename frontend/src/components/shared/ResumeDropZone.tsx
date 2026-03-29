@@ -45,7 +45,7 @@ async function uploadFile(file: File, session: any) {
 }
 
 async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
-  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`, {
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.access_token}`,
@@ -56,17 +56,17 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
   });
   const result = await resp.json();
   console.log('[ResumeDropZone] raw response:', result);
-  if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
+  if (!resp.ok || result.error) throw new Error(result.error || 'Parse failed');
+  const p = result.parsed || {};
   return {
-    first_name:      result.parsed.first_name || '',
-    last_name:       result.parsed.last_name || '',
-    email:           result.parsed.email || '',
-    phone:           result.parsed.phone || '',
-    current_company: result.parsed.current_company || '',
-    current_title:   result.parsed.current_title || '',
-    location:        result.parsed.location || '',
-    linkedin_url:    result.parsed.linkedin_url || '',
-    _candidate_id:   result.candidate_id,
+    first_name:      p.first_name || '',
+    last_name:       p.last_name || '',
+    email:           p.email || '',
+    phone:           p.phone || '',
+    current_company: p.current_company || '',
+    current_title:   p.current_title || '',
+    location:        p.location || '',
+    linkedin_url:    p.linkedin_url || '',
   };
 }
 
@@ -140,8 +140,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           linkedin_url:    data?.linkedin_url || '',
           file_name,
           file_path,
-          candidate_id:    data?._candidate_id ?? null,
-          match_label:     data?._candidate_id ? `${data.first_name} ${data.last_name}`.trim() : null,
+          candidate_id:    null,
+          match_label:     null,
         };
 
         parsed.push(entry);
