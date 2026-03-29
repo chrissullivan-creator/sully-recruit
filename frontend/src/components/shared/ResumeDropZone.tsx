@@ -55,9 +55,19 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
     body: JSON.stringify({ file_path, file_name }),
   });
   const result = await resp.json();
-  console.log('[ResumeDropZone] parsed result:', result);
+  console.log('[ResumeDropZone] raw response:', result);
   if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
-  return { ...result.parsed, _candidate_id: result.candidate_id };
+  return {
+    first_name:      result.parsed.first_name || '',
+    last_name:       result.parsed.last_name || '',
+    email:           result.parsed.email || '',
+    phone:           result.parsed.phone || '',
+    current_company: result.parsed.current_company || '',
+    current_title:   result.parsed.current_title || '',
+    location:        result.parsed.location || '',
+    linkedin_url:    result.parsed.linkedin_url || '',
+    _candidate_id:   result.candidate_id,
+  };
 }
 
 // ── Component ────────────────────────────────────────────────────────────────

@@ -113,7 +113,7 @@ async def fetch_resume_data() -> list:
     async with httpx.AsyncClient(timeout=30) as http:
         # Fetch resumes with summaries
         resumes_resp = await http.get(
-            f"{SUPABASE_URL}/rest/v1/candidate_resumes",
+            f"{SUPABASE_URL}/rest/v1/resumes",
             headers=headers,
             params={
                 "select": "candidate_id,ai_summary,raw_text,file_name",

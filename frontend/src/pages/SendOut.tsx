@@ -268,11 +268,11 @@ export default function SendOut() {
 
   // Resumes for this candidate
   const { data: resumes = [] } = useQuery({
-    queryKey: ['candidate_resumes', id],
+    queryKey: ['resumes', id],
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('candidate_resumes')
+        .from('resumes')
         .select('*')
         .eq('candidate_id', id!)
         .order('created_at', { ascending: false });
