@@ -140,7 +140,7 @@ export type Database = {
           },
         ]
       }
-      candidate_resumes: {
+      resumes: {
         Row: {
           ai_summary: string | null
           candidate_id: string | null
@@ -194,14 +194,14 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "candidate_resumes_candidate_id_fkey"
+            foreignKeyName: "resumes_candidate_id_fkey"
             columns: ["candidate_id"]
             isOneToOne: false
             referencedRelation: "candidate_summary"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "candidate_resumes_candidate_id_fkey"
+            foreignKeyName: "resumes_candidate_id_fkey"
             columns: ["candidate_id"]
             isOneToOne: false
             referencedRelation: "candidates"
