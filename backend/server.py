@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import anthropic
 
 
 ROOT_DIR = Path(__file__).parent
@@ -26,7 +26,14 @@ db = client[os.environ['DB_NAME']]
 # Supabase config
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+claude_client: anthropic.AsyncAnthropic | None = None
+
+def get_claude() -> anthropic.AsyncAnthropic:
+    global claude_client
+    if claude_client is None:
+        claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    return claude_client
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -175,7 +182,7 @@ async def fetch_resume_data() -> list:
 async def write_sequence_step(request: StepWriteRequest):
     """Ask Joe to write a sequence step with Emerald Recruiting style."""
 
-    if not EMERGENT_LLM_KEY:
+    if not ANTHROPIC_API_KEY:
         return {"error": "LLM key not configured"}
 
     channel_labels = {
@@ -220,19 +227,19 @@ You are writing Step {request.step_number} of {request.total_steps} in a {ch_lab
 Return ONLY the message body text. No subject line unless this is an email first touch (not a reply). If it's an email first touch, put the subject on the first line prefixed with "Subject: " then a blank line then the body."""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"step-write-{uuid.uuid4()}",
-            system_message=system_prompt,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
         prompt = f"Write a {ch_label} message for step {request.step_number} of {request.total_steps}."
         if request.existing_content:
             prompt += f"\n\nCurrent draft to improve:\n{request.existing_content}"
         if request.instructions:
             prompt += f"\n\nSpecific request: {request.instructions}"
 
-        response = await chat.send_message(UserMessage(text=prompt))
+        msg = await get_claude().messages.create(
+            model="claude-sonnet-4-5-20250514",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        response = msg.content[0].text
         return {"content": response}
     except Exception as e:
         logger.error(f"Step write error: {e}")
@@ -266,7 +273,7 @@ async def fetch_candidates_for_matching() -> list:
 @api_router.post("/match-candidates-to-job")
 async def match_candidates_to_job(request: MatchCandidatesRequest):
     """Use Claude to match existing candidates to a job."""
-    if not EMERGENT_LLM_KEY:
+    if not ANTHROPIC_API_KEY:
         return {"error": "LLM key not configured"}
 
     candidates = await fetch_candidates_for_matching()
@@ -322,13 +329,14 @@ Candidates in database:
 {cand_context}"""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"match-{uuid.uuid4()}",
-            system_message=system_prompt,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-        response = await chat.send_message(UserMessage(text=f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")))
+        user_prompt = f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")
+        msg = await get_claude().messages.create(
+            model="claude-sonnet-4-5-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        response = msg.content[0].text
         return {"content": response}
     except Exception as e:
         logger.error(f"Match error: {e}")
@@ -340,7 +348,7 @@ Candidates in database:
 async def resume_search_ai(request: ResumeSearchRequest):
     """AI-powered resume search using Claude to analyze candidate resumes."""
 
-    if not EMERGENT_LLM_KEY:
+    if not ANTHROPIC_API_KEY:
         return {"error": "LLM key not configured"}
 
     # Fetch resume data
@@ -389,13 +397,6 @@ Here are the candidate resumes:
 
 Remember: Show ALL matching candidates ranked from highest to lowest confidence. Don't artificially limit results."""
 
-    # Build conversation
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=request.session_id,
-        system_message=system_prompt,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
     # Build full message from history + new query
     full_query = ""
     for msg in request.messages:
@@ -404,11 +405,24 @@ Remember: Show ALL matching candidates ranked from highest to lowest confidence.
     if request.query:
         full_query = request.query
 
-    user_msg = UserMessage(text=full_query)
+    # Build messages list including conversation history
+    api_messages = []
+    for msg in request.messages:
+        api_messages.append({"role": msg.role, "content": msg.content})
+    if request.query:
+        api_messages.append({"role": "user", "content": request.query})
+    if not api_messages:
+        api_messages = [{"role": "user", "content": full_query}]
 
     async def stream_response():
         try:
-            response = await chat.send_message(user_msg)
+            msg = await get_claude().messages.create(
+                model="claude-sonnet-4-5-20250514",
+                max_tokens=4096,
+                system=system_prompt,
+                messages=api_messages,
+            )
+            response = msg.content[0].text
             # Send the full response as a stream of chunks
             chunk_size = 50
             for i in range(0, len(response), chunk_size):
@@ -817,7 +831,7 @@ class ParseResumeRequest(BaseModel):
 @api_router.post("/parse-resume-ai")
 async def parse_resume_ai(request: ParseResumeRequest):
     """Parse resume text into structured JSON using Claude."""
-    if not EMERGENT_LLM_KEY:
+    if not ANTHROPIC_API_KEY:
         return {"error": "LLM key not configured"}
 
     job_context = ""
@@ -864,13 +878,13 @@ Group multiple titles at the same company together under one company entry with 
 If tailoring to a job, emphasize relevant experience and skills."""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"parse-{uuid.uuid4()}",
-            system_message=system_prompt,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-        response = await chat.send_message(UserMessage(text=f"Parse this resume:\n\n{request.resume_text[:8000]}"))
+        msg = await get_claude().messages.create(
+            model="claude-sonnet-4-5-20250514",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": f"Parse this resume:\n\n{request.resume_text[:8000]}"}],
+        )
+        response = msg.content[0].text
 
         # Extract JSON from response
         text = response.strip()
@@ -902,7 +916,7 @@ class SendOutEmailRequest(BaseModel):
 @api_router.post("/generate-sendout-email")
 async def generate_sendout_email(request: SendOutEmailRequest):
     """Generate a send-out email in Emerald writing style."""
-    if not EMERGENT_LLM_KEY:
+    if not ANTHROPIC_API_KEY:
         return {"error": "LLM key not configured"}
 
     greeting = "Hi,"
@@ -924,12 +938,6 @@ Write ONLY the email body (no subject line, no greeting, no signature — those 
 Use notes from the profile to make it personal. Sound like a human recruiter, not a template. Be specific about the candidate's background."""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"sendout-{uuid.uuid4()}",
-            system_message=system_prompt,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
         prompt = f"Write a send-out email body for:\n\nCandidate: {request.candidate_name}"
         if request.candidate_title:
             prompt += f"\nTitle: {request.candidate_title}"
@@ -946,7 +954,13 @@ Use notes from the profile to make it personal. Sound like a human recruiter, no
         if request.job_description:
             prompt += f"\nJob details: {request.job_description[:300]}"
 
-        response = await chat.send_message(UserMessage(text=prompt))
+        msg = await get_claude().messages.create(
+            model="claude-sonnet-4-5-20250514",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        response = msg.content[0].text
         return {"body": response.strip(), "greeting": greeting}
     except Exception as e:
         logger.error(f"Send-out email error: {e}")
