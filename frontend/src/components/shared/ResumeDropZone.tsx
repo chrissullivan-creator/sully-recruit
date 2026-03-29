@@ -46,41 +46,117 @@ async function uploadFile(file: File, session: any) {
   return { file_path: data.path, file_name: file.name };
 }
 
-async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
-  // Try to extract text (only useful for .txt files — PDF/DOC/DOCX are binary)
-  const isTextFile = file_name.toLowerCase().endsWith('.txt');
-  let resumeText = '';
-  if (isTextFile) {
-    try { resumeText = await file.text(); } catch { /* can't read */ }
+// Extract readable text from a DOCX file (ZIP → word/document.xml → strip XML tags)
+async function extractDocxText(file: File): Promise<string> {
+  const arrayBuf = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+
+  // DOCX is a ZIP. Find the local file header for word/document.xml
+  const needle = new TextEncoder().encode('word/document.xml');
+  let xmlStart = -1;
+  let xmlEnd = -1;
+
+  for (let i = 0; i < bytes.length - needle.length; i++) {
+    // Local file header signature: PK\x03\x04
+    if (bytes[i] === 0x50 && bytes[i+1] === 0x4B && bytes[i+2] === 0x03 && bytes[i+3] === 0x04) {
+      const fnLen = bytes[i+26] | (bytes[i+27] << 8);
+      const extraLen = bytes[i+28] | (bytes[i+29] << 8);
+      const fn = decoder.decode(bytes.slice(i+30, i+30+fnLen));
+      if (fn === 'word/document.xml') {
+        xmlStart = i + 30 + fnLen + extraLen;
+        for (let j = xmlStart + 1; j < bytes.length - 3; j++) {
+          if (bytes[j] === 0x50 && bytes[j+1] === 0x4B) { xmlEnd = j; break; }
+        }
+        if (xmlEnd === -1) xmlEnd = bytes.length;
+        break;
+      }
+    }
   }
 
-  // Primary: backend AI parser (only for text files with readable content)
-  if (isTextFile && resumeText && resumeText.length > 50) {
+  if (xmlStart < 0) return '';
+
+  let xmlRaw = bytes.slice(xmlStart, xmlEnd);
+
+  // Try to decompress (most DOCX use deflate compression)
+  try {
+    const ds = new DecompressionStream('deflate-raw');
+    const writer = ds.writable.getWriter();
+    const reader = ds.readable.getReader();
+    writer.write(xmlRaw);
+    writer.close();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const total = chunks.reduce((s, c) => s + c.length, 0);
+    const decompressed = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { decompressed.set(c, off); off += c.length; }
+    xmlRaw = decompressed;
+  } catch { /* stored uncompressed */ }
+
+  // Strip XML tags → clean text
+  return decoder.decode(xmlRaw)
+    .replace(/<w:br[^>]*\/>/g, '\n')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function mapBackendResult(data: any) {
+  return {
+    first_name: data.name?.split(' ')[0] || '',
+    last_name: data.name?.split(' ').slice(1).join(' ') || '',
+    email: data.email || '',
+    phone: data.phone || '',
+    current_company: data.experience?.[0]?.company || '',
+    current_title: data.experience?.[0]?.title || '',
+    location: data.location || '',
+    linkedin_url: data.linkedin || '',
+  };
+}
+
+async function callBackendParser(text: string): Promise<any> {
+  const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resume_text: text }),
+  });
+  const result = await resp.json();
+  if (result.data) return mapBackendResult(result.data);
+  return null;
+}
+
+async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
+  const lower = file_name.toLowerCase();
+
+  // ── Extract text based on file type ────────────────────────────────────────
+  let resumeText = '';
+
+  if (lower.endsWith('.txt')) {
+    try { resumeText = await file.text(); } catch { /* empty */ }
+  } else if (lower.endsWith('.docx')) {
+    try { resumeText = await extractDocxText(file); } catch (e) { console.warn('DOCX extraction failed:', e); }
+  }
+  // PDF and .doc handled by edge function below
+
+  // ── Try backend AI parser with extracted text ──────────────────────────────
+  if (resumeText && resumeText.length > 50) {
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resume_text: resumeText }),
-      });
-      const data = await resp.json();
-      if (data.data) {
-        return {
-          first_name: data.data.name?.split(' ')[0] || '',
-          last_name: data.data.name?.split(' ').slice(1).join(' ') || '',
-          email: data.data.email || '',
-          phone: data.data.phone || '',
-          current_company: data.data.experience?.[0]?.company || '',
-          current_title: data.data.experience?.[0]?.title || '',
-          location: data.data.location || '',
-          linkedin_url: data.data.linkedin || '',
-        };
-      }
+      const result = await callBackendParser(resumeText);
+      if (result) return result;
     } catch (e) {
       console.warn('Backend parse failed:', e);
     }
   }
 
-  // Fallback: edge function (handles PDF/DOC/DOCX via Claude document support)
+  // ── Fallback: edge function (handles PDF natively, DOC as best-effort) ────
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 65000);
   try {
