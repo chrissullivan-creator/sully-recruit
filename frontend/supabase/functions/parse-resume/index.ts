@@ -111,15 +111,103 @@ serve(async (req) => {
             type: "document",
             source: { type: "base64", media_type: "application/pdf", data: base64Data },
           });
-        } else if (lowerName.endsWith(".doc") || lowerName.endsWith(".docx")) {
-          // For DOC/DOCX, send as text extraction since Claude can't read these natively
+        } else if (lowerName.endsWith(".docx")) {
+          // DOCX is a ZIP archive — extract text from word/document.xml
+          // Use the Web Streams API / DecompressionStream or manual ZIP parsing
+          // Deno supports JSZip-like extraction via the zip format
+          let docText = "";
+          try {
+            // DOCX is a ZIP file. Find word/document.xml by locating its local file header.
+            const zipData = fileBytes;
+            const decoder = new TextDecoder("utf-8", { fatal: false });
+
+            // Search for "word/document.xml" in the ZIP central directory
+            const needle = new TextEncoder().encode("word/document.xml");
+            let xmlStart = -1;
+            let xmlEnd = -1;
+
+            // Find the local file header for word/document.xml
+            for (let i = 0; i < zipData.length - needle.length; i++) {
+              // Local file header signature: PK\x03\x04
+              if (zipData[i] === 0x50 && zipData[i+1] === 0x4B && zipData[i+2] === 0x03 && zipData[i+3] === 0x04) {
+                const fnLen = zipData[i+26] | (zipData[i+27] << 8);
+                const extraLen = zipData[i+28] | (zipData[i+29] << 8);
+                const fnBytes = zipData.slice(i+30, i+30+fnLen);
+                const fn = decoder.decode(fnBytes);
+                if (fn === "word/document.xml") {
+                  xmlStart = i + 30 + fnLen + extraLen;
+                  // Find the next PK header or end of file
+                  for (let j = xmlStart + 1; j < zipData.length - 3; j++) {
+                    if (zipData[j] === 0x50 && zipData[j+1] === 0x4B) {
+                      xmlEnd = j;
+                      break;
+                    }
+                  }
+                  if (xmlEnd === -1) xmlEnd = zipData.length;
+                  break;
+                }
+              }
+            }
+
+            if (xmlStart > 0) {
+              let xmlRaw = zipData.slice(xmlStart, xmlEnd);
+
+              // Check if the data is deflate-compressed (compression method at offset 8 of local header)
+              // Most DOCX files use deflate compression
+              // Try to decompress using DecompressionStream
+              try {
+                const ds = new DecompressionStream("deflate-raw");
+                const writer = ds.writable.getWriter();
+                const reader = ds.readable.getReader();
+                writer.write(xmlRaw);
+                writer.close();
+
+                const chunks: Uint8Array[] = [];
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  chunks.push(value);
+                }
+                const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
+                const decompressed = new Uint8Array(totalLen);
+                let offset = 0;
+                for (const chunk of chunks) {
+                  decompressed.set(chunk, offset);
+                  offset += chunk.length;
+                }
+                xmlRaw = decompressed;
+              } catch {
+                // Data might be stored uncompressed, use as-is
+              }
+
+              const xmlText = decoder.decode(xmlRaw);
+              // Strip XML tags, keep text content
+              docText = xmlText
+                .replace(/<w:br[^>]*\/>/g, "\n")           // line breaks
+                .replace(/<\/w:p>/g, "\n")                   // paragraph ends
+                .replace(/<[^>]+>/g, "")                     // all other tags
+                .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+                .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+                .replace(/\n{3,}/g, "\n\n")                  // collapse blank lines
+                .trim();
+            }
+          } catch (e) {
+            console.error("DOCX text extraction error:", e);
+          }
+
+          if (docText.length > 50) {
+            contentBlocks.push({ type: "text", text: `Parse this resume:\n\n${docText.slice(0, 8000)}` });
+          } else {
+            throw new Error("Could not extract text from DOCX file");
+          }
+        } else if (lowerName.endsWith(".doc")) {
+          // Legacy .doc — try to extract readable ASCII text
           const textContent = new TextDecoder("utf-8", { fatal: false }).decode(fileBytes);
-          // Try to extract readable text from the binary
           const readable = textContent.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s{3,}/g, " ").trim();
           if (readable.length > 50) {
             contentBlocks.push({ type: "text", text: `Parse this resume:\n\n${readable.slice(0, 8000)}` });
           } else {
-            throw new Error("Could not extract readable text from DOC/DOCX file");
+            throw new Error("Could not extract readable text from DOC file");
           }
         } else {
           // Text files

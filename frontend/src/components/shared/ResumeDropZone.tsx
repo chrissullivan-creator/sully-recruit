@@ -47,12 +47,15 @@ async function uploadFile(file: File, session: any) {
 }
 
 async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
-  // Try to extract text
+  // Try to extract text (only useful for .txt files — PDF/DOC/DOCX are binary)
+  const isTextFile = file_name.toLowerCase().endsWith('.txt');
   let resumeText = '';
-  try { resumeText = await file.text(); } catch { /* binary file */ }
+  if (isTextFile) {
+    try { resumeText = await file.text(); } catch { /* can't read */ }
+  }
 
-  // Primary: backend AI parser (works best for text-readable content)
-  if (resumeText && resumeText.length > 50) {
+  // Primary: backend AI parser (only for text files with readable content)
+  if (isTextFile && resumeText && resumeText.length > 50) {
     try {
       const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
         method: 'POST',
