@@ -96,29 +96,56 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const [askJoeLoading, setAskJoeLoading] = useState(false);
 
-  const handleAskJoe = async (instructions?: string) => {
+  const handleAskJoe = async () => {
     setAskJoeLoading(true);
     try {
-      const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
-      const resp = await fetch(`${backendUrl}/api/write-sequence-step`, {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (!supabaseUrl || !supabaseKey) throw new Error('Supabase not configured');
+
+      const channelLabel = channelOptions.find(c => c.value === step.channel)?.label ?? step.channel;
+      const prompt = `Write a ${channelLabel} message for step ${index + 1} of ${allSteps.length}. Channel: ${channelLabel}.${jobTitle ? ` Job: ${jobTitle}${jobCompany ? ` at ${jobCompany}` : ''}.` : ''}${sequenceName ? ` Sequence: ${sequenceName}.` : ''} Return ONLY the message body, no preamble.`;
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/ask-joe`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+          'apikey': supabaseKey,
+        },
         body: JSON.stringify({
-          channel: step.channel,
-          step_number: index + 1,
-          total_steps: allSteps.length,
-          is_reply: step.isReply,
-          existing_content: step.content || undefined,
-          job_title: jobTitle || undefined,
-          job_company: jobCompany || undefined,
-          sequence_name: sequenceName || undefined,
-          instructions: instructions || undefined,
+          mode: 'draft_message',
+          messages: [{ role: 'user', content: prompt }],
         }),
       });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
 
-      let content = data.content || '';
+      if (!resp.ok) throw new Error(`Joe returned ${resp.status}`);
+
+      // Read SSE stream
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('No response stream');
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        // Parse SSE lines: "data: {...}\n\n"
+        for (const line of chunk.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              if (parsed.content) fullContent += parsed.content;
+            } catch { /* skip non-JSON lines */ }
+          }
+        }
+      }
+
+      if (!fullContent.trim()) throw new Error('Joe returned an empty response');
+
+      let content = fullContent.trim();
       let subject = step.subject;
 
       // Parse subject from response if it's a first-touch email
