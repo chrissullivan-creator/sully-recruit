@@ -168,12 +168,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     setImporting(true);
     try {
       const BATCH = 50;
-      let newCount = 0;
+      let processed = 0;
 
       if (entityType === 'candidates') {
-        const withEmail = valid.filter(r => !!(r.mapped as any).email);
-        const withoutEmail = valid.filter(r => !(r.mapped as any).email);
-
         const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
           const stage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
@@ -194,30 +191,43 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           return row;
         };
 
-        // Upsert rows that have an email — email conflict = update, not error
-        if (withEmail.length > 0) {
-          const rows = withEmail.map(buildRow);
-          for (let i = 0; i < rows.length; i += BATCH) {
-            const { error } = await supabase.from('candidates').upsert(rows.slice(i, i + BATCH) as any, { onConflict: 'email', ignoreDuplicates: false });
-            if (error) throw error;
-            newCount += Math.min(BATCH, rows.length - i);
-          }
+        // Prefetch existing emails
+        const emailsInCsv = valid.map(r => (r.mapped as any).email?.toLowerCase().trim()).filter(Boolean);
+        const { data: existing } = await supabase
+          .from('candidates').select('id, email').in('email', emailsInCsv);
+        const existingMap = new Map((existing ?? []).map((e: any) => [e.email?.toLowerCase().trim(), e.id]));
+
+        const toUpdate = valid.filter(r => {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          return e && existingMap.has(e);
+        });
+        const toInsert = valid.filter(r => {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          return !e || !existingMap.has(e);
+        });
+
+        // Update existing records one by one (update by id to avoid constraint issues)
+        for (const r of toUpdate) {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          const id = existingMap.get(e);
+          const row = buildRow(r);
+          delete row.user_id; delete row.status; delete row.stage; delete row.skills;
+          await supabase.from('candidates').update(row).eq('id', id);
+          processed++;
         }
-        // Insert rows without email (no unique constraint to conflict on)
-        if (withoutEmail.length > 0) {
-          const rows = withoutEmail.map(buildRow);
+
+        // Insert new records in batches
+        if (toInsert.length > 0) {
+          const rows = toInsert.map(buildRow);
           for (let i = 0; i < rows.length; i += BATCH) {
             const { error } = await supabase.from('candidates').insert(rows.slice(i, i + BATCH) as any);
             if (error) throw error;
-            newCount += Math.min(BATCH, rows.length - i);
+            processed += Math.min(BATCH, rows.length - i);
           }
         }
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
 
       } else if (entityType === 'contacts') {
-        const withEmail = valid.filter(r => !!(r.mapped as any).email);
-        const withoutEmail = valid.filter(r => !(r.mapped as any).email);
-
         const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
           const row: Record<string, any> = {
@@ -233,20 +243,35 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           return row;
         };
 
-        if (withEmail.length > 0) {
-          const rows = withEmail.map(buildRow);
-          for (let i = 0; i < rows.length; i += BATCH) {
-            const { error } = await supabase.from('contacts').upsert(rows.slice(i, i + BATCH) as any, { onConflict: 'email', ignoreDuplicates: false });
-            if (error) throw error;
-            newCount += Math.min(BATCH, rows.length - i);
-          }
+        const emailsInCsv = valid.map(r => (r.mapped as any).email?.toLowerCase().trim()).filter(Boolean);
+        const { data: existing } = await supabase
+          .from('contacts').select('id, email').in('email', emailsInCsv);
+        const existingMap = new Map((existing ?? []).map((e: any) => [e.email?.toLowerCase().trim(), e.id]));
+
+        const toUpdate = valid.filter(r => {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          return e && existingMap.has(e);
+        });
+        const toInsert = valid.filter(r => {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          return !e || !existingMap.has(e);
+        });
+
+        for (const r of toUpdate) {
+          const e = (r.mapped as any).email?.toLowerCase().trim();
+          const id = existingMap.get(e);
+          const row = buildRow(r);
+          delete row.user_id;
+          await supabase.from('contacts').update(row).eq('id', id);
+          processed++;
         }
-        if (withoutEmail.length > 0) {
-          const rows = withoutEmail.map(buildRow);
+
+        if (toInsert.length > 0) {
+          const rows = toInsert.map(buildRow);
           for (let i = 0; i < rows.length; i += BATCH) {
             const { error } = await supabase.from('contacts').insert(rows.slice(i, i + BATCH) as any);
             if (error) throw error;
-            newCount += Math.min(BATCH, rows.length - i);
+            processed += Math.min(BATCH, rows.length - i);
           }
         }
         queryClient.invalidateQueries({ queryKey: ['contacts'] });
@@ -269,12 +294,12 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         for (let i = 0; i < rows.length; i += BATCH) {
           const { error } = await supabase.from('jobs').insert(rows.slice(i, i + BATCH) as any);
           if (error) throw error;
-          newCount += Math.min(BATCH, rows.length - i);
+          processed += Math.min(BATCH, rows.length - i);
         }
         queryClient.invalidateQueries({ queryKey: ['jobs'] });
       }
 
-      setImportedCount(newCount);
+      setImportedCount(processed);
       setStep('done');
     } catch (err: any) {
       toast.error(err.message || 'Import failed');
