@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
+const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ask-joe`;
 
 type SearchMode = 'candidate_search' | 'contact_search' | 'resume_search';
@@ -50,17 +51,33 @@ export function AskJoeSearch({ open, onOpenChange }: Props) {
     let assistantSoFar = '';
 
     try {
-      const resp = await fetch(CHAT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
-          mode: mode,
-        }),
-      });
+      let resp: Response;
+
+      if (mode === 'resume_search') {
+        // Use our backend with Claude
+        resp = await fetch(`${BACKEND_URL}/api/resume-search-ai`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: query,
+            messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
+            session_id: `askjoe-${Date.now()}`,
+          }),
+        });
+      } else {
+        // Try Supabase edge function for candidate/contact search
+        resp = await fetch(CHAT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
+            mode: mode,
+          }),
+        });
+      }
 
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);

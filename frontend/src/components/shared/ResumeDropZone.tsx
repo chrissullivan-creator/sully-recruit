@@ -266,7 +266,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       } else {
         const userId = (await supabase.auth.getUser()).data.user?.id;
         const { error } = await supabase.from('candidates').insert({
-          owner_user_id:   userId,
+          owner_id:        userId,
           first_name:      parsed.first_name.trim() || null,
           last_name:       parsed.last_name.trim() || null,
           full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || null,
