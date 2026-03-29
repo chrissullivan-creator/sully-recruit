@@ -33,8 +33,6 @@ interface ParsedData {
   error?: string;
 }
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.REACT_APP_BACKEND_URL || '';
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function uploadFile(file: File, session: any) {
@@ -46,177 +44,20 @@ async function uploadFile(file: File, session: any) {
   return { file_path: data.path, file_name: file.name };
 }
 
-// Extract readable text from a DOCX file (ZIP → word/document.xml → strip XML tags)
-async function extractDocxText(file: File): Promise<string> {
-  const arrayBuf = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuf);
-  const decoder = new TextDecoder('utf-8', { fatal: false });
-
-  // DOCX is a ZIP. Find the local file header for word/document.xml
-  const needle = new TextEncoder().encode('word/document.xml');
-  let xmlStart = -1;
-  let xmlEnd = -1;
-
-  for (let i = 0; i < bytes.length - needle.length; i++) {
-    // Local file header signature: PK\x03\x04
-    if (bytes[i] === 0x50 && bytes[i+1] === 0x4B && bytes[i+2] === 0x03 && bytes[i+3] === 0x04) {
-      const fnLen = bytes[i+26] | (bytes[i+27] << 8);
-      const extraLen = bytes[i+28] | (bytes[i+29] << 8);
-      const fn = decoder.decode(bytes.slice(i+30, i+30+fnLen));
-      if (fn === 'word/document.xml') {
-        xmlStart = i + 30 + fnLen + extraLen;
-        for (let j = xmlStart + 1; j < bytes.length - 3; j++) {
-          if (bytes[j] === 0x50 && bytes[j+1] === 0x4B) { xmlEnd = j; break; }
-        }
-        if (xmlEnd === -1) xmlEnd = bytes.length;
-        break;
-      }
-    }
-  }
-
-  if (xmlStart < 0) return '';
-
-  let xmlRaw = bytes.slice(xmlStart, xmlEnd);
-
-  // Try to decompress (most DOCX use deflate compression)
-  try {
-    const ds = new DecompressionStream('deflate-raw');
-    const writer = ds.writable.getWriter();
-    const reader = ds.readable.getReader();
-    writer.write(xmlRaw);
-    writer.close();
-    const chunks: Uint8Array[] = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const total = chunks.reduce((s, c) => s + c.length, 0);
-    const decompressed = new Uint8Array(total);
-    let off = 0;
-    for (const c of chunks) { decompressed.set(c, off); off += c.length; }
-    xmlRaw = decompressed;
-  } catch { /* stored uncompressed */ }
-
-  // Strip XML tags → clean text
-  return decoder.decode(xmlRaw)
-    .replace(/<w:br[^>]*\/>/g, '\n')
-    .replace(/<\/w:p>/g, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function mapBackendResult(data: any) {
-  return {
-    first_name: data.name?.split(' ')[0] || '',
-    last_name: data.name?.split(' ').slice(1).join(' ') || '',
-    email: data.email || '',
-    phone: data.phone || '',
-    current_company: data.experience?.[0]?.company || '',
-    current_title: data.experience?.[0]?.title || '',
-    location: data.location || '',
-    linkedin_url: data.linkedin || '',
-  };
-}
-
-async function callBackendParser(text: string): Promise<any> {
-  const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
+async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resume_text: text }),
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ file_path, file_name }),
   });
   const result = await resp.json();
-  if (result.data) return mapBackendResult(result.data);
-  return null;
-}
-
-async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
-  const lower = file_name.toLowerCase();
-
-  // ── Extract text based on file type ────────────────────────────────────────
-  let resumeText = '';
-
-  if (lower.endsWith('.txt')) {
-    try { resumeText = await file.text(); } catch { /* empty */ }
-  } else if (lower.endsWith('.docx')) {
-    try { resumeText = await extractDocxText(file); } catch (e) { console.warn('DOCX extraction failed:', e); }
-  }
-  // PDF and .doc handled by edge function below
-
-  // ── Try backend AI parser with extracted text ──────────────────────────────
-  if (BACKEND_URL && resumeText && resumeText.length > 50) {
-    try {
-      const result = await callBackendParser(resumeText);
-      if (result) return result;
-    } catch (e) {
-      console.warn('Backend parse failed:', e);
-    }
-  }
-
-  // ── Fallback: edge function (handles PDF natively, DOC as best-effort) ────
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 65000);
-  try {
-    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ file_path, file_name }),
-    });
-    const result = await resp.json();
-    console.log('[ResumeDropZone] parsed result:', result);
-    if (resp.ok) {
-      // Support both { parsed: { ... } } and flat { first_name, ... } shapes
-      const data = result.parsed || result;
-      if (data.first_name || data.last_name || data.email || data.name) {
-        return {
-          first_name: data.first_name || data.name?.split(' ')[0] || '',
-          last_name: data.last_name || data.name?.split(' ').slice(1).join(' ') || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          current_company: data.current_company || data.company || data.experience?.[0]?.company || '',
-          current_title: data.current_title || data.title || data.experience?.[0]?.title || '',
-          location: data.location || '',
-          linkedin_url: data.linkedin_url || data.linkedin || '',
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('Edge function parse failed:', e);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  return null;
-}
-
-async function matchCandidate(email: string, phone: string, session: any): Promise<{ id: string; name: string } | null> {
-  if (!email && !phone) return null;
-  try {
-    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-entity`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, phone }),
-    });
-    const data = await resp.json();
-    if (data.matched && data.entity_type === 'candidate') {
-      return { id: data.entity_id, name: data.entity_name || '' };
-    }
-  } catch (e) {
-    console.warn('Match-entity failed:', e);
-  }
-  return null;
+  console.log('[ResumeDropZone] parsed result:', result);
+  if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
+  return { ...result.parsed, _candidate_id: result.candidate_id };
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -289,20 +130,9 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           linkedin_url:    data?.linkedin_url || '',
           file_name,
           file_path,
-          candidate_id:    null,
-          match_label:     null,
+          candidate_id:    data?._candidate_id ?? null,
+          match_label:     data?._candidate_id ? `${data.first_name} ${data.last_name}`.trim() : null,
         };
-
-        // Check for existing candidate
-        const match = await matchCandidate(entry.email, entry.phone, session);
-        if (match) {
-          entry.candidate_id = match.id;
-          entry.match_label = match.name || `${entry.first_name} ${entry.last_name}`.trim();
-        }
-
-        if (!data) {
-          toast.info(`Could not auto-parse ${file_name} — fill in manually`);
-        }
 
         parsed.push(entry);
       } catch (err: any) {
@@ -328,20 +158,14 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     }
   }, []);
 
-  // ── Save a single entry (insert or update) ────────────────────────────────
+  // ── Save a single entry (update user-edited fields, or insert if no candidate_id) ──
   const saveCandidate = async (entry: ParsedData): Promise<void> => {
     if (!entry.first_name.trim() && !entry.last_name.trim()) {
       throw new Error('Name is required');
     }
 
     if (entry.candidate_id) {
-      // Update existing — preserve linkedin_url if new one is empty
-      const { data: existing } = await supabase
-        .from('candidates')
-        .select('linkedin_url')
-        .eq('id', entry.candidate_id)
-        .single();
-
+      // process-resume already created/updated the record — just apply user edits
       const { error } = await supabase
         .from('candidates')
         .update({
@@ -353,13 +177,13 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           current_company: entry.current_company.trim() || undefined,
           current_title:   entry.current_title.trim() || undefined,
           location:        entry.location.trim() || undefined,
-          linkedin_url:    entry.linkedin_url.trim() || existing?.linkedin_url || undefined,
+          linkedin_url:    entry.linkedin_url.trim() || undefined,
           updated_at:      new Date().toISOString(),
         } as any)
         .eq('id', entry.candidate_id);
       if (error) throw error;
     } else {
-      // Insert new
+      // No candidate_id means process-resume didn't create one — insert new
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const { error } = await supabase.from('candidates').insert({
         owner_id:        userId,
