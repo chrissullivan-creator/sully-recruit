@@ -222,16 +222,17 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       try {
         const { file_path, file_name } = await uploadFile(file, session);
 
-        // Extract text from file for backend AI parser
+        // Extract text from file for backend AI parser (works well for .txt)
         let resumeText = '';
+        const isTextFile = file.name.endsWith('.txt');
         try {
           resumeText = await file.text();
         } catch { /* can't read text */ }
 
         let parsedData: any = null;
 
-        // Primary: Use backend AI parser (same as single-file mode)
-        if (resumeText && resumeText.length > 50) {
+        // Primary: Use backend AI parser for text files with readable content
+        if (isTextFile && resumeText && resumeText.length > 50) {
           try {
             const aiResp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
               method: 'POST',
@@ -256,7 +257,34 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           }
         }
 
-        if (!parsedData) throw new Error('Could not parse resume text');
+        // Fallback: Use parse-resume edge function (handles PDF, DOC, DOCX via Eden AI)
+        if (!parsedData) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 65000);
+          try {
+            const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
+            const resp = await fetch(parseUrl, {
+              method: 'POST',
+              signal: ctrl.signal,
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ file_path, file_name }),
+            });
+            const result = await resp.json();
+            if (resp.ok && result.parsed) {
+              parsedData = result.parsed;
+            }
+          } catch (e) {
+            console.warn(`Edge function parse failed for ${file_name}:`, e);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+
+        if (!parsedData) throw new Error('Could not parse resume');
 
         // Create candidate record directly
         const insertData = {
