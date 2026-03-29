@@ -195,7 +195,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           phone:           entry.phone.trim() || undefined,
           current_company: entry.current_company.trim() || undefined,
           current_title:   entry.current_title.trim() || undefined,
-          location:        entry.location.trim() || undefined,
+          location_text:   entry.location.trim() || undefined,
           linkedin_url:    entry.linkedin_url.trim() || undefined,
           updated_at:      new Date().toISOString(),
         } as any)
@@ -213,7 +213,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         phone:           entry.phone.trim() || null,
         current_company: entry.current_company.trim() || null,
         current_title:   entry.current_title.trim() || null,
-        location:        entry.location.trim() || null,
+        location_text:   entry.location.trim() || null,
         linkedin_url:    entry.linkedin_url.trim() || null,
         status:          'new',
       } as any);
