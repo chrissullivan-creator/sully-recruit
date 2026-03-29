@@ -57,6 +57,7 @@ interface CampaignStepItemProps {
   jobTitle?: string;
   jobCompany?: string;
   sequenceName?: string;
+  sequenceDescription?: string;
 }
 
 const isLinkedInChannel = (ch: ChannelType) =>
@@ -74,7 +75,7 @@ const channelToAccountTypes = (ch: ChannelType): string[] => {
   return [];
 };
 
-export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete, jobTitle, jobCompany, sequenceName }: CampaignStepItemProps) => {
+export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete, jobTitle, jobCompany, sequenceName, sequenceDescription }: CampaignStepItemProps) => {
   const {
     attributes,
     listeners,
@@ -104,7 +105,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
       if (!supabaseUrl || !supabaseKey) throw new Error('Supabase not configured');
 
       const channelLabel = channelOptions.find(c => c.value === step.channel)?.label ?? step.channel;
-      const prompt = `Write a ${channelLabel} message for step ${index + 1} of ${allSteps.length}. Channel: ${channelLabel}.${jobTitle ? ` Job: ${jobTitle}${jobCompany ? ` at ${jobCompany}` : ''}.` : ''}${sequenceName ? ` Sequence: ${sequenceName}.` : ''} Return ONLY the message body, no preamble.`;
+      const prompt = `Write a ${channelLabel} message for step ${index + 1} of ${allSteps.length}. Channel: ${channelLabel}.${jobTitle ? ` Job: ${jobTitle}${jobCompany ? ` at ${jobCompany}` : ''}.` : ''}${sequenceName ? ` Sequence: ${sequenceName}.` : ''}${sequenceDescription ? ` Sequence description: "${sequenceDescription}".` : ''} Return ONLY the message body, no preamble.`;
 
       const resp = await fetch(`${supabaseUrl}/functions/v1/ask-joe`, {
         method: 'POST',
