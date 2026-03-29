@@ -66,8 +66,8 @@ const Candidates = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTagFilter, setJobTagFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('all');
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [sortField, setSortField] = useState<SortField>('created');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
