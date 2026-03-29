@@ -39,7 +39,6 @@ interface BatchResult {
   parsed?: Partial<ParsedData>;
 }
 
-const PROCESS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`;
 const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
 
 export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
@@ -145,14 +144,15 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           }
         }
 
-        // Fallback: Try Supabase edge function
+        // Fallback: Try Supabase parse-resume edge function
         if (!parsedData) {
           try {
             const ctrl1 = new AbortController();
             const t1 = setTimeout(() => ctrl1.abort(), 65000);
             let resp: Response;
+            const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
             try {
-              resp = await fetch(PROCESS_URL, {
+              resp = await fetch(parseUrl, {
                 method: 'POST',
                 signal: ctrl1.signal,
                 headers: {
@@ -168,11 +168,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
             let result: any;
             try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status}`); }
-            if (resp.ok && result.success && result.parsed) {
+            if (resp.ok && result.parsed) {
               parsedData = result.parsed;
-              if (result.candidate_id) {
-                parsedData.candidate_id = result.candidate_id;
-              }
             }
           } catch (e) {
             console.warn('Edge function parse also failed:', e);
@@ -218,40 +215,107 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     setBatchDone(false);
 
     const results: BatchResult[] = [];
+    const userId = (await supabase.auth.getUser()).data.user?.id;
 
     for (let i = 0; i < valid.length; i++) {
       const file = valid[i];
       try {
         const { file_path, file_name } = await uploadFile(file, session);
 
-        const ctrl2 = new AbortController();
-        const t2 = setTimeout(() => ctrl2.abort(), 65000);
-        let resp: Response;
+        // Extract text from file for backend AI parser (works well for .txt)
+        let resumeText = '';
+        const isTextFile = file.name.endsWith('.txt');
         try {
-          resp = await fetch(PROCESS_URL, {
-            method: 'POST',
-            signal: ctrl2.signal,
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file_path, file_name }),
-          });
-        } finally {
-          clearTimeout(t2);
+          resumeText = await file.text();
+        } catch { /* can't read text */ }
+
+        let parsedData: any = null;
+
+        // Primary: Use backend AI parser for text files with readable content
+        if (isTextFile && resumeText && resumeText.length > 50) {
+          try {
+            const aiResp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ resume_text: resumeText }),
+            });
+            const aiData = await aiResp.json();
+            if (aiData.data) {
+              parsedData = {
+                first_name: aiData.data.name?.split(' ')[0] || '',
+                last_name: aiData.data.name?.split(' ').slice(1).join(' ') || '',
+                email: aiData.data.email || '',
+                phone: aiData.data.phone || '',
+                current_company: aiData.data.experience?.[0]?.company || '',
+                current_title: aiData.data.experience?.[0]?.title || '',
+                location: aiData.data.location || '',
+                linkedin_url: aiData.data.linkedin || '',
+              };
+            }
+          } catch (e) {
+            console.warn(`Backend parse failed for ${file_name}:`, e);
+          }
         }
 
-        let result: any;
-        try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status}`); }
-        if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
+        // Fallback: Use parse-resume edge function (handles PDF, DOC, DOCX via Eden AI)
+        if (!parsedData) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 65000);
+          try {
+            const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
+            const resp = await fetch(parseUrl, {
+              method: 'POST',
+              signal: ctrl.signal,
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ file_path, file_name }),
+            });
+            const result = await resp.json();
+            if (resp.ok && result.parsed) {
+              parsedData = result.parsed;
+            }
+          } catch (e) {
+            console.warn(`Edge function parse failed for ${file_name}:`, e);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+
+        if (!parsedData) throw new Error('Could not parse resume');
+
+        // Create candidate record directly
+        const insertData = {
+          owner_id: userId,
+          first_name: parsedData.first_name || null,
+          last_name: parsedData.last_name || null,
+          full_name: `${parsedData.first_name || ''} ${parsedData.last_name || ''}`.trim() || null,
+          email: parsedData.email || null,
+          phone: parsedData.phone || null,
+          current_company: parsedData.current_company || null,
+          current_title: parsedData.current_title || null,
+          linkedin_url: parsedData.linkedin_url || null,
+          status: 'new',
+        } as any;
+        if (parsedData.location) {
+          insertData.location_text = parsedData.location;
+        }
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from('candidates')
+          .insert(insertData)
+          .select('id')
+          .single();
+        if (insertErr) throw insertErr;
 
         results.push({
           file_name,
           file_path,
           success: true,
-          candidate_id: result.candidate_id,
-          parsed: result.parsed,
+          candidate_id: inserted.id,
+          parsed: parsedData,
         });
       } catch (err: any) {
         results.push({
