@@ -10,8 +10,9 @@ import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSear
 import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -48,6 +49,7 @@ const Contacts = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
+  const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
   const { data: contacts = [], isLoading } = useContacts();
   const { data: jobs = [] } = useJobs();
 
@@ -319,9 +321,33 @@ const Contacts = () => {
                       })() : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>
-                        <ListTodo className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Fetch email & LinkedIn history" disabled={fetchingHistoryId === contact.id}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setFetchingHistoryId(contact.id);
+                            try {
+                              const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-entity-history`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+                                body: JSON.stringify({ contact_id: contact.id }),
+                              });
+                              const data = await resp.json();
+                              if (data.error) throw new Error(data.error);
+                              const total = (data.email_history?.inserted ?? 0) + (data.linkedin_history?.inserted ?? 0);
+                              toast(total > 0 ? `Found ${total} historical message${total !== 1 ? 's' : ''}` : 'No new history found');
+                            } catch (err: any) {
+                              toast.error(err.message || 'History fetch failed');
+                            } finally {
+                              setFetchingHistoryId(null);
+                            }
+                          }}>
+                          {fetchingHistoryId === contact.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>
+                          <ListTodo className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
