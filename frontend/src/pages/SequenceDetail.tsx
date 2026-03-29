@@ -42,11 +42,16 @@ const statusColors: Record<string, string> = {
   completed: 'bg-info/10 text-info border-info/20',
 };
 
+// Maps UI channel type → DB step_type
 const channelToStepType = (channel: ChannelType): string => {
   const map: Record<ChannelType, string> = {
-    linkedin_recruiter: 'linkedin_inmail', sales_nav: 'linkedin_inmail',
-    linkedin_message: 'linkedin_message', linkedin_connection: 'linkedin_connection',
-    email: 'email', sms: 'sms', phone: 'call',
+    linkedin_recruiter: 'recruiter_inmail',
+    sales_nav: 'sales_nav_inmail',        // ← was 'linkedin_inmail', now correct
+    linkedin_message: 'linkedin_message',
+    linkedin_connection: 'linkedin_connection',
+    email: 'email',
+    sms: 'sms',
+    phone: 'call',
   };
   return map[channel] || channel;
 };
@@ -56,12 +61,16 @@ const channelToDbChannel = (channel: ChannelType): string => {
   return channel;
 };
 
+// Maps DB step_type + channel → UI ChannelType
 const dbChannelToChannel = (stepType: string, channel: string | null): ChannelType => {
-  if (stepType === 'linkedin_inmail') return 'linkedin_recruiter';
-  if (stepType === 'linkedin_message') return 'linkedin_message';
-  if (stepType === 'linkedin_connection') return 'linkedin_connection';
+  if (stepType === 'sales_nav_inmail') return 'sales_nav';           // ← NEW
+  if (stepType === 'recruiter_inmail' || stepType === 'linkedin_inmail') return 'linkedin_recruiter';
+  if (stepType === 'linkedin_message' || stepType === 'classic_message') return 'linkedin_message';
+  if (stepType === 'linkedin_connection' || stepType === 'connection_request') return 'linkedin_connection';
   if (channel === 'sms' || stepType === 'sms') return 'sms';
   if (channel === 'phone' || stepType === 'call') return 'phone';
+  if (channel === 'email' || stepType === 'email') return 'email';
+  if (channel === 'linkedin') return 'linkedin_message';
   return 'email';
 };
 
