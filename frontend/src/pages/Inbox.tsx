@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -656,6 +656,33 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
   );
 }
 
+// ---------- Helpers ----------
+function stripEmailThread(body: string): string {
+  // Remove everything after "On ... wrote:" quote block
+  const patterns = [
+    /\r?\n\s*On .{10,80} wrote:\s*\r?\n[\s\S]*/,
+    /\r?\n\s*----+ ?Original Message ?----+[\s\S]*/i,
+    /\r?\n\s*From: .+[\s\S]*/,
+    /\r?\n\s*>.*(\r?\n\s*>.*)*/,
+  ];
+  let result = body;
+  for (const p of patterns) {
+    const m = result.match(p);
+    if (m && m.index !== undefined && m.index > 20) {
+      result = result.slice(0, m.index).trimEnd();
+      break;
+    }
+  }
+  return result;
+}
+
+function getInitials(name: string | null | undefined): string {
+  if (!name) return '??';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
 // ---------- Message Detail ----------
 function MessagePane({ threadId }: { threadId: string | null }) {
   const queryClient = useQueryClient();
@@ -664,8 +691,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const [showEntity, setShowEntity] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogType, setCreateDialogType] = useState<'candidate' | 'contact'>('candidate');
-  const messagesEndRef = { current: null as HTMLDivElement | null };
-
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
     enabled: !!threadId,
@@ -688,6 +714,13 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       return data as Message[];
     },
   });
+
+  // Auto-scroll to bottom on load and when new messages arrive
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, threadId]);
 
   const handleMarkRead = async () => {
     if (!threadId || thread?.is_read) return;
@@ -875,83 +908,126 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         )}
 
         {/* Messages scroll */}
-        <ScrollArea className="flex-1 p-6">
+        <ScrollArea className="flex-1">
+          <div className="p-6">
           {msgsLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 mb-3 opacity-20" />
-              <p className="text-sm">No messages in this thread yet</p>
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground select-none">
+              <div className="relative">
+                <MessageSquare className="h-12 w-12 opacity-20 animate-pulse" />
+              </div>
+              <p className="text-sm font-medium mt-4">Conversation starting...</p>
+              <p className="text-xs opacity-60 mt-1">Messages will appear here as they sync</p>
             </div>
           ) : (
-            <div className="space-y-1 max-w-2xl mx-auto">
+            <div className="max-w-2xl mx-auto">
               {messages.map((msg, idx) => {
-                const isInbound = msg.direction === 'inbound';
+                const isOutbound = msg.direction === 'outbound';
+                const isInbound = !isOutbound;
                 const msgDate = getDateKey(msg);
                 const prevDate = idx > 0 ? getDateKey(messages[idx - 1]) : null;
                 const showDateSep = msgDate !== prevDate;
                 const msgTime = msg.sent_at || msg.received_at || msg.created_at;
 
+                // Grouping: same sender as previous message?
+                const prevMsg = idx > 0 ? messages[idx - 1] : null;
+                const sameSenderAsPrev = prevMsg && prevMsg.direction === msg.direction && !showDateSep;
+
+                // Determine display body
+                let displayBody = msg.body || '';
+                if (!displayBody && msg.subject) displayBody = msg.subject;
+                if (displayBody && thread.channel === 'email') displayBody = stripEmailThread(displayBody);
+
+                // Outbound sender initials from sender_name
+                const outboundInitials = getInitials(msg.sender_name || 'You');
+                // Inbound initials from sender or entity name
+                const inboundInitials = getInitials(msg.sender_name || entityName);
+
                 return (
                   <div key={msg.id}>
-                    {/* Date separator */}
+                    {/* Date divider */}
                     {showDateSep && (
-                      <div className="flex items-center gap-3 py-3">
-                        <div className="flex-1 h-px bg-border" />
-                        <span className="text-[10px] font-medium text-muted-foreground">
-                          {format(new Date(msgTime), 'EEEE, MMM d')}
+                      <div className="flex items-center gap-3 py-4 my-2">
+                        <div className="flex-1 h-px bg-border/60" />
+                        <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">
+                          {format(new Date(msgTime), 'MMMM d')}
                         </span>
-                        <div className="flex-1 h-px bg-border" />
+                        <div className="flex-1 h-px bg-border/60" />
                       </div>
                     )}
 
-                    {/* Message bubble */}
-                    <div className={cn('flex gap-2.5 mb-3', isInbound ? 'justify-start' : 'justify-end')}>
+                    {/* Chat bubble */}
+                    <div className={cn(
+                      'flex items-end gap-2',
+                      isOutbound ? 'justify-end' : 'justify-start',
+                      sameSenderAsPrev ? 'mt-0.5' : 'mt-3'
+                    )}>
+                      {/* Inbound avatar */}
                       {isInbound && (
-                        <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
-                          <span className="text-[10px] font-semibold text-muted-foreground">
-                            {(msg.sender_name || entityName || '?').slice(0, 2).toUpperCase()}
-                          </span>
+                        <div className="w-7 shrink-0">
+                          {!sameSenderAsPrev ? (
+                            <div className="h-7 w-7 rounded-full bg-[#2A5C42] flex items-center justify-center">
+                              <span className="text-[10px] font-bold text-white">{inboundInitials}</span>
+                            </div>
+                          ) : <div className="h-7" />}
                         </div>
                       )}
-                      <div className={cn(
-                        'max-w-[78%] rounded-2xl px-4 py-3',
-                        isInbound
-                          ? 'bg-muted rounded-tl-sm'
-                          : 'bg-accent/10 border border-accent/20 rounded-tr-sm'
-                      )}>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={cn('text-xs font-medium', isInbound ? 'text-foreground/80' : 'text-accent')}>
-                            {isInbound ? (msg.sender_name || entityName || 'Sender') : 'You'}
-                          </span>
-                          {!isInbound && (
-                            <Send className="h-2.5 w-2.5 text-accent/60" />
+
+                      <div className={cn('max-w-[75%] flex flex-col', isOutbound ? 'items-end' : 'items-start')}>
+                        {/* Bubble */}
+                        <div className={cn(
+                          'px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words',
+                          isOutbound
+                            ? 'bg-[#2A5C42] text-white rounded-2xl rounded-br-md'
+                            : 'bg-secondary text-foreground rounded-2xl rounded-bl-md'
+                        )}>
+                          {msg.subject && thread.channel === 'email' && displayBody !== msg.subject && (
+                            <p className={cn(
+                              'text-xs font-semibold mb-1.5',
+                              isOutbound ? 'text-white/80' : 'text-foreground/70'
+                            )}>{msg.subject}</p>
                           )}
-                          <span className="text-[10px] text-muted-foreground ml-auto">
-                            {format(new Date(msgTime), 'h:mm a')}
-                          </span>
+                          {displayBody || <span className="italic opacity-50">(No content)</span>}
                         </div>
-                        {msg.subject && thread.channel === 'email' && (
-                          <p className="text-xs font-semibold text-foreground mb-1.5">{msg.subject}</p>
+
+                        {/* Sender + timestamp below bubble */}
+                        {!sameSenderAsPrev && (
+                          <div className={cn(
+                            'flex items-center gap-1.5 mt-1 px-1',
+                            isOutbound ? 'flex-row-reverse' : 'flex-row'
+                          )}>
+                            <span className="text-[10px] text-muted-foreground">
+                              {isOutbound ? (msg.sender_name || 'You') : (msg.sender_name || entityName || 'Sender')}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/50">·</span>
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {format(new Date(msgTime), 'h:mm a')}
+                            </span>
+                          </div>
                         )}
-                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                          {msg.body || '(No content)'}
-                        </p>
                       </div>
-                      {!isInbound && (
-                        <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
-                          <Send className="h-3 w-3 text-accent" />
+
+                      {/* Outbound avatar */}
+                      {isOutbound && (
+                        <div className="w-7 shrink-0">
+                          {!sameSenderAsPrev ? (
+                            <div className="h-7 w-7 rounded-full bg-[#C9A84C] flex items-center justify-center">
+                              <span className="text-[10px] font-bold text-white">{outboundInitials}</span>
+                            </div>
+                          ) : <div className="h-7" />}
                         </div>
                       )}
                     </div>
                   </div>
                 );
               })}
-              <div ref={(el) => { messagesEndRef.current = el; }} />
+              <div ref={messagesEndRef} />
             </div>
           )}
+          </div>
         </ScrollArea>
 
         {/* Reply */}
