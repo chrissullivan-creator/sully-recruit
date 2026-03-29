@@ -26,7 +26,7 @@ db = client[os.environ['DB_NAME']]
 # Supabase config
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+ANTHROPIC_API_KEY = os.environ.get('anthropic_api_key', '')
 claude_client: anthropic.AsyncAnthropic | None = None
 
 def get_claude() -> anthropic.AsyncAnthropic:
