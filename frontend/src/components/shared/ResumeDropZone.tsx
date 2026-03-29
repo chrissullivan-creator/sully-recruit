@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Upload, Loader2, FileText, CheckCircle, XCircle, X } from 'lucide-react';
+import { Upload, Loader2, FileText, CheckCircle, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -28,60 +28,138 @@ interface ParsedData {
   file_name: string;
   file_path: string;
   candidate_id: string | null;
-}
-
-interface BatchResult {
-  file_name: string;
-  file_path: string;
-  success: boolean;
+  match_label: string | null;
+  saved?: boolean;
   error?: string;
-  candidate_id?: string;
-  parsed?: Partial<ParsedData>;
 }
 
 const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function uploadFile(file: File, session: any) {
+  const storagePath = `${session.user.id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  const { data, error } = await supabase.storage
+    .from('resumes')
+    .upload(storagePath, file, { contentType: file.type || 'application/pdf', upsert: false });
+  if (error) throw new Error('Upload failed: ' + error.message);
+  return { file_path: data.path, file_name: file.name };
+}
+
+async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
+  // Try to extract text
+  let resumeText = '';
+  try { resumeText = await file.text(); } catch { /* binary file */ }
+
+  // Primary: backend AI parser (works best for text-readable content)
+  if (resumeText && resumeText.length > 50) {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume_text: resumeText }),
+      });
+      const data = await resp.json();
+      if (data.data) {
+        return {
+          first_name: data.data.name?.split(' ')[0] || '',
+          last_name: data.data.name?.split(' ').slice(1).join(' ') || '',
+          email: data.data.email || '',
+          phone: data.data.phone || '',
+          current_company: data.data.experience?.[0]?.company || '',
+          current_title: data.data.experience?.[0]?.title || '',
+          location: data.data.location || '',
+          linkedin_url: data.data.linkedin || '',
+        };
+      }
+    } catch (e) {
+      console.warn('Backend parse failed:', e);
+    }
+  }
+
+  // Fallback: edge function (handles PDF/DOC/DOCX via Claude document support)
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 65000);
+  try {
+    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ file_path, file_name }),
+    });
+    const result = await resp.json();
+    if (resp.ok && result.parsed) return result.parsed;
+  } catch (e) {
+    console.warn('Edge function parse failed:', e);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return null;
+}
+
+async function matchCandidate(email: string, phone: string, session: any): Promise<{ id: string; name: string } | null> {
+  if (!email && !phone) return null;
+  try {
+    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-entity`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, phone }),
+    });
+    const data = await resp.json();
+    if (data.matched && data.entity_type === 'candidate') {
+      return { id: data.entity_id, name: data.entity_name || '' };
+    }
+  } catch (e) {
+    console.warn('Match-entity failed:', e);
+  }
+  return null;
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   const qc = useQueryClient();
   const [dragging, setDragging] = useState(false);
 
-  // Single-file review mode
-  const [parsed, setParsed] = useState<ParsedData | null>(null);
+  // Parse phase
+  const [parsing, setParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState(0);
+  const [parseTotal, setParseTotal] = useState(0);
+
+  // Review phase — unified queue for single and batch
+  const [queue, setQueue] = useState<ParsedData[]>([]);
+  const [reviewIndex, setReviewIndex] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
+  const [allDone, setAllDone] = useState(false);
 
-  // Batch mode
-  const [batchMode, setBatchMode] = useState(false);
-  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
-  const [batchProgress, setBatchProgress] = useState(0);
-  const [batchTotal, setBatchTotal] = useState(0);
-  const [batchDone, setBatchDone] = useState(false);
-  const [isSingleParsing, setIsSingleParsing] = useState(false);
+  const current = queue[reviewIndex] ?? null;
 
-  const update = (field: keyof ParsedData, value: string) =>
-    setParsed((prev) => prev ? { ...prev, [field]: value } : null);
+  const updateField = (field: keyof ParsedData, value: string) => {
+    setQueue(prev => prev.map((item, i) => i === reviewIndex ? { ...item, [field]: value } : item));
+  };
 
   const reset = () => {
-    setParsed(null);
+    setParsing(false);
+    setParseProgress(0);
+    setParseTotal(0);
+    setQueue([]);
+    setReviewIndex(0);
     setSaving(false);
-    setBatchMode(false);
-    setBatchResults([]);
-    setBatchProgress(0);
-    setBatchTotal(0);
-    setBatchDone(false);
-    setIsSingleParsing(false);
+    setSavedCount(0);
+    setAllDone(false);
   };
 
-  // ── Upload + parse a single file, returns {file_path, file_name} ───────────
-  const uploadFile = async (file: File, session: any): Promise<{ file_path: string; file_name: string }> => {
-    const storagePath = `${session.user.id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('resumes')
-      .upload(storagePath, file, { contentType: file.type || 'application/pdf', upsert: false });
-    if (uploadError) throw new Error('Upload failed: ' + uploadError.message);
-    return { file_path: uploadData.path, file_name: file.name };
-  };
-
-  // ── Handle one or many files dropped/selected ───────────────────────────────
+  // ── Parse all dropped files, then transition to review ─────────────────────
   const handleFiles = useCallback(async (files: File[]) => {
     const valid = files.filter(f => f.name.match(/\.(pdf|doc|docx|txt)$/i));
     if (valid.length === 0) {
@@ -92,261 +170,186 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) { toast.error('Not authenticated'); return; }
 
-    // Single file → review mode
-    if (valid.length === 1) {
-      setParsed(null);
-      setBatchMode(false);
-      setIsSingleParsing(true);
+    // Start parse phase
+    reset();
+    setParsing(true);
+    setParseTotal(valid.length);
 
-      try {
-        setBatchProgress(0);
-        setBatchTotal(1);
-        const file = valid[0];
-        const { file_path, file_name } = await uploadFile(file, session);
-
-        // Try to extract text from file for our backend AI parser
-        let resumeText = '';
-        try {
-          // For text files, read directly
-          if (file.name.endsWith('.txt')) {
-            resumeText = await file.text();
-          } else {
-            // For PDF/DOCX, try to read as text first
-            resumeText = await file.text();
-          }
-        } catch { /* can't read, will try edge function */ }
-
-        let parsedData: any = null;
-
-        // Primary: Use our backend AI parser (has working Claude key)
-        if (resumeText && resumeText.length > 50) {
-          try {
-            const aiResp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ resume_text: resumeText }),
-            });
-            const aiData = await aiResp.json();
-            if (aiData.data) {
-              parsedData = {
-                first_name: aiData.data.name?.split(' ')[0] || '',
-                last_name: aiData.data.name?.split(' ').slice(1).join(' ') || '',
-                email: aiData.data.email || '',
-                phone: aiData.data.phone || '',
-                current_company: aiData.data.experience?.[0]?.company || '',
-                current_title: aiData.data.experience?.[0]?.title || '',
-                location: aiData.data.location || '',
-                linkedin_url: aiData.data.linkedin || '',
-              };
-            }
-          } catch (e) {
-            console.warn('Backend parse failed, trying edge function:', e);
-          }
-        }
-
-        // Fallback: Try Supabase parse-resume edge function
-        if (!parsedData) {
-          try {
-            const ctrl1 = new AbortController();
-            const t1 = setTimeout(() => ctrl1.abort(), 65000);
-            let resp: Response;
-            const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
-            try {
-              resp = await fetch(parseUrl, {
-                method: 'POST',
-                signal: ctrl1.signal,
-                headers: {
-                  Authorization: `Bearer ${session.access_token}`,
-                  apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ file_path, file_name }),
-              });
-            } finally {
-              clearTimeout(t1);
-            }
-
-            let result: any;
-            try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status}`); }
-            if (resp.ok && result.parsed) {
-              parsedData = result.parsed;
-            }
-          } catch (e) {
-            console.warn('Edge function parse also failed:', e);
-          }
-        }
-
-        if (!parsedData) {
-          // Last resort: just show empty form with file info
-          parsedData = { first_name: '', last_name: '', email: '', phone: '', current_company: '', current_title: '', location: '', linkedin_url: '' };
-          toast.info('Could not auto-parse — fill in the details manually');
-        }
-
-        setParsed({
-          first_name:      parsedData.first_name || '',
-          last_name:       parsedData.last_name || '',
-          email:           parsedData.email || '',
-          phone:           parsedData.phone || '',
-          current_company: parsedData.current_company || '',
-          current_title:   parsedData.current_title || '',
-          location:        parsedData.location || '',
-          linkedin_url:    parsedData.linkedin_url || '',
-          file_name,
-          file_path,
-          candidate_id:    parsedData.candidate_id || null,
-        });
-        setBatchProgress(1);
-        setIsSingleParsing(false);
-        toast.success(parsedData.candidate_id ? 'Resume parsed — matched to existing candidate' : 'Resume parsed — review and save');
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to process resume');
-        setBatchProgress(0);
-        setBatchTotal(0);
-        setIsSingleParsing(false);
-      }
-      return;
-    }
-
-    // Multiple files → batch mode, process sequentially
-    setBatchMode(true);
-    setBatchResults([]);
-    setBatchProgress(0);
-    setBatchTotal(valid.length);
-    setBatchDone(false);
-
-    const results: BatchResult[] = [];
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const parsed: ParsedData[] = [];
 
     for (let i = 0; i < valid.length; i++) {
       const file = valid[i];
       try {
         const { file_path, file_name } = await uploadFile(file, session);
+        const data = await parseFile(file, file_path, file_name, session);
 
-        // Extract text from file for backend AI parser (works well for .txt)
-        let resumeText = '';
-        const isTextFile = file.name.endsWith('.txt');
-        try {
-          resumeText = await file.text();
-        } catch { /* can't read text */ }
-
-        let parsedData: any = null;
-
-        // Primary: Use backend AI parser for text files with readable content
-        if (isTextFile && resumeText && resumeText.length > 50) {
-          try {
-            const aiResp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ resume_text: resumeText }),
-            });
-            const aiData = await aiResp.json();
-            if (aiData.data) {
-              parsedData = {
-                first_name: aiData.data.name?.split(' ')[0] || '',
-                last_name: aiData.data.name?.split(' ').slice(1).join(' ') || '',
-                email: aiData.data.email || '',
-                phone: aiData.data.phone || '',
-                current_company: aiData.data.experience?.[0]?.company || '',
-                current_title: aiData.data.experience?.[0]?.title || '',
-                location: aiData.data.location || '',
-                linkedin_url: aiData.data.linkedin || '',
-              };
-            }
-          } catch (e) {
-            console.warn(`Backend parse failed for ${file_name}:`, e);
-          }
-        }
-
-        // Fallback: Use parse-resume edge function (handles PDF, DOC, DOCX via Eden AI)
-        if (!parsedData) {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 65000);
-          try {
-            const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`;
-            const resp = await fetch(parseUrl, {
-              method: 'POST',
-              signal: ctrl.signal,
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ file_path, file_name }),
-            });
-            const result = await resp.json();
-            if (resp.ok && result.parsed) {
-              parsedData = result.parsed;
-            }
-          } catch (e) {
-            console.warn(`Edge function parse failed for ${file_name}:`, e);
-          } finally {
-            clearTimeout(timer);
-          }
-        }
-
-        if (!parsedData) throw new Error('Could not parse resume');
-
-        // Create candidate record directly
-        const insertData = {
-          owner_id: userId,
-          first_name: parsedData.first_name || null,
-          last_name: parsedData.last_name || null,
-          full_name: `${parsedData.first_name || ''} ${parsedData.last_name || ''}`.trim() || null,
-          email: parsedData.email || null,
-          phone: parsedData.phone || null,
-          current_company: parsedData.current_company || null,
-          current_title: parsedData.current_title || null,
-          linkedin_url: parsedData.linkedin_url || null,
-          status: 'new',
-        } as any;
-        if (parsedData.location) {
-          insertData.location_text = parsedData.location;
-        }
-
-        const { data: inserted, error: insertErr } = await supabase
-          .from('candidates')
-          .insert(insertData)
-          .select('id')
-          .single();
-        if (insertErr) throw insertErr;
-
-        results.push({
+        const entry: ParsedData = {
+          first_name:      data?.first_name || '',
+          last_name:       data?.last_name || '',
+          email:           data?.email || '',
+          phone:           data?.phone || '',
+          current_company: data?.current_company || '',
+          current_title:   data?.current_title || '',
+          location:        data?.location || '',
+          linkedin_url:    data?.linkedin_url || '',
           file_name,
           file_path,
-          success: true,
-          candidate_id: inserted.id,
-          parsed: parsedData,
-        });
+          candidate_id:    null,
+          match_label:     null,
+        };
+
+        // Check for existing candidate
+        const match = await matchCandidate(entry.email, entry.phone, session);
+        if (match) {
+          entry.candidate_id = match.id;
+          entry.match_label = match.name || `${entry.first_name} ${entry.last_name}`.trim();
+        }
+
+        if (!data) {
+          toast.info(`Could not auto-parse ${file_name} — fill in manually`);
+        }
+
+        parsed.push(entry);
       } catch (err: any) {
-        results.push({
-          file_name: file.name,
-          file_path: '',
-          success: false,
+        parsed.push({
+          first_name: '', last_name: '', email: '', phone: '',
+          current_company: '', current_title: '', location: '', linkedin_url: '',
+          file_name: file.name, file_path: '',
+          candidate_id: null, match_label: null,
           error: err.message,
         });
       }
-
-      setBatchProgress(i + 1);
-      setBatchResults([...results]);
+      setParseProgress(i + 1);
     }
 
-    setBatchDone(true);
+    // Transition to review phase
+    setParsing(false);
+    setQueue(parsed);
+    setReviewIndex(0);
+
+    const ok = parsed.filter(p => !p.error).length;
+    if (ok > 0) {
+      toast.success(`${ok} resume${ok !== 1 ? 's' : ''} parsed — review and save`);
+    }
+  }, []);
+
+  // ── Save a single entry (insert or update) ────────────────────────────────
+  const saveCandidate = async (entry: ParsedData): Promise<void> => {
+    if (!entry.first_name.trim() && !entry.last_name.trim()) {
+      throw new Error('Name is required');
+    }
+
+    if (entry.candidate_id) {
+      // Update existing — preserve linkedin_url if new one is empty
+      const { data: existing } = await supabase
+        .from('candidates')
+        .select('linkedin_url')
+        .eq('id', entry.candidate_id)
+        .single();
+
+      const { error } = await supabase
+        .from('candidates')
+        .update({
+          first_name:      entry.first_name.trim() || undefined,
+          last_name:       entry.last_name.trim() || undefined,
+          full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
+          email:           entry.email.trim() || undefined,
+          phone:           entry.phone.trim() || undefined,
+          current_company: entry.current_company.trim() || undefined,
+          current_title:   entry.current_title.trim() || undefined,
+          location:        entry.location.trim() || undefined,
+          linkedin_url:    entry.linkedin_url.trim() || existing?.linkedin_url || undefined,
+          updated_at:      new Date().toISOString(),
+        } as any)
+        .eq('id', entry.candidate_id);
+      if (error) throw error;
+    } else {
+      // Insert new
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const { error } = await supabase.from('candidates').insert({
+        owner_id:        userId,
+        first_name:      entry.first_name.trim() || null,
+        last_name:       entry.last_name.trim() || null,
+        full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
+        email:           entry.email.trim() || null,
+        phone:           entry.phone.trim() || null,
+        current_company: entry.current_company.trim() || null,
+        current_title:   entry.current_title.trim() || null,
+        location:        entry.location.trim() || null,
+        linkedin_url:    entry.linkedin_url.trim() || null,
+        status:          'new',
+      } as any);
+      if (error) throw error;
+    }
+  };
+
+  // ── Save current and advance ───────────────────────────────────────────────
+  const handleSaveCurrent = async () => {
+    if (!current) return;
+    setSaving(true);
+    try {
+      await saveCandidate(current);
+      setQueue(prev => prev.map((item, i) => i === reviewIndex ? { ...item, saved: true } : item));
+      setSavedCount(prev => prev + 1);
+      qc.invalidateQueries({ queryKey: ['candidates'] });
+
+      const label = current.candidate_id ? 'updated' : 'created';
+      toast.success(`${current.first_name} ${current.last_name} ${label}`);
+
+      // Advance or finish
+      if (queue.length === 1) {
+        reset();
+        onOpenChange(false);
+      } else if (reviewIndex < queue.length - 1) {
+        setReviewIndex(prev => prev + 1);
+      } else {
+        setAllDone(true);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Skip current entry ─────────────────────────────────────────────────────
+  const handleSkip = () => {
+    if (reviewIndex < queue.length - 1) {
+      setReviewIndex(prev => prev + 1);
+    } else {
+      setAllDone(true);
+    }
+  };
+
+  // ── Save all remaining unsaved entries ─────────────────────────────────────
+  const handleSaveAll = async () => {
+    setSaving(true);
+    let saved = 0;
+    let failed = 0;
+    for (let i = reviewIndex; i < queue.length; i++) {
+      const entry = queue[i];
+      if (entry.saved || entry.error) continue;
+      if (!entry.first_name.trim() && !entry.last_name.trim()) continue;
+      try {
+        await saveCandidate(entry);
+        setQueue(prev => prev.map((item, j) => j === i ? { ...item, saved: true } : item));
+        saved++;
+      } catch {
+        failed++;
+      }
+    }
+    setSaving(false);
+    setSavedCount(prev => prev + saved);
     qc.invalidateQueries({ queryKey: ['candidates'] });
-    const ok = results.filter(r => r.success).length;
-    const fail = results.filter(r => !r.success).length;
-    toast.success(`${ok} resume${ok !== 1 ? 's' : ''} parsed${fail > 0 ? `, ${fail} failed` : ''}`);
-  }, [qc]);
+    toast.success(`${saved} saved${failed > 0 ? `, ${failed} failed` : ''}`);
+    setAllDone(true);
+  };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     handleFiles(Array.from(e.dataTransfer.files));
   }, [handleFiles]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) handleFiles(Array.from(e.target.files));
-    e.target.value = '';
-  };
 
   const triggerFilePicker = () => {
     const input = document.createElement('input');
@@ -360,78 +363,15 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     input.click();
   };
 
-  // ── Save single reviewed candidate ─────────────────────────────────────────
-  const handleSave = async () => {
-    if (!parsed) return;
-    if (!parsed.first_name.trim() && !parsed.last_name.trim()) {
-      toast.error('Name is required');
-      return;
-    }
-    setSaving(true);
-    try {
-      if (parsed.candidate_id) {
-        const { error } = await supabase
-          .from('candidates')
-          .update({
-            first_name:      parsed.first_name.trim() || undefined,
-            last_name:       parsed.last_name.trim() || undefined,
-            full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || undefined,
-            email:           parsed.email.trim() || undefined,
-            phone:           parsed.phone.trim() || undefined,
-            current_company: parsed.current_company.trim() || undefined,
-            current_title:   parsed.current_title.trim() || undefined,
-            location_text:   parsed.location.trim() || undefined,
-            linkedin_url:    parsed.linkedin_url.trim() || undefined,
-            updated_at:      new Date().toISOString(),
-          } as any)
-          .eq('id', parsed.candidate_id);
-        if (error) throw error;
-      } else {
-        const userId = (await supabase.auth.getUser()).data.user?.id;
-        const insertData = {
-          owner_id:        userId,
-          first_name:      parsed.first_name.trim() || null,
-          last_name:       parsed.last_name.trim() || null,
-          full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || null,
-          email:           parsed.email.trim() || null,
-          phone:           parsed.phone.trim() || null,
-          current_company: parsed.current_company.trim() || null,
-          current_title:   parsed.current_title.trim() || null,
-          linkedin_url:    parsed.linkedin_url.trim() || null,
-          status: 'new',
-        } as any;
-        // Try location_text first, fall back to location
-        if (parsed.location.trim()) {
-          insertData.location_text = parsed.location.trim();
-        }
-        console.log('Inserting candidate:', insertData);
-        const { data: insertedData, error } = await supabase.from('candidates').insert(insertData).select('id, full_name');
-        if (error) {
-          console.error('Candidate insert error:', error);
-          throw error;
-        }
-        console.log('Candidate created:', insertedData);
-        toast.success(`Candidate "${parsed.first_name} ${parsed.last_name}" created!`);
-      }
-
-      qc.invalidateQueries({ queryKey: ['candidates'] });
-      toast.success('Candidate saved');
-      reset();
-      onOpenChange(false);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleClose = (val: boolean) => {
     if (!val) reset();
     onOpenChange(val);
   };
 
-  const isProcessing = batchTotal > 0 && !batchDone && batchMode;
-  const isSingleProcessing = batchTotal === 1 && !parsed && batchProgress === 0;
+  const showDropZone = !parsing && queue.length === 0;
+  const showParsing = parsing;
+  const showReview = !parsing && queue.length > 0 && !allDone;
+  const isBatch = queue.length > 1;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -439,12 +379,12 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-accent" />
-            Parse Resume{batchMode ? 's' : ''} — Ask Joe
+            Parse Resume{isBatch ? 's' : ''} — Ask Joe
           </DialogTitle>
         </DialogHeader>
 
-        {/* ── Drop zone (always shown unless reviewing parsed data) ── */}
-        {!parsed && !batchMode && (
+        {/* ── Drop zone ── */}
+        {showDropZone && (
           <div
             className={cn(
               'border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer',
@@ -455,159 +395,206 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             onDrop={handleDrop}
             onClick={triggerFilePicker}
           >
-            {isSingleProcessing ? (
-              <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 animate-spin text-accent" />
-                <p className="text-sm text-muted-foreground">Ask Joe is parsing resume...</p>
+            <div className="flex flex-col items-center gap-3">
+              <Upload className="h-8 w-8 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-foreground">Drop resumes here or click to upload</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOC, DOCX or TXT — select multiple for batch import</p>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3">
-                <Upload className="h-8 w-8 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium text-foreground">Drop resumes here or click to upload</p>
-                  <p className="text-xs text-muted-foreground mt-1">PDF, DOC, DOCX or TXT · Select multiple for batch import</p>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* ── Single file parsing spinner ── */}
-        {isSingleProcessing && (
-          <div className="flex items-center gap-3 py-2">
-            <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
-            <p className="text-sm text-muted-foreground">Uploading and parsing...</p>
+        {/* ── Parsing progress ── */}
+        {showParsing && (
+          <div className="space-y-3 py-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Parsing {parseProgress} of {parseTotal}...
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {parseTotal > 0 ? Math.round((parseProgress / parseTotal) * 100) : 0}%
+              </span>
+            </div>
+            <Progress value={parseTotal > 0 ? (parseProgress / parseTotal) * 100 : 0} className="h-2" />
           </div>
         )}
 
-        {/* ── Batch progress ── */}
-        {batchMode && (
-          <div className="space-y-4">
-            {!batchDone && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Parsing {batchProgress} of {batchTotal}...
-                  </span>
-                  <span className="text-xs text-muted-foreground">{Math.round((batchProgress / batchTotal) * 100)}%</span>
-                </div>
-                <Progress value={(batchProgress / batchTotal) * 100} className="h-2" />
-              </div>
-            )}
-
-            {batchDone && (
+        {/* ── Review form ── */}
+        {showReview && current && (
+          <div className="space-y-3">
+            {/* Batch navigation header */}
+            {isBatch && (
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-foreground">
-                  {batchResults.filter(r => r.success).length} of {batchTotal} imported
-                </p>
-                <Button variant="outline" size="sm" onClick={() => { reset(); }}>
-                  Upload More
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setReviewIndex(prev => prev - 1)}
+                  disabled={reviewIndex === 0}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Resume {reviewIndex + 1} of {queue.length}
+                  {savedCount > 0 && <span className="ml-2 text-green-600">({savedCount} saved)</span>}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setReviewIndex(prev => prev + 1)}
+                  disabled={reviewIndex >= queue.length - 1}
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             )}
 
-            {/* Results list */}
-            <div className="space-y-2 max-h-[40vh] overflow-y-auto">
-              {batchResults.map((r, i) => (
-                <div key={i} className={cn(
-                  'flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm',
-                  r.success ? 'border-green-500/20 bg-green-500/5' : 'border-destructive/20 bg-destructive/5'
-                )}>
-                  {r.success
-                    ? <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                    : <XCircle className="h-4 w-4 text-destructive shrink-0" />}
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-foreground truncate">
-                      {r.success && r.parsed
-                        ? `${r.parsed.first_name ?? ''} ${r.parsed.last_name ?? ''}`.trim() || r.file_name
-                        : r.file_name}
-                    </p>
-                    {r.success && r.parsed?.current_title && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {r.parsed.current_title}{r.parsed.current_company ? ` at ${r.parsed.current_company}` : ''}
-                      </p>
-                    )}
-                    {!r.success && (
-                      <p className="text-xs text-destructive truncate">{r.error}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
+            {/* Match badge */}
+            {current.candidate_id && (
+              <div className="flex items-center gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-blue-700">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                Updating existing candidate: {current.match_label}
+              </div>
+            )}
 
-              {/* Show pending files as loading */}
-              {!batchDone && Array.from({ length: batchTotal - batchResults.length }).map((_, i) => (
-                <div key={`pending-${i}`} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-sm opacity-50">
-                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                  <p className="text-muted-foreground">Pending...</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+            {/* Error badge */}
+            {current.error && (
+              <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <XCircle className="h-4 w-4 shrink-0" />
+                Parse error: {current.error} — fill in manually
+              </div>
+            )}
 
-        {/* ── Single file review form ── */}
-        {parsed && !batchMode && (
-          <div className="space-y-3">
+            {/* Saved badge */}
+            {current.saved && (
+              <div className="flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/5 px-3 py-2 text-sm text-green-700">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                Saved
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              Ask Joe extracted this data. Review and edit before saving:
+              Review and edit before saving:
             </p>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">First Name</Label>
-                <Input value={parsed.first_name} onChange={(e) => update('first_name', e.target.value)} />
+                <Input value={current.first_name} onChange={(e) => updateField('first_name', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Last Name</Label>
-                <Input value={parsed.last_name} onChange={(e) => update('last_name', e.target.value)} />
+                <Input value={current.last_name} onChange={(e) => updateField('last_name', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
-                <Input value={parsed.email} onChange={(e) => update('email', e.target.value)} />
+                <Input value={current.email} onChange={(e) => updateField('email', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Phone</Label>
-                <Input value={parsed.phone} onChange={(e) => update('phone', e.target.value)} />
+                <Input value={current.phone} onChange={(e) => updateField('phone', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Company</Label>
-                <Input value={parsed.current_company} onChange={(e) => update('current_company', e.target.value)} />
+                <Input value={current.current_company} onChange={(e) => updateField('current_company', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Title</Label>
-                <Input value={parsed.current_title} onChange={(e) => update('current_title', e.target.value)} />
+                <Input value={current.current_title} onChange={(e) => updateField('current_title', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Location</Label>
-                <Input value={parsed.location} onChange={(e) => update('location', e.target.value)} />
+                <Input value={current.location} onChange={(e) => updateField('location', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">LinkedIn</Label>
-                <Input value={parsed.linkedin_url} onChange={(e) => update('linkedin_url', e.target.value)} />
+                <Input value={current.linkedin_url} onChange={(e) => updateField('linkedin_url', e.target.value)} disabled={current.saved} />
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground">Source: {parsed.file_name}</p>
+
+            <p className="text-[10px] text-muted-foreground">Source: {current.file_name}</p>
           </div>
         )}
 
-        {/* ── Single file footer ── */}
-        {parsed && !batchMode && (
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setParsed(null)}>Re-upload</Button>
-            <Button variant="gold" onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              Save Candidate
-            </Button>
+        {/* ── Review footer ── */}
+        {showReview && current && !current.saved && (
+          <DialogFooter className="flex-row gap-2 sm:justify-between">
+            <div className="flex gap-2">
+              {isBatch && (
+                <Button variant="ghost" size="sm" onClick={handleSkip}>
+                  Skip
+                </Button>
+              )}
+              {!isBatch && (
+                <Button variant="ghost" onClick={() => reset()}>Re-upload</Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {isBatch && (
+                <Button variant="outline" size="sm" onClick={handleSaveAll} disabled={saving}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Save All
+                </Button>
+              )}
+              <Button variant="gold" onClick={handleSaveCurrent} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                {isBatch ? 'Save & Next' : 'Save Candidate'}
+              </Button>
+            </div>
           </DialogFooter>
         )}
 
-        {/* ── Batch done footer ── */}
-        {batchMode && batchDone && (
+        {/* Already saved — show nav only for batch */}
+        {showReview && current?.saved && isBatch && (
           <DialogFooter>
-            <Button variant="gold" onClick={() => { reset(); onOpenChange(false); }}>
-              Done
-            </Button>
+            {reviewIndex < queue.length - 1 ? (
+              <Button variant="gold" onClick={() => setReviewIndex(prev => prev + 1)}>
+                Next
+              </Button>
+            ) : (
+              <Button variant="gold" onClick={() => { reset(); onOpenChange(false); }}>
+                Done
+              </Button>
+            )}
           </DialogFooter>
+        )}
+
+        {/* ── All done ── */}
+        {allDone && (
+          <>
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+              {queue.map((entry, i) => (
+                <div key={i} className={cn(
+                  'flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm',
+                  entry.saved ? 'border-green-500/20 bg-green-500/5' : 'border-muted bg-muted/5'
+                )}>
+                  {entry.saved
+                    ? <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                    : <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-foreground truncate">
+                      {`${entry.first_name} ${entry.last_name}`.trim() || entry.file_name}
+                    </p>
+                    {entry.current_title && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {entry.current_title}{entry.current_company ? ` at ${entry.current_company}` : ''}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {entry.saved ? (entry.candidate_id ? 'Updated' : 'Created') : 'Skipped'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => reset()}>Upload More</Button>
+              <Button variant="gold" onClick={() => { reset(); onOpenChange(false); }}>
+                Done
+              </Button>
+            </DialogFooter>
+          </>
         )}
       </DialogContent>
     </Dialog>
