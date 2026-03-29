@@ -33,7 +33,7 @@ interface ParsedData {
   error?: string;
 }
 
-const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.REACT_APP_BACKEND_URL || '';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,7 +147,7 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
   // PDF and .doc handled by edge function below
 
   // ── Try backend AI parser with extracted text ──────────────────────────────
-  if (resumeText && resumeText.length > 50) {
+  if (BACKEND_URL && resumeText && resumeText.length > 50) {
     try {
       const result = await callBackendParser(resumeText);
       if (result) return result;
@@ -160,7 +160,7 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 65000);
   try {
-    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`, {
+    const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`, {
       method: 'POST',
       signal: ctrl.signal,
       headers: {
@@ -171,7 +171,23 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
       body: JSON.stringify({ file_path, file_name }),
     });
     const result = await resp.json();
-    if (resp.ok && result.parsed) return result.parsed;
+    console.log('[ResumeDropZone] parsed result:', result);
+    if (resp.ok) {
+      // Support both { parsed: { ... } } and flat { first_name, ... } shapes
+      const data = result.parsed || result;
+      if (data.first_name || data.last_name || data.email || data.name) {
+        return {
+          first_name: data.first_name || data.name?.split(' ')[0] || '',
+          last_name: data.last_name || data.name?.split(' ').slice(1).join(' ') || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          current_company: data.current_company || data.company || data.experience?.[0]?.company || '',
+          current_title: data.current_title || data.title || data.experience?.[0]?.title || '',
+          location: data.location || '',
+          linkedin_url: data.linkedin_url || data.linkedin || '',
+        };
+      }
+    }
   } catch (e) {
     console.warn('Edge function parse failed:', e);
   } finally {
