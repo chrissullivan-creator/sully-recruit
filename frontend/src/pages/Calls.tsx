@@ -217,10 +217,158 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   );
 }
 
+// ---- Link Call Dialog ----
+function LinkCallDialog({
+  open, onOpenChange, call,
+}: {
+  open: boolean; onOpenChange: (v: boolean) => void; call: CallLog | null;
+}) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+
+  const handleSearch = async () => {
+    if (!search.trim()) return;
+    setSearching(true);
+    const q = search.trim();
+    const [cRes, ctRes] = await Promise.all([
+      supabase.from('candidates').select('id, full_name, email, phone, current_title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
+      supabase.from('contacts').select('id, full_name, email, phone, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
+    ]);
+    setResults([
+      ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
+      ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' })),
+    ]);
+    setSearching(false);
+  };
+
+  // Auto-search by phone number on open
+  const handleAutoTag = async () => {
+    if (!call) return;
+    setSearching(true);
+    const normalized = call.phone_number.replace(/[^0-9+]/g, '');
+    const [cRes, ctRes] = await Promise.all([
+      supabase.from('candidates').select('id, full_name, email, phone, current_title').not('phone', 'is', null),
+      supabase.from('contacts').select('id, full_name, email, phone, title').not('phone', 'is', null),
+    ]);
+    const norm = (p: string) => p.replace(/[^0-9+]/g, '');
+    const matches = [
+      ...(cRes.data || []).filter(r => r.phone && norm(r.phone) === normalized).map(r => ({ ...r, entity_type: 'candidate' })),
+      ...(ctRes.data || []).filter(r => r.phone && norm(r.phone) === normalized).map(r => ({ ...r, entity_type: 'contact' })),
+    ];
+    setResults(matches);
+    setSearching(false);
+    if (matches.length === 0) {
+      setSearch(call.phone_number);
+    }
+  };
+
+  const handleLink = async (entityType: string, entityId: string, entityName: string) => {
+    if (!call) return;
+    setLinking(true);
+    try {
+      await supabase.from('call_logs' as any).update({
+        linked_entity_type: entityType,
+        linked_entity_id: entityId,
+        linked_entity_name: entityName,
+      }).eq('id', call.id);
+      if (call.notes) {
+        const userId = (await supabase.auth.getUser()).data.user?.id;
+        await supabase.from('notes').insert({
+          entity_id: entityId,
+          entity_type: entityType,
+          note: `📞 Call Notes (${format(new Date(call.started_at), 'MMM d')}): ${call.notes}`,
+          created_by: userId,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['call_logs'] });
+      toast.success(`Tagged to ${entityName}`);
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to link');
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setSearch(''); setResults([]); } onOpenChange(v); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            Link Call to Record
+          </DialogTitle>
+        </DialogHeader>
+        {call && (
+          <p className="text-xs text-muted-foreground -mt-2">
+            {call.direction === 'outbound' ? 'Outbound' : 'Inbound'} call · {call.phone_number}
+          </p>
+        )}
+        <div className="space-y-3">
+          <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={handleAutoTag} disabled={searching}>
+            {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Phone className="h-3.5 w-3.5" />}
+            Auto-match by phone number
+          </Button>
+
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-[10px] text-muted-foreground">or search manually</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search name, email, or phone..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              className="h-8 text-xs"
+            />
+            <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching} className="h-8 px-2">
+              {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {results.length > 0 && (
+            <div className="rounded-lg border border-border overflow-hidden max-h-60 overflow-y-auto">
+              {results.map((r) => (
+                <button
+                  key={r.id + r.entity_type}
+                  onClick={() => handleLink(r.entity_type, r.id, r.full_name)}
+                  disabled={linking}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-b-0 text-left"
+                >
+                  {r.entity_type === 'candidate'
+                    ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                    : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
+                    <p className="text-[10px] text-muted-foreground truncate capitalize">
+                      {r.entity_type} · {r.current_title || r.title || r.email || r.phone || ''}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {results.length === 0 && search && !searching && (
+            <p className="text-xs text-muted-foreground text-center py-3">No matches found</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---- Main page ----
 const Calls = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [logOpen, setLogOpen] = useState(false);
+  const [linkCall, setLinkCall] = useState<CallLog | null>(null);
   const queryClient = useQueryClient();
 
   const { data: calls = [], isLoading } = useQuery({
@@ -229,7 +377,7 @@ const Calls = () => {
       const { data, error } = await supabase
         .from('call_logs' as any)
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('started_at', { ascending: false })
         .limit(100);
       if (error) throw error;
       return (data ?? []) as unknown as CallLog[];
@@ -400,40 +548,10 @@ const Calls = () => {
                           variant="outline"
                           size="sm"
                           className="text-xs gap-1"
-                          onClick={async () => {
-                            const normalized = call.phone_number.replace(/[^0-9+]/g, '');
-                            const [cRes, ctRes] = await Promise.all([
-                              supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
-                              supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
-                            ]);
-                            const norm = (p: string) => p.replace(/[^0-9+]/g, '');
-                            const cand = cRes.data?.find(r => r.phone && norm(r.phone) === normalized);
-                            const cont = ctRes.data?.find(r => r.phone && norm(r.phone) === normalized);
-                            const match = cand ? { type: 'candidate', id: cand.id, name: cand.full_name } : cont ? { type: 'contact', id: cont.id, name: cont.full_name } : null;
-                            if (match) {
-                              await supabase.from('call_logs' as any).update({
-                                linked_entity_type: match.type,
-                                linked_entity_id: match.id,
-                                linked_entity_name: match.name,
-                              }).eq('id', call.id);
-                              if (call.notes) {
-                                const userId = (await supabase.auth.getUser()).data.user?.id;
-                                await supabase.from('notes').insert({
-                                  entity_id: match.id,
-                                  entity_type: match.type,
-                                  note: `📞 Call Notes (${format(new Date(call.started_at), 'MMM d')}): ${call.notes}`,
-                                  created_by: userId,
-                                });
-                              }
-                              queryClient.invalidateQueries({ queryKey: ['call_logs'] });
-                              toast.success(`Tagged to ${match.name}`);
-                            } else {
-                              toast.info('No matching candidate or contact found for this number');
-                            }
-                          }}
+                          onClick={() => setLinkCall(call)}
                         >
                           <UserPlus className="h-3 w-3" />
-                          Auto-Tag to Record
+                          Tag to Record
                         </Button>
                       </div>
                     )}
@@ -446,6 +564,7 @@ const Calls = () => {
       </div>
 
       <LogCallDialog open={logOpen} onOpenChange={setLogOpen} />
+      <LinkCallDialog open={!!linkCall} onOpenChange={(v) => !v && setLinkCall(null)} call={linkCall} />
     </MainLayout>
   );
 };
