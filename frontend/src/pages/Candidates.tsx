@@ -84,6 +84,7 @@ const Candidates = () => {
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState('');
   const queryClient = useQueryClient();
   const PAGE_SIZE = 100;
 
@@ -160,14 +161,43 @@ const Candidates = () => {
     if (selectedIds.length === 0) return;
     setDeleting(true);
     try {
-      // Delete related records first to avoid FK issues
-      await supabase.from('sequence_enrollments').delete().in('candidate_id', selectedIds);
-      await supabase.from('notes').delete().in('entity_id', selectedIds).eq('entity_type', 'candidate');
+      setDeleteProgress('Cleaning up related records...');
 
-      const { error } = await supabase.from('candidates').delete().in('id', selectedIds);
-      if (error) throw error;
+      await supabase.from('resumes')
+        .update({ candidate_id: null })
+        .in('candidate_id', selectedIds);
 
-      toast.success(`Deleted ${selectedIds.length} candidate${selectedIds.length > 1 ? 's' : ''}`);
+      await supabase.from('resume_embeddings')
+        .delete().in('candidate_id', selectedIds);
+
+      await supabase.from('sequence_enrollments')
+        .delete().in('candidate_id', selectedIds);
+
+      await supabase.from('messages')
+        .update({ candidate_id: null })
+        .in('candidate_id', selectedIds);
+
+      await supabase.from('ai_call_notes')
+        .update({ candidate_id: null })
+        .in('candidate_id', selectedIds);
+
+      await supabase.from('notes')
+        .delete().in('entity_id', selectedIds).eq('entity_type', 'candidate');
+
+      setDeleteProgress('Deleting candidates...');
+
+      const { error, count } = await supabase
+        .from('candidates')
+        .delete({ count: 'exact' })
+        .in('id', selectedIds);
+
+      if (error) throw new Error(error.message);
+
+      if (count === 0) {
+        throw new Error('Delete was blocked — try refreshing and trying again.');
+      }
+
+      toast.success(`Deleted ${count} candidate${count !== 1 ? 's' : ''}`);
       setSelectedIds([]);
       setDeleteConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -175,6 +205,7 @@ const Candidates = () => {
       toast.error(err.message || 'Failed to delete candidates');
     } finally {
       setDeleting(false);
+      setDeleteProgress('');
     }
   };
 
