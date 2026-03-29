@@ -37,26 +37,33 @@ interface ParsedData {
 
 async function uploadFile(file: File, session: any) {
   const storagePath = `${session.user.id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  console.log('[ResumeDropZone] uploading to storage:', storagePath);
   const { data, error } = await supabase.storage
     .from('resumes')
     .upload(storagePath, file, { contentType: file.type || 'application/pdf', upsert: false });
   if (error) throw new Error('Upload failed: ' + error.message);
+  console.log('[ResumeDropZone] upload success, path:', data.path);
   return { file_path: data.path, file_name: file.name };
 }
 
-async function parseFile(file: File, file_path: string, file_name: string, session: any): Promise<any> {
-  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-resume`, {
+async function parseFile(file_path: string, file_name: string, session: any): Promise<any> {
+  const body = { file_path, file_name };
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`;
+  console.log('[ResumeDropZone] sending to process-resume:', body);
+  console.log('[ResumeDropZone] url:', url);
+  const resp = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.access_token}`,
       apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ file_path, file_name }),
+    body: JSON.stringify(body),
   });
   const result = await resp.json();
-  console.log('[ResumeDropZone] raw response:', result);
-  if (!resp.ok || result.error) throw new Error(result.error || 'Parse failed');
+  console.log('[ResumeDropZone] process-resume status:', resp.status);
+  console.log('[ResumeDropZone] process-resume response:', result);
+  if (!resp.ok || result.error) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
   const p = result.parsed || {};
   return {
     first_name:      p.first_name || '',
@@ -67,6 +74,7 @@ async function parseFile(file: File, file_path: string, file_name: string, sessi
     current_title:   p.current_title || '',
     location:        p.location || '',
     linkedin_url:    p.linkedin_url || '',
+    _candidate_id:   result.candidate_id || null,
   };
 }
 
@@ -127,7 +135,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const file = valid[i];
       try {
         const { file_path, file_name } = await uploadFile(file, session);
-        const data = await parseFile(file, file_path, file_name, session);
+        console.log('[ResumeDropZone] file uploaded, calling process-resume for:', file_name);
+        const data = await parseFile(file_path, file_name, session);
 
         const entry: ParsedData = {
           first_name:      data?.first_name || '',
@@ -140,8 +149,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           linkedin_url:    data?.linkedin_url || '',
           file_name,
           file_path,
-          candidate_id:    null,
-          match_label:     null,
+          candidate_id:    data?._candidate_id ?? null,
+          match_label:     data?._candidate_id ? `${data.first_name} ${data.last_name}`.trim() : null,
         };
 
         parsed.push(entry);
