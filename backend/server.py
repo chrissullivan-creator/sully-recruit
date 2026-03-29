@@ -953,6 +953,50 @@ Use notes from the profile to make it personal. Sound like a human recruiter, no
         return {"error": str(e)}
 
 
+
+# ── Backfill full_name for candidates/contacts missing it ────────────────────
+@api_router.post("/backfill-full-names")
+async def backfill_full_names():
+    """Set full_name = first_name + ' ' + last_name for records missing it."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"error": "Supabase not configured"}
+
+    headers = _sb_headers()
+    fixed = 0
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        for table in ['candidates', 'contacts']:
+            # Get records where full_name is null but first/last exists
+            resp = await http.get(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                headers={**headers, "Prefer": ""},
+                params={
+                    "select": "id,first_name,last_name,full_name",
+                    "full_name": "is.null",
+                    "limit": "500",
+                },
+            )
+            if resp.status_code != 200:
+                continue
+            records = resp.json()
+
+            for r in records:
+                fn = (r.get("first_name") or "").strip()
+                ln = (r.get("last_name") or "").strip()
+                full = f"{fn} {ln}".strip()
+                if not full:
+                    continue
+                await http.patch(
+                    f"{SUPABASE_URL}/rest/v1/{table}",
+                    headers=headers,
+                    params={"id": f"eq.{r['id']}"},
+                    json={"full_name": full},
+                )
+                fixed += 1
+
+    return {"fixed": fixed}
+
+
 # Include the router in the main app
 app.include_router(api_router)
 

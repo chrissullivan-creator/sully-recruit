@@ -38,6 +38,7 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
           {
             first_name: firstName,
             last_name: lastName,
+            full_name: `${firstName} ${lastName}`.trim() || null,
             email,
             phone,
             status: 'new'

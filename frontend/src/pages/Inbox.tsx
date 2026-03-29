@@ -206,6 +206,7 @@ function CreatePersonDialog({
         const { data: newRecord, error } = await supabase.from('candidates').insert({
           first_name: form.first_name.trim() || null,
           last_name: form.last_name.trim() || null,
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,
@@ -224,6 +225,7 @@ function CreatePersonDialog({
         const { data: newRecord, error } = await supabase.from('contacts').insert({
           first_name: form.first_name.trim() || null,
           last_name: form.last_name.trim() || null,
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,

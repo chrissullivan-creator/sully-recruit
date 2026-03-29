@@ -166,7 +166,16 @@ const CandidateDetail = () => {
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
-    const { error } = await supabase.from('candidates').update({ [field]: value || null }).eq('id', id);
+    const updates: any = { [field]: value || null };
+
+    // Auto-compute full_name when first_name or last_name changes
+    if (field === 'first_name' || field === 'last_name') {
+      const first = field === 'first_name' ? value : candidate?.first_name || '';
+      const last = field === 'last_name' ? value : candidate?.last_name || '';
+      updates.full_name = `${first} ${last}`.trim() || null;
+    }
+
+    const { error } = await supabase.from('candidates').update(updates).eq('id', id);
     if (error) { toast.error(`Failed to update`); return; }
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
     queryClient.invalidateQueries({ queryKey: ['candidates'] });
