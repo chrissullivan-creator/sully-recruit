@@ -122,6 +122,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const [activeTab, setActiveTab] = useState<'valid' | 'issues' | 'mapping'>('mapping');
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [updatedCount, setUpdatedCount] = useState(0);
 
   const aliases = entityType === 'jobs' ? JOB_ALIASES : entityType === 'contacts' ? CONTACT_ALIASES : CANDIDATE_ALIASES;
   const fieldLabels = entityType === 'jobs' ? JOB_FIELDS : entityType === 'contacts' ? CONTACT_FIELDS : CANDIDATE_FIELDS;
@@ -130,7 +131,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const mappedCount = Object.values(columnMap).filter(Boolean).length;
   const unmappedCount = Object.values(columnMap).filter(v => v === null).length;
 
-  const reset = () => { setStep('upload'); setFileName(''); setRawHeaders([]); setRawRows([]); setColumnMap({}); setResults([]); setActiveTab('mapping'); setImportedCount(0); };
+  const reset = () => { setStep('upload'); setFileName(''); setRawHeaders([]); setRawRows([]); setColumnMap({}); setResults([]); setActiveTab('mapping'); setImportedCount(0); setUpdatedCount(0); };
   const handleClose = () => { reset(); onOpenChange(false); };
 
   const processFile = useCallback((file: File) => {
@@ -166,42 +167,120 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
     if (!user || valid.length === 0) return;
     setImporting(true);
     try {
-      const BATCH = 100; let inserted = 0;
+      const BATCH = 50;
+      let newCount = 0;
+
       if (entityType === 'candidates') {
-        const rows = valid.map(r => {
+        const withEmail = valid.filter(r => !!(r.mapped as any).email);
+        const withoutEmail = valid.filter(r => !(r.mapped as any).email);
+
+        const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
           const stage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
           const skills = c.skills ? c.skills.split(/[,;|]/).map((s: string) => s.trim()).filter(Boolean) : [];
-          const row: Record<string, any> = { user_id: user.id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' '), email: c.email || '', stage: VALID_CANDIDATE_STAGES.includes(stage) ? stage : 'back_of_resume', status: 'new', skills };
-          if (c.phone) row.phone = c.phone; if (c.current_title) row.current_title = c.current_title; if (c.current_company) row.current_company = c.current_company; if (c.linkedin_url) row.linkedin_url = c.linkedin_url; if (c.location_text) row.location_text = c.location_text; if (c.source) row.source = c.source; if (c.notes) row.notes = c.notes;
+          const row: Record<string, any> = {
+            user_id: user.id, first_name: c.first_name, last_name: c.last_name,
+            full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+            email: c.email || '', stage: VALID_CANDIDATE_STAGES.includes(stage) ? stage : 'back_of_resume',
+            status: 'new', skills,
+          };
+          if (c.phone) row.phone = c.phone;
+          if (c.current_title) row.current_title = c.current_title;
+          if (c.current_company) row.current_company = c.current_company;
+          if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
+          if (c.location_text) row.location_text = c.location_text;
+          if (c.source) row.source = c.source;
+          if (c.notes) row.notes = c.notes;
           return row;
-        });
-        for (let i = 0; i < rows.length; i += BATCH) { const { error } = await supabase.from('candidates').insert(rows.slice(i, i + BATCH) as any); if (error) throw error; inserted += Math.min(BATCH, rows.length - i); }
+        };
+
+        // Upsert rows that have an email — email conflict = update, not error
+        if (withEmail.length > 0) {
+          const rows = withEmail.map(buildRow);
+          for (let i = 0; i < rows.length; i += BATCH) {
+            const { error } = await supabase.from('candidates').upsert(rows.slice(i, i + BATCH) as any, { onConflict: 'email', ignoreDuplicates: false });
+            if (error) throw error;
+            newCount += Math.min(BATCH, rows.length - i);
+          }
+        }
+        // Insert rows without email (no unique constraint to conflict on)
+        if (withoutEmail.length > 0) {
+          const rows = withoutEmail.map(buildRow);
+          for (let i = 0; i < rows.length; i += BATCH) {
+            const { error } = await supabase.from('candidates').insert(rows.slice(i, i + BATCH) as any);
+            if (error) throw error;
+            newCount += Math.min(BATCH, rows.length - i);
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
+
       } else if (entityType === 'contacts') {
-        const rows = valid.map(r => {
+        const withEmail = valid.filter(r => !!(r.mapped as any).email);
+        const withoutEmail = valid.filter(r => !(r.mapped as any).email);
+
+        const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
-          const row: Record<string, any> = { user_id: user.id, first_name: c.first_name, last_name: c.last_name, full_name: [c.first_name, c.last_name].filter(Boolean).join(' '), email: c.email || '' };
-          if (c.phone) row.phone = c.phone; if (c.title) row.title = c.title; if (c.company_name) row.company_name = c.company_name; if (c.linkedin_url) row.linkedin_url = c.linkedin_url; if (c.notes) row.notes = c.notes;
+          const row: Record<string, any> = {
+            user_id: user.id, first_name: c.first_name, last_name: c.last_name,
+            full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+            email: c.email || '',
+          };
+          if (c.phone) row.phone = c.phone;
+          if (c.title) row.title = c.title;
+          if (c.company_name) row.company_name = c.company_name;
+          if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
+          if (c.notes) row.notes = c.notes;
           return row;
-        });
-        for (let i = 0; i < rows.length; i += BATCH) { const { error } = await supabase.from('contacts').insert(rows.slice(i, i + BATCH) as any); if (error) throw error; inserted += Math.min(BATCH, rows.length - i); }
+        };
+
+        if (withEmail.length > 0) {
+          const rows = withEmail.map(buildRow);
+          for (let i = 0; i < rows.length; i += BATCH) {
+            const { error } = await supabase.from('contacts').upsert(rows.slice(i, i + BATCH) as any, { onConflict: 'email', ignoreDuplicates: false });
+            if (error) throw error;
+            newCount += Math.min(BATCH, rows.length - i);
+          }
+        }
+        if (withoutEmail.length > 0) {
+          const rows = withoutEmail.map(buildRow);
+          for (let i = 0; i < rows.length; i += BATCH) {
+            const { error } = await supabase.from('contacts').insert(rows.slice(i, i + BATCH) as any);
+            if (error) throw error;
+            newCount += Math.min(BATCH, rows.length - i);
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ['contacts'] });
+
       } else {
         const rows = valid.map(r => {
           const j = r.mapped as any;
           const stage = j.stage ? j.stage.toLowerCase().replace(/\s/g, '_') : 'lead';
           const priority = j.priority ? j.priority.toLowerCase() : 'medium';
-          const row: Record<string, any> = { user_id: user.id, title: j.title || '', company: j.company || '', location: j.location || '', status: VALID_JOB_STAGES.includes(stage) ? stage : 'lead', priority: VALID_PRIORITIES.includes(priority) ? priority : 'medium' };
-          if (j.salary) row.salary = j.salary; if (j.hiring_manager) row.hiring_manager = j.hiring_manager; if (j.notes) row.notes = j.notes;
+          const row: Record<string, any> = {
+            user_id: user.id, title: j.title || '', company: j.company || '',
+            location: j.location || '', status: VALID_JOB_STAGES.includes(stage) ? stage : 'lead',
+            priority: VALID_PRIORITIES.includes(priority) ? priority : 'medium',
+          };
+          if (j.salary) row.salary = j.salary;
+          if (j.hiring_manager) row.hiring_manager = j.hiring_manager;
+          if (j.notes) row.notes = j.notes;
           return row;
         });
-        for (let i = 0; i < rows.length; i += BATCH) { const { error } = await supabase.from('jobs').insert(rows.slice(i, i + BATCH) as any); if (error) throw error; inserted += Math.min(BATCH, rows.length - i); }
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const { error } = await supabase.from('jobs').insert(rows.slice(i, i + BATCH) as any);
+          if (error) throw error;
+          newCount += Math.min(BATCH, rows.length - i);
+        }
         queryClient.invalidateQueries({ queryKey: ['jobs'] });
       }
-      setImportedCount(inserted); setStep('done');
-    } catch (err: any) { toast.error(err.message || 'Import failed'); }
-    finally { setImporting(false); }
+
+      setImportedCount(newCount);
+      setStep('done');
+    } catch (err: any) {
+      toast.error(err.message || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -303,8 +382,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             <div className="flex-1 flex flex-col items-center justify-center gap-5 p-10">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10"><CheckCircle2 className="h-8 w-8 text-success" /></div>
               <div className="text-center">
-                <p className="text-lg font-semibold text-foreground">{importedCount} {entityType==='jobs'?`job${importedCount!==1?'s':''}`:entityType==='contacts'?`contact${importedCount!==1?'s':''}` :`candidate${importedCount!==1?'s':''}`} imported</p>
-                <p className="text-sm text-muted-foreground mt-1">They'll appear in your list now.</p>
+                <p className="text-lg font-semibold text-foreground">{importedCount} {entityType==='jobs'?`job${importedCount!==1?'s':''}`:entityType==='contacts'?`contact${importedCount!==1?'s':''}` :`candidate${importedCount!==1?'s':''}`} processed</p>
+                <p className="text-sm text-muted-foreground mt-1">New records added + existing records updated by email match.</p>
               </div>
               <div className="flex gap-3"><Button variant="outline" onClick={reset}>Import Another File</Button><Button variant="gold" onClick={handleClose}>Done</Button></div>
             </div>
