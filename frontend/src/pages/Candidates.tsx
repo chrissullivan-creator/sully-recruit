@@ -40,7 +40,7 @@ const JOB_STATUS_COLORS: Record<string, string> = {
   withdrew:     'bg-muted text-muted-foreground',
 };
 
-type SortField = 'name' | 'title' | 'company' | 'status' | 'created';
+type SortField = 'name' | 'title' | 'company' | 'status' | 'created' | 'updated';
 type SortDir = 'asc' | 'desc';
 
 const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed'] as const;
@@ -66,7 +66,7 @@ const Candidates = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTagFilter, setJobTagFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('all');
-  const [sortField, setSortField] = useState<SortField>('created');
+  const [sortField, setSortField] = useState<SortField>('updated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -112,6 +112,7 @@ const Candidates = () => {
         case 'company': aVal = a.current_company ?? ''; bVal = b.current_company ?? ''; break;
         case 'status': aVal = a.status; bVal = b.status; break;
         case 'created': aVal = a.created_at; bVal = b.created_at; break;
+        case 'updated': aVal = (a as any).updated_at ?? a.created_at; bVal = (b as any).updated_at ?? b.created_at; break;
       }
       const cmp = aVal.localeCompare(bVal);
       return sortDir === 'asc' ? cmp : -cmp;
@@ -346,6 +347,9 @@ const Candidates = () => {
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Owner</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Job</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
+                    <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Added <SortIcon field="created" /></span>
                   </th>
@@ -419,12 +423,15 @@ const Candidates = () => {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" onClick={() => navigate(`/candidates/${candidate.id}`)}>
+                      {(candidate as any).updated_at ? format(new Date((candidate as any).updated_at), 'MMM d, yyyy') : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       {format(new Date(candidate.created_at), 'MMM d, yyyy')}
                     </td>
                   </tr>
                 ))}
                 {paginatedCandidates.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
             </table>

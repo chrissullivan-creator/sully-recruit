@@ -13,6 +13,8 @@ import { useContacts, useJobs } from '@/hooks/useData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -34,14 +36,15 @@ const ChannelBadge = ({ channel }: { channel?: string | null }) => {
   return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground capitalize">{icon}{channel === 'linkedin' ? 'LinkedIn' : channel}</span>;
 };
 
-type ContactSortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'status';
+type ContactSortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'status' | 'updated';
 type ContactSortDir = 'asc' | 'desc';
 
 const Contacts = () => {
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [sortField, setSortField] = useState<ContactSortField>('name');
-  const [sortDir, setSortDir] = useState<ContactSortDir>('asc');
+  const [sortField, setSortField] = useState<ContactSortField>('updated');
+  const [sortDir, setSortDir] = useState<ContactSortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
@@ -91,6 +94,10 @@ const Contacts = () => {
         case 'lastResponded':
           aVal = (a as any).last_responded_at || '';
           bVal = (b as any).last_responded_at || '';
+          break;
+        case 'updated':
+          aVal = (a as any).updated_at || (a as any).created_at || '';
+          bVal = (b as any).updated_at || (b as any).created_at || '';
           break;
       }
       const cmp = aVal.localeCompare(bVal);
@@ -238,6 +245,9 @@ const Contacts = () => {
           </th>
           <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
           <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
+            <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
+          </th>
           <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
@@ -319,6 +329,9 @@ const Contacts = () => {
                           </span>
                         );
                       })() : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      {(contact as any).updated_at ? format(new Date((contact as any).updated_at), 'MMM d, yyyy') : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
