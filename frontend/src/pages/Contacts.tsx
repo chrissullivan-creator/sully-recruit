@@ -10,8 +10,28 @@ import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSear
 import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
+  interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
+  positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
+  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A84C]/15', text: 'text-[#C9A84C]' },
+  neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
+  negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
+  not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },
+  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-red-900/20',   text: 'text-red-700' },
+};
+
+const ChannelBadge = ({ channel }: { channel?: string | null }) => {
+  if (!channel) return <span className="text-muted-foreground">—</span>;
+  const icon = channel === 'email' ? <Mail className="h-3 w-3" />
+    : channel === 'linkedin' || channel.startsWith('linkedin') ? <Linkedin className="h-3 w-3" />
+    : channel === 'sms' ? <MessageCircle className="h-3 w-3" />
+    : channel === 'phone' ? <PhoneCall className="h-3 w-3" />
+    : null;
+  return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground capitalize">{icon}{channel === 'linkedin' ? 'LinkedIn' : channel}</span>;
+};
 
 type ContactSortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'status';
 type ContactSortDir = 'asc' | 'desc';
@@ -214,6 +234,8 @@ const Contacts = () => {
           <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
             <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
           </th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
+          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
           <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
@@ -281,6 +303,20 @@ const Contacts = () => {
                       )}>
                         {contact.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <ChannelBadge channel={(contact as any).last_comm_channel} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {(contact as any).last_sequence_sentiment ? (() => {
+                        const s = (contact as any).last_sequence_sentiment;
+                        const cfg = SENTIMENT_CONFIG[s] ?? { label: s.replace(/_/g, ' '), bg: 'bg-muted', text: 'text-muted-foreground' };
+                        return (
+                          <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', cfg.bg, cfg.text)} title={(contact as any).last_sequence_sentiment_note || undefined}>
+                            {cfg.label}
+                          </span>
+                        );
+                      })() : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>

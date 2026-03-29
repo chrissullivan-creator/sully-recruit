@@ -18,7 +18,7 @@ import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
-  DollarSign, ChevronDown, ChevronUp, PhoneCall,
+  DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -36,6 +36,38 @@ const JOB_STATUSES = [
   { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
+
+const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
+  interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
+  positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
+  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A84C]/15', text: 'text-[#C9A84C]' },
+  neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
+  negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
+  not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },
+  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-red-900/20',   text: 'text-red-700' },
+};
+
+const SentimentChip = ({ sentiment, note }: { sentiment?: string | null; note?: string | null }) => {
+  if (!sentiment) return null;
+  const cfg = SENTIMENT_CONFIG[sentiment] ?? { label: sentiment.replace(/_/g, ' '), bg: 'bg-muted', text: 'text-muted-foreground' };
+  return (
+    <div>
+      <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', cfg.bg, cfg.text)}>
+        {cfg.label}
+      </span>
+      {note && <p className="text-[10px] italic text-muted-foreground mt-0.5 line-clamp-2">{note}</p>}
+    </div>
+  );
+};
+
+const ChannelIcon = ({ channel }: { channel?: string | null }) => {
+  if (!channel) return null;
+  if (channel === 'email') return <Mail className="h-3 w-3" />;
+  if (channel === 'linkedin' || channel.startsWith('linkedin')) return <Linkedin className="h-3 w-3" />;
+  if (channel === 'sms') return <MessageCircle className="h-3 w-3" />;
+  if (channel === 'phone') return <PhoneCall className="h-3 w-3" />;
+  return null;
+};
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
@@ -261,6 +293,12 @@ const CandidateDetail = () => {
           <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            const tabsList = document.querySelector('[data-value="joe"]') as HTMLElement;
+            if (tabsList) tabsList.click();
+          }}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe ✍️
+          </Button>
           <Button variant="outline" size="sm" onClick={async () => {
             toast.info('Syncing activity across all channels...');
             try {
@@ -312,6 +350,30 @@ const CandidateDetail = () => {
               <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" />
               <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
               <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Clock className="h-3 w-3" /> Last Activity</h3>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Last Reached Out</span>
+                  <span className="text-foreground">{c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Last Response</span>
+                  <span className="text-foreground">{c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}</span>
+                </div>
+                {c.last_comm_channel && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Channel</span>
+                    <span className="inline-flex items-center gap-1 text-foreground capitalize">
+                      <ChannelIcon channel={c.last_comm_channel} />
+                      {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
             </div>
 
             <div className="space-y-3">

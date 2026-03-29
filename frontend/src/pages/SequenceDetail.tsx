@@ -496,6 +496,30 @@ const SequenceDetail = () => {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-foreground">Enrolled ({enrollments.length})</h3>
                 <div className="flex gap-2">
+                  {enrollments.some(e => e.status === 'active') && (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      const activeIds = enrollments.filter(e => e.status === 'active').map(e => e.id);
+                      for (const eid of activeIds) {
+                        await supabase.from('sequence_enrollments').update({ status: 'paused', paused_at: new Date().toISOString() } as any).eq('id', eid);
+                      }
+                      loadSequence();
+                      toast.success(`Paused ${activeIds.length} enrollments`);
+                    }}>
+                      <PauseCircle className="h-4 w-4 mr-1" /> Pause All
+                    </Button>
+                  )}
+                  {enrollments.some(e => e.status === 'paused') && (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      const pausedIds = enrollments.filter(e => e.status === 'paused').map(e => e.id);
+                      for (const eid of pausedIds) {
+                        await supabase.from('sequence_enrollments').update({ status: 'active', paused_at: null } as any).eq('id', eid);
+                      }
+                      loadSequence();
+                      toast.success(`Resumed ${pausedIds.length} enrollments`);
+                    }}>
+                      <Play className="h-4 w-4 mr-1" /> Resume All
+                    </Button>
+                  )}
                   <Button variant="gold-outline" size="sm" onClick={() => { setEnrollType('candidate'); setEnrollOpen(true); }}>
                     <UserPlus className="h-4 w-4 mr-1" /> Add Candidates
                   </Button>
@@ -540,6 +564,8 @@ const SequenceDetail = () => {
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Step</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Result</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Connection</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
                         <th className="w-10 px-4 py-2.5"></th>
                       </tr>
                     </thead>
@@ -626,6 +652,37 @@ const SequenceDetail = () => {
                               {lastResult === 'bounced' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#DC2626', background: '#FEF2F2' }}>Bounced</span>}
                               {lastResult === 'sent' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#6B7280', background: '#F3F4F6' }}>Sent</span>}
                               {!lastResult && <span className="text-xs text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {(() => {
+                                const connStatus = (enrollment as any).linkedin_connection_status;
+                                if (connStatus === 'requested' || connStatus === 'pending')
+                                  return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#C9A84C', background: '#FBF4E3' }}>⏳ Awaiting</span>;
+                                if (connStatus === 'accepted')
+                                  return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#2A5C42', background: '#EAF2EC' }}>✓ Connected</span>;
+                                return <span className="text-xs text-muted-foreground">—</span>;
+                              })()}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {(() => {
+                                const sentiment = (enrollment as any).reply_sentiment;
+                                if (!sentiment) return <span className="text-xs text-muted-foreground">—</span>;
+                                const cfgMap: Record<string, { label: string; color: string; bg: string }> = {
+                                  interested:     { label: 'Interested',     color: '#2A5C42', bg: '#EAF2EC' },
+                                  positive:       { label: 'Positive',       color: '#16a34a', bg: '#f0fdf4' },
+                                  maybe:          { label: 'Maybe',          color: '#C9A84C', bg: '#FBF4E3' },
+                                  neutral:        { label: 'Neutral',        color: '#6B7280', bg: '#F3F4F6' },
+                                  negative:       { label: 'Negative',       color: '#ea580c', bg: '#fff7ed' },
+                                  not_interested: { label: 'Not Interested', color: '#DC2626', bg: '#FEF2F2' },
+                                  do_not_contact: { label: 'DNC',            color: '#7f1d1d', bg: '#fef2f2' },
+                                };
+                                const cfg = cfgMap[sentiment] ?? { label: sentiment.replace(/_/g, ' '), color: '#6B7280', bg: '#F3F4F6' };
+                                return (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded capitalize" style={{ color: cfg.color, background: cfg.bg }} title={(enrollment as any).reply_sentiment_note || undefined}>
+                                    {cfg.label}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-2.5">
                               <DropdownMenu>
