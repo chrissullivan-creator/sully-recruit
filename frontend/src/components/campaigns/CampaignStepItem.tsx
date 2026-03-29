@@ -224,6 +224,13 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
             <Select
               value={step.channel}
               onValueChange={(value: ChannelType) => {
+                if (value === 'linkedin_message') {
+                  const hasConnectionBefore = allSteps.slice(0, index).some(s => s.channel === 'linkedin_connection');
+                  if (!hasConnectionBefore) {
+                    toast.error('A Connection Request step must come before a LinkedIn Message step.');
+                    return;
+                  }
+                }
                 const updates: Partial<CampaignStep> = { channel: value, accountId: undefined };
                 if (value === 'email') {
                   updates.useSignature = true;
@@ -316,6 +323,14 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
+
+          {/* LinkedIn message without prior connection warning */}
+          {step.channel === 'linkedin_message' && !allSteps.slice(0, index).some(s => s.channel === 'linkedin_connection') && (
+            <div className="flex items-center gap-2 rounded-md border border-[#C9A84C]/30 bg-[#C9A84C]/10 px-3 py-2 text-xs text-[#92722A]">
+              <span>⚠️</span>
+              <span>No connection request step found before this message. Add one or this step will be skipped for non-connections.</span>
+            </div>
+          )}
 
           {/* Row 2: Timing controls */}
           <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-muted/30 p-3">

@@ -319,13 +319,21 @@ const SequenceDetail = () => {
     }
   };
 
-  const addStep = () => {
+  const addStep = (channel: ChannelType = 'email') => {
+    if (channel === 'linkedin_message') {
+      const hasConnectionBefore = steps.some(s => s.channel === 'linkedin_connection');
+      if (!hasConnectionBefore) {
+        toast.error('Add a Connection Request step first — LinkedIn messages require an active connection.');
+        return;
+      }
+    }
     const prevEmailStep = [...steps].reverse().find(s => s.channel === 'email');
     const newStep: CampaignStep = {
-      id: generateId(), order: steps.length + 1, channel: 'email', content: '',
+      id: generateId(), order: steps.length + 1, channel, content: '',
       delayDays: steps.length === 0 ? 0 : 2, delayHours: 0,
       sendWindowStart: 6, sendWindowEnd: 23, waitForConnection: false,
-      minHoursAfterConnection: 4, isReply: !!prevEmailStep, useSignature: true,
+      minHoursAfterConnection: 4, isReply: channel === 'email' ? !!prevEmailStep : false,
+      useSignature: channel === 'email',
     };
     setSteps([...steps, newStep]);
   };
