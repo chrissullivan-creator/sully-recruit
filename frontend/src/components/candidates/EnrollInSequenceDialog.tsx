@@ -31,7 +31,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
   const { data: integrationAccounts = [] } = useIntegrationAccounts();
-  const emailAccounts = (integrationAccounts as any[]).filter(a => a.provider === 'email');
+  const allAccounts = (integrationAccounts as any[]).filter(a => a.is_active !== false);
   const queryClient = useQueryClient();
 
   const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0;
@@ -51,12 +51,12 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       supabase.auth.getUser().then(({ data }) => {
         const userId = data.user?.id;
         if (!userId) return;
-        const mine = emailAccounts.find((a: any) => a.owner_user_id === userId || a.user_id === userId);
+        const mine = allAccounts.find((a: any) => a.owner_user_id === userId || a.user_id === userId);
         if (mine) setSelectedAccountId(mine.id);
-        else if (emailAccounts.length === 1) setSelectedAccountId(emailAccounts[0].id);
+        else if (allAccounts.length === 1) setSelectedAccountId(allAccounts[0].id);
       });
     }
-  }, [open, preselectedSequenceId, emailAccounts.length]);
+  }, [open, preselectedSequenceId, allAccounts.length]);
 
   const activeSequences = sequences.filter((s) => s.status === 'active');
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
@@ -133,10 +133,10 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 0,
+          current_step_order: 1,
           next_step_at: new Date().toISOString(),
           enrolled_by: userId,
-          account_id: selectedAccountId || null,
+          integration_account_id: selectedAccountId,
         });
       }
 
@@ -210,7 +210,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           )}
 
           {/* Sender account picker — required */}
-          {emailAccounts.length > 0 && (
+          {allAccounts.length > 0 && (
             <div className="space-y-2">
               <Label>Send From <span className="text-destructive">*</span></Label>
               <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
@@ -218,14 +218,17 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                   <SelectValue placeholder="Choose sender account..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {emailAccounts.map((acct: any) => (
-                    <SelectItem key={acct.id} value={acct.id}>
-                      <span className="flex items-center gap-2">
-                        <Mail className="h-3.5 w-3.5" />
-                        {acct.account_label} — {acct.email_address}
-                      </span>
-                    </SelectItem>
-                  ))}
+                  {allAccounts.map((acct: any) => {
+                    const isLi = acct.account_type?.startsWith('linkedin') || acct.account_type === 'sales_navigator';
+                    return (
+                      <SelectItem key={acct.id} value={acct.id}>
+                        <span className="flex items-center gap-2">
+                          {isLi ? <Linkedin className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
+                          {acct.account_label || acct.account_type}{acct.email_address ? ` — ${acct.email_address}` : ''}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
