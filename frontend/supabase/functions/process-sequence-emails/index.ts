@@ -172,7 +172,8 @@ Deno.serve(async (req: Request) => {
       // ── 5. Determine channel type for rate limiting ─────────────────
       const stepChannel = step.channel || step.step_type || sequence.channel || "";
       const isConnection = stepChannel === "linkedin_connection";
-      const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav";
+      const isInMail = stepChannel === "linkedin_recruiter" || stepChannel === "sales_nav"
+        || stepChannel === "recruiter_inmail" || stepChannel === "sales_nav_inmail";
 
       // ── 5a. Daily cap: 40/day for connections, no cap for InMails ──
       if (!isInMail) {
@@ -351,8 +352,8 @@ Deno.serve(async (req: Request) => {
               .eq("id", entityId)
               .single();
             to = entity?.phone;
-          } else if (step.channel.startsWith('linkedin')) {
-            // LinkedIn: Everything goes through Unipile. Resolve and cache provider_id.
+          } else if (step.channel.startsWith('linkedin') || ['sales_nav', 'sales_nav_inmail', 'recruiter_inmail'].includes(step.channel)) {
+            // LinkedIn/InMail: Everything goes through Unipile. Resolve and cache provider_id.
             
             // 1. Check candidate_channels for cached provider_id (candidates)
             if (enrollment.candidate_id) {
@@ -568,9 +569,12 @@ async function sendSequenceMessage(
       break;
     case 'linkedin':
     case 'linkedin_connection':
+    case 'linkedin_message':
     case 'linkedin_recruiter':
     case 'sales_nav':
-      result = await sendLinkedIn(supabase, to, body, account_id);
+    case 'recruiter_inmail':
+    case 'sales_nav_inmail':
+      result = await sendLinkedIn(supabase, to, body, account_id, channel);
       externalMessageId = result.message_id;
       externalConversationId = result.conversation_id;
       break;
@@ -727,7 +731,8 @@ async function sendLinkedIn(
   supabase: any,
   to: string,
   body: string,
-  account_id?: string
+  account_id?: string,
+  stepChannel?: string
 ): Promise<{ message_id: string; conversation_id: string }> {
   // Get Unipile API key
   let apiKey: string | null = null;
@@ -786,6 +791,22 @@ async function sendLinkedIn(
     }
   }
 
+  // Determine message type: InMail vs regular message
+  const isInMailChannel = stepChannel === 'sales_nav_inmail' || stepChannel === 'recruiter_inmail'
+    || stepChannel === 'sales_nav' || stepChannel === 'linkedin_recruiter';
+  const isConnectionRequest = stepChannel === 'linkedin_connection';
+
+  const sendPayload: any = {
+    provider_id: providerId,
+    text: body,
+  };
+  if (isInMailChannel) {
+    sendPayload.message_type = 'INMAIL';
+  }
+  if (isConnectionRequest) {
+    sendPayload.message_type = 'CONNECTION_REQUEST';
+  }
+
   // Send message via Unipile
   const response = await fetch(`${baseUrl}/messages`, {
     method: 'POST',
@@ -794,10 +815,7 @@ async function sendLinkedIn(
       'Content-Type': 'application/json',
       'X-UNIPILE-CLIENT': 'sully-recruit',
     },
-    body: JSON.stringify({
-      provider_id: providerId,
-      text: body,
-    }),
+    body: JSON.stringify(sendPayload),
   });
 
   if (!response.ok) {

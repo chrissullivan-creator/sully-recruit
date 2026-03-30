@@ -91,7 +91,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
   };
 
   const channelInfo = channelOptions.find(c => c.value === step.channel);
-  const showConnectionWait = isLinkedInChannel(step.channel) && step.channel !== 'linkedin_connection';
+  const showConnectionWait = step.channel === 'linkedin_message';
   const isEmail = step.channel === 'email';
 
   const contentRef = useRef<HTMLTextAreaElement>(null);

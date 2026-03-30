@@ -57,8 +57,16 @@ const channelToStepType = (channel: ChannelType): string => {
 };
 
 const channelToDbChannel = (channel: ChannelType): string => {
-  if (channel.startsWith('linkedin') || channel === 'sales_nav') return 'linkedin';
-  return channel;
+  const map: Record<ChannelType, string> = {
+    linkedin_recruiter: 'recruiter_inmail',
+    sales_nav: 'sales_nav_inmail',
+    linkedin_message: 'linkedin_message',
+    linkedin_connection: 'linkedin_connection',
+    email: 'email',
+    sms: 'sms',
+    phone: 'phone',
+  };
+  return map[channel] || channel;
 };
 
 // Maps DB step_type + channel → UI ChannelType
