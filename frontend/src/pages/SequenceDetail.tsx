@@ -661,7 +661,11 @@ const SequenceDetail = () => {
                         const personName = person?.full_name || `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim() || 'Unknown';
                         const company = enrollment.candidates?.current_company || (enrollment.contacts as any)?.company_name || '';
                         const isCand = !!enrollment.candidate_id;
-                        const profileUrl = isCand ? `/candidates/${enrollment.candidate_id}` : null;
+                        const profileUrl = enrollment.candidate_id
+                          ? `/candidates/${enrollment.candidate_id}`
+                          : enrollment.contact_id
+                            ? `/contacts/${enrollment.contact_id}`
+                            : null;
 
                         // Build a map from step ID → step info for resolving execution metadata
                         const stepById = Object.fromEntries(steps.map(s => [s.id, s]));
