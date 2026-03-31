@@ -20,7 +20,7 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare, Plus,
+  PenSquare, Plus, Bold, Italic, Underline,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
@@ -692,6 +692,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogType, setCreateDialogType] = useState<'candidate' | 'contact'>('candidate');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
     enabled: !!threadId,
@@ -730,7 +731,9 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   };
 
   const handleSend = async () => {
-    if (!replyText.trim() || !threadId || !thread) return;
+    const html = editorRef.current?.innerHTML ?? '';
+    const text = editorRef.current?.textContent ?? '';
+    if (!text.trim() || !threadId || !thread) return;
     setSending(true);
     try {
       // Determine recipient address based on channel
@@ -771,7 +774,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           contact_id: thread.contact_id,
           to: toAddress,
           subject: thread.subject || undefined,
-          body: replyText.trim(),
+          body: thread.channel === 'email' ? html : text.trim(),
           account_id: thread.account_id,
         },
       });
@@ -780,6 +783,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       if (!data.success) throw new Error(data.error || 'Send failed');
 
       toast.success(`Message sent via ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
+      if (editorRef.current) editorRef.current.innerHTML = '';
       setReplyText('');
       queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
@@ -990,7 +994,11 @@ function MessagePane({ threadId }: { threadId: string | null }) {
                               isOutbound ? 'text-white/80' : 'text-foreground/70'
                             )}>{msg.subject}</p>
                           )}
-                          {displayBody || <span className="italic opacity-50">(No content)</span>}
+                          {displayBody
+                            ? thread.channel === 'email'
+                              ? <div dangerouslySetInnerHTML={{ __html: displayBody }} className="prose prose-sm max-w-none [&_*]:text-inherit [&_a]:underline" />
+                              : displayBody
+                            : <span className="italic opacity-50">(No content)</span>}
                         </div>
 
                         {/* Sender + timestamp below bubble */}
@@ -1032,25 +1040,34 @@ function MessagePane({ threadId }: { threadId: string | null }) {
 
         {/* Reply */}
         <div className="border-t border-border p-4">
-          <div className="flex gap-2 items-end max-w-2xl mx-auto">
-            <textarea
-              placeholder={`Reply via ${CHANNEL_LABELS[thread.channel] || thread.channel}...`}
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-              }}
-              rows={2}
-              className="flex-1 rounded-lg border border-input bg-background text-foreground text-sm px-3 py-2 resize-none placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <Button
-              variant="gold"
-              onClick={handleSend}
-              disabled={sending || !replyText.trim()}
-              className="h-[60px] px-4"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
+          <div className="max-w-2xl mx-auto">
+            {/* Formatting toolbar */}
+            <div className="flex items-center gap-0.5 mb-1.5">
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); document.execCommand('bold'); }} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Bold (Ctrl+B)"><Bold className="h-3.5 w-3.5" /></button>
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); document.execCommand('italic'); }} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Italic (Ctrl+I)"><Italic className="h-3.5 w-3.5" /></button>
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); document.execCommand('underline'); }} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Underline (Ctrl+U)"><Underline className="h-3.5 w-3.5" /></button>
+            </div>
+            <div className="flex gap-2 items-end">
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={() => setReplyText(editorRef.current?.textContent ?? '')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                }}
+                data-placeholder={`Reply via ${CHANNEL_LABELS[thread.channel] || thread.channel}...`}
+                className="flex-1 rounded-lg border border-input bg-background text-foreground text-sm px-3 py-2 min-h-[60px] max-h-[200px] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-ring empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground"
+              />
+              <Button
+                variant="gold"
+                onClick={handleSend}
+                disabled={sending || !replyText.trim()}
+                className="h-[60px] px-4"
+              >
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
