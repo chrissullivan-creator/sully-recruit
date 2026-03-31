@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CampaignStepItem } from '@/components/campaigns/CampaignStepItem';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -30,7 +32,7 @@ import {
 import {
   ArrowLeft, Play, Pause, Plus, Save, Users, UserPlus, Mail, Linkedin, MessageSquare,
   Phone, BarChart3, Loader2, Martini, ShieldAlert, Trash2, Clock, CheckCircle, XCircle, Copy,
-  MoreHorizontal, Eye, PauseCircle,
+  MoreHorizontal, Eye, PauseCircle, ChevronsUpDown, Briefcase, User,
 } from 'lucide-react';
 import { SequenceAnalytics } from '@/components/campaigns/SequenceAnalytics';
 import type { CampaignStep, ChannelType } from '@/types';
@@ -112,7 +114,8 @@ const SequenceDetail = () => {
   const [description, setDescription] = useState('');
   const [channel, setChannel] = useState('linkedin');
   const [stopOnReply, setStopOnReply] = useState(true);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobIds, setJobIds] = useState<string[]>([]);
+  const [candidateTagIds, setCandidateTagIds] = useState<string[]>([]);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
 
   // Enroll dialog
@@ -165,7 +168,8 @@ const SequenceDetail = () => {
       setDescription(seq.description || '');
       setChannel(seq.channel);
       setStopOnReply(seq.stop_on_reply ?? true);
-      setJobId(seq.job_id ?? null);
+      setJobIds(seq.job_ids?.length ? seq.job_ids : seq.job_id ? [seq.job_id] : []);
+      setCandidateTagIds(seq.candidate_ids ?? []);
 
       const dbSteps = ((seq.sequence_steps as any[]) ?? []).sort((a: any, b: any) => a.step_order - b.step_order);
       const loadedSteps: CampaignStep[] = dbSteps.map((s: any) => {
@@ -198,7 +202,8 @@ const SequenceDetail = () => {
     setSaving(true);
     try {
       const { error: seqError } = await supabase.from('sequences').update({
-        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply, job_id: jobId,
+        name: name.trim(), description: description.trim() || null, channel, stop_on_reply: stopOnReply,
+        job_id: jobIds[0] || null, job_ids: jobIds, candidate_ids: candidateTagIds,
       } as any).eq('id', id);
       if (seqError) throw seqError;
 
@@ -295,7 +300,7 @@ const SequenceDetail = () => {
       const { data: newSeq, error: seqError } = await supabase.from('sequences').insert({
         name: `${name.trim()} (Copy)`,
         description: description.trim() || null,
-        channel, stop_on_reply: stopOnReply, job_id: jobId,
+        channel, stop_on_reply: stopOnReply, job_id: jobIds[0] || null, job_ids: jobIds, candidate_ids: candidateTagIds,
         status: 'draft', created_by: userId,
       } as any).select('id').single();
       if (seqError) throw seqError;
@@ -399,7 +404,7 @@ const SequenceDetail = () => {
           <h1 className="text-lg font-semibold text-foreground truncate">{sequence.name}</h1>
           <p className="text-sm text-muted-foreground">
             {sequence.channel} • {steps.length} steps • {enrollments.length} enrolled
-            {jobId && jobs.find((j: any) => j.id === jobId) && <> • <span className="text-gold font-medium">{jobs.find((j: any) => j.id === jobId)?.title}</span></>}
+            {jobIds.length > 0 && <> • <span className="text-gold font-medium">{jobIds.map(jid => jobs.find((j: any) => j.id === jid)?.title).filter(Boolean).join(', ')}</span></>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -448,21 +453,76 @@ const SequenceDetail = () => {
                     <Input value={name} onChange={(e) => setName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Tagged Job</Label>
-                    <Select value={jobId ?? 'none'} onValueChange={(v) => setJobId(v === 'none' ? null : v)}>
-                      <SelectTrigger><SelectValue placeholder="No job tagged" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No job tagged</SelectItem>
+                    <Label>Tagged Jobs</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between font-normal h-auto min-h-[2.5rem] py-1.5">
+                          <span className="flex flex-wrap gap-1 text-left">
+                            {jobIds.length === 0 && <span className="text-muted-foreground">No jobs tagged</span>}
+                            {jobIds.map(jid => {
+                              const j = jobs.find((x: any) => x.id === jid);
+                              return j ? <Badge key={jid} variant="secondary" className="text-xs gap-1"><Briefcase className="h-3 w-3" />{(j as any).title}</Badge> : null;
+                            })}
+                          </span>
+                          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50 ml-2" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-2 max-h-60 overflow-y-auto" align="start">
                         {jobs.map((j: any) => (
-                          <SelectItem key={j.id} value={j.id}>{j.title}{j.company_name ? ` — ${j.company_name}` : ''}</SelectItem>
+                          <label key={j.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer">
+                            <Checkbox checked={jobIds.includes(j.id)} onCheckedChange={(checked) => {
+                              setJobIds(prev => checked ? [...prev, j.id] : prev.filter(x => x !== j.id));
+                            }} />
+                            <span className="text-sm truncate">{j.title}{j.company_name ? ` — ${j.company_name}` : ''}</span>
+                          </label>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description..." />
+                </div>
+                <div className="space-y-2">
+                  <Label>Tagged Candidates</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between font-normal h-auto min-h-[2.5rem] py-1.5">
+                        <span className="flex flex-wrap gap-1 text-left">
+                          {candidateTagIds.length === 0 && <span className="text-muted-foreground">No candidates tagged</span>}
+                          {candidateTagIds.map(cid => {
+                            const c = allCandidates.find((x: any) => x.id === cid);
+                            return c ? <Badge key={cid} variant="secondary" className="text-xs gap-1"><User className="h-3 w-3" />{(c as any).full_name || `${(c as any).first_name} ${(c as any).last_name}`}</Badge> : null;
+                          })}
+                        </span>
+                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50 ml-2" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0 max-h-72 flex flex-col" align="start">
+                      <div className="p-2 border-b border-border">
+                        <Input placeholder="Search candidates..." className="h-8 text-xs" onChange={(e) => {
+                          const el = e.target.closest('[data-radix-popper-content-wrapper]')?.querySelector('[data-candidate-list]');
+                          if (el) (el as any).__searchQuery = e.target.value.toLowerCase();
+                          // Force re-render by toggling a data attr
+                          e.target.setAttribute('data-q', e.target.value);
+                        }} />
+                      </div>
+                      <div className="overflow-y-auto max-h-56 p-2">
+                        {allCandidates.slice(0, 100).map((c: any) => (
+                          <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer">
+                            <Checkbox checked={candidateTagIds.includes(c.id)} onCheckedChange={(checked) => {
+                              setCandidateTagIds(prev => checked ? [...prev, c.id] : prev.filter(x => x !== c.id));
+                            }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm truncate">{c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">{[c.current_title, c.current_company].filter(Boolean).join(' · ')}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
                   <div className="flex items-center gap-2">
@@ -505,8 +565,8 @@ const SequenceDetail = () => {
                           accounts={accounts}
                           onUpdate={updateStep}
                           onDelete={deleteStep}
-                          jobTitle={jobId ? (jobs.find((j: any) => j.id === jobId)?.title ?? undefined) : undefined}
-                          jobCompany={jobId ? (jobs.find((j: any) => j.id === jobId)?.company_name ?? undefined) : undefined}
+                          jobTitle={jobIds.length > 0 ? (jobs.find((j: any) => j.id === jobIds[0])?.title ?? undefined) : undefined}
+                          jobCompany={jobIds.length > 0 ? (jobs.find((j: any) => j.id === jobIds[0])?.company_name ?? undefined) : undefined}
                           sequenceName={name}
                           sequenceDescription={description || undefined}
                         />
