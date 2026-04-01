@@ -32,6 +32,10 @@ export function useCandidates() {
   });
 
   useEffect(() => {
+    // Remove any existing channel with the same name first (handles React StrictMode double-mount)
+    const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:candidates-changes');
+    if (existing) supabase.removeChannel(existing);
+
     const channel = supabase
       .channel('candidates-changes')
       .on(
@@ -191,6 +195,9 @@ export function useContacts() {
   });
 
   useEffect(() => {
+    const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:contacts-changes');
+    if (existing) supabase.removeChannel(existing);
+
     const channel = supabase
       .channel('contacts-changes')
       .on(
