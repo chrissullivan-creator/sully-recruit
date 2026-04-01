@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ import { format } from 'date-fns';
 import {
   Phone, PhoneIncoming, PhoneOutgoing, Search, Clock,
   FileText, Plus, UserCheck, User, Users, Loader2,
-  CheckCircle2, AlertCircle, UserPlus,
+  CheckCircle2, AlertCircle, UserPlus, ListChecks, Sparkles,
 } from 'lucide-react';
 
 interface CallLog {
@@ -366,9 +367,12 @@ function LinkCallDialog({
 
 // ---- Main page ----
 const Calls = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [logOpen, setLogOpen] = useState(false);
   const [linkCall, setLinkCall] = useState<CallLog | null>(null);
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<'calls' | 'screened'>('calls');
   const queryClient = useQueryClient();
 
   const { data: calls = [], isLoading } = useQuery({
@@ -378,9 +382,22 @@ const Calls = () => {
         .from('call_logs' as any)
         .select('*')
         .order('started_at', { ascending: false })
-        .limit(100);
+        .limit(200);
       if (error) throw error;
       return (data ?? []) as unknown as CallLog[];
+    },
+  });
+
+  const { data: screenedCalls = [], isLoading: screenedLoading } = useQuery({
+    queryKey: ['ai_call_notes_all'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ai_call_notes')
+        .select('*, candidates(id, first_name, last_name, full_name, current_title, current_company)')
+        .order('call_started_at', { ascending: false, nullsFirst: false })
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []) as any[];
     },
   });
 
@@ -388,8 +405,16 @@ const Calls = () => {
     !searchQuery ||
     c.phone_number?.includes(searchQuery) ||
     c.linked_entity_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.summary?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     c.notes?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const filteredScreened = screenedCalls.filter((n: any) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const name = n.candidates?.full_name || `${n.candidates?.first_name ?? ''} ${n.candidates?.last_name ?? ''}`;
+    return name.toLowerCase().includes(q) || n.ai_summary?.toLowerCase().includes(q) || n.phone_number?.includes(searchQuery);
+  });
 
   const formatDuration = (seconds?: number | null) => {
     if (!seconds) return '--:--';
@@ -436,7 +461,28 @@ const Calls = () => {
           />
         </div>
 
-        {isLoading ? (
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6">
+          {([
+            ['calls', `Logged Calls (${filtered.length})`],
+            ['screened', `Screened Candidates (${filteredScreened.length})`],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={cn(
+                'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors',
+                activeTab === key
+                  ? 'bg-accent text-accent-foreground border-accent'
+                  : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'calls' && (isLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
             <Loader2 className="h-5 w-5 animate-spin" /> Loading calls...
           </div>
@@ -479,13 +525,26 @@ const Calls = () => {
                           </h3>
                           <span className="text-xs text-muted-foreground">{call.phone_number}</span>
                           {call.linked_entity_name && (
-                            <span className={cn(
-                              'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border',
-                              entityColor(call.linked_entity_type)
-                            )}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (call.linked_entity_id) {
+                                  const path = call.linked_entity_type === 'candidate'
+                                    ? `/candidates/${call.linked_entity_id}`
+                                    : call.linked_entity_type === 'contact'
+                                      ? `/contacts/${call.linked_entity_id}`
+                                      : null;
+                                  if (path) navigate(path);
+                                }
+                              }}
+                              className={cn(
+                                'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity',
+                                entityColor(call.linked_entity_type)
+                              )}
+                            >
                               {entityIcon(call.linked_entity_type)}
                               {call.linked_entity_name}
-                            </span>
+                            </button>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
@@ -510,12 +569,41 @@ const Calls = () => {
                       </div>
                     </div>
 
-                    {/* Notes */}
-                    {call.notes && (
-                      <div className="mt-3 p-3 rounded-lg bg-muted/50">
-                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{call.notes}</p>
-                      </div>
-                    )}
+                    {/* Summary / Notes — prefer summary, truncate raw notes */}
+                    {(call.summary || call.notes) && (() => {
+                      if (call.summary) {
+                        return (
+                          <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
+                            <div className="flex items-center gap-2 mb-1">
+                              <FileText className="h-3.5 w-3.5 text-accent" />
+                              <span className="text-xs font-medium text-accent">Summary</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{call.summary}</p>
+                          </div>
+                        );
+                      }
+                      const isExpanded = expandedNotes.has(call.id);
+                      const needsTruncation = (call.notes?.length ?? 0) > 300;
+                      return (
+                        <div className="mt-3 p-3 rounded-lg bg-muted/50">
+                          <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                            {isExpanded || !needsTruncation ? call.notes : `${call.notes!.slice(0, 300)}...`}
+                          </p>
+                          {needsTruncation && (
+                            <button
+                              onClick={() => setExpandedNotes(prev => {
+                                const next = new Set(prev);
+                                isExpanded ? next.delete(call.id) : next.add(call.id);
+                                return next;
+                              })}
+                              className="text-xs text-accent hover:underline mt-1"
+                            >
+                              {isExpanded ? 'Show less' : 'Show more'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Audio Recording */}
                     {call.audio_url && (
@@ -527,17 +615,6 @@ const Calls = () => {
                         <audio controls className="w-full h-8" preload="none">
                           <source src={call.audio_url} />
                         </audio>
-                      </div>
-                    )}
-
-                    {/* AI Summary */}
-                    {call.summary && (
-                      <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
-                        <div className="flex items-center gap-2 mb-1">
-                          <FileText className="h-3.5 w-3.5 text-accent" />
-                          <span className="text-xs font-medium text-accent">Summary</span>
-                        </div>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">{call.summary}</p>
                       </div>
                     )}
 
@@ -560,7 +637,102 @@ const Calls = () => {
               </div>
             ))}
           </div>
-        )}
+        ))}
+
+        {/* Screened Candidates tab */}
+        {activeTab === 'screened' && (screenedLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading screened calls...
+          </div>
+        ) : filteredScreened.length === 0 ? (
+          <div className="text-center py-16">
+            <Sparkles className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">No screened candidates yet</h3>
+            <p className="text-sm text-muted-foreground">AI-processed call notes will appear here.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredScreened.map((note: any) => {
+              const cand = note.candidates;
+              const candName = cand?.full_name || `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim() || 'Unknown';
+              const subtitle = [cand?.current_title, cand?.current_company].filter(Boolean).join(' · ');
+              return (
+                <div key={note.id} className="rounded-lg border border-border bg-card p-5 hover:border-accent/40 transition-all">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-4 flex-wrap">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {cand?.id ? (
+                              <button
+                                onClick={() => navigate(`/candidates/${cand.id}`)}
+                                className="text-sm font-medium text-foreground hover:text-accent transition-colors cursor-pointer"
+                              >
+                                {candName}
+                              </button>
+                            ) : (
+                              <span className="text-sm font-medium text-foreground">{candName}</span>
+                            )}
+                            {note.call_direction && (
+                              <Badge variant="outline" className="text-[10px] capitalize">{note.call_direction}</Badge>
+                            )}
+                            {note.call_duration_formatted && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" /> {note.call_duration_formatted}
+                              </span>
+                            )}
+                          </div>
+                          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, yyyy · h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d, yyyy') : '—'}
+                        </span>
+                      </div>
+
+                      {/* AI Summary */}
+                      {note.ai_summary && (
+                        <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
+                          <div className="flex items-center gap-2 mb-1">
+                            <FileText className="h-3.5 w-3.5 text-accent" />
+                            <span className="text-xs font-medium text-accent">Summary</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{note.ai_summary}</p>
+                        </div>
+                      )}
+
+                      {/* Action Items */}
+                      {note.ai_action_items && (
+                        <div className="mt-2 p-3 rounded-lg bg-muted/50">
+                          <div className="flex items-center gap-2 mb-1">
+                            <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-xs font-medium text-muted-foreground">Action Items</span>
+                          </div>
+                          <p className="text-sm text-foreground whitespace-pre-wrap">{note.ai_action_items}</p>
+                        </div>
+                      )}
+
+                      {/* Audio */}
+                      {note.recording_url && (
+                        <div className="mt-2 p-3 rounded-lg bg-muted/30 border border-border">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-xs font-medium text-muted-foreground">Recording</span>
+                          </div>
+                          <audio controls className="w-full h-8" preload="none">
+                            <source src={note.recording_url} />
+                          </audio>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
       <LogCallDialog open={logOpen} onOpenChange={setLogOpen} />
