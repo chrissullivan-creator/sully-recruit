@@ -96,8 +96,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
   const [links, setLinks] = useState<{ entity_type: string; entity_id: string; label: string }[]>([]);
   const [attendees, setAttendees] = useState<{ entity_type: string; entity_id: string; label: string }[]>([]);
   const [entitySearch, setEntitySearch] = useState('');
-  const [entityType, setEntityType] = useState<EntityType>('candidate');
-  const [searchResults, setSearchResults] = useState<{ id: string; label: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ id: string; label: string; type: EntityType }[]>([]);
   const [searching, setSearching] = useState(false);
   const [attendeeSearch, setAttendeeSearch] = useState('');
   const [attendeeResults, setAttendeeResults] = useState<{ id: string; label: string; type: string }[]>([]);
@@ -120,28 +119,29 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
     }
   }, [open, defaultLinks, defaultMode]);
 
-  // Search entities with debounce
+  // Search ALL entity types at once with debounce
   useEffect(() => {
     if (!entitySearch.trim()) { setSearchResults([]); return; }
     const timeout = setTimeout(async () => {
       setSearching(true);
-      if (entityType === 'candidate') {
-        const { data } = await supabase.from('candidates').select('id, full_name').ilike('full_name', `%${entitySearch}%`).limit(8);
-        setSearchResults((data || []).map(c => ({ id: c.id, label: c.full_name || 'Unnamed' })));
-      } else if (entityType === 'job') {
-        const { data } = await supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${entitySearch}%`).not('status', 'in', '("closed_won","closed_lost")').limit(8);
-        setSearchResults((data || []).map(j => ({ id: j.id, label: `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}` })));
-      } else if (entityType === 'contact') {
-        const { data } = await supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${entitySearch}%`).limit(8);
-        setSearchResults((data || []).map(c => ({ id: c.id, label: `${c.full_name || 'Unnamed'}${c.title ? ` · ${c.title}` : ''}` })));
-      } else if (entityType === 'company') {
-        const { data } = await supabase.from('companies').select('id, name').ilike('name', `%${entitySearch}%`).limit(8);
-        setSearchResults((data || []).map(c => ({ id: c.id, label: c.name || 'Unnamed' })));
-      }
+      const q = entitySearch.trim();
+      const [candRes, jobRes, contactRes, companyRes] = await Promise.all([
+        supabase.from('candidates').select('id, full_name').ilike('full_name', `%${q}%`).limit(4),
+        supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${q}%`).not('status', 'in', '("closed_won","closed_lost")').limit(4),
+        supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${q}%`).limit(4),
+        supabase.from('companies').select('id, name').ilike('name', `%${q}%`).limit(4),
+      ]);
+      const results: { id: string; label: string; type: EntityType }[] = [
+        ...(candRes.data || []).map(c => ({ id: c.id, label: c.full_name || 'Unnamed', type: 'candidate' as EntityType })),
+        ...(contactRes.data || []).map(c => ({ id: c.id, label: `${c.full_name || 'Unnamed'}${c.title ? ` · ${c.title}` : ''}`, type: 'contact' as EntityType })),
+        ...(jobRes.data || []).map(j => ({ id: j.id, label: `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}`, type: 'job' as EntityType })),
+        ...(companyRes.data || []).map(c => ({ id: c.id, label: c.name || 'Unnamed', type: 'company' as EntityType })),
+      ];
+      setSearchResults(results);
       setSearching(false);
     }, 300);
     return () => clearTimeout(timeout);
-  }, [entitySearch, entityType]);
+  }, [entitySearch]);
 
   // Search attendees (candidates + contacts + users)
   useEffect(() => {
@@ -164,9 +164,9 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
     return () => clearTimeout(timeout);
   }, [attendeeSearch]);
 
-  const addLink = (id: string, label: string) => {
+  const addLink = (id: string, label: string, type: EntityType) => {
     if (!links.find(l => l.entity_id === id)) {
-      setLinks(prev => [...prev, { entity_type: entityType, entity_id: id, label }]);
+      setLinks(prev => [...prev, { entity_type: type, entity_id: id, label }]);
     }
     setEntitySearch('');
     setSearchResults([]);
@@ -238,7 +238,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{mode === 'task' ? 'Add Task' : 'Add Meeting'}</DialogTitle>
         </DialogHeader>
@@ -255,7 +255,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
           </div>
         </RadioGroup>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
+        <ScrollArea className="flex-1 -mx-6 px-6 max-h-[calc(85vh-180px)]">
           <div className="space-y-4 pb-4">
             {/* Title */}
             <div className="space-y-1.5">
@@ -280,39 +280,34 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Related to</Label>
-                <div className="flex gap-1.5">
-                  <Select value={entityType} onValueChange={(v) => { setEntityType(v as EntityType); setEntitySearch(''); setSearchResults([]); }}>
-                    <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="candidate">Candidate</SelectItem>
-                      <SelectItem value="contact">Contact</SelectItem>
-                      <SelectItem value="company">Company</SelectItem>
-                      <SelectItem value="job">Job</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="relative flex-1">
-                    <Input
-                      value={entitySearch}
-                      onChange={(e) => setEntitySearch(e.target.value)}
-                      placeholder={`Search...`}
-                      className="h-9 text-sm pr-7"
-                    />
-                    {entitySearch && (
-                      <button onClick={() => { setEntitySearch(''); setSearchResults([]); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {searching && <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                    {searchResults.length > 0 && (
-                      <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-40 overflow-y-auto">
-                        {searchResults.map(r => (
-                          <button key={r.id} onClick={() => addLink(r.id, r.label)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 text-foreground">
-                            {r.label}
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={entitySearch}
+                    onChange={(e) => setEntitySearch(e.target.value)}
+                    placeholder="Select Candidate/Contact/Company/Job"
+                    className="h-9 text-sm pl-7 pr-7"
+                  />
+                  {entitySearch && (
+                    <button onClick={() => { setEntitySearch(''); setSearchResults([]); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {searching && <Loader2 className="absolute right-7 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  {searchResults.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                      {searchResults.map(r => {
+                        const cfg = ENTITY_CONFIG[r.type];
+                        return (
+                          <button key={r.id + r.type} onClick={() => addLink(r.id, r.label, r.type)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 text-foreground flex items-center gap-2">
+                            <cfg.icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-[10px] uppercase text-muted-foreground w-16 shrink-0">{r.type}</span>
+                            <span className="truncate">{r.label}</span>
                           </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
