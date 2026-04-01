@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { useRef, useState } from 'react';
@@ -500,12 +500,11 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
               {askJoeLoading ? 'Writing...' : 'Ask Joe'}
             </Button>
           </div>
-          <Textarea
-            ref={contentRef}
-            placeholder={channelPlaceholders[step.channel] || 'Message content...'}
+          <RichTextEditor
             value={step.content}
-            onChange={(e) => onUpdate(step.id, { content: e.target.value })}
-            className="min-h-[80px] resize-none"
+            onChange={(html) => onUpdate(step.id, { content: html })}
+            placeholder={channelPlaceholders[step.channel] || 'Message content...'}
+            minHeight="80px"
           />
 
           {/* Attachments */}

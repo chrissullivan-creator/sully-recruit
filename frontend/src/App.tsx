@@ -14,6 +14,7 @@ import CandidateDetail from "./pages/CandidateDetail";
 import SendOut from "./pages/SendOut";
 import Companies from "./pages/Companies";
 import Contacts from "./pages/Contacts";
+import ContactDetail from "./pages/ContactDetail";
 import Campaigns from "./pages/Campaigns";
 import SequenceDetail from "./pages/SequenceDetail";
 import Calls from "./pages/Calls";
@@ -46,6 +47,7 @@ const App = () => (
             <Route path="/candidates/:id/sendout" element={<ProtectedRoute><SendOut /></ProtectedRoute>} />
             <Route path="/companies" element={<ProtectedRoute><Companies /></ProtectedRoute>} />
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
+            <Route path="/contacts/:id" element={<ProtectedRoute><ContactDetail /></ProtectedRoute>} />
             <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
             <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />

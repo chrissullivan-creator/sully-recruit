@@ -4,8 +4,10 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
@@ -23,10 +25,11 @@ import { Label } from '@/components/ui/label';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, ChevronRight, Sparkles,
+  Search, ChevronRight, Sparkles, MessageSquare, CheckSquare, Calendar, Play,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
 
 const JOB_STATUSES = [
   { value: 'lead',         label: 'Lead',         color: 'bg-gray-500/15 text-gray-400' },
@@ -237,6 +240,76 @@ const JobDetail = () => {
   const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
   const [instructionsLoaded, setInstructionsLoaded] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
+  const [activityTab, setActivityTab] = useState<'notes' | 'tasks' | 'meetings'>('notes');
+  const [jobNoteText, setJobNoteText] = useState('');
+  const [savingJobNote, setSavingJobNote] = useState(false);
+
+  // ── Activity sidebar queries ─────────────────────────────────────────
+  const { data: jobNotes = [] } = useQuery({
+    queryKey: ['notes', 'job', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('notes')
+        .select('*')
+        .eq('entity_id', id!)
+        .eq('entity_type', 'job')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: jobTaskLinks = [] } = useQuery({
+    queryKey: ['task_links', 'job', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('task_links')
+        .select('*, tasks(*)')
+        .eq('entity_type', 'job')
+        .eq('entity_id', id!);
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: jobMeetings = [] } = useQuery({
+    queryKey: ['task_links', 'job_meetings', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('task_links')
+        .select('*, tasks(*)')
+        .eq('entity_type', 'job')
+        .eq('entity_id', id!);
+      if (error) throw error;
+      return ((data ?? []) as any[]).filter((tl: any) => tl.tasks?.task_type === 'meeting');
+    },
+  });
+
+  const { data: jobSequences = [] } = useQuery({
+    queryKey: ['sequences', 'job', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sequences')
+        .select('*')
+        .eq('job_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const handleSaveJobNote = async () => {
+    if (!jobNoteText.trim() || !id) return;
+    setSavingJobNote(true);
+    const { error } = await supabase.from('notes').insert({ entity_id: id, entity_type: 'job', note: jobNoteText.trim() });
+    if (error) toast.error('Failed to save note');
+    else { toast.success('Note saved'); setJobNoteText(''); queryClient.invalidateQueries({ queryKey: ['notes', 'job', id] }); }
+    setSavingJobNote(false);
+  };
 
   // Seed local state from job data once loaded
   if (job && !instructionsLoaded) {
@@ -402,7 +475,9 @@ const JobDetail = () => {
         }
       />
 
-      <div className="p-8 space-y-6 max-w-4xl">
+      <div className="flex flex-1 overflow-hidden">
+      {/* ── Main Content ─────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-8 space-y-6">
 
         {/* ── Job Info ──────────────────────────────────────────────────────── */}
         <Card>
@@ -469,11 +544,11 @@ const JobDetail = () => {
             <p className="text-xs text-muted-foreground">
               Instructions for submitting candidates to this role — format requirements, what to include, client preferences, etc.
             </p>
-            <Textarea
+            <RichTextEditor
               value={submittalInstructions}
-              onChange={e => setSubmittalInstructions(e.target.value)}
+              onChange={setSubmittalInstructions}
               placeholder="e.g. Send blind resume only. Include comp expectations and reason for looking. Client requires GPA 3.5+. Submit to hiring manager directly, not HR..."
-              className="min-h-[130px] text-sm resize-none"
+              minHeight="130px"
             />
             <Button
               variant="gold"
@@ -772,6 +847,196 @@ const JobDetail = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* ── Campaigns Tab ────────────────────────────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Play className="h-5 w-5 text-accent" />
+              Campaigns
+              {jobSequences.length > 0 && (
+                <Badge variant="secondary" className="ml-1">{jobSequences.length}</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {jobSequences.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No campaigns linked to this job yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {jobSequences.map((seq: any) => (
+                  <div key={seq.id} className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">{seq.name}</p>
+                        {seq.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{seq.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {seq.enrolled_count != null && (
+                          <span className="text-xs text-muted-foreground">{seq.enrolled_count} enrolled</span>
+                        )}
+                        <Badge variant="secondary" className={cn(
+                          'text-xs',
+                          seq.status === 'active' && 'bg-green-500/15 text-green-400',
+                          seq.status === 'paused' && 'bg-yellow-500/15 text-yellow-400',
+                          seq.status === 'draft' && 'bg-gray-500/15 text-gray-400',
+                        )}>
+                          {seq.status ? seq.status.charAt(0).toUpperCase() + seq.status.slice(1) : 'Unknown'}
+                        </Badge>
+                        {seq.created_at && (
+                          <span className="text-xs text-muted-foreground">{format(new Date(seq.created_at), 'MMM d, yyyy')}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Activity Sidebar ──────────────────────────────────────────────── */}
+      <aside className="w-[28%] min-w-[300px] shrink-0 border-l border-border flex flex-col overflow-hidden bg-card/30">
+        <div className="px-4 pt-4 pb-2 border-b border-border">
+          <div className="flex gap-1">
+            <button
+              onClick={() => setActivityTab('notes')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                activityTab === 'notes' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              )}
+            >
+              <MessageSquare className="h-3.5 w-3.5" /> Notes
+            </button>
+            <button
+              onClick={() => setActivityTab('tasks')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                activityTab === 'tasks' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              )}
+            >
+              <CheckSquare className="h-3.5 w-3.5" /> Tasks
+            </button>
+            <button
+              onClick={() => setActivityTab('meetings')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                activityTab === 'meetings' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              )}
+            >
+              <Calendar className="h-3.5 w-3.5" /> Meetings
+            </button>
+          </div>
+        </div>
+        <ScrollArea className="flex-1">
+          <div className="p-4 space-y-3">
+            {/* Notes sub-tab */}
+            {activityTab === 'notes' && (
+              <>
+                <div className="space-y-2">
+                  <RichTextEditor
+                    value={jobNoteText}
+                    onChange={setJobNoteText}
+                    placeholder="Add a note..."
+                    minHeight="70px"
+                  />
+                  <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleSaveJobNote} disabled={savingJobNote || !jobNoteText.trim()}>
+                    {savingJobNote && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save Note
+                  </Button>
+                </div>
+                {(jobNotes as any[]).length > 0 ? (
+                  <div className="space-y-2">
+                    {(jobNotes as any[]).map((n: any) => (
+                      <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
+                        <div className="text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
+                        <p className="text-[10px] text-muted-foreground mt-1.5">{n.created_at ? format(new Date(n.created_at), 'MMM d, yyyy h:mm a') : ''}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No notes yet.</p>
+                )}
+              </>
+            )}
+
+            {/* Tasks sub-tab */}
+            {activityTab === 'tasks' && (
+              <>
+                {(jobTaskLinks as any[]).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No tasks linked to this job.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(jobTaskLinks as any[]).map((tl: any) => {
+                      const t = tl.tasks;
+                      if (!t) return null;
+                      return (
+                        <div key={tl.id} className="rounded-md border border-border bg-secondary/50 p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
+                            <Badge variant="secondary" className={cn(
+                              'text-[9px]',
+                              t.status === 'completed' && 'bg-green-500/15 text-green-400',
+                              t.status === 'in_progress' && 'bg-blue-500/15 text-blue-400',
+                              t.status === 'pending' && 'bg-gray-500/15 text-gray-400',
+                            )}>
+                              {t.status ?? 'pending'}
+                            </Badge>
+                          </div>
+                          {t.description && <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>}
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            {t.due_date && <span>Due: {format(new Date(t.due_date), 'MMM d, yyyy')}</span>}
+                            {t.task_type && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{t.task_type}</Badge>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Meetings sub-tab */}
+            {activityTab === 'meetings' && (
+              <>
+                {(jobMeetings as any[]).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No meetings linked to this job.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(jobMeetings as any[]).map((tl: any) => {
+                      const t = tl.tasks;
+                      if (!t) return null;
+                      return (
+                        <div key={tl.id} className="rounded-md border border-border bg-secondary/50 p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
+                            <Badge variant="secondary" className={cn(
+                              'text-[9px]',
+                              t.status === 'completed' && 'bg-green-500/15 text-green-400',
+                              t.status === 'scheduled' && 'bg-blue-500/15 text-blue-400',
+                            )}>
+                              {t.status ?? 'scheduled'}
+                            </Badge>
+                          </div>
+                          {t.description && <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>}
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            {t.due_date && (
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {format(new Date(t.due_date), 'MMM d, yyyy h:mm a')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </ScrollArea>
+      </aside>
       </div>
 
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />

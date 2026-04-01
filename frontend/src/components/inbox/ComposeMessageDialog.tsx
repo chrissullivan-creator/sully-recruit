@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,6 +13,8 @@ import {
   Mail, MessageSquare, Linkedin, Search, Loader2, Send,
   UserCheck, Users, X,
 } from 'lucide-react';
+import { RichTextEditor } from '@/components/shared/RichTextEditor';
+import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
 type Channel = 'email' | 'sms' | 'linkedin';
 
@@ -281,13 +282,21 @@ export function ComposeMessageDialog({
 
           {/* Body */}
           <div>
-            <Label className="text-xs text-muted-foreground mb-2 block">Message</Label>
-            <Textarea
-              placeholder={`Type your ${channel === 'email' ? 'email' : channel === 'sms' ? 'text message' : 'LinkedIn message'}...`}
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs text-muted-foreground">Message</Label>
+              <TemplatePickerPopover
+                channel={channel}
+                onInsert={(template) => {
+                  setBody(template.body);
+                  if (template.subject && channel === 'email') setSubject(template.subject);
+                }}
+              />
+            </div>
+            <RichTextEditor
               value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={5}
-              className="text-sm resize-none"
+              onChange={setBody}
+              placeholder={`Type your ${channel === 'email' ? 'email' : channel === 'sms' ? 'text message' : 'LinkedIn message'}...`}
+              minHeight="120px"
             />
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,7 @@ type ContactSortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResp
 type ContactSortDir = 'asc' | 'desc';
 
 const Contacts = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -253,14 +255,14 @@ const Contacts = () => {
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredContacts.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={contact.id} className="hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.includes(contact.id)}
                         onCheckedChange={() => toggleSelect(contact.id)}
                       />
                     </td>
-                    <td className="px-4 py-3" onClick={() => {/* TODO: Navigate to contact detail */}}>
+                    <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
                           {(contact.first_name?.[0] ?? '')}{(contact.last_name?.[0] ?? '')}

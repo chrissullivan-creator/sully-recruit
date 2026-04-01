@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { MessageTemplateManager } from '@/components/templates/MessageTemplateManager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -317,6 +318,7 @@ Senior Recruiter | Your Company
 
   const tabs = [
     { id: 'integrations', label: 'Integrations', icon: Link2 },
+    { id: 'templates', label: 'Message Templates', icon: PenLine },
     { id: 'signature', label: 'Email Signature', icon: PenLine },
     { id: 'linkedin_safety', label: 'LinkedIn Safety', icon: ShieldCheck },
     { id: 'api', label: 'API Keys', icon: Key },
@@ -380,6 +382,16 @@ Senior Recruiter | Your Company
             ) : (
               <>
                 {/* ============ INTEGRATIONS TAB ============ */}
+                {activeTab === 'templates' && (
+                  <div className="space-y-4">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Message Templates</h2>
+                      <p className="text-sm text-muted-foreground">Create reusable message templates for email, LinkedIn, and SMS outreach.</p>
+                    </div>
+                    <MessageTemplateManager />
+                  </div>
+                )}
+
                 {activeTab === 'integrations' && (
                   <div className="space-y-6">
                     <div className="mb-6">
