@@ -189,7 +189,6 @@ async def write_sequence_step(request: StepWriteRequest):
     channel_labels = {
         'email': 'Email',
         'linkedin_recruiter': 'LinkedIn Recruiter InMail',
-        'sales_nav': 'Sales Navigator InMail',
         'linkedin_message': 'LinkedIn Direct Message',
         'linkedin_connection': 'LinkedIn Connection Request',
         'sms': 'SMS Text',

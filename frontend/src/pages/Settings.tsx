@@ -941,7 +941,7 @@ Senior Recruiter | Your Company
 
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <Label className="text-xs text-muted-foreground">Daily InMails (Recruiter / Sales Nav)</Label>
+                          <Label className="text-xs text-muted-foreground">Daily InMails (Recruiter)</Label>
                           <span className="text-sm font-semibold text-foreground">{dailyInmails}/day</span>
                         </div>
                         <Slider

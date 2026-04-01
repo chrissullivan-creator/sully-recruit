@@ -23,7 +23,7 @@ import {
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type ApiMode = 'classic' | 'recruiter' | 'sales_navigator';
+type ApiMode = 'recruiter_ashley' | 'recruiter_nancy' | 'recruiter_chris';
 
 interface AccountOption {
   label: string;
@@ -56,7 +56,7 @@ export default function LinkedInSearch() {
 
   // ---- Account switching state ----
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
-  const [selectedMode, setSelectedMode] = useState<ApiMode>('classic');
+  const [selectedMode, setSelectedMode] = useState<ApiMode>('recruiter_ashley');
   const [accountsLoading, setAccountsLoading] = useState(true);
 
   // ---- Search form state ----
@@ -86,25 +86,21 @@ export default function LinkedInSearch() {
     (async () => {
       setAccountsLoading(true);
       try {
-        // 1) Current user's Unipile account (classic)
-        const { data: userInteg } = await supabase
-          .from('user_integrations')
-          .select('config')
-          .eq('user_id', user.id)
-          .eq('integration_type', 'unipile')
-          .maybeSingle();
-
-        const classicId = (userInteg?.config as any)?.account_id ?? null;
-
-        // 2) Nancy Eberlein → Recruiter
-        const { data: nancyRow } = await supabase
+        // Load all 3 LinkedIn Recruiter accounts
+        const { data: ashleyRow } = await supabase
           .from('integration_accounts')
           .select('unipile_account_id, owner_user_id')
-          .ilike('account_label', '%Nancy Eberlein%')
+          .ilike('account_label', '%Ashley%')
           .eq('is_active', true)
           .maybeSingle();
 
-        // 3) Chris Sullivan → Sales Navigator
+        const { data: nancyRow } = await supabase
+          .from('integration_accounts')
+          .select('unipile_account_id, owner_user_id')
+          .ilike('account_label', '%Nancy%')
+          .eq('is_active', true)
+          .maybeSingle();
+
         const { data: chrisRow } = await supabase
           .from('integration_accounts')
           .select('unipile_account_id, owner_user_id')
@@ -113,9 +109,9 @@ export default function LinkedInSearch() {
           .maybeSingle();
 
         setAccounts([
-          { label: 'Classic (My Account)', mode: 'classic', accountId: classicId, ownerUserId: user.id },
-          { label: 'Recruiter — Nancy Eberlein', mode: 'recruiter', accountId: nancyRow?.unipile_account_id ?? null, ownerUserId: nancyRow?.owner_user_id ?? null },
-          { label: 'Sales Nav — Chris Sullivan', mode: 'sales_navigator', accountId: chrisRow?.unipile_account_id ?? null, ownerUserId: chrisRow?.owner_user_id ?? null },
+          { label: 'Recruiter — Ashley', mode: 'recruiter_ashley', accountId: ashleyRow?.unipile_account_id ?? null, ownerUserId: ashleyRow?.owner_user_id ?? null },
+          { label: 'Recruiter — Nancy', mode: 'recruiter_nancy', accountId: nancyRow?.unipile_account_id ?? null, ownerUserId: nancyRow?.owner_user_id ?? null },
+          { label: 'Recruiter — Chris', mode: 'recruiter_chris', accountId: chrisRow?.unipile_account_id ?? null, ownerUserId: chrisRow?.owner_user_id ?? null },
         ]);
       } catch (err) {
         console.error('Failed to load LinkedIn accounts', err);
@@ -171,7 +167,7 @@ export default function LinkedInSearch() {
         body = { url: pastedUrl.trim() };
       } else {
         body = {
-          api: selectedMode,
+          api: 'recruiter',
           category: 'people',
           keywords: keywords || undefined,
           role: title ? [{ keywords: title }] : undefined,

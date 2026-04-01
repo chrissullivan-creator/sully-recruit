@@ -110,7 +110,7 @@ export interface Contact {
 // Campaign types
 export type CampaignType = 'candidate_outreach' | 'account_based' | 'opportunity_based' | 'check_in';
 export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
-export type ChannelType = 'linkedin_recruiter' | 'sales_nav' | 'linkedin_message' | 'linkedin_connection' | 'email' | 'sms' | 'phone';
+export type ChannelType = 'linkedin_recruiter' | 'linkedin_message' | 'linkedin_connection' | 'email' | 'sms' | 'phone';
 
 export interface CampaignStep {
   id: string;

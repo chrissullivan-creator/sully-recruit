@@ -45,7 +45,6 @@ const generateId = () => `step-${Date.now()}-${Math.random().toString(36).substr
 const channelToStepType = (channel: ChannelType): string => {
   const map: Record<ChannelType, string> = {
     linkedin_recruiter: 'linkedin_inmail',
-    sales_nav: 'linkedin_inmail',
     linkedin_message: 'linkedin_message',
     linkedin_connection: 'linkedin_connection',
     email: 'email',
@@ -56,7 +55,7 @@ const channelToStepType = (channel: ChannelType): string => {
 };
 
 const channelToDbChannel = (channel: ChannelType): string => {
-  if (channel.startsWith('linkedin') || channel === 'sales_nav') return 'linkedin';
+  if (channel.startsWith('linkedin')) return 'linkedin';
   return channel;
 };
 

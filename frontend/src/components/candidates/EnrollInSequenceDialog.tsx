@@ -219,7 +219,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 </SelectTrigger>
                 <SelectContent>
                   {allAccounts.map((acct: any) => {
-                    const isLi = acct.account_type?.startsWith('linkedin') || acct.account_type === 'sales_navigator';
+                    const isLi = acct.account_type?.startsWith('linkedin');
                     return (
                       <SelectItem key={acct.id} value={acct.id}>
                         <span className="flex items-center gap-2">

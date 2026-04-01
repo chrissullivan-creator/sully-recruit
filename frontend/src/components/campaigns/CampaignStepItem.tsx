@@ -16,7 +16,6 @@ import type { CampaignStep, ChannelType } from '@/types';
 
 const channelOptions: { value: ChannelType; label: string; icon: React.ReactNode }[] = [
   { value: 'linkedin_recruiter', label: 'LinkedIn Recruiter InMail', icon: <Linkedin className="h-4 w-4" /> },
-  { value: 'sales_nav', label: 'Sales Nav InMail', icon: <Linkedin className="h-4 w-4" /> },
   { value: 'linkedin_message', label: 'LinkedIn Message', icon: <MessageSquare className="h-4 w-4" /> },
   { value: 'linkedin_connection', label: 'Connection Request', icon: <Users className="h-4 w-4" /> },
   { value: 'email', label: 'Email', icon: <Mail className="h-4 w-4" /> },
@@ -31,7 +30,6 @@ const hourOptions = Array.from({ length: 24 }, (_, i) => ({
 
 const channelPlaceholders: Partial<Record<ChannelType, string>> = {
   linkedin_recruiter: 'InMail message body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
-  sales_nav: 'Sales Navigator InMail body...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
   linkedin_message: 'LinkedIn message...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.',
   linkedin_connection: 'Connection request note (max 300 chars)...',
   email: 'Type your email here in plain text...\n\nUse {{first_name}}, {{company}}, {{title}} for personalization.\n\nYour signature will be added automatically if enabled.',
@@ -61,14 +59,14 @@ interface CampaignStepItemProps {
 }
 
 const isLinkedInChannel = (ch: ChannelType) =>
-  ['linkedin_recruiter', 'sales_nav', 'linkedin_message', 'linkedin_connection'].includes(ch);
+  ['linkedin_recruiter', 'linkedin_message', 'linkedin_connection'].includes(ch);
 
 const needsSubject = (ch: ChannelType) =>
-  ['linkedin_recruiter', 'sales_nav', 'email'].includes(ch);
+  ['linkedin_recruiter', 'email'].includes(ch);
 
 /** Map step channel to relevant account_type values */
 const channelToAccountTypes = (ch: ChannelType): string[] => {
-  if (isLinkedInChannel(ch)) return ['linkedin', 'linkedin_recruiter', 'sales_navigator'];
+  if (isLinkedInChannel(ch)) return ['linkedin', 'linkedin_recruiter'];
   if (ch === 'email') return ['email', 'smtp', 'gmail', 'outlook'];
   if (ch === 'sms') return ['sms', 'twilio'];
   if (ch === 'phone') return ['phone', 'voip', 'twilio'];
@@ -508,7 +506,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
           />
 
           {/* Attachments */}
-          {(step.channel === 'email' || step.channel === 'linkedin_recruiter' || step.channel === 'sales_nav') && (
+          {(step.channel === 'email' || step.channel === 'linkedin_recruiter') && (
             <StepAttachments
               stepId={step.id}
               attachments={step.attachments ?? []}

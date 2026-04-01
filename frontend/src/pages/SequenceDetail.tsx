@@ -48,7 +48,6 @@ const statusColors: Record<string, string> = {
 const channelToStepType = (channel: ChannelType): string => {
   const map: Record<ChannelType, string> = {
     linkedin_recruiter: 'recruiter_inmail',
-    sales_nav: 'sales_nav_inmail',        // ← was 'linkedin_inmail', now correct
     linkedin_message: 'linkedin_message',
     linkedin_connection: 'linkedin_connection',
     email: 'email',
@@ -61,7 +60,6 @@ const channelToStepType = (channel: ChannelType): string => {
 const channelToDbChannel = (channel: ChannelType): string => {
   const map: Record<ChannelType, string> = {
     linkedin_recruiter: 'recruiter_inmail',
-    sales_nav: 'sales_nav_inmail',
     linkedin_message: 'linkedin_message',
     linkedin_connection: 'linkedin_connection',
     email: 'email',
@@ -73,8 +71,7 @@ const channelToDbChannel = (channel: ChannelType): string => {
 
 // Maps DB step_type + channel → UI ChannelType
 const dbChannelToChannel = (stepType: string, channel: string | null): ChannelType => {
-  if (stepType === 'sales_nav_inmail') return 'sales_nav';           // ← NEW
-  if (stepType === 'recruiter_inmail' || stepType === 'linkedin_inmail') return 'linkedin_recruiter';
+  if (stepType === 'recruiter_inmail' || stepType === 'linkedin_inmail' || stepType === 'sales_nav_inmail') return 'linkedin_recruiter';
   if (stepType === 'linkedin_message' || stepType === 'classic_message') return 'linkedin_message';
   if (stepType === 'linkedin_connection' || stepType === 'connection_request') return 'linkedin_connection';
   if (channel === 'sms' || stepType === 'sms') return 'sms';
