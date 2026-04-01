@@ -13,6 +13,7 @@ import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
+import { UnifiedSearchDialog } from '@/components/candidates/UnifiedSearchDialog';
 import {
   CandidateFilterSidebar,
   DEFAULT_FILTERS,
@@ -23,6 +24,7 @@ import {
   type SavedSearch,
 } from '@/components/candidates/CandidateFilterSidebar';
 import { booleanMatch, hasBooleanOperators } from '@/lib/booleanSearch';
+import { haversineDistanceMiles } from '@/lib/geocoding';
 import { useCandidates, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,7 +37,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
@@ -106,6 +108,7 @@ const Candidates = () => {
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
+  const [unifiedSearchOpen, setUnifiedSearchOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -184,9 +187,27 @@ const Candidates = () => {
       // Owner filter
       const matchesOwner = filters.owner === 'all' ? true : filters.owner === 'mine' ? c.owner_id === user?.id : c.owner_id === filters.owner;
 
-      // Location filter (partial match)
+      // Location filter (text match or radius)
       const candLocation = ((c as any).location_text || (c as any).location || '').toLowerCase();
-      const matchesLocation = !filters.location || candLocation.includes(filters.location.toLowerCase());
+      let matchesLocation = true;
+      if (filters.location) {
+        const radius = filters.locationRadius ?? 0;
+        const fLat = filters.locationLat ?? null;
+        const fLng = filters.locationLng ?? null;
+        if (radius > 0 && fLat !== null && fLng !== null) {
+          // Radius search: check if candidate has coordinates, else fall back to text match
+          const candLat = (c as any).latitude ?? (c as any).lat;
+          const candLng = (c as any).longitude ?? (c as any).lng ?? (c as any).lon;
+          if (candLat != null && candLng != null) {
+            const dist = haversineDistanceMiles(fLat, fLng, candLat, candLng);
+            matchesLocation = dist <= radius;
+          } else {
+            matchesLocation = candLocation.includes(filters.location.toLowerCase());
+          }
+        } else {
+          matchesLocation = candLocation.includes(filters.location.toLowerCase());
+        }
+      }
 
       // Title filter (partial match)
       const matchesTitle = !filters.title || (c.current_title ?? '').toLowerCase().includes(filters.title.toLowerCase());
@@ -348,6 +369,10 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setUnifiedSearchOpen(true)}>
+              <Globe className="h-4 w-4 mr-1" />
+              Search Everything
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setAskJoeSearchOpen(true)}>
               <Sparkles className="h-4 w-4 mr-1" />
               Ask Joe — Search
@@ -697,6 +722,8 @@ const Candidates = () => {
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
 
       {/* Bulk Delete Confirmation */}
+      <UnifiedSearchDialog open={unifiedSearchOpen} onOpenChange={setUnifiedSearchOpen} />
+
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

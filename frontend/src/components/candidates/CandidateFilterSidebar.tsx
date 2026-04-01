@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -12,10 +12,11 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import {
-  X, ChevronDown, ChevronRight, CalendarIcon, RotateCcw, Save, Bookmark, Trash2,
+  X, ChevronDown, ChevronRight, CalendarIcon, RotateCcw, Save, Bookmark, Trash2, MapPin, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { geocodeLocation } from '@/lib/geocoding';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ export interface CandidateFilters {
   jobTag: string;
   owner: string;
   location: string;
+  locationRadius: number; // miles, 0 = text-match only
+  locationLat: number | null;
+  locationLng: number | null;
   title: string;
   company: string;
   skills: string[];
@@ -40,6 +44,9 @@ export const DEFAULT_FILTERS: CandidateFilters = {
   jobTag: 'all',
   owner: 'all',
   location: '',
+  locationRadius: 0,
+  locationLat: null,
+  locationLng: null,
   title: '',
   company: '',
   skills: [],
@@ -87,7 +94,10 @@ export function getActiveFilterChips(filters: CandidateFilters, statusLabels: Re
     const ownerLabel = filters.owner === 'mine' ? 'Mine' : (profiles.find((p: any) => p.id === filters.owner)?.full_name ?? filters.owner);
     chips.push({ key: 'owner', label: `Owner: ${ownerLabel}` });
   }
-  if (filters.location) chips.push({ key: 'location', label: `Location: ${filters.location}` });
+  if (filters.location) {
+    const radiusLabel = filters.locationRadius > 0 ? ` (${filters.locationRadius}mi)` : '';
+    chips.push({ key: 'location', label: `Location: ${filters.location}${radiusLabel}` });
+  }
   if (filters.title) chips.push({ key: 'title', label: `Title: ${filters.title}` });
   if (filters.company) chips.push({ key: 'company', label: `Company: ${filters.company}` });
   if (filters.skills.length > 0) chips.push({ key: 'skills', label: `Skills: ${filters.skills.join(', ')}` });
@@ -108,7 +118,7 @@ export function clearFilterByKey(filters: CandidateFilters, key: string): Candid
     case 'status': f.status = 'all'; break;
     case 'jobTag': f.jobTag = 'all'; break;
     case 'owner': f.owner = 'all'; break;
-    case 'location': f.location = ''; break;
+    case 'location': f.location = ''; f.locationRadius = 0; f.locationLat = null; f.locationLng = null; break;
     case 'title': f.title = ''; break;
     case 'company': f.company = ''; break;
     case 'skills': f.skills = []; break;
@@ -171,6 +181,28 @@ export function CandidateFilterSidebar({
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [savedOpen, setSavedOpen] = useState(true);
+  const [geocoding, setGeocoding] = useState(false);
+  const geocodeTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleGeocode = useCallback(async () => {
+    if (!filters.location || geocoding) return;
+    setGeocoding(true);
+    try {
+      const result = await geocodeLocation(filters.location);
+      if (result) {
+        onFiltersChange({ ...filters, locationLat: result.lat, locationLng: result.lng });
+      }
+    } finally {
+      setGeocoding(false);
+    }
+  }, [filters, geocoding, onFiltersChange]);
+
+  const debouncedGeocode = useCallback(() => {
+    clearTimeout(geocodeTimer.current);
+    geocodeTimer.current = setTimeout(() => {
+      handleGeocode();
+    }, 600);
+  }, [handleGeocode]);
 
   const update = (partial: Partial<CandidateFilters>) => {
     onFiltersChange({ ...filters, ...partial });
@@ -312,22 +344,89 @@ export function CandidateFilterSidebar({
             </Select>
           </FilterSection>
 
-          {/* ── Location ───────────────────────────────────────────────── */}
+          {/* ── Location / Radius ──────────────────────────────────────── */}
           <FilterSection title="Location">
-            <Input
-              className="h-8 text-xs"
-              placeholder="e.g. New York, Remote"
-              value={filters.location}
-              onChange={(e) => update({ location: e.target.value })}
-              list="location-suggestions"
-            />
-            {availableLocations.length > 0 && (
-              <datalist id="location-suggestions">
-                {availableLocations.slice(0, 20).map((loc) => (
-                  <option key={loc} value={loc} />
-                ))}
-              </datalist>
-            )}
+            <div className="space-y-2">
+              <div className="relative">
+                <Input
+                  className="h-8 text-xs pr-8"
+                  placeholder="e.g. New York, Remote"
+                  value={filters.location}
+                  onChange={(e) => update({ location: e.target.value, locationLat: null, locationLng: null })}
+                  list="location-suggestions"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && filters.location && filters.locationRadius > 0) {
+                      handleGeocode();
+                    }
+                  }}
+                />
+                {geocoding && (
+                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              {availableLocations.length > 0 && (
+                <datalist id="location-suggestions">
+                  {availableLocations.slice(0, 20).map((loc) => (
+                    <option key={loc} value={loc} />
+                  ))}
+                </datalist>
+              )}
+              {/* Radius slider */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-2.5 w-2.5" />
+                    Radius Search
+                  </label>
+                  <span className="text-[10px] font-medium text-foreground">
+                    {filters.locationRadius === 0 ? 'Off' : `${filters.locationRadius} mi`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="5"
+                  value={filters.locationRadius}
+                  onChange={(e) => {
+                    const radius = parseInt(e.target.value, 10);
+                    update({ locationRadius: radius });
+                    // Trigger geocoding when radius is enabled and location is set
+                    if (radius > 0 && filters.location && !filters.locationLat) {
+                      debouncedGeocode();
+                    }
+                  }}
+                  className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer accent-accent"
+                />
+                <div className="flex justify-between text-[9px] text-muted-foreground/60">
+                  <span>Text only</span>
+                  <span>25mi</span>
+                  <span>50mi</span>
+                  <span>100mi</span>
+                  <span>200mi</span>
+                </div>
+              </div>
+              {/* Geocode status */}
+              {filters.locationRadius > 0 && filters.location && (
+                <div className="text-[10px]">
+                  {filters.locationLat !== null ? (
+                    <span className="text-emerald-500 flex items-center gap-1">
+                      <MapPin className="h-2.5 w-2.5" />
+                      Geocoded — searching within {filters.locationRadius}mi
+                    </span>
+                  ) : (
+                    <button
+                      onClick={handleGeocode}
+                      className="text-accent hover:underline flex items-center gap-1"
+                      disabled={geocoding}
+                    >
+                      <MapPin className="h-2.5 w-2.5" />
+                      {geocoding ? 'Geocoding...' : 'Click to enable radius search'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </FilterSection>
 
           {/* ── Title ──────────────────────────────────────────────────── */}

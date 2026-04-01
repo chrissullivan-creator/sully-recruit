@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 // Candidates
@@ -31,26 +31,38 @@ export function useCandidates() {
     },
   });
 
+  const candidatesChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
-    const channel = supabase
-      .channel('candidates-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'candidates',
-        },
-        (payload) => {
-          console.log('Candidates change detected:', payload);
-          queryClient.invalidateQueries({ queryKey: ['candidates'] });
-        }
-      )
-      .subscribe();
+    // Clean up any previous channel ref
+    if (candidatesChannelRef.current) {
+      try { supabase.removeChannel(candidatesChannelRef.current); } catch {}
+      candidatesChannelRef.current = null;
+    }
+    // Also remove by name in case of orphaned channels
+    try {
+      const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:candidates-changes');
+      if (existing) supabase.removeChannel(existing);
+    } catch {}
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    try {
+      const channel = supabase
+        .channel('candidates-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'candidates' },
+          () => { queryClient.invalidateQueries({ queryKey: ['candidates'] }); }
+        )
+        .subscribe();
+      candidatesChannelRef.current = channel;
+
+      return () => {
+        try { supabase.removeChannel(channel); } catch {}
+        candidatesChannelRef.current = null;
+      };
+    } catch (err) {
+      console.warn('Failed to set up candidates realtime channel:', err);
+      return () => {};
+    }
   }, [queryClient]);
 
   return query;
@@ -190,26 +202,36 @@ export function useContacts() {
     },
   });
 
+  const contactsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
-    const channel = supabase
-      .channel('contacts-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'contacts',
-        },
-        (payload) => {
-          console.log('Contacts change detected:', payload);
-          queryClient.invalidateQueries({ queryKey: ['contacts'] });
-        }
-      )
-      .subscribe();
+    if (contactsChannelRef.current) {
+      try { supabase.removeChannel(contactsChannelRef.current); } catch {}
+      contactsChannelRef.current = null;
+    }
+    try {
+      const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:contacts-changes');
+      if (existing) supabase.removeChannel(existing);
+    } catch {}
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    try {
+      const channel = supabase
+        .channel('contacts-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'contacts' },
+          () => { queryClient.invalidateQueries({ queryKey: ['contacts'] }); }
+        )
+        .subscribe();
+      contactsChannelRef.current = channel;
+
+      return () => {
+        try { supabase.removeChannel(channel); } catch {}
+        contactsChannelRef.current = null;
+      };
+    } catch (err) {
+      console.warn('Failed to set up contacts realtime channel:', err);
+      return () => {};
+    }
   }, [queryClient]);
 
   return query;
