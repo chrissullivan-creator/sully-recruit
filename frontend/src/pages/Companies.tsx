@@ -3,17 +3,48 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
-import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo } from 'lucide-react';
+import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useNavigate } from 'react-router-dom';
 
 const Companies = () => {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const { data: companies = [], isLoading } = useCompanies();
+
+  const handleQuickTypeChange = async (companyId: string, newType: string) => {
+    try {
+      const { error } = await supabase.from('companies').update({ company_type: newType }).eq('id', companyId);
+      if (error) throw new Error(error.message);
+      toast.success(`Company type updated to ${newType}`);
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update type');
+    }
+  };
+
+  const handleQuickDelete = async (companyId: string) => {
+    try {
+      const { error } = await supabase.from('companies').delete().eq('id', companyId);
+      if (error) throw new Error(error.message);
+      toast.success('Company deleted');
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete company');
+    }
+  };
 
   const filteredCompanies = companies.filter((company) => {
     const matchesFilter = filter === 'all' || company.company_type === filter;
@@ -106,9 +137,35 @@ const Companies = () => {
                     <Briefcase className="h-3 w-3" />
                     {company.job_count} active {company.job_count === 1 ? 'job' : 'jobs'}
                   </span>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: company.id, name: company.name }); }}>
-                    <ListTodo className="h-3.5 w-3.5" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="p-1 rounded hover:bg-muted transition-colors" onClick={(e) => e.stopPropagation()}>
+                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => setTaskPanel({ id: company.id, name: company.name })}>
+                        <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Type
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          {['client', 'target'].filter(t => t !== company.company_type).map(t => (
+                            <DropdownMenuItem key={t} onClick={() => handleQuickTypeChange(company.id, t)}>
+                              {t.charAt(0).toUpperCase() + t.slice(1)}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive" onClick={() => handleQuickDelete(company.id)}>
+                        <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             ))}

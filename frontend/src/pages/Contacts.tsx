@@ -11,11 +11,15 @@ import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSear
 import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2 } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -141,6 +145,28 @@ const Contacts = () => {
     .filter((c) => selectedIds.includes(c.id))
     .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
 
+  const handleQuickStatusChange = async (contactId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase.from('contacts').update({ status: newStatus }).eq('id', contactId);
+      if (error) throw new Error(error.message);
+      toast.success(`Status updated to ${newStatus}`);
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update status');
+    }
+  };
+
+  const handleQuickDelete = async (contactId: string) => {
+    try {
+      const { error } = await supabase.from('contacts').delete().eq('id', contactId);
+      if (error) throw new Error(error.message);
+      toast.success('Contact deleted');
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete contact');
+    }
+  };
+
   // Called by AskJoeContactSearch when user clicks "Enroll X Contacts in Sequence"
   const handleJoeEnroll = (contactIds: string[]) => {
     setSelectedIds(contactIds);
@@ -255,7 +281,7 @@ const Contacts = () => {
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredContacts.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
+                  <tr key={contact.id} className="group hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.includes(contact.id)}
@@ -335,34 +361,71 @@ const Contacts = () => {
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                       {(contact as any).updated_at ? format(new Date((contact as any).updated_at), 'MMM d, yyyy') : '—'}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Fetch email & LinkedIn history" disabled={fetchingHistoryId === contact.id}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setFetchingHistoryId(contact.id);
-                            try {
-                              const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-entity-history`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
-                                body: JSON.stringify({ contact_id: contact.id }),
-                              });
-                              const data = await resp.json();
-                              if (data.error) throw new Error(data.error);
-                              const total = (data.email_history?.inserted ?? 0) + (data.linkedin_history?.inserted ?? 0);
-                              toast(total > 0 ? `Found ${total} historical message${total !== 1 ? 's' : ''}` : 'No new history found');
-                            } catch (err: any) {
-                              toast.error(err.message || 'History fetch failed');
-                            } finally {
-                              setFetchingHistoryId(null);
-                            }
-                          }}>
-                          {fetchingHistoryId === contact.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` }); }}>
-                          <ListTodo className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => navigate(`/contacts/${contact.id}`)}>
+                            <User className="h-3.5 w-3.5 mr-2" /> View Profile
+                          </DropdownMenuItem>
+                          {contact.email && (
+                            <DropdownMenuItem onClick={() => window.open(`mailto:${contact.email}`)}>
+                              <Mail className="h-3.5 w-3.5 mr-2" /> Send Email
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => setTaskPanel({ id: contact.id, name: contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}` })}>
+                            <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={fetchingHistoryId === contact.id}
+                            onClick={async () => {
+                              setFetchingHistoryId(contact.id);
+                              try {
+                                const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-entity-history`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+                                  body: JSON.stringify({ contact_id: contact.id }),
+                                });
+                                const data = await resp.json();
+                                if (data.error) throw new Error(data.error);
+                                const total = (data.email_history?.inserted ?? 0) + (data.linkedin_history?.inserted ?? 0);
+                                toast(total > 0 ? `Found ${total} historical message${total !== 1 ? 's' : ''}` : 'No new history found');
+                              } catch (err: any) {
+                                toast.error(err.message || 'History fetch failed');
+                              } finally {
+                                setFetchingHistoryId(null);
+                              }
+                            }}
+                          >
+                            {fetchingHistoryId === contact.id ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : <History className="h-3.5 w-3.5 mr-2" />}
+                            Fetch History
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Status
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              {['active', 'inactive'].filter(s => s !== contact.status).map(s => (
+                                <DropdownMenuItem key={s} onClick={() => handleQuickStatusChange(contact.id, s)}>
+                                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuItem onClick={() => { setSelectedIds([contact.id]); setEnrollOpen(true); }}>
+                            <Play className="h-3.5 w-3.5 mr-2" /> Enroll in Sequence
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleQuickDelete(contact.id)}>
+                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))}

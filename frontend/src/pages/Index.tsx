@@ -1,8 +1,8 @@
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
+import { ConversionFunnel } from '@/components/dashboard/ConversionFunnel';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
-// CandidatePipeline removed from dashboard per user request
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import {
   Plus,
   Sparkles,
   User,
+  Award,
 } from 'lucide-react';
 
 const getGreeting = () => {
@@ -83,12 +84,29 @@ const Dashboard = () => {
         </div>
 
         {/* Pipeline Stage Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <MetricCard label="Send Out" value={isLoading ? '...' : (metrics?.sendOutCandidates ?? 0)} icon={<FileText className="h-5 w-5" />} />
           <MetricCard label="Submitted" value={isLoading ? '...' : (metrics?.submittedCandidates ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
           <MetricCard label="Interviewing" value={isLoading ? '...' : (metrics?.interviewingCandidates ?? 0)} icon={<Calendar className="h-5 w-5" />} />
           <MetricCard label="Offers Out" value={isLoading ? '...' : (metrics?.offerCandidates ?? 0)} icon={<Phone className="h-5 w-5" />} />
+          <MetricCard label="Placed" value={isLoading ? '...' : (metrics?.placedCandidates ?? 0)} icon={<Award className="h-5 w-5" />} />
         </div>
+
+        {/* Conversion Funnel */}
+        {!isLoading && metrics && (
+          <ConversionFunnel
+            stages={[
+              { label: 'New', value: metrics.newCandidates ?? 0, color: 'bg-blue-500' },
+              { label: 'Contacted', value: metrics.contactedCandidates ?? 0, color: 'bg-indigo-500' },
+              { label: 'Pitched', value: metrics.pitchedCandidates ?? 0, color: 'bg-purple-500' },
+              { label: 'Send Out', value: metrics.sendOutCandidates ?? 0, color: 'bg-yellow-600' },
+              { label: 'Submitted', value: metrics.submittedCandidates ?? 0, color: 'bg-orange-500' },
+              { label: 'Interviewing', value: metrics.interviewingCandidates ?? 0, color: 'bg-amber-600' },
+              { label: 'Offers', value: metrics.offerCandidates ?? 0, color: 'bg-emerald-600' },
+              { label: 'Placed', value: metrics.placedCandidates ?? 0, color: 'bg-green-700' },
+            ]}
+          />
+        )}
 
         {/* Tasks + Activity Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

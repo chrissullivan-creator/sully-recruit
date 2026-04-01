@@ -7,9 +7,15 @@ import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useData';
-import { Plus, LayoutGrid, List, Search, Upload, ListTodo } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const Jobs = () => {
   const navigate = useNavigate();
@@ -18,7 +24,38 @@ const Jobs = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
+  const queryClient = useQueryClient();
   const { data: jobs = [], isLoading } = useJobs();
+
+  const JOB_STATUS_OPTIONS = [
+    { value: 'lead', label: 'Lead' },
+    { value: 'hot', label: 'Hot' },
+    { value: 'offer_made', label: 'Offer Made' },
+    { value: 'closed_won', label: 'Closed Won' },
+    { value: 'closed_lost', label: 'Closed Lost' },
+  ];
+
+  const handleQuickStatusChange = async (jobId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId);
+      if (error) throw new Error(error.message);
+      toast.success(`Job status updated to ${JOB_STATUS_OPTIONS.find(o => o.value === newStatus)?.label ?? newStatus}`);
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update status');
+    }
+  };
+
+  const handleQuickDelete = async (jobId: string) => {
+    try {
+      const { error } = await supabase.from('jobs').delete().eq('id', jobId);
+      if (error) throw new Error(error.message);
+      toast.success('Job deleted');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete job');
+    }
+  };
 
   const filteredJobs = jobs.filter((job) =>
     job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -94,7 +131,7 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
-                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="group hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
@@ -114,10 +151,39 @@ const Jobs = () => {
                         {job.status === 'lead' ? 'Lead' : job.status === 'hot' ? 'Hot' : job.status === 'offer_made' ? 'Offer Made' : job.status === 'closed_won' ? 'Closed Won' : job.status === 'closed_lost' ? 'Closed Lost' : job.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTaskPanel({ id: job.id, name: job.title })}>
-                        <ListTodo className="h-3.5 w-3.5" />
-                      </Button>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => navigate(`/jobs/${job.id}`)}>
+                            <Eye className="h-3.5 w-3.5 mr-2" /> View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setTaskPanel({ id: job.id, name: job.title })}>
+                            <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Status
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              {JOB_STATUS_OPTIONS.filter(o => o.value !== job.status).map(o => (
+                                <DropdownMenuItem key={o.value} onClick={() => handleQuickStatusChange(job.id, o.value)}>
+                                  {o.label}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleQuickDelete(job.id)}>
+                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))}
