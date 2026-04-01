@@ -18,11 +18,12 @@ import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
-  DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock,
+  DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { CallDetailModal } from '@/components/shared/CallDetailModal';
 
 const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -171,6 +172,20 @@ const CandidateDetail = () => {
       return data as any[];
     },
   });
+  const { data: callLogs = [] } = useQuery({
+    queryKey: ['call_logs', 'candidate', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('call_logs')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('started_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+  const [selectedCall, setSelectedCall] = useState<any>(null);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
@@ -342,7 +357,7 @@ const CandidateDetail = () => {
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">{initials}</div>
-              <Badge variant="secondary" className="capitalize text-xs">{candidate.status}</Badge>
+              <Badge variant="secondary" className="text-xs">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
             </div>
 
             <div className="space-y-3">
@@ -469,7 +484,7 @@ const CandidateDetail = () => {
                 <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-                <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Call Notes</TabsTrigger>
+                <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
               </TabsList>
             </div>
@@ -567,62 +582,84 @@ const CandidateDetail = () => {
               <TabsContent value="call-notes" className="px-8 py-5 mt-0">
                 <div className="flex items-center gap-2 mb-5">
                   <PhoneCall className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">AI Call Notes</h2>
+                  <h2 className="text-base font-semibold">Calls</h2>
+                  <span className="text-xs text-muted-foreground">({(callLogs as any[]).length} calls, {(callNotes as any[]).length} with AI notes)</span>
                 </div>
-                {(callNotes as any[]).length === 0 ? (
+                {(callLogs as any[]).length === 0 && (callNotes as any[]).length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
                     <PhoneCall className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No call notes yet</p>
-                    <p className="text-xs text-muted-foreground">AI-extracted notes from calls will appear here.</p>
+                    <p className="text-sm font-medium mb-1">No calls yet</p>
+                    <p className="text-xs text-muted-foreground">Call logs and AI-extracted notes will appear here.</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {(callNotes as any[]).map((note: any, idx: number) => (
-                      <div key={note.id ?? idx} className="rounded-xl border border-border bg-secondary/30 p-5 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <PhoneCall className="h-4 w-4 text-accent" />
-                            <span className="text-sm font-semibold text-foreground">Call Notes</span>
-                          </div>
-                          {note.updated_candidates_at && (
-                            <span className="text-xs text-muted-foreground">
-                              {format(new Date(note.updated_candidates_at), 'MMM d, yyyy h:mm a')}
-                            </span>
-                          )}
-                        </div>
-
-                        {note.extracted_notes && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Notes</p>
-                            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{note.extracted_notes}</p>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-2 gap-3">
-                          {note.extracted_current_base != null && (
-                            <div>
-                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Current Base</p>
-                              <p className="text-sm text-foreground">{typeof note.extracted_current_base === 'number' ? `$${note.extracted_current_base.toLocaleString()}` : note.extracted_current_base}</p>
+                  <div className="space-y-2">
+                    {/* Show call_logs first — they have the timeline */}
+                    {(callLogs as any[]).map((call: any) => {
+                      const isOut = call.direction === 'outbound';
+                      const dur = call.duration_seconds;
+                      const durStr = dur ? `${Math.floor(dur / 60)}:${(dur % 60).toString().padStart(2, '0')}` : '--:--';
+                      const aiNote = (callNotes as any[]).find((n: any) => n.call_log_id === call.id || n.external_call_id === call.external_call_id);
+                      const summaryPreview = aiNote?.ai_summary || call.summary || call.notes || '';
+                      return (
+                        <button
+                          key={call.id}
+                          onClick={() => setSelectedCall({ call, aiNote })}
+                          className="w-full text-left rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', isOut ? 'bg-info/10 text-info' : 'bg-success/10 text-success')}>
+                              {isOut ? <PhoneOutgoing className="h-4 w-4" /> : <PhoneIncoming className="h-4 w-4" />}
                             </div>
-                          )}
-                          {note.extracted_target_base != null && (
-                            <div>
-                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Target Base</p>
-                              <p className="text-sm text-foreground">{typeof note.extracted_target_base === 'number' ? `$${note.extracted_target_base.toLocaleString()}` : note.extracted_target_base}</p>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-foreground">{isOut ? 'Outbound' : 'Inbound'} Call</span>
+                                <span className="text-xs text-muted-foreground">{call.phone_number}</span>
+                                {call.audio_url && <Volume2 className="h-3 w-3 text-accent shrink-0" />}
+                                {aiNote && <Badge variant="secondary" className="text-[9px]">AI Notes</Badge>}
+                              </div>
+                              {summaryPreview && (
+                                <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-lg">{summaryPreview.slice(0, 120)}{summaryPreview.length > 120 ? '...' : ''}</p>
+                              )}
                             </div>
-                          )}
-                        </div>
-
-                        {note.extracted_reason_for_leaving && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Reason for Leaving</p>
-                            <p className="text-sm text-foreground leading-relaxed">{note.extracted_reason_for_leaving}</p>
+                            <div className="text-right shrink-0">
+                              <p className="text-xs text-muted-foreground">{call.started_at ? format(new Date(call.started_at), 'MMM d, h:mm a') : '—'}</p>
+                              <p className="text-xs text-muted-foreground flex items-center gap-1 justify-end"><Clock className="h-3 w-3" /> {durStr}</p>
+                            </div>
                           </div>
-                        )}
-                      </div>
+                        </button>
+                      );
+                    })}
+                    {/* Show orphan AI notes (no matching call_log) */}
+                    {(callNotes as any[]).filter((n: any) => !(callLogs as any[]).some((cl: any) => cl.id === n.call_log_id || (cl.external_call_id && cl.external_call_id === n.external_call_id))).map((note: any, idx: number) => (
+                      <button
+                        key={note.id ?? idx}
+                        onClick={() => setSelectedCall({ call: { id: note.id, direction: note.call_direction || 'outbound', phone_number: note.phone_number || '', duration_seconds: note.call_duration_seconds, started_at: note.call_started_at || note.created_at, audio_url: note.recording_url, summary: note.ai_summary, notes: note.extracted_notes, linked_entity_name: c.full_name }, aiNote: note })}
+                        className="w-full text-left rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
+                            <PhoneCall className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-foreground">Call Notes</span>
+                              {note.recording_url && <Volume2 className="h-3 w-3 text-accent shrink-0" />}
+                              <Badge variant="secondary" className="text-[9px]">AI Notes</Badge>
+                            </div>
+                            {note.ai_summary && <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-lg">{note.ai_summary.slice(0, 120)}...</p>}
+                          </div>
+                          <p className="text-xs text-muted-foreground shrink-0">{note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d') : '—'}</p>
+                        </div>
+                      </button>
                     ))}
                   </div>
                 )}
+                <CallDetailModal
+                  open={!!selectedCall}
+                  onOpenChange={(v) => !v && setSelectedCall(null)}
+                  call={selectedCall?.call}
+                  aiNotes={selectedCall?.aiNote}
+                />
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0">

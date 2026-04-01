@@ -65,18 +65,21 @@ const CHANNEL_ICONS: Record<string, React.ElementType> = {
   sms: MessageSquare,
   linkedin: Linkedin,
   phone: Phone,
+  call: Phone,
 };
 const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
   sms: 'SMS',
   linkedin: 'LinkedIn',
   phone: 'Phone',
+  call: 'Call',
 };
 const CHANNEL_COLORS: Record<string, string> = {
   email: 'bg-info/10 text-info',
   linkedin: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   sms: 'bg-success/10 text-success',
   phone: 'bg-accent/10 text-accent',
+  call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
 };
 
 // ---------- Thread Item ----------
@@ -1038,8 +1041,8 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           </div>
         </ScrollArea>
 
-        {/* Reply */}
-        <div className="border-t border-border p-4">
+        {/* Reply — hidden for call channel */}
+        {thread.channel !== 'call' && <div className="border-t border-border p-4">
           <div className="max-w-2xl mx-auto">
             {/* Formatting toolbar */}
             <div className="flex items-center gap-0.5 mb-1.5">
@@ -1069,7 +1072,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
               </Button>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Entity side panel */}
