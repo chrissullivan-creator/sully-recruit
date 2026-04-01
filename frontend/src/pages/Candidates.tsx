@@ -24,7 +24,7 @@ import {
   type SavedSearch,
 } from '@/components/candidates/CandidateFilterSidebar';
 import { booleanMatch, hasBooleanOperators } from '@/lib/booleanSearch';
-import { geocodeLocation, haversineDistanceMiles } from '@/lib/geocoding';
+import { haversineDistanceMiles } from '@/lib/geocoding';
 import { useCandidates, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
@@ -191,15 +191,17 @@ const Candidates = () => {
       const candLocation = ((c as any).location_text || (c as any).location || '').toLowerCase();
       let matchesLocation = true;
       if (filters.location) {
-        if (filters.locationRadius > 0 && filters.locationLat !== null && filters.locationLng !== null) {
+        const radius = filters.locationRadius ?? 0;
+        const fLat = filters.locationLat ?? null;
+        const fLng = filters.locationLng ?? null;
+        if (radius > 0 && fLat !== null && fLng !== null) {
           // Radius search: check if candidate has coordinates, else fall back to text match
           const candLat = (c as any).latitude ?? (c as any).lat;
           const candLng = (c as any).longitude ?? (c as any).lng ?? (c as any).lon;
           if (candLat != null && candLng != null) {
-            const dist = haversineDistanceMiles(filters.locationLat, filters.locationLng, candLat, candLng);
-            matchesLocation = dist <= filters.locationRadius;
+            const dist = haversineDistanceMiles(fLat, fLng, candLat, candLng);
+            matchesLocation = dist <= radius;
           } else {
-            // No coordinates on candidate — fall back to text match
             matchesLocation = candLocation.includes(filters.location.toLowerCase());
           }
         } else {
