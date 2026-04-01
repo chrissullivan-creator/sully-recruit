@@ -66,7 +66,10 @@ const needsSubject = (ch: ChannelType) =>
 
 /** Map step channel to relevant account_type values */
 const channelToAccountTypes = (ch: ChannelType): string[] => {
-  if (isLinkedInChannel(ch)) return ['linkedin', 'linkedin_recruiter'];
+  // InMails require a Recruiter seat
+  if (ch === 'linkedin_recruiter') return ['linkedin_recruiter', 'linkedin'];
+  // Messages & connections go through classic LinkedIn accounts
+  if (ch === 'linkedin_message' || ch === 'linkedin_connection') return ['linkedin'];
   if (ch === 'email') return ['email', 'smtp', 'gmail', 'outlook'];
   if (ch === 'sms') return ['sms', 'twilio'];
   if (ch === 'phone') return ['phone', 'voip', 'twilio'];
