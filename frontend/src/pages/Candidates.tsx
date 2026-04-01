@@ -35,10 +35,13 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   pitched:      'bg-blue-500/10 text-blue-400',
@@ -278,6 +281,24 @@ const Candidates = () => {
     .filter((c) => selectedIds.includes(c.id))
     .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
 
+  // Quick action: change candidate status inline
+  const handleQuickStatusChange = async (candidateId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from('candidates')
+        .update({ status: newStatus })
+        .eq('id', candidateId);
+      if (error) throw new Error(error.message);
+      toast.success(`Status updated to ${STATUS_LABELS[newStatus] ?? newStatus}`);
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update status');
+    }
+  };
+
+  // Quick action state for single-candidate enroll
+  const [quickEnrollId, setQuickEnrollId] = useState<string | null>(null);
+
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
     setDeleting(true);
@@ -514,11 +535,12 @@ const Candidates = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Added <SortIcon field="created" /></span>
                   </th>
+                  <th className="w-10 px-2 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {paginatedCandidates.map((candidate) => (
-                  <tr key={candidate.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={candidate.id} className="group hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.includes(candidate.id)}
@@ -589,10 +611,49 @@ const Candidates = () => {
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       {format(new Date(candidate.created_at), 'MMM d, yyyy')}
                     </td>
+                    <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => navigate(`/candidates/${candidate.id}`)}>
+                            <User className="h-3.5 w-3.5 mr-2" /> View Profile
+                          </DropdownMenuItem>
+                          {candidate.email && (
+                            <DropdownMenuItem onClick={() => window.open(`mailto:${candidate.email}`)}>
+                              <Mail className="h-3.5 w-3.5 mr-2" /> Send Email
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Status
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              {statusFilters.filter(s => s !== 'all' && s !== candidate.status).map(s => (
+                                <DropdownMenuItem key={s} onClick={() => handleQuickStatusChange(candidate.id, s)}>
+                                  {STATUS_LABELS[s]}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuItem onClick={() => { setSelectedIds([candidate.id]); setEnrollOpen(true); }}>
+                            <Play className="h-3.5 w-3.5 mr-2" /> Enroll in Sequence
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive" onClick={() => { setSelectedIds([candidate.id]); setDeleteConfirmOpen(true); }}>
+                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
                   </tr>
                 ))}
                 {paginatedCandidates.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
             </table>
