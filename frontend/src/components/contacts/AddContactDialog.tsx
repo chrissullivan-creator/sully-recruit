@@ -16,6 +16,73 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Extract a LinkedIn slug from a URL or return the input as-is if already a slug.
+ */
+function extractLinkedInSlug(input: string): string | null {
+  if (!input) return null;
+  const match = input.match(/linkedin\.com\/in\/([^/?#]+)/);
+  if (match) return match[1];
+  // If it looks like a slug already (no slashes/spaces)
+  if (/^[\w-]+$/.test(input.trim())) return input.trim();
+  return null;
+}
+
+/**
+ * After saving a contact, resolve their Unipile ID via Chris's Recruiter account.
+ * This runs in the background and doesn't block the UI.
+ */
+async function resolveUnipileIdInBackground(contactId: string, linkedinUrl: string) {
+  try {
+    const slug = extractLinkedInSlug(linkedinUrl);
+    if (!slug) return;
+
+    // Get Chris's Unipile account ID
+    const { data: chrisAcct } = await supabase
+      .from('integration_accounts')
+      .select('unipile_account_id')
+      .ilike('account_label', '%Chris Sullivan%')
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const accountId = chrisAcct?.unipile_account_id;
+    if (!accountId) {
+      console.warn('No Unipile account found for Chris — skipping ID resolution');
+      return;
+    }
+
+    // Call resolve-unipile-id edge function
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+      },
+      body: JSON.stringify({ linkedin_slug: slug, account_id: accountId }),
+    });
+
+    if (!resp.ok) {
+      console.warn('Failed to resolve Unipile ID:', await resp.text());
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.unipile_id || result.provider_id) {
+      await supabase
+        .from('contacts')
+        .update({
+          unipile_id: result.unipile_id || result.provider_id,
+        } as any)
+        .eq('id', contactId);
+    }
+  } catch (err) {
+    console.warn('Background Unipile ID resolution failed:', err);
+  }
+}
+
 export function AddContactDialog({ open, onOpenChange }: Props) {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useCompanies();
@@ -33,7 +100,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
     setSaving(true);
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const { error } = await supabase.from('contacts').insert({
+      const { data: inserted, error } = await supabase.from('contacts').insert({
         first_name: form.first_name.trim() || null,
         last_name: form.last_name.trim() || null,
         full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
@@ -45,10 +112,17 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         company_id: form.company_id || null,
         status: form.status,
         owner_id: userId,
-      } as any);
+      } as any).select('id').single();
       if (error) throw error;
+
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       toast.success('Contact created');
+
+      // Resolve Unipile ID in background (non-blocking)
+      if (form.linkedin_url.trim() && inserted?.id) {
+        resolveUnipileIdInBackground(inserted.id, form.linkedin_url.trim());
+      }
+
       setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'active' });
       onOpenChange(false);
     } catch (err: any) {
