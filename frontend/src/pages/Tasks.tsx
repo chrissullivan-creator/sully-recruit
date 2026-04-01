@@ -10,11 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Bell } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Bell, Video } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
-import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 const ADMIN_EMAILS = [
@@ -115,20 +114,28 @@ function CalendarView({ tasks, isAdmin }: { tasks: any[]; isAdmin: boolean }) {
                 {format(day, 'd')}
               </div>
               <div className="space-y-0.5">
-                {dayTasks.slice(0, 3).map(t => (
-                  <div
-                    key={t.id}
-                    className={cn(
-                      'text-[10px] leading-tight px-1 py-0.5 rounded truncate border',
-                      t.status === 'completed'
-                        ? 'bg-muted/50 text-muted-foreground line-through border-transparent'
-                        : priorityColors[t.priority] || priorityColors.medium,
-                    )}
-                    title={`${t.title}${t.assignee_name ? ` — ${t.assignee_name}` : ''}`}
-                  >
-                    {t.assignee_name ? `${t.assignee_name.split(' ')[0]}: ` : ''}{t.title}
-                  </div>
-                ))}
+                {dayTasks.slice(0, 3).map(t => {
+                  const isMeeting = (t as any).task_type === 'meeting';
+                  const isOutlook = t.title.startsWith('📅');
+                  return (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        'text-[10px] leading-tight px-1 py-0.5 rounded truncate border',
+                        t.status === 'completed'
+                          ? 'bg-muted/50 text-muted-foreground line-through border-transparent'
+                          : isMeeting
+                            ? 'bg-info/10 text-info border-info/20'
+                            : isOutlook
+                              ? 'bg-blue-500/10 text-blue-400 border-blue-400/20'
+                              : priorityColors[t.priority] || priorityColors.medium,
+                      )}
+                      title={`${isMeeting ? '🗓 ' : ''}${t.title}${t.assignee_name ? ` — ${t.assignee_name}` : ''}${(t as any).start_time ? ` @ ${format(new Date((t as any).start_time), 'h:mm a')}` : ''}`}
+                    >
+                      {isMeeting && '🗓 '}{t.assignee_name ? `${t.assignee_name.split(' ')[0]}: ` : ''}{t.title}
+                    </div>
+                  );
+                })}
                 {dayTasks.length > 3 && (
                   <div className="text-[9px] text-muted-foreground text-center">
                     +{dayTasks.length - 3} more
@@ -150,9 +157,11 @@ export default function Tasks() {
   const bulkUpdate = useBulkUpdateTasks();
   const bulkDelete = useBulkDeleteTasks();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<'task' | 'meeting'>('task');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'meeting'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [viewTab, setViewTab] = useState<'list' | 'calendar'>('list');
 
@@ -163,7 +172,13 @@ export default function Tasks() {
     if (statusFilter === 'overdue') {
       if (t.status === 'completed' || !t.due_date || !isPast(new Date(t.due_date))) return false;
     } else if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-    
+
+    // Type filter (task vs meeting)
+    if (typeFilter !== 'all') {
+      const taskType = (t as any).task_type || 'task';
+      if (taskType !== typeFilter) return false;
+    }
+
     // Non-admin: only show own tasks
     if (!isAdmin) {
       if (assignmentFilter === 'assigned_to_me' && t.assigned_to !== user?.id) return false;
@@ -247,7 +262,10 @@ export default function Tasks() {
               <Bell className="h-4 w-4 mr-1" /> Run Nudge
             </Button>
           )}
-          <Button variant="gold" onClick={() => setCreateOpen(true)}>
+          <Button variant="outline" onClick={() => { setCreateMode('meeting'); setCreateOpen(true); }}>
+            <Video className="h-4 w-4 mr-1" /> New Meeting
+          </Button>
+          <Button variant="gold" onClick={() => { setCreateMode('task'); setCreateOpen(true); }}>
             <Plus className="h-4 w-4 mr-1" /> New Task
           </Button>
         </div>
@@ -271,6 +289,14 @@ export default function Tasks() {
             <SelectContent>
               {assignmentFilters.map((a) => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
               {isAdmin && <SelectItem value="all_team">All Team</SelectItem>}
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as any)}>
+            <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="task">Tasks</SelectItem>
+              <SelectItem value="meeting">Meetings</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -326,7 +352,7 @@ export default function Tasks() {
         )}
       </div>
 
-      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} defaultMode={createMode} />
     </MainLayout>
   );
 }

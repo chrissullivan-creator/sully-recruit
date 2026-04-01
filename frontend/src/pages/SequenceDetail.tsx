@@ -106,6 +106,7 @@ const SequenceDetail = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [executions, setExecutions] = useState<any[]>([]);
@@ -330,6 +331,46 @@ const SequenceDetail = () => {
     }
   };
 
+  const handleSaveAsTemplate = async () => {
+    if (!name.trim() || steps.length === 0) {
+      toast.error('Sequence needs a name and at least one step');
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const stepsJson = steps.map(step => ({
+        order: step.order,
+        channel: step.channel,
+        subject: step.subject || null,
+        content: step.content || null,
+        delayDays: step.delayDays,
+        delayHours: step.delayHours,
+        sendWindowStart: step.sendWindowStart,
+        sendWindowEnd: step.sendWindowEnd,
+        waitForConnection: step.waitForConnection,
+        minHoursAfterConnection: step.minHoursAfterConnection,
+        isReply: step.isReply,
+        useSignature: step.useSignature,
+      }));
+      const { error } = await supabase.from('sequence_templates').insert({
+        name: `${name.trim()} Template`,
+        description: description.trim() || null,
+        channel,
+        stop_on_reply: stopOnReply,
+        steps_json: stepsJson,
+        created_by: userId,
+        is_shared: true,
+      } as any);
+      if (error) throw error;
+      toast.success('Saved as template');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save template');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
@@ -408,6 +449,10 @@ const SequenceDetail = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={handleSaveAsTemplate} disabled={savingTemplate}>
+            {savingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+            Save as Template
+          </Button>
           <Button variant="ghost" size="sm" onClick={handleDuplicate} disabled={duplicating}>
             {duplicating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
             Duplicate
@@ -431,6 +476,7 @@ const SequenceDetail = () => {
               <TabsTrigger value="general" className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />General</TabsTrigger>
               <TabsTrigger value="steps" className="gap-1.5"><Mail className="h-3.5 w-3.5" />Steps</TabsTrigger>
               <TabsTrigger value="enrollees" className="gap-1.5"><Users className="h-3.5 w-3.5" />Enrollees</TabsTrigger>
+              <TabsTrigger value="schedule" className="gap-1.5"><Clock className="h-3.5 w-3.5" />Schedule</TabsTrigger>
             </TabsList>
           </div>
 
@@ -809,6 +855,94 @@ const SequenceDetail = () => {
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Schedule */}
+            <TabsContent value="schedule" className="px-8 py-6 mt-0">
+              <h3 className="text-sm font-semibold text-foreground mb-4">Enrollee Schedule</h3>
+              {enrollments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Clock className="h-10 w-10 text-muted-foreground mb-3" />
+                  <p className="text-muted-foreground">No enrollees to show schedule for</p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary">
+                      <tr>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky left-0 bg-secondary">Enrollee</th>
+                        {steps.sort((a, b) => a.order - b.order).map((step) => (
+                          <th key={step.id} className="text-center px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
+                            Step {step.order} ({step.channel.replace('linkedin_', 'LI ').replace('_', ' ')})
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {enrollments.map((enrollment) => {
+                        const person = enrollment.candidates || enrollment.contacts;
+                        const personName = person?.full_name || 'Unknown';
+                        const enrollExecs = executions.filter(x => x.enrollment_id === enrollment.id);
+
+                        return (
+                          <tr key={enrollment.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 font-medium text-foreground sticky left-0 bg-card whitespace-nowrap">
+                              {personName}
+                              <span className={cn('ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium capitalize',
+                                enrollment.status === 'active' ? 'bg-success/10 text-success' :
+                                enrollment.status === 'paused' ? 'bg-warning/10 text-warning' :
+                                enrollment.status === 'completed' ? 'bg-info/10 text-info' :
+                                'bg-muted text-muted-foreground'
+                              )}>{enrollment.status}</span>
+                            </td>
+                            {steps.sort((a, b) => a.order - b.order).map((step) => {
+                              const exec = enrollExecs.find(x => x.sequence_step_id === step.id);
+                              const isPending = !exec && enrollment.status === 'active' && (enrollment.current_step_order || 1) <= step.order;
+                              const isUpcoming = isPending && enrollment.current_step_order === step.order;
+
+                              // Calculate scheduled time
+                              let scheduledTime = '';
+                              if (isUpcoming && enrollment.next_step_at) {
+                                scheduledTime = format(new Date(enrollment.next_step_at), 'MMM d, h:mm a');
+                              }
+
+                              return (
+                                <td key={step.id} className="px-3 py-3 text-center">
+                                  {exec ? (
+                                    <div>
+                                      <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium',
+                                        exec.status === 'sent' || exec.status === 'delivered' ? 'bg-success/10 text-success' :
+                                        exec.status === 'opened' ? 'bg-info/10 text-info' :
+                                        exec.status === 'replied' || exec.status === 'clicked' ? 'bg-primary/10 text-primary' :
+                                        exec.status === 'bounced' || exec.status === 'failed' ? 'bg-destructive/10 text-destructive' :
+                                        'bg-muted text-muted-foreground'
+                                      )}>{exec.status}</span>
+                                      {exec.executed_at && (
+                                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                                          {format(new Date(exec.executed_at), 'MMM d, h:mm a')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ) : isUpcoming ? (
+                                    <div>
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning/10 text-warning">next</span>
+                                      {scheduledTime && <p className="text-[10px] text-muted-foreground mt-0.5">{scheduledTime}</p>}
+                                    </div>
+                                  ) : isPending ? (
+                                    <span className="text-[10px] text-muted-foreground">pending</span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground/40">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}

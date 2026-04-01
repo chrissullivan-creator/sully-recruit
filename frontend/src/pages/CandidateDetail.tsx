@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
+import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { supabase } from '@/integrations/supabase/client';
@@ -19,7 +20,9 @@ import {
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
+  GraduationCap, Upload, Plus, Info,
 } from 'lucide-react';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -194,6 +197,149 @@ const CandidateDetail = () => {
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [compExpanded, setCompExpanded] = useState(false);
+  const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
+  const [educationOpen, setEducationOpen] = useState(false);
+  const [showAddWork, setShowAddWork] = useState(false);
+  const [showAddEducation, setShowAddEducation] = useState(false);
+  const [savingWork, setSavingWork] = useState(false);
+  const [savingEducation, setSavingEducation] = useState(false);
+  const [workForm, setWorkForm] = useState({ company_name: '', title: '', start_date: '', end_date: '', is_current: false, description: '' });
+  const [eduForm, setEduForm] = useState({ institution: '', degree: '', field_of_study: '', start_year: '', end_year: '' });
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: workHistory = [] } = useQuery({
+    queryKey: ['candidate_work_history', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_work_history')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('start_date', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: education = [] } = useQuery({
+    queryKey: ['candidate_education', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_education')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('start_year', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: candidateResumes = [] } = useQuery({
+    queryKey: ['candidate_resumes', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_resumes')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: assignedJobs = [] } = useQuery({
+    queryKey: ['candidate_send_outs', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('send_outs')
+        .select('*, jobs(id, title, company_name, location, status)')
+        .eq('candidate_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const handleAddWorkHistory = async () => {
+    if (!id || !workForm.company_name || !workForm.title) return;
+    setSavingWork(true);
+    try {
+      const { error } = await supabase.from('candidate_work_history').insert({
+        candidate_id: id,
+        company_name: workForm.company_name,
+        title: workForm.title,
+        start_date: workForm.start_date || null,
+        end_date: workForm.is_current ? null : (workForm.end_date || null),
+        is_current: workForm.is_current,
+        description: workForm.description || null,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['candidate_work_history', id] });
+      setWorkForm({ company_name: '', title: '', start_date: '', end_date: '', is_current: false, description: '' });
+      setShowAddWork(false);
+      toast.success('Work experience added');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSavingWork(false);
+    }
+  };
+
+  const handleAddEducation = async () => {
+    if (!id || !eduForm.institution) return;
+    setSavingEducation(true);
+    try {
+      const { error } = await supabase.from('candidate_education').insert({
+        candidate_id: id,
+        institution: eduForm.institution,
+        degree: eduForm.degree || null,
+        field_of_study: eduForm.field_of_study || null,
+        start_year: eduForm.start_year ? parseInt(eduForm.start_year) : null,
+        end_year: eduForm.end_year ? parseInt(eduForm.end_year) : null,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['candidate_education', id] });
+      setEduForm({ institution: '', degree: '', field_of_study: '', start_year: '', end_year: '' });
+      setShowAddEducation(false);
+      toast.success('Education added');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSavingEducation(false);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!id) return;
+    setUploadingFile(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const path = `${session.user.id}/${id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
+      const { error: dbErr } = await supabase.from('candidate_resumes').insert({
+        candidate_id: id,
+        file_name: file.name,
+        file_path: path,
+        file_url: urlData.publicUrl,
+        file_size: file.size,
+        file_type: file.type,
+      });
+      if (dbErr) throw dbErr;
+      queryClient.invalidateQueries({ queryKey: ['candidate_resumes', id] });
+      toast.success('File uploaded');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploadingFile(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -486,6 +632,8 @@ const CandidateDetail = () => {
                 <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
                 <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+                <TabsTrigger value="files" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Files</TabsTrigger>
+                <TabsTrigger value="assigned-jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Assigned Jobs</TabsTrigger>
               </TabsList>
             </div>
 
@@ -562,8 +710,12 @@ const CandidateDetail = () => {
               </TabsContent>
 
               <TabsContent value="notes" className="px-8 py-5 mt-0 space-y-4">
-                <textarea placeholder="Add a note..." value={noteText} onChange={e => setNoteText(e.target.value)}
-                  className="w-full h-24 rounded-lg border border-input bg-background text-foreground p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none" />
+                <RichTextEditor
+                  value={noteText}
+                  onChange={setNoteText}
+                  placeholder="Add a note..."
+                  minHeight="80px"
+                />
                 <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()}>
                   {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
                 </Button>
@@ -571,7 +723,7 @@ const CandidateDetail = () => {
                   <div className="space-y-3">
                     {(notes as any[]).map((n) => (
                       <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-4">
-                        <p className="text-sm whitespace-pre-wrap">{n.note}</p>
+                        <div className="text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
                         <p className="text-xs text-muted-foreground mt-2">{format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}</p>
                       </div>
                     ))}
@@ -665,6 +817,296 @@ const CandidateDetail = () => {
               <TabsContent value="activity" className="px-8 py-5 mt-0">
                 <p className="text-sm text-muted-foreground">Activity history will appear here.</p>
               </TabsContent>
+
+              {/* ── Files Tab ─────────────────────────────────────────────── */}
+              <TabsContent value="files" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Files</h2>
+                    <span className="text-xs text-muted-foreground">({candidateResumes.length})</span>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingFile}>
+                    {uploadingFile ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                    Upload File
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.csv"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+                {candidateResumes.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No files yet</p>
+                    <p className="text-xs text-muted-foreground mb-4">Upload resumes, cover letters, or other documents.</p>
+                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="h-3.5 w-3.5 mr-1" /> Upload File
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {candidateResumes.map((r: any) => (
+                      <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <FileText className="h-4 w-4 text-accent shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{r.file_name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {r.file_type && <span className="mr-2">{r.file_type}</span>}
+                              {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                              {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                            </p>
+                          </div>
+                        </div>
+                        {r.file_url && (
+                          <a href={r.file_url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
+                            <ExternalLink className="h-3.5 w-3.5" /> Download
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Assigned Jobs Tab ─────────────────────────────────────── */}
+              <TabsContent value="assigned-jobs" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Briefcase className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">Assigned Jobs</h2>
+                  <span className="text-xs text-muted-foreground">({assignedJobs.length})</span>
+                </div>
+                {assignedJobs.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No job assignments</p>
+                    <p className="text-xs text-muted-foreground">Send outs linked to this candidate will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {assignedJobs.map((so: any) => {
+                      const j = so.jobs;
+                      const stageCfg = JOB_STATUSES.find(s => s.value === so.stage);
+                      return (
+                        <div
+                          key={so.id}
+                          className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 cursor-pointer transition-colors"
+                          onClick={() => j?.id && navigate(`/jobs/${j.id}`)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">{j?.title ?? 'Unknown Job'}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {j?.company_name && <span>{j.company_name}</span>}
+                                {j?.location && <span> &middot; {j.location}</span>}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {stageCfg && (
+                                <span className={cn('px-2 py-0.5 rounded text-xs font-medium', stageCfg.color)}>
+                                  {stageCfg.label}
+                                </span>
+                              )}
+                              <span className="text-xs text-muted-foreground">{so.created_at ? format(new Date(so.created_at), 'MMM d, yyyy') : ''}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Work History Section ──────────────────────────────────── */}
+              <div className="px-8 py-5 border-t border-border">
+                <Collapsible open={workHistoryOpen} onOpenChange={setWorkHistoryOpen}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full group">
+                    <div className="flex items-center gap-2">
+                      <Briefcase className="h-4 w-4 text-accent" />
+                      <h3 className="text-sm font-semibold text-foreground">Work History</h3>
+                      <span className="text-xs text-muted-foreground">({workHistory.length})</span>
+                    </div>
+                    {workHistoryOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-3 space-y-3">
+                    {workHistory.length === 0 && !showAddWork && (
+                      <p className="text-sm text-muted-foreground">No work history recorded.</p>
+                    )}
+                    {workHistory.map((w: any) => (
+                      <div key={w.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-foreground">{w.title}</p>
+                          {w.is_current && <Badge variant="secondary" className="text-[9px]">Current</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Building className="h-3 w-3" /> {w.company_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {w.start_date ? format(new Date(w.start_date), 'MMM yyyy') : '?'}
+                          {' — '}
+                          {w.is_current ? 'Present' : w.end_date ? format(new Date(w.end_date), 'MMM yyyy') : '?'}
+                        </p>
+                        {w.description && <p className="text-xs text-muted-foreground mt-1">{w.description}</p>}
+                      </div>
+                    ))}
+                    {showAddWork ? (
+                      <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+                        <h4 className="text-sm font-semibold">Add Work Experience</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Company *</Label>
+                            <Input className="h-8 text-sm" value={workForm.company_name} onChange={e => setWorkForm(f => ({ ...f, company_name: e.target.value }))} placeholder="Company name" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Title *</Label>
+                            <Input className="h-8 text-sm" value={workForm.title} onChange={e => setWorkForm(f => ({ ...f, title: e.target.value }))} placeholder="Job title" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Start Date</Label>
+                            <Input className="h-8 text-sm" type="date" value={workForm.start_date} onChange={e => setWorkForm(f => ({ ...f, start_date: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">End Date</Label>
+                            <Input className="h-8 text-sm" type="date" value={workForm.end_date} onChange={e => setWorkForm(f => ({ ...f, end_date: e.target.value }))} disabled={workForm.is_current} />
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={workForm.is_current} onChange={e => setWorkForm(f => ({ ...f, is_current: e.target.checked, end_date: e.target.checked ? '' : f.end_date }))} className="rounded" />
+                          Currently works here
+                        </label>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Description</Label>
+                          <Input className="h-8 text-sm" value={workForm.description} onChange={e => setWorkForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description..." />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddWorkHistory} disabled={savingWork || !workForm.company_name || !workForm.title}>
+                            {savingWork && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(false)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(true)}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Work Experience
+                      </Button>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+
+              {/* ── Education History Section ─────────────────────────────── */}
+              <div className="px-8 py-5 border-t border-border">
+                <Collapsible open={educationOpen} onOpenChange={setEducationOpen}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full group">
+                    <div className="flex items-center gap-2">
+                      <GraduationCap className="h-4 w-4 text-accent" />
+                      <h3 className="text-sm font-semibold text-foreground">Education</h3>
+                      <span className="text-xs text-muted-foreground">({education.length})</span>
+                    </div>
+                    {educationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-3 space-y-3">
+                    {education.length === 0 && !showAddEducation && (
+                      <p className="text-sm text-muted-foreground">No education history recorded.</p>
+                    )}
+                    {education.map((e: any) => (
+                      <div key={e.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                        <p className="text-sm font-medium text-foreground">{e.institution}</p>
+                        {(e.degree || e.field_of_study) && (
+                          <p className="text-xs text-muted-foreground">
+                            {e.degree}{e.degree && e.field_of_study ? ' in ' : ''}{e.field_of_study}
+                          </p>
+                        )}
+                        {(e.start_year || e.end_year) && (
+                          <p className="text-xs text-muted-foreground">
+                            {e.start_year ?? '?'} — {e.end_year ?? '?'}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    {showAddEducation ? (
+                      <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+                        <h4 className="text-sm font-semibold">Add Education</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1 col-span-2">
+                            <Label className="text-xs">Institution *</Label>
+                            <Input className="h-8 text-sm" value={eduForm.institution} onChange={e => setEduForm(f => ({ ...f, institution: e.target.value }))} placeholder="University or school name" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Degree</Label>
+                            <Input className="h-8 text-sm" value={eduForm.degree} onChange={e => setEduForm(f => ({ ...f, degree: e.target.value }))} placeholder="e.g. B.S., MBA" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Field of Study</Label>
+                            <Input className="h-8 text-sm" value={eduForm.field_of_study} onChange={e => setEduForm(f => ({ ...f, field_of_study: e.target.value }))} placeholder="e.g. Finance, CS" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Start Year</Label>
+                            <Input className="h-8 text-sm" type="number" value={eduForm.start_year} onChange={e => setEduForm(f => ({ ...f, start_year: e.target.value }))} placeholder="2018" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">End Year</Label>
+                            <Input className="h-8 text-sm" type="number" value={eduForm.end_year} onChange={e => setEduForm(f => ({ ...f, end_year: e.target.value }))} placeholder="2022" />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddEducation} disabled={savingEducation || !eduForm.institution}>
+                            {savingEducation && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(false)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(true)}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Education
+                      </Button>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+
+              {/* ── System Information Section ────────────────────────────── */}
+              <div className="px-8 py-5 border-t border-border">
+                <div className="flex items-center gap-2 mb-3">
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold text-foreground">System Information</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Created On</span>
+                    <p className="text-sm text-foreground mt-0.5">{c.created_at ? format(new Date(c.created_at), 'MMM d, yyyy h:mm a') : '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last Updated On</span>
+                    <p className="text-sm text-foreground mt-0.5">{c.updated_at ? format(new Date(c.updated_at), 'MMM d, yyyy h:mm a') : '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Created By</span>
+                    <p className="text-sm text-foreground mt-0.5">
+                      {(() => {
+                        const owner = profiles.find((p: any) => p.id === c.owner_id);
+                        return owner?.full_name ?? '—';
+                      })()}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last Email Sent On</span>
+                    <p className="text-sm text-foreground mt-0.5">{c.last_email_sent_at ? format(new Date(c.last_email_sent_at), 'MMM d, yyyy h:mm a') : '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last SMS Sent By</span>
+                    <p className="text-sm text-foreground mt-0.5">{c.last_sms_sent_at ? format(new Date(c.last_sms_sent_at), 'MMM d, yyyy h:mm a') : '—'}</p>
+                  </div>
+                </div>
+              </div>
             </ScrollArea>
           </Tabs>
         </div>

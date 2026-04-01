@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  FunnelChart, Funnel, LabelList, Cell,
+  FunnelChart, Funnel, LabelList, Cell, PieChart, Pie,
 } from 'recharts';
-import { TrendingUp, Eye, MessageSquare, Send, MousePointerClick } from 'lucide-react';
+import { TrendingUp, Eye, MessageSquare, Send, MousePointerClick, Users, Play, CheckCircle2, SmilePlus } from 'lucide-react';
 
 interface Enrollment {
   id: string;
   status: string;
   current_step_order: number | null;
+  reply_sentiment?: string | null;
 }
 
 interface StepExecution {
@@ -48,13 +49,20 @@ const FUNNEL_COLORS = [
   'hsl(173 58% 39%)',
 ];
 
+const SENTIMENT_COLORS: Record<string, string> = {
+  positive: 'hsl(142 76% 36%)',
+  neutral:  'hsl(217 91% 60%)',
+  negative: 'hsl(12 76% 61%)',
+  unknown:  'hsl(var(--muted-foreground))',
+};
+
 export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAnalyticsProps) => {
   const metrics = useMemo(() => {
     const totalEnrolled = enrollments.length;
     if (totalEnrolled === 0 || steps.length === 0) return null;
 
     // Group executions by step
-    // Build a map from step_id → step_order for both current and historical steps
+    // Build a map from step_id -> step_order for both current and historical steps
     const stepIdToOrder = new Map(steps.map(s => [s.id, s.order]));
 
     // For historical executions with old step IDs, try to infer step_order from enrollment's current_step_order
@@ -63,7 +71,7 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
       // First try direct match to current steps
       const order = stepIdToOrder.get(exec.sequence_step_id);
       if (order !== undefined) return order;
-      // Can't match — step was re-created after save
+      // Can't match -- step was re-created after save
       return null;
     };
 
@@ -108,6 +116,25 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
     const totalReplied = perStep.reduce((a, b) => a + b.replied, 0);
     const totalBounced = perStep.reduce((a, b) => a + b.bounced, 0);
 
+    // Enrollment status breakdown
+    const activeCount = enrollments.filter(e => e.status === 'active').length;
+    const completedCount = enrollments.filter(e => e.status === 'completed').length;
+
+    // Sentiment breakdown from reply_sentiment on enrollments
+    const sentimentCounts: Record<string, number> = {};
+    enrollments.forEach((e) => {
+      const s = e.reply_sentiment?.toLowerCase() ?? null;
+      if (s) {
+        const key = ['positive', 'neutral', 'negative'].includes(s) ? s : 'unknown';
+        sentimentCounts[key] = (sentimentCounts[key] || 0) + 1;
+      }
+    });
+    const sentimentData = Object.entries(sentimentCounts).map(([name, value]) => ({
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      value,
+      fill: SENTIMENT_COLORS[name] ?? SENTIMENT_COLORS.unknown,
+    }));
+
     // Funnel data: how many reached each step
     const funnelData = perStep.map((step, i) => {
       // Count enrollees whose current_step_order >= this step order, or who completed/sent this step
@@ -121,6 +148,8 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
 
     return {
       totalEnrolled,
+      activeCount,
+      completedCount,
       totalSent,
       totalDelivered,
       totalOpened,
@@ -133,6 +162,7 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
       overallReplyRate: totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0,
       perStep,
       funnelData,
+      sentimentData,
     };
   }, [steps, enrollments, executions]);
 
@@ -147,7 +177,34 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
+      {/* High-Level Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <SummaryCard
+          icon={<Users className="h-4 w-4" />}
+          label="Total Enrolled"
+          value={metrics.totalEnrolled}
+        />
+        <SummaryCard
+          icon={<Play className="h-4 w-4" />}
+          label="Active"
+          value={metrics.activeCount}
+          highlight
+        />
+        <SummaryCard
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          label="Completed"
+          value={metrics.completedCount}
+        />
+        <SummaryCard
+          icon={<MessageSquare className="h-4 w-4" />}
+          label="Reply Rate"
+          value={metrics.overallReplyRate}
+          suffix="%"
+          highlight
+        />
+      </div>
+
+      {/* Delivery & Engagement Cards */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <SummaryCard icon={<Send className="h-4 w-4" />} label="Sent" value={metrics.totalSent} />
         <SummaryCard icon={<TrendingUp className="h-4 w-4" />} label="Delivered" value={metrics.totalDelivered} suffix={`${metrics.overallDeliverRate}%`} />
@@ -157,34 +214,86 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
         <SummaryCard icon={<TrendingUp className="h-4 w-4" />} label="Bounced" value={metrics.totalBounced} />
       </div>
 
-      {/* Per-Step Bar Chart */}
-      <div className="rounded-lg border border-border bg-card p-5">
-        <h4 className="text-sm font-semibold text-foreground mb-4">Per-Step Performance</h4>
-        {metrics.perStep.some(s => s.sent > 0) ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={metrics.perStep} barCategoryGap="20%">
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-              <YAxis tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'hsl(var(--card))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: 'hsl(var(--foreground))',
-                }}
-              />
-              <Bar dataKey="sent" name="Sent" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="delivered" name="Delivered" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="opened" name="Opened" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="clicked" name="Clicked" fill="hsl(217 91% 60%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="replied" name="Replied" fill="hsl(280 67% 51%)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-sm text-muted-foreground text-center py-8">No step executions yet. Data will appear once messages are sent.</p>
-        )}
+      {/* Per-Step Bar Chart + Sentiment Side-by-Side */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Per-Step Performance (takes 2/3 width on large screens) */}
+        <div className="lg:col-span-2 rounded-lg border border-border bg-card p-5">
+          <h4 className="text-sm font-semibold text-foreground mb-4">Per-Step Performance</h4>
+          {metrics.perStep.some(s => s.sent > 0) ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={metrics.perStep} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
+                <YAxis tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                />
+                <Bar dataKey="sent" name="Sent" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="delivered" name="Delivered" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="opened" name="Opened" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="clicked" name="Clicked" fill="hsl(217 91% 60%)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="replied" name="Replied" fill="hsl(280 67% 51%)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">No step executions yet. Data will appear once messages are sent.</p>
+          )}
+        </div>
+
+        {/* Sentiment Breakdown (takes 1/3 width) */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+            <SmilePlus className="h-4 w-4 text-muted-foreground" />
+            Reply Sentiment
+          </h4>
+          {metrics.sentimentData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={180}>
+                <PieChart>
+                  <Pie
+                    data={metrics.sentimentData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={72}
+                    paddingAngle={3}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {metrics.sentimentData.map((entry, index) => (
+                      <Cell key={`sentiment-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: 'hsl(var(--foreground))',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap justify-center gap-3 mt-2">
+                {metrics.sentimentData.map((entry) => (
+                  <div key={entry.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.fill }} />
+                    {entry.name} ({entry.value})
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">No sentiment data yet. Replies will be categorized as they come in.</p>
+          )}
+        </div>
       </div>
 
       {/* Conversion Funnel */}
@@ -253,8 +362,12 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
   );
 };
 
-const SummaryCard = ({ icon, label, value, suffix }: { icon: React.ReactNode; label: string; value: number; suffix?: string }) => (
-  <div className="rounded-lg border border-border bg-card p-4">
+const SummaryCard = ({
+  icon, label, value, suffix, highlight,
+}: {
+  icon: React.ReactNode; label: string; value: number; suffix?: string; highlight?: boolean;
+}) => (
+  <div className={`rounded-lg border border-border bg-card p-4 ${highlight ? 'ring-1 ring-primary/20' : ''}`}>
     <div className="flex items-center gap-2 text-muted-foreground mb-1">
       {icon}
       <span className="text-xs">{label}</span>

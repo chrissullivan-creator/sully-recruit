@@ -14,6 +14,19 @@ export interface Task {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  task_type?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  timezone?: string | null;
+  reminder?: string | null;
+  location?: string | null;
+  meeting_url?: string | null;
+  meeting_provider?: string | null;
+  related_to_type?: string | null;
+  related_to_id?: string | null;
+  no_calendar_invites?: boolean;
+  create_followup?: boolean;
+  task_subtype?: string | null;
   task_links?: TaskLink[];
   task_comments?: TaskComment[];
   // joined profile names
@@ -139,6 +152,18 @@ export function useCreateTask() {
       due_date?: string;
       assigned_to?: string;
       links?: { entity_type: string; entity_id: string }[];
+      task_type?: string;
+      start_time?: string;
+      end_time?: string;
+      timezone?: string;
+      reminder?: string;
+      task_subtype?: string;
+      location?: string;
+      meeting_url?: string;
+      meeting_provider?: string;
+      no_calendar_invites?: boolean;
+      create_followup?: boolean;
+      attendees?: { entity_type: string; entity_id: string }[];
     }) => {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const { data: task, error } = await supabase
@@ -150,6 +175,17 @@ export function useCreateTask() {
           due_date: payload.due_date || new Date().toISOString().split('T')[0],
           assigned_to: payload.assigned_to || null,
           created_by: userId,
+          task_type: payload.task_type || 'task',
+          start_time: payload.start_time || null,
+          end_time: payload.end_time || null,
+          timezone: payload.timezone || null,
+          reminder: payload.reminder || null,
+          task_subtype: payload.task_subtype || null,
+          location: payload.location || null,
+          meeting_url: payload.meeting_url || null,
+          meeting_provider: payload.meeting_provider || null,
+          no_calendar_invites: payload.no_calendar_invites || false,
+          create_followup: payload.create_followup || false,
         } as any)
         .select()
         .single();
@@ -164,12 +200,22 @@ export function useCreateTask() {
         await supabase.from('task_links').insert(linkRows as any);
       }
 
+      // Insert meeting attendees
+      if (payload.attendees?.length) {
+        const attendeeRows = payload.attendees.map((a) => ({
+          task_id: task.id,
+          entity_type: a.entity_type,
+          entity_id: a.entity_id,
+        }));
+        await supabase.from('meeting_attendees').insert(attendeeRows as any);
+      }
+
       // Notify assigned user
       if (payload.assigned_to && payload.assigned_to !== userId) {
         await supabase.from('notifications').insert({
           user_id: payload.assigned_to,
           type: 'task_assigned',
-          title: 'New task assigned to you',
+          title: payload.task_type === 'meeting' ? 'New meeting scheduled' : 'New task assigned to you',
           body: payload.title,
           entity_type: 'task',
           entity_id: task.id,
@@ -178,10 +224,10 @@ export function useCreateTask() {
 
       return task;
     },
-    onSuccess: () => {
+    onSuccess: (_, payload) => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['entity_tasks'] });
-      toast.success('Task created');
+      toast.success(payload.task_type === 'meeting' ? 'Meeting created' : 'Task created');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to create task'),
   });

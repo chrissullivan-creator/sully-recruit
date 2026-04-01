@@ -4,11 +4,14 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { useSequences } from '@/hooks/useData';
-import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2, Trash2, X } from 'lucide-react';
+import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2, Trash2, X, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 const statusColors: Record<string, string> = {
@@ -32,7 +35,17 @@ const Campaigns = () => {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
   const { data: sequences = [], isLoading } = useSequences();
+  const { data: templates = [] } = useQuery({
+    queryKey: ['sequence_templates'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('sequence_templates').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
   const queryClient = useQueryClient();
 
   const filteredSequences = useMemo(() => sequences.filter((seq) => {
@@ -84,6 +97,57 @@ const Campaigns = () => {
       navigate(`/campaigns/${seq.id}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create sequence');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleCreateFromTemplate = async (template: any) => {
+    setCreating(true);
+    setTemplateDialogOpen(false);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const { data: seq, error } = await supabase
+        .from('sequences')
+        .insert({
+          name: `${template.name.replace(' Template', '')}`,
+          description: template.description || null,
+          channel: template.channel || 'email',
+          status: 'draft',
+          stop_on_reply: template.stop_on_reply ?? true,
+          created_by: userId,
+        } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      // Insert steps from template
+      const stepsJson = Array.isArray(template.steps_json) ? template.steps_json : [];
+      if (stepsJson.length > 0) {
+        const rows = stepsJson.map((step: any) => ({
+          sequence_id: seq.id,
+          step_order: step.order,
+          step_type: step.channel || 'email',
+          channel: step.channel || 'email',
+          delay_days: step.delayDays || 0,
+          delay_hours: step.delayHours || 0,
+          send_window_start: step.sendWindowStart || 9,
+          send_window_end: step.sendWindowEnd || 17,
+          wait_for_connection: step.waitForConnection || false,
+          min_hours_after_connection: step.minHoursAfterConnection || 4,
+          subject: step.subject || null,
+          body: step.content || null,
+          is_reply: step.isReply || false,
+          use_signature: step.useSignature || false,
+        }));
+        await supabase.from('sequence_steps').insert(rows as any);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      toast.success('Sequence created from template');
+      navigate(`/campaigns/${seq.id}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create from template');
     } finally {
       setCreating(false);
     }
@@ -141,10 +205,17 @@ const Campaigns = () => {
         title="Sequences" 
         description="Multi-channel outreach sequences for candidates and business development."
         actions={
-          <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
-            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            New Sequence
-          </Button>
+          <div className="flex items-center gap-2">
+            {templates.length > 0 && (
+              <Button variant="outline" onClick={() => setTemplateDialogOpen(true)} disabled={creating}>
+                <FileText className="h-4 w-4 mr-1" /> From Template
+              </Button>
+            )}
+            <Button variant="gold" onClick={handleCreateNew} disabled={creating}>
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              New Sequence
+            </Button>
+          </div>
         }
       />
       
@@ -294,6 +365,46 @@ const Campaigns = () => {
           </div>
         )}
       </div>
+
+      {/* Template Picker Dialog */}
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Start from Template</DialogTitle>
+          </DialogHeader>
+          <Input
+            placeholder="Search templates..."
+            value={templateSearch}
+            onChange={(e) => setTemplateSearch(e.target.value)}
+            className="mb-3"
+          />
+          <ScrollArea className="max-h-80">
+            <div className="space-y-2">
+              {templates
+                .filter(t => !templateSearch || t.name.toLowerCase().includes(templateSearch.toLowerCase()))
+                .map((template: any) => {
+                  const stepsCount = Array.isArray(template.steps_json) ? template.steps_json.length : 0;
+                  return (
+                    <button
+                      key={template.id}
+                      onClick={() => handleCreateFromTemplate(template)}
+                      className="w-full text-left rounded-lg border border-border p-3 hover:bg-accent/10 transition-colors"
+                    >
+                      <p className="text-sm font-medium text-foreground">{template.name}</p>
+                      {template.description && <p className="text-xs text-muted-foreground mt-0.5">{template.description}</p>}
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {template.channel} &middot; {stepsCount} step{stepsCount !== 1 ? 's' : ''} &middot; {template.stop_on_reply ? 'Stop on reply' : 'Continue on reply'}
+                      </p>
+                    </button>
+                  );
+                })}
+              {templates.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">No templates saved yet. Save a sequence as a template first.</p>
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };
