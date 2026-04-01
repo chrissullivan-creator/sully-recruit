@@ -13,6 +13,7 @@ from typing import List, Optional
 import uuid
 from datetime import datetime
 import anthropic
+import asyncio
 
 
 ROOT_DIR = Path(__file__).parent
@@ -1040,6 +1041,219 @@ async def backfill_full_names():
                 fixed += 1
 
     return {"fixed": fixed}
+
+
+class UnifiedSearchRequest(BaseModel):
+    query: str
+    messages: List[ChatMessage] = []
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+
+async def fetch_all_searchable_data() -> dict:
+    """Fetch candidates, contacts, resumes, notes, and recent messages for unified search."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {}
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        # Parallel fetch all data sources
+        cand_task = http.get(
+            f"{SUPABASE_URL}/rest/v1/candidates",
+            headers=headers,
+            params={
+                "select": "id,full_name,first_name,last_name,current_title,current_company,email,location_text,status,skills,work_authorization",
+                "order": "created_at.desc",
+                "limit": "300",
+            },
+        )
+        contact_task = http.get(
+            f"{SUPABASE_URL}/rest/v1/contacts",
+            headers=headers,
+            params={
+                "select": "id,full_name,first_name,last_name,title,email,company_name,status,department",
+                "order": "created_at.desc",
+                "limit": "200",
+            },
+        )
+        notes_task = http.get(
+            f"{SUPABASE_URL}/rest/v1/notes",
+            headers=headers,
+            params={
+                "select": "id,entity_id,entity_type,note,created_at",
+                "order": "created_at.desc",
+                "limit": "300",
+            },
+        )
+        messages_task = http.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers=headers,
+            params={
+                "select": "id,candidate_id,contact_id,channel,direction,body,subject,sender_address,recipient_address,sent_at",
+                "order": "sent_at.desc",
+                "limit": "200",
+            },
+        )
+
+        cand_resp, contact_resp, notes_resp, msg_resp = await asyncio.gather(
+            cand_task, contact_task, notes_task, messages_task
+        )
+
+    resume_data = await fetch_resume_data()
+
+    return {
+        "candidates": cand_resp.json() if cand_resp.status_code == 200 else [],
+        "contacts": contact_resp.json() if contact_resp.status_code == 200 else [],
+        "notes": notes_resp.json() if notes_resp.status_code == 200 else [],
+        "messages": msg_resp.json() if msg_resp.status_code == 200 else [],
+        "resumes": resume_data,
+    }
+
+
+@api_router.post("/unified-search")
+async def unified_search(request: UnifiedSearchRequest):
+    """Search across candidates, contacts, resumes, notes, and messages in one query."""
+    if not ANTHROPIC_API_KEY:
+        async def err():
+            yield f"data: {json.dumps({'content': 'LLM key not configured.'})}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
+
+    data = await fetch_all_searchable_data()
+    if not any(data.values()):
+        async def empty():
+            yield f"data: {json.dumps({'content': 'No data found in the database.'})}\n\n"
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    # Build context sections
+    sections = []
+
+    # Candidates
+    if data.get("candidates"):
+        entries = []
+        for c in data["candidates"]:
+            name = c.get("full_name") or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            if not name:
+                continue
+            parts = [f"[CANDIDATE] {name}"]
+            if c.get("current_title"): parts.append(f"  Title: {c['current_title']}")
+            if c.get("current_company"): parts.append(f"  Company: {c['current_company']}")
+            if c.get("location_text"): parts.append(f"  Location: {c['location_text']}")
+            if c.get("email"): parts.append(f"  Email: {c['email']}")
+            if c.get("skills"):
+                skills = c["skills"] if isinstance(c["skills"], str) else ", ".join(c["skills"])
+                parts.append(f"  Skills: {skills}")
+            if c.get("work_authorization"): parts.append(f"  Work Auth: {c['work_authorization']}")
+            if c.get("status"): parts.append(f"  Status: {c['status']}")
+            entries.append("\n".join(parts))
+        sections.append(f"=== CANDIDATES ({len(entries)}) ===\n" + "\n\n".join(entries))
+
+    # Contacts
+    if data.get("contacts"):
+        entries = []
+        for ct in data["contacts"]:
+            name = ct.get("full_name") or f"{ct.get('first_name', '')} {ct.get('last_name', '')}".strip()
+            if not name:
+                continue
+            parts = [f"[CONTACT] {name}"]
+            if ct.get("title"): parts.append(f"  Title: {ct['title']}")
+            if ct.get("company_name"): parts.append(f"  Company: {ct['company_name']}")
+            if ct.get("email"): parts.append(f"  Email: {ct['email']}")
+            if ct.get("department"): parts.append(f"  Dept: {ct['department']}")
+            if ct.get("status"): parts.append(f"  Status: {ct['status']}")
+            entries.append("\n".join(parts))
+        sections.append(f"=== CONTACTS ({len(entries)}) ===\n" + "\n\n".join(entries))
+
+    # Resumes
+    if data.get("resumes"):
+        entries = []
+        for r in data["resumes"]:
+            entry = f"[RESUME] {r['name']}"
+            if r.get("title"): entry += f" | {r['title']}"
+            if r.get("company"): entry += f" @ {r['company']}"
+            entry += f"\n  {r['summary'][:600]}"
+            entries.append(entry)
+        sections.append(f"=== RESUMES ({len(entries)}) ===\n" + "\n\n".join(entries))
+
+    # Notes
+    if data.get("notes"):
+        entries = []
+        for n in data["notes"]:
+            note_text = n.get("note", "")[:300]
+            if not note_text.strip():
+                continue
+            entries.append(f"[NOTE on {n.get('entity_type', 'unknown')} {n.get('entity_id', '')}] {note_text}")
+        if entries:
+            sections.append(f"=== NOTES ({len(entries)}) ===\n" + "\n\n".join(entries[:100]))
+
+    # Messages
+    if data.get("messages"):
+        entries = []
+        for m in data["messages"]:
+            body = (m.get("body") or m.get("subject") or "")[:200]
+            if not body.strip():
+                continue
+            direction = "sent" if m.get("direction") == "outbound" else "received"
+            channel = m.get("channel", "unknown")
+            date = m.get("sent_at", "")[:10]
+            entries.append(f"[MESSAGE {channel} {direction} {date}] {m.get('sender_address', '')} → {m.get('recipient_address', '')}: {body}")
+        if entries:
+            sections.append(f"=== MESSAGES ({len(entries)}) ===\n" + "\n\n".join(entries[:100]))
+
+    full_context = "\n\n".join(sections)
+    # Truncate if too long
+    if len(full_context) > 120000:
+        full_context = full_context[:120000] + "\n\n[... truncated ...]"
+
+    system_prompt = f"""You are Joe, a senior recruiting assistant at Sully Recruit. You have access to ALL data across the platform:
+- {len(data.get('candidates', []))} candidates
+- {len(data.get('contacts', []))} contacts
+- {len(data.get('resumes', []))} resumes
+- {len(data.get('notes', []))} notes
+- {len(data.get('messages', []))} messages
+
+When the recruiter asks a question, search across ALL data sources to find the answer. This includes:
+- Candidate profiles and their attributes
+- Contact information for hiring managers and decision makers
+- Resume content (skills, experience, education)
+- Internal notes written by recruiters
+- Email, LinkedIn, and SMS message history
+
+Instructions:
+1. Search across all data — don't limit to just one type
+2. Label each result with its source: [CANDIDATE], [CONTACT], [RESUME], [NOTE], [MESSAGE]
+3. Rank by relevance and explain why each result matches
+4. If the query mentions a person, check all sources (their profile + resume + notes about them + messages with them)
+5. Be thorough but concise
+
+Here is all searchable data:
+
+{full_context}"""
+
+    api_messages = []
+    for msg in request.messages:
+        api_messages.append({"role": msg.role, "content": msg.content})
+    if not api_messages:
+        api_messages = [{"role": "user", "content": request.query}]
+
+    async def stream_response():
+        try:
+            async with get_claude().messages.stream(
+                model="claude-sonnet-4-5-20250514",
+                max_tokens=4096,
+                system=system_prompt,
+                messages=api_messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield f"data: {json.dumps({'content': text})}\n\n"
+        except Exception as e:
+            logger.error(f"Unified search error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 # Include the router in the main app
