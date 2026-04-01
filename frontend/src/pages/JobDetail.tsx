@@ -1061,25 +1061,31 @@ const JobDetail = () => {
             </DialogTitle>
           </DialogHeader>
           <ScrollArea className="flex-1 min-h-[200px]">
-            {matching ? (
+            {matching && !matchResults ? (
               <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Joe is analyzing your candidate database...</span>
+                <span className="text-sm">Joe is analyzing your candidate database and resumes...</span>
               </div>
             ) : matchResults ? (
               <div className="prose prose-sm max-w-none text-foreground whitespace-pre-wrap px-1">
                 {matchResults}
+                {matching && (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground ml-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  </span>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
                 <Sparkles className="h-10 w-10 opacity-30" />
                 <p className="text-sm text-center max-w-md">
-                  Joe will search your candidate database and rank the best matches for this role based on skills, experience, and background.
+                  Joe will search your candidate database (including resumes) and rank the best matches for this role based on skills, experience, and background.
                 </p>
                 <Button
                   variant="gold"
                   onClick={async () => {
                     setMatching(true);
+                    setMatchResults('');
                     try {
                       const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
                       const resp = await fetch(`${backendUrl}/api/match-candidates-to-job`, {
@@ -1090,12 +1096,40 @@ const JobDetail = () => {
                           job_company: companyName || (job as any).company_name,
                           job_location: job.location,
                           job_description: (job as any).description || (job as any).notes,
-                          job_salary: (job as any).salary_range || (job as any).salary,
+                          job_salary: (job as any).salary_range || (job as any).salary || (job as any).compensation,
                         }),
                       });
-                      const data = await resp.json();
-                      if (data.error) throw new Error(data.error);
-                      setMatchResults(data.content || 'No matches found.');
+
+                      // Stream the response
+                      const reader = resp.body?.getReader();
+                      if (!reader) throw new Error('No response body');
+                      const decoder = new TextDecoder();
+                      let textBuffer = '';
+                      let resultSoFar = '';
+
+                      while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        textBuffer += decoder.decode(value, { stream: true });
+                        const lines = textBuffer.split('\n');
+                        textBuffer = lines.pop() || '';
+                        for (const line of lines) {
+                          if (line.startsWith('data: ')) {
+                            try {
+                              const data = JSON.parse(line.slice(6));
+                              if (data.error) throw new Error(data.error);
+                              if (data.content) {
+                                resultSoFar += data.content;
+                                setMatchResults(resultSoFar);
+                              }
+                            } catch (e: any) {
+                              if (e.message && !e.message.includes('JSON')) throw e;
+                            }
+                          }
+                        }
+                      }
+
+                      if (!resultSoFar) setMatchResults('No matches found.');
                     } catch (err: any) {
                       toast.error(err.message || 'Failed to match');
                       setMatchResults('');

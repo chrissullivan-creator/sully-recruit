@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CandidatePipeline } from '@/components/pipeline/CandidatePipeline';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
@@ -12,6 +13,16 @@ import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
+import {
+  CandidateFilterSidebar,
+  DEFAULT_FILTERS,
+  getActiveFilterCount,
+  getActiveFilterChips,
+  clearFilterByKey,
+  type CandidateFilters,
+  type SavedSearch,
+} from '@/components/candidates/CandidateFilterSidebar';
+import { booleanMatch, hasBooleanOperators } from '@/lib/booleanSearch';
 import { useCandidates, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,13 +32,13 @@ import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle } from 'lucide-react';
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   pitched:      'bg-blue-500/10 text-blue-400',
@@ -58,14 +69,25 @@ const statusColors: Record<string, string> = {
   placed:         'bg-success/10 text-success border-success/20',
 };
 
+// Saved searches persisted to localStorage
+const SAVED_SEARCHES_KEY = 'sully-recruit-saved-searches';
+function loadSavedSearches(): SavedSearch[] {
+  try {
+    const raw = localStorage.getItem(SAVED_SEARCHES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function persistSavedSearches(searches: SavedSearch[]) {
+  localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
+}
+
 const Candidates = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [view, setView] = useState<'pipeline' | 'list'>('list');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [jobTagFilter, setJobTagFilter] = useState('all');
-  const [ownerFilter, setOwnerFilter] = useState('all');
+  const [filters, setFilters] = useState<CandidateFilters>(DEFAULT_FILTERS);
+  const [filterSidebarOpen, setFilterSidebarOpen] = useState(false);
   const [sortField, setSortField] = useState<SortField>('updated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
@@ -84,24 +106,120 @@ const Candidates = () => {
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>(loadSavedSearches);
   const queryClient = useQueryClient();
   const PAGE_SIZE = 100;
 
+  // Derive unique skills and locations from candidate data for filter suggestions
+  const availableSkills = useMemo(() => {
+    const skills = new Set<string>();
+    for (const c of candidates) {
+      const s = (c as any).skills;
+      if (Array.isArray(s)) s.forEach((sk: string) => skills.add(sk));
+      else if (typeof s === 'string' && s) s.split(',').forEach((sk: string) => { const t = sk.trim(); if (t) skills.add(t); });
+    }
+    return Array.from(skills).sort();
+  }, [candidates]);
+
+  const availableLocations = useMemo(() => {
+    const locs = new Set<string>();
+    for (const c of candidates) {
+      const loc = (c as any).location_text || (c as any).location;
+      if (loc && typeof loc === 'string') locs.add(loc);
+    }
+    return Array.from(locs).sort();
+  }, [candidates]);
+
+  // Saved search handlers
+  const handleSaveSearch = useCallback((name: string) => {
+    const newSearch: SavedSearch = {
+      id: `ss-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name,
+      filters: { ...filters },
+      searchQuery,
+      created_at: new Date().toISOString(),
+    };
+    const updated = [newSearch, ...savedSearches];
+    setSavedSearches(updated);
+    persistSavedSearches(updated);
+    toast.success(`Saved search "${name}"`);
+  }, [filters, searchQuery, savedSearches]);
+
+  const handleLoadSearch = useCallback((search: SavedSearch) => {
+    setFilters(search.filters);
+    setSearchQuery(search.searchQuery);
+    setPage(1);
+    toast.success(`Loaded "${search.name}"`);
+  }, []);
+
+  const handleDeleteSearch = useCallback((id: string) => {
+    const updated = savedSearches.filter((s) => s.id !== id);
+    setSavedSearches(updated);
+    persistSavedSearches(updated);
+  }, [savedSearches]);
+
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch = !q ||
-        (c.full_name ?? '').toLowerCase().includes(q) ||
-        (c.first_name ?? '').toLowerCase().includes(q) ||
-        (c.last_name ?? '').toLowerCase().includes(q) ||
-        (c.current_company ?? '').toLowerCase().includes(q) ||
-        (c.current_title ?? '').toLowerCase().includes(q) ||
-        (c.email ?? '').toLowerCase().includes(q) ||
-        (`${c.first_name ?? ''} ${c.last_name ?? ''}`).toLowerCase().includes(q);
-      const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-      const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
-      const matchesOwner = ownerFilter === 'all' ? true : ownerFilter === 'mine' ? c.owner_id === user?.id : c.owner_id === ownerFilter;
-      return matchesSearch && matchesStatus && matchesJobTag && matchesOwner;
+      // Boolean search across key fields
+      const searchFields = [
+        c.full_name ?? '',
+        c.first_name ?? '',
+        c.last_name ?? '',
+        c.current_company ?? '',
+        c.current_title ?? '',
+        c.email ?? '',
+        `${c.first_name ?? ''} ${c.last_name ?? ''}`,
+      ];
+      const matchesSearch = booleanMatch(searchQuery, searchFields);
+
+      // Status filter
+      const matchesStatus = filters.status === 'all' || c.status === filters.status;
+
+      // Job tag filter
+      const matchesJobTag = filters.jobTag === 'all' || (c as any).job_id === filters.jobTag;
+
+      // Owner filter
+      const matchesOwner = filters.owner === 'all' ? true : filters.owner === 'mine' ? c.owner_id === user?.id : c.owner_id === filters.owner;
+
+      // Location filter (partial match)
+      const candLocation = ((c as any).location_text || (c as any).location || '').toLowerCase();
+      const matchesLocation = !filters.location || candLocation.includes(filters.location.toLowerCase());
+
+      // Title filter (partial match)
+      const matchesTitle = !filters.title || (c.current_title ?? '').toLowerCase().includes(filters.title.toLowerCase());
+
+      // Company filter (partial match)
+      const matchesCompany = !filters.company || (c.current_company ?? '').toLowerCase().includes(filters.company.toLowerCase());
+
+      // Skills filter
+      const matchesSkills = filters.skills.length === 0 || (() => {
+        const candidateSkills = (() => {
+          const s = (c as any).skills;
+          if (Array.isArray(s)) return s.map((sk: string) => sk.toLowerCase());
+          if (typeof s === 'string' && s) return s.split(',').map((sk: string) => sk.trim().toLowerCase());
+          return [];
+        })();
+        // Also search in title and company for skill keywords
+        const allText = [...candidateSkills, (c.current_title ?? '').toLowerCase(), (c.current_company ?? '').toLowerCase()].join(' ');
+        return filters.skills.every((skill) => allText.includes(skill));
+      })();
+
+      // Work authorization filter
+      const matchesWorkAuth = filters.workAuthorization === 'all' ||
+        ((c as any).work_authorization ?? '').toLowerCase().includes(filters.workAuthorization.toLowerCase());
+
+      // Date added range
+      const createdDate = new Date(c.created_at);
+      const matchesDateFrom = !filters.dateAddedFrom || createdDate >= filters.dateAddedFrom;
+      const matchesDateTo = !filters.dateAddedTo || createdDate <= filters.dateAddedTo;
+
+      // Last activity
+      const updatedDate = (c as any).updated_at ? new Date((c as any).updated_at) : createdDate;
+      const matchesLastActivity = !filters.lastActivityFrom || updatedDate >= filters.lastActivityFrom;
+
+      return matchesSearch && matchesStatus && matchesJobTag && matchesOwner &&
+        matchesLocation && matchesTitle && matchesCompany && matchesSkills &&
+        matchesWorkAuth && matchesDateFrom && matchesDateTo && matchesLastActivity;
     });
 
     list.sort((a, b) => {
@@ -119,7 +237,10 @@ const Candidates = () => {
     });
 
     return list;
-  }, [candidates, searchQuery, statusFilter, jobTagFilter, ownerFilter, sortField, sortDir, user?.id]);
+  }, [candidates, searchQuery, filters, sortField, sortDir, user?.id]);
+
+  const activeFilterCount = getActiveFilterCount(filters);
+  const filterChips = getActiveFilterChips(filters, STATUS_LABELS, jobs, profiles);
 
   // Reset page when filters change
   const totalPages = Math.ceil(filteredCandidates.length / PAGE_SIZE);
@@ -230,63 +351,80 @@ const Candidates = () => {
         }
       />
       
-      <div className="p-8">
-        <div className="flex flex-wrap items-center gap-4 mb-6">
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Filter Sidebar ─────────────────────────────────────────────── */}
+        {filterSidebarOpen && (
+          <CandidateFilterSidebar
+            filters={filters}
+            onFiltersChange={(f) => { setFilters(f); setPage(1); }}
+            onClose={() => setFilterSidebarOpen(false)}
+            statusOptions={statusFilters.filter(s => s !== 'all').map(s => ({ value: s, label: STATUS_LABELS[s] }))}
+            jobs={jobs}
+            profiles={profiles}
+            availableSkills={availableSkills}
+            availableLocations={availableLocations}
+            savedSearches={savedSearches}
+            onSaveSearch={handleSaveSearch}
+            onLoadSearch={handleLoadSearch}
+            onDeleteSearch={handleDeleteSearch}
+            searchQuery={searchQuery}
+          />
+        )}
+
+        {/* ── Main content ───────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Filter toggle */}
+          <Button
+            variant={filterSidebarOpen ? 'secondary' : 'outline'}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => setFilterSidebarOpen(!filterSidebarOpen)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="ml-0.5 text-[10px] h-5 px-1.5 bg-accent/10 text-accent">
+                {activeFilterCount}
+              </Badge>
+            )}
+          </Button>
+
+          {/* Search bar with Boolean support */}
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search candidates..."
+              placeholder="Search candidates... (supports AND, OR, NOT, &quot;quotes&quot;)"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-9 pl-10 pr-8 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
+            {searchQuery && hasBooleanOperators(searchQuery) && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-accent font-medium uppercase tracking-wide">
+                Boolean
+              </span>
+            )}
+            {!searchQuery && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs text-xs">
+                    <p className="font-medium mb-1">Boolean Search Syntax</p>
+                    <p>React AND TypeScript — both required</p>
+                    <p>Python OR Java — either matches</p>
+                    <p>NOT junior — exclude term</p>
+                    <p>"senior engineer" — exact phrase</p>
+                    <p>(React OR Vue) AND NOT intern</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-              <SelectTrigger className="h-8 w-44 text-xs">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {statusFilters.filter(s => s !== 'all').map(s => (
-                  <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={jobTagFilter} onValueChange={(v) => { setJobTagFilter(v); setPage(1); }}>
-              <SelectTrigger className="h-8 w-52 text-xs">
-                <SelectValue placeholder="All Jobs" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Jobs</SelectItem>
-                {(jobs as any[])
-                  .filter(j => j.status !== 'lost' && j.status !== 'on_hold')
-                  .sort((a, b) => a.title.localeCompare(b.title))
-                  .map(job => (
-                    <SelectItem key={job.id} value={job.id}>
-                      {job.title}{job.company_name ? ` — ${job.company_name}` : ''}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(1); }}>
-              <SelectTrigger className="h-8 w-44 text-xs">
-                <SelectValue placeholder="All Owners" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Owners</SelectItem>
-                <SelectItem value="mine">My Candidates</SelectItem>
-                {profiles.filter(p => p.full_name).map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
+          {/* Bulk actions */}
           {selectedIds.length > 0 && (
             <>
               <Button variant="gold" size="sm" onClick={() => setBulkActionsOpen(true)}>
@@ -316,6 +454,29 @@ const Candidates = () => {
             </Button>
           )}
         </div>
+
+        {/* ── Active Filter Chips ──────────────────────────────────────── */}
+        {filterChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 mb-4">
+            {filterChips.map((chip) => (
+              <Badge
+                key={chip.key}
+                variant="secondary"
+                className="text-xs gap-1 pr-1 cursor-pointer hover:bg-destructive/10 transition-colors"
+                onClick={() => { setFilters(clearFilterByKey(filters, chip.key)); setPage(1); }}
+              >
+                {chip.label}
+                <X className="h-3 w-3" />
+              </Badge>
+            ))}
+            <button
+              className="text-[10px] text-muted-foreground hover:text-foreground ml-1 transition-colors"
+              onClick={() => { setFilters(DEFAULT_FILTERS); setPage(1); }}
+            >
+              Clear all
+            </button>
+          </div>
+        )}
 
         {isLoading ? (
           <p className="text-muted-foreground text-sm">Loading candidates...</p>
@@ -452,6 +613,7 @@ const Candidates = () => {
           )}
           </>
         )}
+        </div>
       </div>
 
       <EnrollInSequenceDialog

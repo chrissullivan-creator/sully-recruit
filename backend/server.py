@@ -272,36 +272,63 @@ async def fetch_candidates_for_matching() -> list:
 
 @api_router.post("/match-candidates-to-job")
 async def match_candidates_to_job(request: MatchCandidatesRequest):
-    """Use Claude to match existing candidates to a job."""
+    """Use Claude to match existing candidates to a job, with streaming results."""
     if not ANTHROPIC_API_KEY:
-        return {"error": "LLM key not configured"}
+        async def err_stream():
+            yield f"data: {json.dumps({'content': 'LLM key not configured.'})}\n\n"
+        return StreamingResponse(err_stream(), media_type="text/event-stream")
 
+    # Fetch candidates and resumes in parallel for richer matching
     candidates = await fetch_candidates_for_matching()
-    if not candidates:
-        return {"content": "No candidates found in the database to match against."}
+    resume_data = await fetch_resume_data()
 
-    # Build candidate summaries
+    if not candidates:
+        async def empty_stream():
+            yield f"data: {json.dumps({'content': 'No candidates found in the database to match against.'})}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    # Build a resume lookup by candidate_id
+    resume_map = {}
+    for r in resume_data:
+        cid = r.get("candidate_id")
+        if cid and r.get("summary"):
+            resume_map[cid] = r["summary"][:800]
+
+    # Build candidate summaries enriched with resume data
     cand_entries = []
     for c in candidates:
         name = c.get("full_name") or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
         if not name:
             continue
-        parts = [f"**{name}**"]
+        parts = [f"**{name}** (ID: {c.get('id', 'unknown')})"]
         if c.get("current_title"):
             parts.append(f"Title: {c['current_title']}")
         if c.get("current_company"):
             parts.append(f"Company: {c['current_company']}")
         if c.get("location_text"):
             parts.append(f"Location: {c['location_text']}")
+        if c.get("skills"):
+            skills = c["skills"] if isinstance(c["skills"], str) else ", ".join(c["skills"])
+            parts.append(f"Skills: {skills}")
+        if c.get("current_base_comp"):
+            parts.append(f"Current Comp: {c['current_base_comp']}")
         if c.get("target_roles"):
             parts.append(f"Target Roles: {c['target_roles']}")
         if c.get("work_authorization"):
             parts.append(f"Work Auth: {c['work_authorization']}")
         if c.get("status"):
             parts.append(f"Status: {c['status']}")
+        # Include resume summary if available
+        resume_summary = resume_map.get(c.get("id"))
+        if resume_summary:
+            parts.append(f"Resume: {resume_summary}")
         cand_entries.append("\n".join(parts))
 
     cand_context = "\n\n---\n\n".join(cand_entries[:200])
+
+    # Truncate if too long
+    if len(cand_context) > 100000:
+        cand_context = cand_context[:100000] + "\n\n[... additional candidates truncated ...]"
 
     job_desc = f"Job: {request.job_title}"
     if request.job_company:
@@ -311,36 +338,40 @@ async def match_candidates_to_job(request: MatchCandidatesRequest):
     if request.job_salary:
         job_desc += f"\nSalary: {request.job_salary}"
     if request.job_description:
-        job_desc += f"\nDescription: {request.job_description[:1000]}"
+        job_desc += f"\nDescription: {request.job_description[:1500]}"
 
     system_prompt = f"""You are Joe, the AI recruiting assistant for Emerald Recruiting Group. You analyze candidates in the database to find the best matches for a specific job.
 
 Instructions:
 1. Rank ALL potential matches from highest confidence to lowest
 2. Show confidence percentage for each (e.g., "92% match")
-3. Explain WHY each person is a good fit — reference their title, company, skills, location
-4. Flag any concerns (location mismatch, overqualified, etc.)
+3. Explain WHY each person is a good fit — reference their title, company, skills, resume highlights, and location
+4. Flag any concerns (location mismatch, overqualified, compensation gap, etc.)
 5. Group into tiers: Strong Match (80%+), Good Match (60-79%), Worth Considering (40-59%)
 6. Be thorough — show everyone who could potentially fit, not just top 5
+7. Consider resume content when available — it contains richer detail about skills and experience
 
 {job_desc}
 
 Candidates in database:
 {cand_context}"""
 
-    try:
-        user_prompt = f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")
-        msg = await get_claude().messages.create(
-            model="claude-sonnet-4-5-20250514",
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        response = msg.content[0].text
-        return {"content": response}
-    except Exception as e:
-        logger.error(f"Match error: {e}")
-        return {"error": str(e)}
+    async def stream_response():
+        try:
+            user_prompt = f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")
+            async with get_claude().messages.stream(
+                model="claude-sonnet-4-5-20250514",
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield f"data: {json.dumps({'content': text})}\n\n"
+        except Exception as e:
+            logger.error(f"Match streaming error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 
