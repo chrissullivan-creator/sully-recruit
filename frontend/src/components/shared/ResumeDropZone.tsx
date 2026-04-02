@@ -49,33 +49,47 @@ async function uploadFile(file: File, session: any) {
 async function parseFile(file_path: string, file_name: string, session: any): Promise<any> {
   const body = { file_path, file_name };
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`;
-  console.log('[ResumeDropZone] sending to process-resume:', body);
-  console.log('[ResumeDropZone] url:', url);
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const result = await resp.json();
-  console.log('[ResumeDropZone] process-resume status:', resp.status);
-  console.log('[ResumeDropZone] process-resume response:', result);
-  if (!resp.ok || result.error) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
-  const p = result.parsed || {};
-  return {
-    first_name:      p.first_name || '',
-    last_name:       p.last_name || '',
-    email:           p.email || '',
-    phone:           p.phone || '',
-    current_company: p.current_company || '',
-    current_title:   p.current_title || '',
-    location:        p.location || '',
-    linkedin_url:    p.linkedin_url || '',
-    _candidate_id:   result.candidate_id || null,
-  };
+
+  // Retry with exponential backoff for rate limit errors
+  const MAX_RETRIES = 4;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const result = await resp.json();
+
+    // Retry on 429 rate limit
+    if ((resp.status === 429 || (result.error && result.error.includes('rate_limit'))) && attempt < MAX_RETRIES) {
+      const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s, 16s
+      console.warn(`[ResumeDropZone] Rate limited, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
+
+    if (!resp.ok || result.error) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
+
+    const p = result.parsed || {};
+    return {
+      first_name:      p.first_name || '',
+      last_name:       p.last_name || '',
+      email:           p.email || '',
+      phone:           p.phone || '',
+      current_company: p.current_company || '',
+      current_title:   p.current_title || '',
+      location:        p.location || '',
+      linkedin_url:    p.linkedin_url || '',
+      _candidate_id:   result.candidate_id || null,
+    };
+  }
+
+  throw new Error('Rate limit exceeded after retries — try again in a minute');
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -132,10 +146,12 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     const parsed: ParsedData[] = [];
 
     for (let i = 0; i < valid.length; i++) {
+      // Add delay between files to avoid rate limiting (skip first)
+      if (i > 0) await new Promise(r => setTimeout(r, 3000));
+
       const file = valid[i];
       try {
         const { file_path, file_name } = await uploadFile(file, session);
-        console.log('[ResumeDropZone] file uploaded, calling process-resume for:', file_name);
         const data = await parseFile(file_path, file_name, session);
 
         const entry: ParsedData = {
@@ -209,10 +225,16 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       if (resp.ok) {
         const result = await resp.json();
         if (result.unipile_id || result.provider_id) {
+          // Store in candidate_channels (not on candidates table)
           await supabase
-            .from('candidates')
-            .update({ unipile_id: result.unipile_id || result.provider_id } as any)
-            .eq('id', candidateId);
+            .from('candidate_channels')
+            .upsert({
+              candidate_id: candidateId,
+              channel: 'linkedin',
+              unipile_id: result.unipile_id || null,
+              provider_id: result.provider_id || null,
+              is_connected: true,
+            }, { onConflict: 'candidate_id,channel' });
         }
       }
     } catch (err) {

@@ -71,12 +71,16 @@ async function resolveUnipileIdInBackground(contactId: string, linkedinUrl: stri
 
     const result = await resp.json();
     if (result.unipile_id || result.provider_id) {
+      // Store in contact_channels (not on contacts table)
       await supabase
-        .from('contacts')
-        .update({
-          unipile_id: result.unipile_id || result.provider_id,
-        } as any)
-        .eq('id', contactId);
+        .from('contact_channels')
+        .upsert({
+          contact_id: contactId,
+          channel: 'linkedin',
+          unipile_id: result.unipile_id || null,
+          provider_id: result.provider_id || null,
+          is_connected: true,
+        }, { onConflict: 'contact_id,channel' });
     }
   } catch (err) {
     console.warn('Background Unipile ID resolution failed:', err);
