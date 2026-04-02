@@ -860,7 +860,8 @@ function MessagePane({ threadId }: { threadId: string | null }) {
     try {
       // Determine recipient address based on channel
       let toAddress = '';
-      const lastInbound = messages.find((m) => m.direction === 'inbound');
+      // Find the most recent inbound message (has the sender's address)
+      const lastInbound = [...messages].reverse().find((m) => m.direction === 'inbound');
 
       if (thread.channel === 'email') {
         toAddress = lastInbound?.sender_address || '';
@@ -913,7 +914,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       }
 
       if (!toAddress) {
-        toast.error(`No recipient address found for ${CHANNEL_LABELS[thread.channel] || thread.channel}. Try linking this conversation to a candidate or contact first.`);
+        toast.error(`No recipient address found. The sender's address may be missing from the inbound message. Try linking this conversation to a candidate or contact first.`);
         setSending(false);
         return;
       }
