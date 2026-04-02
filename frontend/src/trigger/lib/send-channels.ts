@@ -3,44 +3,104 @@ import { logger } from "@trigger.dev/sdk/v3";
 /**
  * Channel send helpers extracted from process-sequence-emails edge function.
  * Used by the sequence-step Trigger.dev task.
+ *
+ * Email: Microsoft Graph (emeraldrecruit.com tenant)
+ * SMS: RingCentral
+ * LinkedIn: Unipile
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EMAIL via Resend
+// EMAIL via Microsoft Graph
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get a client_credentials access token for the emeraldrecruit.com tenant.
+ * Requires MICROSOFT_GRAPH_CLIENT_ID, MICROSOFT_GRAPH_CLIENT_SECRET,
+ * MICROSOFT_GRAPH_TENANT_ID env vars.
+ */
+async function getMicrosoftAccessToken(): Promise<string> {
+  const clientId = process.env.MICROSOFT_GRAPH_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
+  const tenantId = process.env.MICROSOFT_GRAPH_TENANT_ID;
+
+  if (!clientId || !clientSecret || !tenantId) {
+    throw new Error("Microsoft Graph credentials not configured (CLIENT_ID, CLIENT_SECRET, TENANT_ID)");
+  }
+
+  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  const resp = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Microsoft token error: ${errText}`);
+  }
+
+  const data = await resp.json();
+  return data.access_token;
+}
+
 export async function sendEmail(
   to: string,
   subject: string | undefined,
   body: string,
+  senderUserId?: string,
 ): Promise<{ messageId: string; sender: string }> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  if (!resendApiKey) {
-    throw new Error("RESEND_API_KEY not configured");
+  const accessToken = await getMicrosoftAccessToken();
+
+  // Default sender — use the enrolled_by user's email or fall back to configured sender
+  // Graph sendMail requires the sender's mailbox userId or userPrincipalName
+  const fromEmail = senderUserId || process.env.MICROSOFT_GRAPH_SENDER_EMAIL || "";
+  if (!fromEmail) {
+    throw new Error(
+      "No sender configured. Set MICROSOFT_GRAPH_SENDER_EMAIL or pass senderUserId.",
+    );
   }
 
-  const fromEmail = process.env.RESEND_FROM_EMAIL || "noreply@resend.dev";
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          subject: subject || "",
+          body: {
+            contentType: "HTML",
+            content: body,
+          },
+          toRecipients: [
+            {
+              emailAddress: { address: to },
+            },
+          ],
+        },
+        saveToSentItems: true,
+      }),
     },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [to],
-      subject: subject || "",
-      html: body,
-    }),
-  });
+  );
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Resend API error: ${error}`);
+    throw new Error(`Microsoft Graph sendMail error: ${error}`);
   }
 
-  const data = await response.json();
-  return { messageId: data.id, sender: fromEmail };
+  // Graph sendMail returns 202 with no body on success
+  // Generate a message ID from the timestamp since Graph doesn't return one synchronously
+  const messageId = `graph_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  return { messageId, sender: fromEmail };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -281,9 +281,20 @@ export const processSequenceStep = task({
       let externalMessageId: string | null = null;
       let externalConversationId: string | null = null;
 
+      // Resolve sender email for Microsoft Graph (look up enrolled_by user's email)
+      let senderEmail: string | undefined;
+      if (stepChannel === "email" && payload.enrolledBy) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", payload.enrolledBy)
+          .maybeSingle();
+        senderEmail = profile?.email || undefined;
+      }
+
       switch (stepChannel) {
         case "email": {
-          const result = await sendEmail(to, step.subject, step.body);
+          const result = await sendEmail(to, step.subject, step.body, senderEmail);
           externalMessageId = result.messageId;
           break;
         }
@@ -322,7 +333,7 @@ export const processSequenceStep = task({
 
       // Log message in database
       const provider =
-        stepChannel === "email" ? "smtp" : stepChannel === "sms" ? "ringcentral" : "unipile";
+        stepChannel === "email" ? "microsoft_graph" : stepChannel === "sms" ? "ringcentral" : "unipile";
       await supabase.from("messages").insert({
         conversation_id: conversationId,
         candidate_id: payload.candidateId || null,
