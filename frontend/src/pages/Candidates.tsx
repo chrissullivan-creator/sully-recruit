@@ -10,10 +10,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
-import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
-import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
-import { UnifiedSearchDialog } from '@/components/candidates/UnifiedSearchDialog';
 import {
   CandidateFilterSidebar,
   DEFAULT_FILTERS,
@@ -37,7 +34,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Users, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw, Globe } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, Sparkles, X, Target, User, Users, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { DuplicateReviewDialog } from '@/components/candidates/DuplicateReviewDialog';
@@ -105,11 +102,8 @@ const Candidates = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
-  const [resumeSearchOpen, setResumeSearchOpen] = useState(false);
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
-  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
-  const [unifiedSearchOpen, setUnifiedSearchOpen] = useState(false);
   const [dedupOpen, setDedupOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -371,17 +365,9 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setUnifiedSearchOpen(true)}>
-              <Globe className="h-4 w-4 mr-1" />
-              Search Everything
-            </Button>
             <Button variant="ghost" size="sm" onClick={() => setAskJoeSearchOpen(true)}>
               <Sparkles className="h-4 w-4 mr-1" />
-              Ask Joe — Search
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/resume-search')}>
-              <FileSearch className="h-4 w-4 mr-1" />
-              Resume Search
+              Ask Joe
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
               <FileUp className="h-4 w-4 mr-1" />
@@ -722,14 +708,9 @@ const Candidates = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
-      <AskJoeAdvancedSearch open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen} mode="candidate_search" />
       <AskJoeSearch open={askJoeSearchOpen} onOpenChange={setAskJoeSearchOpen} />
-      <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
       <DuplicateReviewDialog open={dedupOpen} onOpenChange={setDedupOpen} />
-
-      {/* Bulk Delete Confirmation */}
-      <UnifiedSearchDialog open={unifiedSearchOpen} onOpenChange={setUnifiedSearchOpen} />
 
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <DialogContent className="max-w-sm">

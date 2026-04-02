@@ -252,6 +252,35 @@ export function useSequences() {
   });
 }
 
+// Sequence list metrics — aggregated execution stats per sequence
+export function useSequenceListMetrics() {
+  return useQuery({
+    queryKey: ['sequence_list_metrics'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sequence_step_executions')
+        .select('status, sequence_enrollments!inner(sequence_id)');
+      if (error) throw error;
+
+      // Aggregate per sequence
+      const metrics: Record<string, { sent: number; delivered: number; opened: number; replied: number; bounced: number }> = {};
+      for (const row of data || []) {
+        const seqId = (row as any).sequence_enrollments?.sequence_id;
+        if (!seqId) continue;
+        if (!metrics[seqId]) metrics[seqId] = { sent: 0, delivered: 0, opened: 0, replied: 0, bounced: 0 };
+        const m = metrics[seqId];
+        const s = row.status;
+        if (s === 'sent' || s === 'delivered' || s === 'opened' || s === 'clicked' || s === 'replied') m.sent++;
+        if (s === 'delivered' || s === 'opened' || s === 'clicked' || s === 'replied') m.delivered++;
+        if (s === 'opened' || s === 'clicked' || s === 'replied') m.opened++;
+        if (s === 'replied') m.replied++;
+        if (s === 'bounced') m.bounced++;
+      }
+      return metrics;
+    },
+  });
+}
+
 // Send outs for a specific job
 export function useJobSendOuts(jobId: string | undefined) {
   return useQuery({

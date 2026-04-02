@@ -932,7 +932,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       });
 
       if (error) throw error;
-      if (!data.success) throw new Error(data.error || 'Send failed');
+      if (!data?.success) throw new Error(data?.error || 'Send failed');
 
       toast.success(`Message sent via ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
       setReplyText('');

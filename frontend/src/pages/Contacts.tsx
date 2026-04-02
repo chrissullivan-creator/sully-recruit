@@ -59,6 +59,8 @@ const Contacts = () => {
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
   const { data: contacts = [], isLoading } = useContacts();
   const { data: jobs = [] } = useJobs();
 
@@ -113,6 +115,13 @@ const Contacts = () => {
     return list;
   }, [contacts, searchQuery, filter, sortField, sortDir]);
 
+  // Reset page when filters change
+  const totalPages = Math.ceil(filteredContacts.length / PAGE_SIZE);
+  const paginatedContacts = filteredContacts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset to page 1 when search or filter changes
+  useMemo(() => { setPage(1); }, [searchQuery, filter]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -120,10 +129,11 @@ const Contacts = () => {
   };
 
   const toggleAll = () => {
-    if (selectedIds.length === filteredContacts.length) {
-      setSelectedIds([]);
+    const pageIds = paginatedContacts.map((c) => c.id);
+    if (pageIds.every((id) => selectedIds.includes(id))) {
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
     } else {
-      setSelectedIds(filteredContacts.map((c) => c.id));
+      setSelectedIds((prev) => [...new Set([...prev, ...pageIds])]);
     }
   };
 
@@ -226,15 +236,15 @@ const Contacts = () => {
             <Button variant={filter === 'inactive' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('inactive')}>Inactive</Button>
           </div>
 
-          {filteredContacts.length > 0 && selectedIds.length !== filteredContacts.length && (
+          {paginatedContacts.length > 0 && !paginatedContacts.every((c) => selectedIds.includes(c.id)) && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
-              Add All ({filteredContacts.length})
+              Select Page ({paginatedContacts.length})
             </Button>
           )}
 
-          {selectedIds.length === filteredContacts.length && filteredContacts.length > 0 && (
+          {paginatedContacts.length > 0 && paginatedContacts.every((c) => selectedIds.includes(c.id)) && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
-              Deselect All
+              Deselect Page
             </Button>
           )}
         </div>
@@ -280,7 +290,7 @@ const Contacts = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredContacts.map((contact) => (
+                {paginatedContacts.map((contact) => (
                   <tr key={contact.id} className="group hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -431,6 +441,22 @@ const Contacts = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-xs text-muted-foreground">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredContacts.length)} of {filteredContacts.length}
+              {selectedIds.length > 0 && <span className="ml-2">({selectedIds.length} selected)</span>}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>First</Button>
+              <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
+              <span className="text-xs text-muted-foreground px-2">Page {page} of {totalPages}</span>
+              <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+              <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(totalPages)}>Last</Button>
+            </div>
           </div>
         )}
       </div>

@@ -86,13 +86,14 @@ export const processRingcentralEvent = task({
         eventBody.result === "Call connected" ||
         (eventBody.duration && eventBody.duration > 30);
 
-      if (match.entityType === "candidate" && isCompletedCall) {
+      if (isCompletedCall) {
         await transcribeAndExtract(
           supabase,
           eventBody,
           match.entityId,
           callLog?.id,
           payload.receivedAt,
+          match.entityType,
         );
       }
     }
@@ -168,6 +169,7 @@ async function transcribeAndExtract(
   candidateId: string,
   callLogId: string | undefined,
   receivedAt: string,
+  entityType: string = "candidate",
 ) {
   try {
     const anthropicKey = getAnthropicKey();
@@ -241,63 +243,75 @@ async function transcribeAndExtract(
     ].join("\n");
 
     await supabase.from("notes").insert({
-      entity_type: "candidate",
+      entity_type: entityType,
       entity_id: candidateId,
       content: noteBody,
       created_at: receivedAt,
     } as any);
 
-    // ── 4. Update candidate fields ──────────────────────────────────
+    // ── 4. Update entity fields ────────────────────────────────────
     const fields = result.extracted_fields || {};
+    const table = entityType === "candidate" ? "candidates" : "contacts";
     const updates: any = {};
 
-    // Only update fields that have actual values from the call
-    if (fields.current_title) updates.current_title = fields.current_title;
-    if (fields.current_company) updates.current_company = fields.current_company;
-    if (fields.reason_for_leaving) updates.reason_for_leaving = fields.reason_for_leaving;
-    if (fields.current_base_comp) updates.current_base_comp = fields.current_base_comp;
-    if (fields.current_bonus_comp) updates.current_bonus_comp = fields.current_bonus_comp;
-    if (fields.current_total_comp) updates.current_total_comp = fields.current_total_comp;
-    if (fields.target_base_comp) updates.target_base_comp = fields.target_base_comp;
-    if (fields.target_total_comp) updates.target_total_comp = fields.target_total_comp;
-    if (fields.comp_notes) updates.comp_notes = fields.comp_notes;
-    if (fields.work_authorization) updates.work_authorization = fields.work_authorization;
-    if (fields.relocation_preference) updates.relocation_preference = fields.relocation_preference;
-    if (fields.target_locations) updates.target_locations = fields.target_locations;
-    if (fields.target_roles) updates.target_roles = fields.target_roles;
-    if (fields.skills?.length) updates.skills = fields.skills;
-
-    // Update candidate_summary
-    if (result.candidate_summary) {
-      updates.candidate_summary = result.candidate_summary;
+    // Basic fields — apply to both candidates and contacts
+    if (fields.current_title) updates.current_title = entityType === "contact" ? undefined : fields.current_title;
+    if (fields.current_title && entityType === "contact") updates.title = fields.current_title;
+    if (fields.current_company) {
+      if (entityType === "candidate") updates.current_company = fields.current_company;
+      else updates.company_name = fields.current_company;
     }
 
-    // Append to back_of_resume_notes (don't overwrite existing)
-    if (result.back_of_resume_points) {
-      const { data: existing } = await supabase
-        .from("candidates")
-        .select("back_of_resume_notes")
-        .eq("id", candidateId)
-        .single();
+    // Candidate-only fields
+    if (entityType === "candidate") {
+      if (fields.reason_for_leaving) updates.reason_for_leaving = fields.reason_for_leaving;
+      if (fields.current_base_comp) updates.current_base_comp = fields.current_base_comp;
+      if (fields.current_bonus_comp) updates.current_bonus_comp = fields.current_bonus_comp;
+      if (fields.current_total_comp) updates.current_total_comp = fields.current_total_comp;
+      if (fields.target_base_comp) updates.target_base_comp = fields.target_base_comp;
+      if (fields.target_total_comp) updates.target_total_comp = fields.target_total_comp;
+      if (fields.comp_notes) updates.comp_notes = fields.comp_notes;
+      if (fields.work_authorization) updates.work_authorization = fields.work_authorization;
+      if (fields.relocation_preference) updates.relocation_preference = fields.relocation_preference;
+      if (fields.target_locations) updates.target_locations = fields.target_locations;
+      if (fields.target_roles) updates.target_roles = fields.target_roles;
+      if (fields.skills?.length) updates.skills = fields.skills;
 
-      const dateLabel = new Date(receivedAt).toLocaleDateString();
-      const newPoints = `\n\n--- Call Notes (${dateLabel}) ---\n${result.back_of_resume_points}`;
+      // Update candidate_summary
+      if (result.candidate_summary) {
+        updates.candidate_summary = result.candidate_summary;
+      }
 
-      updates.back_of_resume_notes = existing?.back_of_resume_notes
-        ? existing.back_of_resume_notes + newPoints
-        : newPoints.trim();
+      // Append to back_of_resume_notes (don't overwrite existing)
+      if (result.back_of_resume_points) {
+        const { data: existing } = await supabase
+          .from("candidates")
+          .select("back_of_resume_notes")
+          .eq("id", candidateId)
+          .single();
+
+        const dateLabel = new Date(receivedAt).toLocaleDateString();
+        const newPoints = `\n\n--- Call Notes (${dateLabel}) ---\n${result.back_of_resume_points}`;
+
+        updates.back_of_resume_notes = existing?.back_of_resume_notes
+          ? existing.back_of_resume_notes + newPoints
+          : newPoints.trim();
+      }
+
+      // Update joe_says with key takeaway
+      if (result.candidate_summary) {
+        updates.joe_says = `Last call: ${result.candidate_summary}`;
+        updates.joe_says_updated_at = receivedAt;
+      }
     }
 
-    // Update joe_says with key takeaway
-    if (result.candidate_summary) {
-      updates.joe_says = `Last call: ${result.candidate_summary}`;
-      updates.joe_says_updated_at = receivedAt;
-    }
+    // Remove undefined keys
+    Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
 
     if (Object.keys(updates).length > 0) {
-      await supabase.from("candidates").update(updates).eq("id", candidateId);
-      logger.info("Updated candidate fields from call", {
-        candidateId,
+      await supabase.from(table).update(updates).eq("id", candidateId);
+      logger.info(`Updated ${entityType} fields from call`, {
+        entityId: candidateId,
         updatedFields: Object.keys(updates),
       });
     }
@@ -432,18 +446,27 @@ async function matchByPhone(
   supabase: any,
   normalizedPhone: string,
 ): Promise<{ entityId: string; entityType: string; entityColumn: string } | null> {
-  const normalize = (p: string) => p.replace(/[^0-9+]/g, "");
+  const normalize = (p: string) => p.replace(/[^0-9]/g, "");
+  const last10 = (p: string) => normalize(p).slice(-10);
+  const searchDigits = last10(normalizedPhone);
 
   const { data: candidates } = await supabase
     .from("candidates")
     .select("id, phone")
     .not("phone", "is", null);
 
-  const candidateMatch = candidates?.find(
-    (c: any) => c.phone && normalize(c.phone) === normalizedPhone,
+  // Try exact match first, then last-10-digits match
+  const candidateExact = candidates?.find(
+    (c: any) => c.phone && normalize(c.phone) === normalize(normalizedPhone),
   );
-  if (candidateMatch) {
-    return { entityId: candidateMatch.id, entityType: "candidate", entityColumn: "candidate_id" };
+  if (candidateExact) {
+    return { entityId: candidateExact.id, entityType: "candidate", entityColumn: "candidate_id" };
+  }
+  const candidateFuzzy = candidates?.find(
+    (c: any) => c.phone && last10(c.phone) === searchDigits && searchDigits.length === 10,
+  );
+  if (candidateFuzzy) {
+    return { entityId: candidateFuzzy.id, entityType: "candidate", entityColumn: "candidate_id" };
   }
 
   const { data: contacts } = await supabase
@@ -451,11 +474,17 @@ async function matchByPhone(
     .select("id, phone")
     .not("phone", "is", null);
 
-  const contactMatch = contacts?.find(
-    (c: any) => c.phone && normalize(c.phone) === normalizedPhone,
+  const contactExact = contacts?.find(
+    (c: any) => c.phone && normalize(c.phone) === normalize(normalizedPhone),
   );
-  if (contactMatch) {
-    return { entityId: contactMatch.id, entityType: "contact", entityColumn: "contact_id" };
+  if (contactExact) {
+    return { entityId: contactExact.id, entityType: "contact", entityColumn: "contact_id" };
+  }
+  const contactFuzzy = contacts?.find(
+    (c: any) => c.phone && last10(c.phone) === searchDigits && searchDigits.length === 10,
+  );
+  if (contactFuzzy) {
+    return { entityId: contactFuzzy.id, entityType: "contact", entityColumn: "contact_id" };
   }
 
   return null;

@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { useSequences } from '@/hooks/useData';
+import { useSequences, useSequenceListMetrics } from '@/hooks/useData';
 import { Plus, Search, Play, Pause, Mail, MessageSquare, Phone, Linkedin, Users, BarChart3, Loader2, Trash2, X, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -38,6 +38,7 @@ const Campaigns = () => {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
   const { data: sequences = [], isLoading } = useSequences();
+  const { data: seqMetrics = {} } = useSequenceListMetrics();
   const { data: templates = [] } = useQuery({
     queryKey: ['sequence_templates'],
     queryFn: async () => {
@@ -347,17 +348,33 @@ const Campaigns = () => {
                     <span className="ml-2 text-xs text-muted-foreground">{steps.length} steps</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
+                  <div className="grid grid-cols-4 gap-3 pt-4 border-t border-border">
                     <div>
                       <p className="text-lg font-semibold text-foreground">{enrollments.length}</p>
                       <p className="text-xs text-muted-foreground">Enrolled</p>
                     </div>
-                    <div className="flex items-center justify-end">
-                      <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                        <BarChart3 className="h-4 w-4 mr-1" />
-                        Analytics
-                      </Button>
-                    </div>
+                    {(() => {
+                      const m = seqMetrics[seq.id];
+                      const replyRate = m && m.sent > 0 ? Math.round((m.replied / m.sent) * 100) : 0;
+                      const openRate = m && m.delivered > 0 ? Math.round((m.opened / m.delivered) * 100) : 0;
+                      const bounceRate = m && m.sent > 0 ? Math.round((m.bounced / m.sent) * 100) : 0;
+                      return (
+                        <>
+                          <div>
+                            <p className="text-lg font-semibold text-foreground">{m ? `${replyRate}%` : '—'}</p>
+                            <p className="text-xs text-muted-foreground">Reply</p>
+                          </div>
+                          <div>
+                            <p className="text-lg font-semibold text-foreground">{m ? `${openRate}%` : '—'}</p>
+                            <p className="text-xs text-muted-foreground">Open</p>
+                          </div>
+                          <div>
+                            <p className="text-lg font-semibold text-foreground">{m ? `${bounceRate}%` : '—'}</p>
+                            <p className="text-xs text-muted-foreground">Bounce</p>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               );

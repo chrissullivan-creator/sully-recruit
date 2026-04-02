@@ -25,14 +25,6 @@ interface RingCentralConfig {
   phone_number: string;
 }
 
-interface SmtpConfig {
-  smtp_host: string;
-  smtp_port: number;
-  smtp_user: string;
-  smtp_pass: string;
-  from_email: string;
-  from_name: string;
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -43,14 +35,20 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    // Auth client for user verification
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: { Authorization: req.headers.get('Authorization')! },
       },
     });
 
+    // Service role client for DB writes (bypasses RLS)
+    const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+
     // Get current user
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    const { data: { user }, error: userError } = await authClient.auth.getUser();
     if (userError || !user) {
       throw new Error('Unauthorized');
     }
@@ -103,6 +101,11 @@ serve(async (req) => {
     const { error: msgError } = await supabaseClient.from('messages').insert(messageInsert);
     if (msgError) {
       console.error('Failed to log message:', msgError);
+      // Don't silently swallow — tell the frontend
+      return new Response(
+        JSON.stringify({ success: false, error: `Message sent but failed to log: ${msgError.message}` }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Update conversation's last_message_at
@@ -130,7 +133,7 @@ serve(async (req) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EMAIL via SMTP (using Resend or generic SMTP)
+// EMAIL via Microsoft Graph
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendEmail(
   supabase: any,
@@ -139,54 +142,80 @@ async function sendEmail(
   subject: string | undefined,
   body: string
 ): Promise<{ messageId: string; sender: string }> {
-  // Check for Resend API key first (simpler)
-  const resendApiKey = Deno.env.get('RESEND_API_KEY');
-  
-  if (resendApiKey) {
-    // Use Resend API
-    const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@resend.dev';
-    
-    const response = await fetch('https://api.resend.com/emails', {
+  // Get Microsoft Graph credentials from app_settings
+  const { data: settings, error: settingsErr } = await supabase
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['MICROSOFT_GRAPH_CLIENT_ID', 'MICROSOFT_GRAPH_CLIENT_SECRET', 'MICROSOFT_GRAPH_TENANT_ID']);
+
+  if (settingsErr || !settings || settings.length < 3) {
+    throw new Error('Microsoft Graph credentials not found in app_settings. Add CLIENT_ID, CLIENT_SECRET, TENANT_ID.');
+  }
+
+  const creds: Record<string, string> = {};
+  for (const row of settings) creds[row.key] = row.value;
+
+  // Get access token
+  const tokenResp = await fetch(
+    `https://login.microsoftonline.com/${creds.MICROSOFT_GRAPH_TENANT_ID}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: creds.MICROSOFT_GRAPH_CLIENT_ID,
+        client_secret: creds.MICROSOFT_GRAPH_CLIENT_SECRET,
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+      }),
+    }
+  );
+
+  if (!tokenResp.ok) {
+    const errText = await tokenResp.text();
+    throw new Error(`Microsoft Graph token error: ${errText}`);
+  }
+
+  const { access_token } = await tokenResp.json();
+
+  // Resolve sender email from profiles table
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email')
+    .eq('id', userId)
+    .single();
+
+  const fromEmail = profile?.email;
+  if (!fromEmail) {
+    throw new Error('No email found for current user in profiles table');
+  }
+
+  // Send via Graph API
+  const sendResp = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
+    {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
+        Authorization: `Bearer ${access_token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject: subject || 'No Subject',
-        html: body.replace(/\n/g, '<br>'),
+        message: {
+          subject: subject || '',
+          body: { contentType: 'HTML', content: body },
+          toRecipients: [{ emailAddress: { address: to } }],
+        },
+        saveToSentItems: true,
       }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Resend API error: ${errorText}`);
     }
+  );
 
-    const result = await response.json();
-    return { messageId: result.id, sender: fromEmail };
+  if (!sendResp.ok) {
+    const errText = await sendResp.text();
+    throw new Error(`Microsoft Graph sendMail error: ${errText}`);
   }
 
-  // Fallback: Check user's SMTP integration config
-  const { data: integrationData } = await supabase
-    .from('user_integrations')
-    .select('config')
-    .eq('user_id', userId)
-    .eq('integration_type', 'smtp')
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (!integrationData) {
-    throw new Error('No email integration configured. Please set up SMTP or Resend.');
-  }
-
-  const config = integrationData.config as SmtpConfig;
-  
-  // For now, we'll use a simple HTTP-based email service
-  // In production, you'd use a proper SMTP library
-  throw new Error('Custom SMTP not yet implemented. Please configure RESEND_API_KEY secret.');
+  const messageId = `graph_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return { messageId, sender: fromEmail };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
