@@ -227,8 +227,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   // ── Trigger resume ingestion (embedding + vector storage) in background ────
   const triggerResumeIngestion = async (candidateId: string, filePath: string, fileName: string) => {
     try {
-      // First, find the resume record for this candidate/file
-      const { data: resume } = await supabase
+      // Find or create the resume record for this candidate/file
+      let { data: resume } = await supabase
         .from('resumes')
         .select('id')
         .eq('candidate_id', candidateId)
@@ -237,9 +237,20 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .limit(1)
         .maybeSingle();
 
+      if (!resume) {
+        // Create resume record (the old edge function used to do this)
+        const { data: inserted } = await supabase.from('resumes').insert({
+          candidate_id: candidateId,
+          file_path: filePath,
+          file_name: fileName,
+          parse_status: 'pending',
+        } as any).select('id').single();
+        resume = inserted;
+      }
+
       const resumeId = resume?.id;
       if (!resumeId) {
-        console.warn('[ResumeDropZone] No resume record found for ingestion trigger');
+        console.warn('[ResumeDropZone] Could not find or create resume record');
         return;
       }
 
@@ -280,7 +291,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .eq('id', entry.candidate_id);
       if (error) throw error;
     } else {
-      // No candidate_id means process-resume didn't create one — insert new
+      // Insert new candidate
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const { data: inserted, error } = await supabase.from('candidates').insert({
         owner_id:        userId,
