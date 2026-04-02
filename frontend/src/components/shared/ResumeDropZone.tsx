@@ -177,11 +177,56 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     }
   }, []);
 
+  // ── Resolve Unipile ID in background after save ────────────────────────────
+  const resolveUnipileInBackground = async (candidateId: string, linkedinUrl: string) => {
+    try {
+      // Extract slug from LinkedIn URL
+      const match = linkedinUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
+      const slug = match ? match[1] : (/^[\w-]+$/.test(linkedinUrl.trim()) ? linkedinUrl.trim() : null);
+      if (!slug) return;
+
+      const { data: chrisAcct } = await supabase
+        .from('integration_accounts')
+        .select('unipile_account_id')
+        .ilike('account_label', '%Chris Sullivan%')
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (!chrisAcct?.unipile_account_id) return;
+
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-unipile-id`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ linkedin_slug: slug, account_id: chrisAcct.unipile_account_id }),
+        }
+      );
+
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result.unipile_id || result.provider_id) {
+          await supabase
+            .from('candidates')
+            .update({ unipile_id: result.unipile_id || result.provider_id } as any)
+            .eq('id', candidateId);
+        }
+      }
+    } catch (err) {
+      console.warn('Background Unipile ID resolution failed:', err);
+    }
+  };
+
   // ── Save a single entry (update user-edited fields, or insert if no candidate_id) ──
   const saveCandidate = async (entry: ParsedData): Promise<void> => {
     if (!entry.first_name.trim() && !entry.last_name.trim()) {
       throw new Error('Name is required');
     }
+
+    let savedId = entry.candidate_id;
 
     if (entry.candidate_id) {
       // process-resume already created/updated the record — just apply user edits
@@ -204,7 +249,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     } else {
       // No candidate_id means process-resume didn't create one — insert new
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const { error } = await supabase.from('candidates').insert({
+      const { data: inserted, error } = await supabase.from('candidates').insert({
         owner_id:        userId,
         first_name:      entry.first_name.trim() || null,
         last_name:       entry.last_name.trim() || null,
@@ -216,8 +261,14 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         location_text:   entry.location.trim() || null,
         linkedin_url:    entry.linkedin_url.trim() || null,
         status:          'new',
-      } as any);
+      } as any).select('id').single();
       if (error) throw error;
+      savedId = inserted?.id || null;
+    }
+
+    // Resolve Unipile ID in background after save (non-blocking)
+    if (savedId && entry.linkedin_url.trim()) {
+      resolveUnipileInBackground(savedId, entry.linkedin_url.trim());
     }
   };
 
