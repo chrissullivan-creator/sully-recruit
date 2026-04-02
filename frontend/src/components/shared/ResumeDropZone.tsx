@@ -242,6 +242,35 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     }
   };
 
+  // ── Trigger resume ingestion (embedding + vector storage) in background ────
+  const triggerResumeIngestion = async (candidateId: string, filePath: string, fileName: string) => {
+    try {
+      // First, find the resume record for this candidate/file
+      const { data: resume } = await supabase
+        .from('resumes')
+        .select('id')
+        .eq('candidate_id', candidateId)
+        .eq('file_path', filePath)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const resumeId = resume?.id;
+      if (!resumeId) {
+        console.warn('[ResumeDropZone] No resume record found for ingestion trigger');
+        return;
+      }
+
+      await fetch('/api/trigger-resume-ingestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resumeId, candidateId, filePath, fileName }),
+      });
+    } catch (err) {
+      console.warn('Background resume ingestion trigger failed:', err);
+    }
+  };
+
   // ── Save a single entry (update user-edited fields, or insert if no candidate_id) ──
   const saveCandidate = async (entry: ParsedData): Promise<void> => {
     if (!entry.first_name.trim() && !entry.last_name.trim()) {
@@ -291,6 +320,11 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     // Resolve Unipile ID in background after save (non-blocking)
     if (savedId && entry.linkedin_url.trim()) {
       resolveUnipileInBackground(savedId, entry.linkedin_url.trim());
+    }
+
+    // Trigger resume ingestion (embedding + vector storage) in background
+    if (savedId && entry.file_path) {
+      triggerResumeIngestion(savedId, entry.file_path, entry.file_name);
     }
   };
 
