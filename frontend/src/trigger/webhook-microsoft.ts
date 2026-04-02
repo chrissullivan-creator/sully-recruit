@@ -1,0 +1,244 @@
+import { task, logger } from "@trigger.dev/sdk/v3";
+import { getSupabaseAdmin } from "./lib/supabase";
+
+interface MicrosoftWebhookPayload {
+  notification: {
+    subscriptionId?: string;
+    changeType?: string;
+    resource?: string;
+    resourceData?: any;
+    clientState?: string;
+    tenantId?: string;
+  };
+  receivedAt: string;
+}
+
+/**
+ * Process Microsoft Graph notifications (email, calendar events).
+ * Tenant: emeraldrecruit.com (Chris, Nancy, Ashley).
+ * Matches sender email to candidates/contacts and logs activity.
+ */
+export const processMicrosoftEvent = task({
+  id: "process-microsoft-event",
+  retry: { maxAttempts: 3 },
+  run: async (payload: MicrosoftWebhookPayload) => {
+    const supabase = getSupabaseAdmin();
+    const { notification } = payload;
+
+    logger.info("Processing Microsoft Graph notification", {
+      changeType: notification.changeType,
+      resource: notification.resource,
+    });
+
+    // Verify client state if configured
+    const expectedState = process.env.MICROSOFT_WEBHOOK_CLIENT_STATE;
+    if (expectedState && notification.clientState !== expectedState) {
+      logger.warn("Client state mismatch — skipping");
+      return { action: "skipped", reason: "invalid_client_state" };
+    }
+
+    // Get access token for the emeraldrecruit.com tenant
+    const accessToken = await getMicrosoftAccessToken();
+    if (!accessToken) {
+      throw new Error("Could not obtain Microsoft Graph access token");
+    }
+
+    // Fetch the full resource from Graph API
+    const resourceUrl = `https://graph.microsoft.com/v1.0/${notification.resource}`;
+    const resourceResp = await fetch(resourceUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!resourceResp.ok) {
+      logger.error("Failed to fetch resource", {
+        status: resourceResp.status,
+        resource: notification.resource,
+      });
+      throw new Error(`Graph API error: ${resourceResp.status}`);
+    }
+
+    const resourceData = await resourceResp.json();
+
+    // Route based on resource type
+    if (notification.resource?.includes("/messages")) {
+      return await processEmailMessage(supabase, resourceData, payload.receivedAt);
+    }
+
+    if (notification.resource?.includes("/events")) {
+      return await processCalendarEvent(supabase, resourceData, payload.receivedAt);
+    }
+
+    logger.info("Unhandled resource type", { resource: notification.resource });
+    return { action: "skipped", reason: "unhandled_resource_type" };
+  },
+});
+
+async function processEmailMessage(supabase: any, message: any, receivedAt: string) {
+  const senderEmail = message.from?.emailAddress?.address?.toLowerCase();
+  if (!senderEmail) {
+    return { action: "skipped", reason: "no_sender_email" };
+  }
+
+  // Match sender to candidate or contact
+  const match = await matchByEmail(supabase, senderEmail);
+
+  if (!match) {
+    logger.info("No matching entity for email", { email: senderEmail });
+    return { action: "no_match", email: senderEmail };
+  }
+
+  // Check for duplicate message (by external ID)
+  const externalId = message.id || message.internetMessageId;
+  if (externalId) {
+    const { data: existing } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("external_message_id", externalId)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      return { action: "skipped", reason: "duplicate" };
+    }
+  }
+
+  // Determine or create conversation
+  const conversationId = `graph_${match.entityId}`;
+  const { data: existingConv } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", conversationId)
+    .maybeSingle();
+
+  if (!existingConv) {
+    await supabase.from("conversations").insert({
+      id: conversationId,
+      [match.entityColumn]: match.entityId,
+      channel: "email",
+      last_message_at: receivedAt,
+    } as any);
+  }
+
+  // Insert message
+  await supabase.from("messages").insert({
+    conversation_id: conversationId,
+    [match.entityColumn]: match.entityId,
+    channel: "email",
+    direction: "inbound",
+    subject: message.subject || null,
+    body: message.body?.content || message.bodyPreview || "",
+    sender_address: senderEmail,
+    recipient_address: message.toRecipients?.[0]?.emailAddress?.address || "",
+    sent_at: message.receivedDateTime || receivedAt,
+    provider: "microsoft_graph",
+    external_message_id: externalId,
+    is_read: message.isRead || false,
+  } as any);
+
+  // Update conversation
+  await supabase
+    .from("conversations")
+    .update({
+      last_message_at: receivedAt,
+      last_message_preview: (message.bodyPreview || "").substring(0, 100),
+      is_read: false,
+    })
+    .eq("id", conversationId);
+
+  // Update entity timestamps
+  const table = match.entityType === "candidate" ? "candidates" : "contacts";
+  await supabase
+    .from(table)
+    .update({
+      last_responded_at: receivedAt,
+      last_comm_channel: "email",
+    } as any)
+    .eq("id", match.entityId);
+
+  logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
+  return { action: "logged", entityId: match.entityId, type: "email" };
+}
+
+async function processCalendarEvent(supabase: any, event: any, receivedAt: string) {
+  // Extract attendee emails and try to match
+  const attendees = event.attendees || [];
+  const matches: any[] = [];
+
+  for (const attendee of attendees) {
+    const email = attendee.emailAddress?.address?.toLowerCase();
+    if (email) {
+      const match = await matchByEmail(supabase, email);
+      if (match) matches.push({ ...match, email });
+    }
+  }
+
+  if (matches.length === 0) {
+    return { action: "no_match", reason: "no_matching_attendees" };
+  }
+
+  // Create tasks for matched entities (calendar events → tasks)
+  for (const match of matches) {
+    await supabase.from("tasks").insert({
+      title: event.subject || "Calendar Event",
+      description: `Calendar event with ${match.email}: ${event.bodyPreview || ""}`,
+      [match.entityColumn]: match.entityId,
+      due_date: event.start?.dateTime || null,
+      status: "pending",
+      task_type: "meeting",
+      created_at: receivedAt,
+    } as any);
+  }
+
+  logger.info("Calendar event processed", { matchCount: matches.length });
+  return { action: "logged", type: "calendar", matchCount: matches.length };
+}
+
+async function getMicrosoftAccessToken(): Promise<string | null> {
+  const clientId = process.env.MICROSOFT_GRAPH_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
+  const tenantId = process.env.MICROSOFT_GRAPH_TENANT_ID;
+
+  if (!clientId || !clientSecret || !tenantId) {
+    logger.error("Microsoft Graph credentials not configured");
+    return null;
+  }
+
+  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  const resp = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    }),
+  });
+
+  if (!resp.ok) {
+    logger.error("Microsoft token error", { status: resp.status });
+    return null;
+  }
+
+  const data = await resp.json();
+  return data.access_token;
+}
+
+async function matchByEmail(
+  supabase: any,
+  email: string,
+): Promise<{ entityId: string; entityType: string; entityColumn: string } | null> {
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const [candidateRes, contactRes] = await Promise.all([
+    supabase.from("candidates").select("id").ilike("email", normalizedEmail).limit(1),
+    supabase.from("contacts").select("id").ilike("email", normalizedEmail).limit(1),
+  ]);
+
+  if (candidateRes.data?.[0]) {
+    return { entityId: candidateRes.data[0].id, entityType: "candidate", entityColumn: "candidate_id" };
+  }
+  if (contactRes.data?.[0]) {
+    return { entityId: contactRes.data[0].id, entityType: "contact", entityColumn: "contact_id" };
+  }
+
+  return null;
+}
