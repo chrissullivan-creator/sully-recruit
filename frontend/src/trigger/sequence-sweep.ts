@@ -28,7 +28,6 @@ export const sequenceSweep = schedules.task({
         sequence_id,
         candidate_id,
         contact_id,
-        prospect_id,
         current_step_order,
         next_step_at,
         account_id,
@@ -62,7 +61,6 @@ export const sequenceSweep = schedules.task({
         sequenceId: enrollment.sequence_id,
         candidateId: enrollment.candidate_id,
         contactId: enrollment.contact_id,
-        prospectId: enrollment.prospect_id,
         currentStepOrder: enrollment.current_step_order,
         accountId: enrollment.account_id,
         enrolledBy: enrollment.enrolled_by,
@@ -117,7 +115,7 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
     const enrollmentIds = [...new Set(executions.map((e: any) => e.enrollment_id))];
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")
-      .select("id, candidate_id, contact_id, prospect_id")
+      .select("id, candidate_id, contact_id")
       .in("id", enrollmentIds);
 
     const enrollmentMap = new Map((enrollments ?? []).map((e: any) => [e.id, e]));
@@ -126,12 +124,10 @@ async function updateTrackingStatuses(supabase: any, now: Date) {
       const enrollment = enrollmentMap.get(exec.enrollment_id);
       if (!enrollment) continue;
 
-      const entityId = enrollment.candidate_id || enrollment.contact_id || enrollment.prospect_id;
+      const entityId = enrollment.candidate_id || enrollment.contact_id;
       const entityColumn = enrollment.candidate_id
         ? "candidate_id"
-        : enrollment.contact_id
-          ? "contact_id"
-          : "prospect_id";
+        : "contact_id";
       if (!entityId) continue;
 
       // Check for inbound reply after this execution
