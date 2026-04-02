@@ -1,27 +1,35 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
+import { createClient } from "@supabase/supabase-js";
 
 /**
  * POST /api/dedup/scan
  *
  * Triggers the scan-duplicate-candidates Trigger.dev task.
- * Auth: Bearer token must match SUPABASE_SERVICE_ROLE_KEY.
+ * Auth: Supabase JWT (from logged-in user) or service role key.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Authenticate with service role key
   const authHeader = req.headers.authorization;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 
-  if (!serviceKey) {
-    return res.status(500).json({ error: "Server misconfigured: missing SUPABASE_SERVICE_ROLE_KEY" });
+  if (!serviceKey || !supabaseUrl) {
+    return res.status(500).json({ error: "Server misconfigured" });
   }
 
   const token = authHeader?.replace("Bearer ", "");
-  if (token !== serviceKey) {
+
+  if (token !== serviceKey && token) {
+    const supabase = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || serviceKey);
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+  } else if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 

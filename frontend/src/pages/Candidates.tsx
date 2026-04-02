@@ -37,9 +37,10 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw, Globe } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User, Users, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
+import { DuplicateReviewDialog } from '@/components/candidates/DuplicateReviewDialog';
 import { format } from 'date-fns';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -109,6 +110,7 @@ const Candidates = () => {
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
   const [unifiedSearchOpen, setUnifiedSearchOpen] = useState(false);
+  const [dedupOpen, setDedupOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -384,6 +386,10 @@ const Candidates = () => {
             <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
               <FileUp className="h-4 w-4 mr-1" />
               Resume Drop
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDedupOpen(true)}>
+              <Users className="h-4 w-4 mr-1" />
+              Duplicates
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4 mr-1" />
@@ -720,6 +726,7 @@ const Candidates = () => {
       <AskJoeSearch open={askJoeSearchOpen} onOpenChange={setAskJoeSearchOpen} />
       <ResumeSearchDialog open={resumeSearchOpen} onOpenChange={setResumeSearchOpen} />
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
+      <DuplicateReviewDialog open={dedupOpen} onOpenChange={setDedupOpen} />
 
       {/* Bulk Delete Confirmation */}
       <UnifiedSearchDialog open={unifiedSearchOpen} onOpenChange={setUnifiedSearchOpen} />
