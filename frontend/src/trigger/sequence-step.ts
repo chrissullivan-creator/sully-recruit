@@ -255,6 +255,7 @@ export const processSequenceStep = task({
         stepChannel,
         entityId,
         entityType,
+        payload.enrolledBy,
         step.account_id || payload.accountId,
       );
 
@@ -281,34 +282,24 @@ export const processSequenceStep = task({
       let externalMessageId: string | null = null;
       let externalConversationId: string | null = null;
 
-      // Resolve sender email for Microsoft Graph (look up enrolled_by user's email)
-      let senderEmail: string | undefined;
-      if (stepChannel === "email" && payload.enrolledBy) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("email")
-          .eq("id", payload.enrolledBy)
-          .maybeSingle();
-        senderEmail = profile?.email || undefined;
-      }
-
       switch (stepChannel) {
         case "email": {
-          const result = await sendEmail(to, step.subject, step.body, senderEmail);
+          const result = await sendEmail(supabase, to, step.subject, step.body, payload.enrolledBy);
           externalMessageId = result.messageId;
           break;
         }
         case "sms": {
-          const result = await sendSms(to, step.body);
+          const result = await sendSms(supabase, to, step.body, payload.enrolledBy);
           externalMessageId = result.id;
           break;
         }
         default: {
-          // All LinkedIn variants
+          // All LinkedIn variants — route to enrolled_by user's Unipile account
           const result = await sendLinkedIn(
             supabase,
             to,
             step.body,
+            payload.enrolledBy,
             step.account_id || payload.accountId,
             stepChannel,
           );
