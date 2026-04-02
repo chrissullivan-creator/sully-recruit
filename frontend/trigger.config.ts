@@ -2,7 +2,7 @@ import { defineConfig } from "@trigger.dev/sdk/v3";
 
 export default defineConfig({
   // Replace with your Trigger.dev project ref from the dashboard
-  project: process.env.TRIGGER_PROJECT_REF || "proj_placeholder",
+  project: "proj_gfgncbvsppickgyffaat",
   runtime: "node",
   logLevel: "log",
   dirs: ["src/trigger"],
