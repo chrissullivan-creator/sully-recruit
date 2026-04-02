@@ -1,4 +1,5 @@
 import { logger } from "@trigger.dev/sdk/v3";
+import { getMicrosoftGraphCredentials } from "./supabase";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -11,6 +12,9 @@ import { logger } from "@trigger.dev/sdk/v3";
  * The enrolled_by userId is used to look up the correct account
  * from user_integrations (RingCentral) and integration_accounts (Unipile).
  * Email sender is resolved from the profiles table.
+ *
+ * Org-level secrets (Microsoft Graph app creds, etc.) are read from
+ * the app_settings table in Supabase — NOT from env vars.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18,13 +22,7 @@ import { logger } from "@trigger.dev/sdk/v3";
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getMicrosoftAccessToken(): Promise<string> {
-  const clientId = process.env.MICROSOFT_GRAPH_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_GRAPH_TENANT_ID;
-
-  if (!clientId || !clientSecret || !tenantId) {
-    throw new Error("Microsoft Graph credentials not configured (CLIENT_ID, CLIENT_SECRET, TENANT_ID)");
-  }
+  const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
   const resp = await fetch(
     `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
@@ -62,11 +60,7 @@ async function resolveSenderEmail(supabase: any, userId: string): Promise<string
 
   if (profile?.email) return profile.email;
 
-  // Fallback to env var
-  const fallback = process.env.MICROSOFT_GRAPH_SENDER_EMAIL;
-  if (fallback) return fallback;
-
-  throw new Error(`No email found for user ${userId} and no MICROSOFT_GRAPH_SENDER_EMAIL fallback set`);
+  throw new Error(`No email found in profiles table for user ${userId}. Ensure the user has an email set.`);
 }
 
 export async function sendEmail(

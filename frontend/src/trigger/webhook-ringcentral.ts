@@ -177,7 +177,7 @@ async function transcribeAndExtract(
     const recordingUrl = eventBody.recording?.contentUri || eventBody.recordingUrl;
 
     if (recordingUrl) {
-      transcript = await fetchAndTranscribeRecording(recordingUrl, anthropicKey);
+      transcript = await fetchAndTranscribeRecording(supabase, recordingUrl, anthropicKey);
     }
 
     // If no recording available, check if there's a voicemail transcription
@@ -311,32 +311,46 @@ async function transcribeAndExtract(
 // FETCH AND TRANSCRIBE RECORDING
 // ─────────────────────────────────────────────────────────────────────────────
 async function fetchAndTranscribeRecording(
+  supabase: any,
   recordingUrl: string,
   anthropicKey: string,
 ): Promise<string | null> {
   try {
-    // Get RingCentral access token for recording download
-    const clientId = process.env.RINGCENTRAL_CLIENT_ID;
-    const clientSecret = process.env.RINGCENTRAL_CLIENT_SECRET;
-    const jwtToken = process.env.RINGCENTRAL_JWT_TOKEN;
-    const phoneNumber = process.env.RINGCENTRAL_PHONE_NUMBER;
+    // Get RingCentral access token from any active user's integration
+    // (recording download works with any valid RC token for the account)
+    const { data: rcIntegration } = await supabase
+      .from("user_integrations")
+      .select("config")
+      .eq("integration_type", "ringcentral")
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
 
-    if (!clientId || !clientSecret || !jwtToken || !phoneNumber) {
-      logger.warn("RingCentral credentials missing — cannot fetch recording");
+    if (!rcIntegration?.config) {
+      logger.warn("No active RingCentral integration — cannot fetch recording");
       return null;
     }
 
-    const authResp = await fetch("https://platform.ringcentral.com/restapi/oauth/token", {
+    const config = rcIntegration.config as any;
+    const clientId = config.client_id;
+    const clientSecret = config.client_secret;
+    const jwtToken = config.jwt_token;
+    const serverUrl = config.server_url || "https://platform.ringcentral.com";
+
+    if (!clientId || !clientSecret || !jwtToken) {
+      logger.warn("RingCentral credentials incomplete — cannot fetch recording");
+      return null;
+    }
+
+    const authResp = await fetch(`${serverUrl}/restapi/oauth/token`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
-        grant_type: "password",
-        username: phoneNumber,
-        password: jwtToken,
-        extension: "",
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: jwtToken,
       }),
     });
 

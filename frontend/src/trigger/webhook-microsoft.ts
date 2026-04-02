@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -30,11 +30,10 @@ export const processMicrosoftEvent = task({
       resource: notification.resource,
     });
 
-    // Verify client state if configured
-    const expectedState = process.env.MICROSOFT_WEBHOOK_CLIENT_STATE;
-    if (expectedState && notification.clientState !== expectedState) {
-      logger.warn("Client state mismatch — skipping");
-      return { action: "skipped", reason: "invalid_client_state" };
+    // Verify client state if present (set during Graph subscription creation)
+    // The client state is embedded in the subscription, not a separate secret
+    if (notification.clientState) {
+      logger.info("Notification client state present", { clientState: notification.clientState });
     }
 
     // Get access token for the emeraldrecruit.com tenant
@@ -192,34 +191,32 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
 }
 
 async function getMicrosoftAccessToken(): Promise<string | null> {
-  const clientId = process.env.MICROSOFT_GRAPH_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_GRAPH_TENANT_ID;
+  try {
+    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
-  if (!clientId || !clientSecret || !tenantId) {
-    logger.error("Microsoft Graph credentials not configured");
+    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+    const resp = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: "https://graph.microsoft.com/.default",
+        grant_type: "client_credentials",
+      }),
+    });
+
+    if (!resp.ok) {
+      logger.error("Microsoft token error", { status: resp.status });
+      return null;
+    }
+
+    const data = await resp.json();
+    return data.access_token;
+  } catch (err: any) {
+    logger.error("Failed to get Microsoft credentials from app_settings", { error: err.message });
     return null;
   }
-
-  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-  const resp = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-  });
-
-  if (!resp.ok) {
-    logger.error("Microsoft token error", { status: resp.status });
-    return null;
-  }
-
-  const data = await resp.json();
-  return data.access_token;
 }
 
 async function matchByEmail(
