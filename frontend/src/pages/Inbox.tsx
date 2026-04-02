@@ -861,13 +861,13 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       // Determine recipient address based on channel
       let toAddress = '';
       const lastInbound = messages.find((m) => m.direction === 'inbound');
-      
+
       if (thread.channel === 'email') {
         toAddress = lastInbound?.sender_address || '';
       } else if (thread.channel === 'sms') {
         toAddress = lastInbound?.sender_address || '';
       } else if (thread.channel === 'linkedin') {
-        // For LinkedIn, use the provider_id from candidate_channels
+        // Try candidate_channels first
         if (thread.candidate_id) {
           const { data: channelData } = await supabase
             .from('candidate_channels')
@@ -877,13 +877,43 @@ function MessagePane({ threadId }: { threadId: string | null }) {
             .maybeSingle();
           toAddress = channelData?.provider_id || channelData?.unipile_id || '';
         }
+        // Try contact_channels
+        if (!toAddress && thread.contact_id) {
+          const { data: channelData } = await supabase
+            .from('contact_channels')
+            .select('provider_id, unipile_id')
+            .eq('contact_id', thread.contact_id)
+            .eq('channel', 'linkedin')
+            .maybeSingle();
+          toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+        }
+        // Fall back to the inbound message sender address (works for unlinked too)
         if (!toAddress) {
           toAddress = lastInbound?.sender_address || '';
         }
       }
 
+      // Determine which account to send from — use the thread's account_id (the account
+      // that received the original message), falling back to looking up the recipient's
+      // account from the original inbound message
+      let sendAccountId = thread.account_id || '';
+      if (!sendAccountId && thread.channel === 'linkedin') {
+        // Try to find the account from the last inbound message's recipient_address
+        const recipientAddr = lastInbound?.recipient_address;
+        if (recipientAddr) {
+          // recipient_address on inbound = the Unipile account that received it
+          const { data: acct } = await supabase
+            .from('integration_accounts')
+            .select('unipile_account_id')
+            .eq('unipile_account_id', recipientAddr)
+            .eq('is_active', true)
+            .maybeSingle();
+          sendAccountId = acct?.unipile_account_id || '';
+        }
+      }
+
       if (!toAddress) {
-        toast.error(`No recipient address found for ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
+        toast.error(`No recipient address found for ${CHANNEL_LABELS[thread.channel] || thread.channel}. Try linking this conversation to a candidate or contact first.`);
         setSending(false);
         return;
       }
@@ -897,7 +927,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           to: toAddress,
           subject: thread.subject || undefined,
           body: thread.channel === 'email' ? html : text.trim(),
-          account_id: thread.account_id,
+          account_id: sendAccountId || undefined,
         },
       });
 
@@ -908,7 +938,6 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       setReplyText('');
       setReplyHtml('');
       if (editorRef.current) editorRef.current.innerHTML = '';
-      setReplyText('');
       queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
     } catch (err: any) {
