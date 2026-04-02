@@ -47,49 +47,31 @@ async function uploadFile(file: File, session: any) {
 }
 
 async function parseFile(file_path: string, file_name: string, session: any): Promise<any> {
-  const body = { file_path, file_name };
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-resume`;
+  // Call the Vercel API route (bypasses broken process-resume edge function)
+  const resp = await fetch('/api/parse-resume', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ filePath: file_path, fileName: file_name }),
+  });
 
-  // Retry with exponential backoff for rate limit errors
-  const MAX_RETRIES = 4;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+  const result = await resp.json();
+  if (!resp.ok || result.error) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
 
-    const result = await resp.json();
-
-    // Retry on 429 rate limit
-    if ((resp.status === 429 || (result.error && result.error.includes('rate_limit'))) && attempt < MAX_RETRIES) {
-      const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s, 16s
-      console.warn(`[ResumeDropZone] Rate limited, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      continue;
-    }
-
-    if (!resp.ok || result.error) throw new Error(result.error || `Parse failed (HTTP ${resp.status})`);
-
-    const p = result.parsed || {};
-    return {
-      first_name:      p.first_name || '',
-      last_name:       p.last_name || '',
-      email:           p.email || '',
-      phone:           p.phone || '',
-      current_company: p.current_company || '',
-      current_title:   p.current_title || '',
-      location:        p.location || '',
-      linkedin_url:    p.linkedin_url || '',
-      _candidate_id:   result.candidate_id || null,
-    };
-  }
-
-  throw new Error('Rate limit exceeded after retries — try again in a minute');
+  const p = result.parsed || {};
+  return {
+    first_name:      p.first_name || '',
+    last_name:       p.last_name || '',
+    email:           p.email || '',
+    phone:           p.phone || '',
+    current_company: p.current_company || '',
+    current_title:   p.current_title || '',
+    location:        p.location || '',
+    linkedin_url:    p.linkedin_url || '',
+    _candidate_id:   null, // No DB writes during parse — candidate created on save
+  };
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -245,8 +227,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   // ── Trigger resume ingestion (embedding + vector storage) in background ────
   const triggerResumeIngestion = async (candidateId: string, filePath: string, fileName: string) => {
     try {
-      // First, find the resume record for this candidate/file
-      const { data: resume } = await supabase
+      // Find or create the resume record for this candidate/file
+      let { data: resume } = await supabase
         .from('resumes')
         .select('id')
         .eq('candidate_id', candidateId)
@@ -255,9 +237,20 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .limit(1)
         .maybeSingle();
 
+      if (!resume) {
+        // Create resume record (the old edge function used to do this)
+        const { data: inserted } = await supabase.from('resumes').insert({
+          candidate_id: candidateId,
+          file_path: filePath,
+          file_name: fileName,
+          parse_status: 'pending',
+        } as any).select('id').single();
+        resume = inserted;
+      }
+
       const resumeId = resume?.id;
       if (!resumeId) {
-        console.warn('[ResumeDropZone] No resume record found for ingestion trigger');
+        console.warn('[ResumeDropZone] Could not find or create resume record');
         return;
       }
 
@@ -298,7 +291,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .eq('id', entry.candidate_id);
       if (error) throw error;
     } else {
-      // No candidate_id means process-resume didn't create one — insert new
+      // Insert new candidate
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const { data: inserted, error } = await supabase.from('candidates').insert({
         owner_id:        userId,
