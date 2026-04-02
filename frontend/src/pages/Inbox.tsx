@@ -179,13 +179,108 @@ function CreatePersonDialog({
     linkedin_url: channel === 'linkedin' ? prefill.address : '',
     title: '',
     company: '',
+    location: '',
   });
   const [creating, setCreating] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const resolvedRef = useRef(false);
+
+  // Auto-resolve Unipile profile when dialog opens for LinkedIn senders
+  useEffect(() => {
+    if (!open || resolvedRef.current) return;
+    if (channel !== 'linkedin') return;
+
+    const slug = prefill.address;
+    if (!slug) return;
+
+    resolvedRef.current = true;
+    setResolving(true);
+
+    (async () => {
+      try {
+        // Get Chris's Unipile account for resolution
+        const { data: chrisAcct } = await supabase
+          .from('integration_accounts')
+          .select('unipile_account_id')
+          .ilike('account_label', '%Chris Sullivan%')
+          .eq('is_active', true)
+          .maybeSingle();
+
+        const accountId = chrisAcct?.unipile_account_id;
+        if (!accountId) {
+          console.warn('No Unipile account found for Chris — skipping profile resolution');
+          return;
+        }
+
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+        // Try resolve-unipile-id for the sender's LinkedIn slug
+        const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+          body: JSON.stringify({ linkedin_slug: slug, account_id: accountId }),
+        });
+
+        if (resp.ok) {
+          const profile = await resp.json();
+          // Also try getting full profile data from Unipile
+          const { data: unipileCfg } = await supabase
+            .from('user_integrations')
+            .select('config')
+            .eq('integration_type', 'unipile')
+            .limit(1)
+            .maybeSingle();
+
+          const cfg = unipileCfg?.config as any;
+          let fullProfile: any = null;
+
+          if (cfg?.api_key && cfg?.base_url && (profile.unipile_id || slug)) {
+            try {
+              const profileResp = await fetch(
+                `${cfg.base_url.replace(/\/+$/, '')}/api/v1/users/${profile.unipile_id || slug}` +
+                (accountId ? `?account_id=${accountId}` : ''),
+                {
+                  headers: {
+                    'X-API-KEY': cfg.api_key,
+                    'Accept': 'application/json',
+                  },
+                }
+              );
+              if (profileResp.ok) {
+                fullProfile = await profileResp.json();
+              }
+            } catch (e) {
+              console.warn('Full profile fetch failed:', e);
+            }
+          }
+
+          // Prefill from resolved data
+          setForm(prev => ({
+            ...prev,
+            first_name: fullProfile?.first_name || profile.name?.split(' ')[0] || prev.first_name,
+            last_name: fullProfile?.last_name || profile.name?.split(' ').slice(1).join(' ') || prev.last_name,
+            title: fullProfile?.headline || fullProfile?.title || fullProfile?.current_title || prev.title,
+            company: fullProfile?.company || fullProfile?.current_company || fullProfile?.company_name || prev.company,
+            location: fullProfile?.location || fullProfile?.region || prev.location,
+            linkedin_url: fullProfile?.public_profile_url || fullProfile?.linkedin_url || (slug.startsWith('http') ? slug : `https://linkedin.com/in/${slug}`),
+            email: fullProfile?.email || prev.email,
+            phone: fullProfile?.phone || fullProfile?.phone_number || prev.phone,
+          }));
+        }
+      } catch (err) {
+        console.warn('Unipile profile resolution failed:', err);
+      } finally {
+        setResolving(false);
+      }
+    })();
+  }, [open, channel, prefill.address]);
 
   // Reset form when dialog opens with new prefill
   const resetForm = () => {
     const parts = prefill.name.split(' ');
     const emailAddr = prefill.address.includes('@');
+    resolvedRef.current = false;
     setForm({
       first_name: parts[0] || '',
       last_name: parts.slice(1).join(' ') || '',
@@ -194,6 +289,7 @@ function CreatePersonDialog({
       linkedin_url: channel === 'linkedin' ? prefill.address : '',
       title: '',
       company: '',
+      location: '',
     });
     setType(defaultType);
   };
@@ -217,6 +313,7 @@ function CreatePersonDialog({
           linkedin_url: form.linkedin_url.trim() || null,
           current_title: form.title.trim() || null,
           current_company: form.company.trim() || null,
+          location: form.location.trim() || null,
           status: 'new',
           owner_id: userId,
         } as any).select('id, full_name').single();
@@ -270,6 +367,13 @@ function CreatePersonDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {resolving && (
+          <div className="flex items-center gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Resolving LinkedIn profile via Recruiter…
+          </div>
+        )}
+
         <div className="space-y-4 py-2">
           {/* Type toggle */}
           <div className="flex gap-2">
@@ -321,37 +425,26 @@ function CreatePersonDialog({
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">Email</Label>
-            <Input
-              value={form.email}
-              onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="email@example.com"
-              className="h-9"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">Phone</Label>
-            <Input
-              value={form.phone}
-              onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-              placeholder="Phone number"
-              className="h-9"
-            />
-          </div>
-
-          {channel === 'linkedin' && (
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">LinkedIn URL</Label>
+              <Label className="text-xs">Email</Label>
               <Input
-                value={form.linkedin_url}
-                onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
-                placeholder="https://linkedin.com/in/..."
+                value={form.email}
+                onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="email@example.com"
                 className="h-9"
               />
             </div>
-          )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Phone</Label>
+              <Input
+                value={form.phone}
+                onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="Phone number"
+                className="h-9"
+              />
+            </div>
+          </div>
 
           <div className="space-y-1.5">
             <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
@@ -364,12 +457,35 @@ function CreatePersonDialog({
           </div>
 
           {type === 'candidate' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Current Company</Label>
+                <Input
+                  value={form.company}
+                  onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
+                  placeholder="Company name"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Location</Label>
+                <Input
+                  value={form.location}
+                  onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
+                  placeholder="City, State"
+                  className="h-9"
+                />
+              </div>
+            </div>
+          )}
+
+          {channel === 'linkedin' && (
             <div className="space-y-1.5">
-              <Label className="text-xs">Current Company</Label>
+              <Label className="text-xs">LinkedIn URL</Label>
               <Input
-                value={form.company}
-                onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
-                placeholder="Company name"
+                value={form.linkedin_url}
+                onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+                placeholder="https://linkedin.com/in/..."
                 className="h-9"
               />
             </div>
@@ -381,7 +497,7 @@ function CreatePersonDialog({
           <Button
             variant="gold"
             onClick={handleCreate}
-            disabled={creating || (!form.first_name.trim() && !form.last_name.trim())}
+            disabled={creating || resolving || (!form.first_name.trim() && !form.last_name.trim())}
             className="gap-1.5"
           >
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
