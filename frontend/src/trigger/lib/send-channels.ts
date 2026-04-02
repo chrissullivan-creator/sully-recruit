@@ -317,11 +317,11 @@ export async function resolveRecipient(
   supabase: any,
   channel: string,
   entityId: string,
-  entityType: "candidate" | "contact" | "prospect",
+  entityType: "candidate" | "contact",
   userId?: string,
   accountId?: string,
 ): Promise<{ to: string; conversationId: string | null }> {
-  const table = entityType === "candidate" ? "candidates" : entityType === "contact" ? "contacts" : "prospects";
+  const table = entityType === "candidate" ? "candidates" : "contacts";
 
   if (channel === "email") {
     const { data: entity } = await supabase.from(table).select("email").eq("id", entityId).single();

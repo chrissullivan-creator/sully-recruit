@@ -95,9 +95,58 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
+  // Handle unknown sender — create unlinked conversation and message
   if (!entityId) {
-    logger.info("No matching entity for LinkedIn sender", { senderId });
-    return { action: "no_match", senderId };
+    logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
+
+    const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
+    const senderAddress = messageData.sender_address || messageData.from?.identifier || messageData.from?.profile_url || senderId;
+
+    const conversationId = externalConversationId || `li_unknown_${senderId}`;
+    const { data: existingConv } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", conversationId)
+      .maybeSingle();
+
+    if (!existingConv) {
+      await supabase.from("conversations").insert({
+        id: conversationId,
+        candidate_id: null,
+        contact_id: null,
+        channel: "linkedin",
+        external_conversation_id: externalConversationId,
+        last_message_at: receivedAt,
+        is_read: false,
+      } as any);
+    }
+
+    await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      candidate_id: null,
+      contact_id: null,
+      channel: "linkedin",
+      direction: "inbound",
+      body: messageBody,
+      sent_at: messageData.created_at || receivedAt,
+      provider: "unipile",
+      external_message_id: externalMessageId,
+      external_conversation_id: externalConversationId,
+      sender_name: senderName,
+      sender_address: senderAddress,
+      is_read: false,
+    } as any);
+
+    await supabase
+      .from("conversations")
+      .update({
+        last_message_at: receivedAt,
+        last_message_preview: messageBody.substring(0, 100),
+        is_read: false,
+      })
+      .eq("id", conversationId);
+
+    return { action: "logged_unlinked", senderId, senderName, type: "linkedin_message" };
   }
 
   // Determine or create conversation

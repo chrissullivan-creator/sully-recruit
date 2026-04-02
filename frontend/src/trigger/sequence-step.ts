@@ -7,7 +7,6 @@ interface SequenceStepPayload {
   sequenceId: string;
   candidateId?: string;
   contactId?: string;
-  prospectId?: string;
   currentStepOrder: number | null;
   accountId?: string;
   enrolledBy: string;
@@ -34,17 +33,13 @@ export const processSequenceStep = task({
     const currentHour = now.getUTCHours();
     const nextStepOrder = (payload.currentStepOrder ?? 0) + 1;
 
-    const entityId = payload.candidateId || payload.contactId || payload.prospectId;
-    const entityType: "candidate" | "contact" | "prospect" = payload.candidateId
+    const entityId = payload.candidateId || payload.contactId;
+    const entityType: "candidate" | "contact" = payload.candidateId
       ? "candidate"
-      : payload.contactId
-        ? "contact"
-        : "prospect";
+      : "contact";
     const entityColumn = payload.candidateId
       ? "candidate_id"
-      : payload.contactId
-        ? "contact_id"
-        : "prospect_id";
+      : "contact_id";
 
     logger.info("Processing step", {
       enrollmentId: payload.enrollmentId,
@@ -272,7 +267,6 @@ export const processSequenceStep = task({
           id: conversationId,
           candidate_id: payload.candidateId || null,
           contact_id: payload.contactId || null,
-          prospect_id: payload.prospectId || null,
           owner_id: payload.enrolledBy,
           last_message_at: now.toISOString(),
         } as any);
