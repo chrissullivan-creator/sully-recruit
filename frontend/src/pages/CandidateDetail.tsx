@@ -250,6 +250,50 @@ const CandidateDetail = () => {
     },
   });
 
+  const { data: formattedResumes = [] } = useQuery({
+    queryKey: ['formatted_resumes', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('formatted_resumes')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const [uploadingFormatted, setUploadingFormatted] = useState(false);
+
+  const handleFormattedUpload = async (file: File, versionLabel: string) => {
+    if (!id) return;
+    setUploadingFormatted(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const path = `${session.user.id}/${id}/formatted/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { error: dbErr } = await supabase.from('formatted_resumes').insert({
+        candidate_id: id,
+        file_name: file.name,
+        file_path: path,
+        mime_type: file.type || 'application/pdf',
+        file_size: file.size,
+        version_label: versionLabel || 'v1',
+        created_by: session.user.id,
+      } as any);
+      if (dbErr) throw dbErr;
+      queryClient.invalidateQueries({ queryKey: ['formatted_resumes', id] });
+      toast.success('Formatted resume uploaded');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploadingFormatted(false);
+    }
+  };
+
   const { data: assignedJobs = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
     enabled: !!id,
@@ -633,6 +677,7 @@ const CandidateDetail = () => {
                 <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="files" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Files</TabsTrigger>
+                <TabsTrigger value="formatted" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Formatted</TabsTrigger>
                 <TabsTrigger value="assigned-jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Assigned Jobs</TabsTrigger>
               </TabsList>
             </div>
@@ -873,6 +918,72 @@ const CandidateDetail = () => {
                               <ExternalLink className="h-3.5 w-3.5" /> Download
                             </a>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Formatted Resumes Tab ──────────────────────────────────── */}
+              <TabsContent value="formatted" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Formatted Resumes</h2>
+                    <span className="text-xs text-muted-foreground">({formattedResumes.length})</span>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = '.pdf,.doc,.docx';
+                    input.onchange = (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (file) {
+                        const label = prompt('Version label (e.g. v1, final, client-ready):', `v${formattedResumes.length + 1}`);
+                        if (label !== null) handleFormattedUpload(file, label);
+                      }
+                    };
+                    input.click();
+                  }} disabled={uploadingFormatted}>
+                    {uploadingFormatted ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                    Upload Formatted Resume
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Client-facing resume versions formatted for submission.</p>
+                {formattedResumes.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No formatted resumes yet</p>
+                    <p className="text-xs text-muted-foreground mb-4">Upload client-ready versions of this candidate's resume.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {formattedResumes.map((r: any) => {
+                      const downloadUrl = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                      return (
+                        <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <FileText className="h-4 w-4 text-accent shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">
+                                {r.file_name}
+                                <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent">{r.version_label}</span>
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                                {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                                {r.notes && <span className="ml-2">— {r.notes}</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {downloadUrl && (
+                              <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                <ExternalLink className="h-3.5 w-3.5" /> View
+                              </a>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
