@@ -143,7 +143,7 @@ export type Database = {
       resumes: {
         Row: {
           ai_summary: string | null
-          candidate_id: string | null
+          candidate_id: string
           created_at: string | null
           file_name: string | null
           file_path: string
@@ -160,7 +160,7 @@ export type Database = {
         }
         Insert: {
           ai_summary?: string | null
-          candidate_id?: string | null
+          candidate_id: string
           created_at?: string | null
           file_name?: string | null
           file_path: string
@@ -177,7 +177,7 @@ export type Database = {
         }
         Update: {
           ai_summary?: string | null
-          candidate_id?: string | null
+          candidate_id?: string
           created_at?: string | null
           file_name?: string | null
           file_path?: string
