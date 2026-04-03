@@ -291,21 +291,49 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .eq('id', entry.candidate_id);
       if (error) throw error;
     } else {
-      // Insert new candidate (owner_id is auto-set by DB trigger)
-      const { data: inserted, error } = await supabase.from('candidates').insert({
-        first_name:      entry.first_name.trim() || null,
-        last_name:       entry.last_name.trim() || null,
-        full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
-        email:           entry.email.trim() || null,
-        phone:           entry.phone.trim() || null,
-        current_company: entry.current_company.trim() || null,
-        current_title:   entry.current_title.trim() || null,
-        location_text:   entry.location.trim() || null,
-        linkedin_url:    entry.linkedin_url.trim() || null,
-        status:          'new',
-      } as any).select('id').single();
-      if (error) throw error;
-      savedId = inserted?.id || null;
+      // Check if candidate with this email already exists
+      let existing: any = null;
+      if (entry.email.trim()) {
+        const { data } = await supabase
+          .from('candidates')
+          .select('id')
+          .eq('email', entry.email.trim())
+          .maybeSingle();
+        existing = data;
+      }
+
+      if (existing) {
+        // Update existing candidate
+        const { error } = await supabase.from('candidates').update({
+          first_name:      entry.first_name.trim() || undefined,
+          last_name:       entry.last_name.trim() || undefined,
+          full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
+          phone:           entry.phone.trim() || undefined,
+          current_company: entry.current_company.trim() || undefined,
+          current_title:   entry.current_title.trim() || undefined,
+          location_text:   entry.location.trim() || undefined,
+          linkedin_url:    entry.linkedin_url.trim() || undefined,
+          updated_at:      new Date().toISOString(),
+        } as any).eq('id', existing.id);
+        if (error) throw error;
+        savedId = existing.id;
+      } else {
+        // Insert new candidate (owner_id is auto-set by DB trigger)
+        const { data: inserted, error } = await supabase.from('candidates').insert({
+          first_name:      entry.first_name.trim() || null,
+          last_name:       entry.last_name.trim() || null,
+          full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
+          email:           entry.email.trim() || null,
+          phone:           entry.phone.trim() || null,
+          current_company: entry.current_company.trim() || null,
+          current_title:   entry.current_title.trim() || null,
+          location_text:   entry.location.trim() || null,
+          linkedin_url:    entry.linkedin_url.trim() || null,
+          status:          'new',
+        } as any).select('id').single();
+        if (error) throw error;
+        savedId = inserted?.id || null;
+      }
     }
 
     // Resolve Unipile ID in background after save (non-blocking)
