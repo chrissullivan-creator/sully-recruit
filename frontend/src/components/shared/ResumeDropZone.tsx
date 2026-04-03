@@ -238,11 +238,17 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .maybeSingle();
 
       if (!resume) {
-        // Create resume record (the old edge function used to do this)
+        // Create resume record
+        const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(filePath);
+        const mimeType = fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+          : fileName.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/octet-stream';
         const { data: inserted } = await supabase.from('resumes').insert({
           candidate_id: candidateId,
           file_path: filePath,
           file_name: fileName,
+          file_url: urlData?.publicUrl || null,
+          mime_type: mimeType,
           parse_status: 'pending',
         } as any).select('id').single();
         resume = inserted;
@@ -343,18 +349,6 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
     // Trigger resume ingestion (embedding + vector storage) in background
     if (savedId && entry.file_path) {
-      // Link resume file to candidate profile
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(entry.file_path);
-      await supabase.from('candidate_resumes').insert({
-        candidate_id: savedId,
-        file_name: entry.file_name,
-        file_path: entry.file_path,
-        file_url: urlData?.publicUrl || null,
-        file_type: entry.file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
-          : entry.file_name.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          : 'application/octet-stream',
-      } as any);
-
       triggerResumeIngestion(savedId, entry.file_path, entry.file_name);
     }
   };

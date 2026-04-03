@@ -237,11 +237,11 @@ const CandidateDetail = () => {
   });
 
   const { data: candidateResumes = [] } = useQuery({
-    queryKey: ['candidate_resumes', id],
+    queryKey: ['resumes', id],
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('candidate_resumes')
+        .from('resumes')
         .select('*')
         .eq('candidate_id', id!)
         .order('created_at', { ascending: false });
@@ -323,16 +323,16 @@ const CandidateDetail = () => {
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
-      const { error: dbErr } = await supabase.from('candidate_resumes').insert({
+      const { error: dbErr } = await supabase.from('resumes').insert({
         candidate_id: id,
         file_name: file.name,
         file_path: path,
         file_url: urlData.publicUrl,
         file_size: file.size,
-        file_type: file.type,
-      });
+        mime_type: file.type,
+      } as any);
       if (dbErr) throw dbErr;
-      queryClient.invalidateQueries({ queryKey: ['candidate_resumes', id] });
+      queryClient.invalidateQueries({ queryKey: ['resumes', id] });
       toast.success('File uploaded');
     } catch (e: any) {
       toast.error(e.message);
@@ -853,26 +853,29 @@ const CandidateDetail = () => {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {candidateResumes.map((r: any) => (
-                      <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <FileText className="h-4 w-4 text-accent shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{r.file_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {r.file_type && <span className="mr-2">{r.file_type}</span>}
-                              {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
-                              {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
-                            </p>
+                    {candidateResumes.map((r: any) => {
+                      const downloadUrl = r.file_url || (r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null);
+                      return (
+                        <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <FileText className="h-4 w-4 text-accent shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">{r.file_name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {r.mime_type && <span className="mr-2">{r.mime_type}</span>}
+                                {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                                {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                              </p>
+                            </div>
                           </div>
+                          {downloadUrl && (
+                            <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
+                              <ExternalLink className="h-3.5 w-3.5" /> Download
+                            </a>
+                          )}
                         </div>
-                        {r.file_url && (
-                          <a href={r.file_url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                            <ExternalLink className="h-3.5 w-3.5" /> Download
-                          </a>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
