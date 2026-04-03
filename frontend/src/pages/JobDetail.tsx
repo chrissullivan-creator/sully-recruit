@@ -240,6 +240,9 @@ const JobDetail = () => {
   const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
   const [instructionsLoaded, setInstructionsLoaded] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
+  const [additionalNotes, setAdditionalNotes] = useState<string>('');
+  const [additionalNotesLoaded, setAdditionalNotesLoaded] = useState(false);
+  const [savingAdditionalNotes, setSavingAdditionalNotes] = useState(false);
   const [activityTab, setActivityTab] = useState<'notes' | 'tasks' | 'meetings'>('notes');
   const [jobNoteText, setJobNoteText] = useState('');
   const [savingJobNote, setSavingJobNote] = useState(false);
@@ -316,6 +319,10 @@ const JobDetail = () => {
     setSubmittalInstructions((job as any).submittal_instructions ?? '');
     setInstructionsLoaded(true);
   }
+  if (job && !additionalNotesLoaded) {
+    setAdditionalNotes((job as any).additional_notes ?? '');
+    setAdditionalNotesLoaded(true);
+  }
 
   const saveInstructions = async () => {
     if (!id) return;
@@ -331,6 +338,22 @@ const JobDetail = () => {
       setSavingInstructions(false);
     }
   };
+
+  const saveAdditionalNotes = async () => {
+    if (!id) return;
+    setSavingAdditionalNotes(true);
+    try {
+      const { error } = await supabase.from('jobs').update({ additional_notes: additionalNotes }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      toast.success('Additional notes saved');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSavingAdditionalNotes(false);
+    }
+  };
+
   const { data: jobContacts = [], refetch: refetchJobContacts } = useQuery({
     queryKey: ['job_contacts', id],
     enabled: !!id,
@@ -559,6 +582,37 @@ const JobDetail = () => {
             >
               {savingInstructions && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
               Save Instructions
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* ── Additional Notes ─────────────────────────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <FileText className="h-5 w-5 text-accent" />
+              Additional Notes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Internal notes about this job — client intel, search nuances, comp details, exclusives, anything the team needs to know.
+            </p>
+            <RichTextEditor
+              value={additionalNotes}
+              onChange={setAdditionalNotes}
+              placeholder="e.g. Client is picky on pedigree, prefers Tier 1 banks. Comp is negotiable above 200K for the right person. Search is exclusive through EOQ..."
+              minHeight="130px"
+            />
+            <Button
+              variant="gold"
+              size="sm"
+              className="h-8"
+              onClick={saveAdditionalNotes}
+              disabled={savingAdditionalNotes || additionalNotes === ((job as any).additional_notes ?? '')}
+            >
+              {savingAdditionalNotes && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              Save Notes
             </Button>
           </CardContent>
         </Card>
