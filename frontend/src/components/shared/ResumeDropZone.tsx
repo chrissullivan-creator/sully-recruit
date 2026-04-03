@@ -343,6 +343,18 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
     // Trigger resume ingestion (embedding + vector storage) in background
     if (savedId && entry.file_path) {
+      // Link resume file to candidate profile
+      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(entry.file_path);
+      await supabase.from('candidate_resumes').insert({
+        candidate_id: savedId,
+        file_name: entry.file_name,
+        file_path: entry.file_path,
+        file_url: urlData?.publicUrl || null,
+        file_type: entry.file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+          : entry.file_name.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/octet-stream',
+      } as any);
+
       triggerResumeIngestion(savedId, entry.file_path, entry.file_name);
     }
   };
