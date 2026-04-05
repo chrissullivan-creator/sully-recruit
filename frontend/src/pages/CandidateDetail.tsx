@@ -298,6 +298,23 @@ const CandidateDetail = () => {
   const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
   const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
 
+  // Match score for candidate's assigned job
+  const { data: candidateJobMatch } = useQuery({
+    queryKey: ['candidate_job_match', id, candidate?.job_id],
+    enabled: !!id && !!(candidate as any)?.job_id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('job_candidate_matches')
+        .select('overall_score, tier, reasoning, strengths, concerns')
+        .eq('candidate_id', id!)
+        .eq('job_id', (candidate as any).job_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
+
   const handleFormattedUpload = async (file: File, versionLabel: string) => {
     if (!id) return;
     setUploadingFormatted(true);
@@ -877,6 +894,30 @@ const CandidateDetail = () => {
                 </Select>
               )}
             </div>
+
+            {/* Match score for assigned job */}
+            {candidateJobMatch && (
+              <div className="rounded-md border border-border bg-secondary/30 p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Job Match Score</span>
+                  <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums',
+                    (candidateJobMatch as any).overall_score >= 80 ? 'text-green-400 bg-green-500/15' :
+                    (candidateJobMatch as any).overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' :
+                    'text-muted-foreground bg-muted'
+                  )}>
+                    {(candidateJobMatch as any).overall_score}%
+                  </span>
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">{(candidateJobMatch as any).reasoning}</p>
+                {(candidateJobMatch as any).strengths?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {(candidateJobMatch as any).strengths.map((s: string, i: number) => (
+                      <span key={i} className="text-[9px] px-1 py-0.5 rounded bg-green-500/10 text-green-400">{s}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <p className="text-[10px] text-muted-foreground">Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</p>
           </div>

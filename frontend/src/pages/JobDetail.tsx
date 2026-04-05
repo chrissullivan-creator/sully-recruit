@@ -216,6 +216,61 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
   );
 };
 
+// ── Match result card ───────────────────────────────────────────────────────
+const MatchCard = ({ match, navigate }: { match: any; navigate: any }) => {
+  const [expanded, setExpanded] = useState(false);
+  const c = match.candidates;
+  const name = c?.full_name ?? `${c?.first_name ?? ''} ${c?.last_name ?? ''}`;
+  const scoreColor = match.overall_score >= 80 ? 'text-green-400 bg-green-500/15' : match.overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' : 'text-muted-foreground bg-muted';
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/30 p-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0 cursor-pointer" onClick={() => navigate(`/candidates/${c?.id}`)}>
+          <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums', scoreColor)}>
+            {match.overall_score}%
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground hover:text-accent transition-colors truncate">{name}</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {c?.current_title}{c?.current_title && c?.current_company ? ' at ' : ''}{c?.current_company}
+              {c?.location_text ? ` · ${c.location_text}` : ''}
+            </p>
+          </div>
+        </div>
+        <button onClick={() => setExpanded(!expanded)} className="shrink-0 text-muted-foreground hover:text-foreground">
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+      </div>
+      {!expanded && (
+        <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2 ml-12">{match.reasoning}</p>
+      )}
+      {expanded && (
+        <div className="mt-3 ml-12 space-y-2">
+          <p className="text-xs text-foreground">{match.reasoning}</p>
+          {match.strengths?.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {match.strengths.map((s: string, i: number) => (
+                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">{s}</span>
+              ))}
+            </div>
+          )}
+          {match.concerns?.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {match.concerns.map((c: string, i: number) => (
+                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">{c}</span>
+              ))}
+            </div>
+          )}
+          {match.vector_similarity != null && (
+            <p className="text-[10px] text-muted-foreground">Resume similarity: {(match.vector_similarity * 100).toFixed(0)}%</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Main page ────────────────────────────────────────────────────────────────
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -235,8 +290,38 @@ const JobDetail = () => {
   const [editJobOpen, setEditJobOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [matching, setMatching] = useState(false);
-  const [matchResults, setMatchResults] = useState<string>('');
+  const [matchDialogResults, setMatchDialogResults] = useState<string>('');
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // Best Matches queries
+  const { data: latestRun } = useQuery({
+    queryKey: ['job_match_run', id],
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data as any)?.status === 'running' ? 3000 : false,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('job_match_runs')
+        .select('*')
+        .eq('job_id', id!)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  const { data: bestMatches = [] } = useQuery({
+    queryKey: ['job_matches', id, (latestRun as any)?.id],
+    enabled: !!id && (latestRun as any)?.status === 'completed',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('job_candidate_matches')
+        .select('*, candidates(id, full_name, first_name, last_name, current_title, current_company, location_text, email)')
+        .eq('run_id', (latestRun as any)!.id)
+        .order('overall_score', { ascending: false });
+      return data ?? [];
+    },
+  });
   const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
   const [instructionsLoaded, setInstructionsLoaded] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -804,6 +889,112 @@ const JobDetail = () => {
           </div>
         )}
 
+        {/* ── Best Matches (AI-ranked) ────────────────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-accent" />
+                Best Matches
+                {bestMatches.length > 0 && (
+                  <Badge variant="secondary" className="ml-1">{bestMatches.length}</Badge>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {latestRun?.completed_at && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Last run: {format(new Date(latestRun.completed_at), 'MMM d, h:mm a')}
+                  </span>
+                )}
+                <Button
+                  variant="gold"
+                  size="sm"
+                  className="h-8"
+                  disabled={latestRun?.status === 'running'}
+                  onClick={async () => {
+                    try {
+                      const resp = await fetch('/api/trigger-best-match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ jobId: id }),
+                      });
+                      const data = await resp.json();
+                      if (data.error) throw new Error(data.error);
+                      toast.success('Best match analysis started — results will appear shortly');
+                      queryClient.invalidateQueries({ queryKey: ['job_match_run', id] });
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to start matching');
+                    }
+                  }}
+                >
+                  {latestRun?.status === 'running' ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Analyzing...</>
+                  ) : (
+                    <><Sparkles className="h-3.5 w-3.5 mr-1" /> {latestRun ? 'Re-run' : 'Find Matches'}</>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {latestRun?.status === 'running' ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">
+                  Joe is analyzing {latestRun.candidates_scanned || '...'} candidates using resume embeddings and AI scoring...
+                </span>
+              </div>
+            ) : latestRun?.status === 'failed' ? (
+              <div className="text-sm text-red-400 py-4">
+                Matching failed: {latestRun.error_message ?? 'Unknown error'}. Try re-running.
+              </div>
+            ) : bestMatches.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                <Sparkles className="h-8 w-8 opacity-30" />
+                <p className="text-sm text-center max-w-md">
+                  {latestRun ? 'No strong matches found. Try updating the job description and re-running.' : 'Click "Find Matches" to search your candidate database using AI-powered resume analysis.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Strong Matches */}
+                {bestMatches.filter((m: any) => m.tier === 'strong').length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2">Strong Matches</h4>
+                    <div className="space-y-2">
+                      {bestMatches.filter((m: any) => m.tier === 'strong').map((m: any) => (
+                        <MatchCard key={m.id} match={m} navigate={navigate} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Good Matches */}
+                {bestMatches.filter((m: any) => m.tier === 'good').length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Good Matches</h4>
+                    <div className="space-y-2">
+                      {bestMatches.filter((m: any) => m.tier === 'good').map((m: any) => (
+                        <MatchCard key={m.id} match={m} navigate={navigate} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Worth Considering */}
+                {bestMatches.filter((m: any) => m.tier === 'worth_considering').length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Worth Considering</h4>
+                    <div className="space-y-2">
+                      {bestMatches.filter((m: any) => m.tier === 'worth_considering').map((m: any) => (
+                        <MatchCard key={m.id} match={m} navigate={navigate} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* ── Candidates Kanban Board ───────────────────────────────────────── */}
         <Card>
           <CardHeader>
@@ -1106,7 +1297,7 @@ const JobDetail = () => {
       <EditJobDialog open={editJobOpen} onOpenChange={setEditJobOpen} job={job} />
 
       {/* Match Candidates Dialog */}
-      <Dialog open={matchOpen} onOpenChange={(v) => { setMatchOpen(v); if (!v) setMatchResults(''); }}>
+      <Dialog open={matchOpen} onOpenChange={(v) => { setMatchOpen(v); if (!v) setMatchDialogResults(''); }}>
         <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1115,14 +1306,14 @@ const JobDetail = () => {
             </DialogTitle>
           </DialogHeader>
           <ScrollArea className="flex-1 min-h-[200px]">
-            {matching && !matchResults ? (
+            {matching && !matchDialogResults ? (
               <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin" />
                 <span className="text-sm">Joe is analyzing your candidate database and resumes...</span>
               </div>
-            ) : matchResults ? (
+            ) : matchDialogResults ? (
               <div className="prose prose-sm max-w-none text-foreground whitespace-pre-wrap px-1">
-                {matchResults}
+                {matchDialogResults}
                 {matching && (
                   <span className="inline-flex items-center gap-1 text-muted-foreground ml-1">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -1139,7 +1330,7 @@ const JobDetail = () => {
                   variant="gold"
                   onClick={async () => {
                     setMatching(true);
-                    setMatchResults('');
+                    setMatchDialogResults('');
                     try {
                       const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
                       const resp = await fetch(`${backendUrl}/api/match-candidates-to-job`, {
@@ -1174,7 +1365,7 @@ const JobDetail = () => {
                               if (data.error) throw new Error(data.error);
                               if (data.content) {
                                 resultSoFar += data.content;
-                                setMatchResults(resultSoFar);
+                                setMatchDialogResults(resultSoFar);
                               }
                             } catch (e: any) {
                               if (e.message && !e.message.includes('JSON')) throw e;
@@ -1183,10 +1374,10 @@ const JobDetail = () => {
                         }
                       }
 
-                      if (!resultSoFar) setMatchResults('No matches found.');
+                      if (!resultSoFar) setMatchDialogResults('No matches found.');
                     } catch (err: any) {
                       toast.error(err.message || 'Failed to match');
-                      setMatchResults('');
+                      setMatchDialogResults('');
                     } finally {
                       setMatching(false);
                     }
