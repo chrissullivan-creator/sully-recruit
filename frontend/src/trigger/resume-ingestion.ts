@@ -60,7 +60,7 @@ export const resumeIngestion = task({
     logger.info("Extracted text", { length: rawText.length });
 
     // ── 3. Parse with Claude ────────────────────────────────────────
-    const anthropicKey = getAnthropicKey();
+    const anthropicKey = await getAnthropicKey();
     const parsedJson = await parseWithClaude(fileBytes, fileName, rawText, anthropicKey);
     logger.info("Parsed resume", { parsed: parsedJson });
 
@@ -98,7 +98,7 @@ export const resumeIngestion = task({
 
     // ── 6. Embed with Voyage AI ─────────────────────────────────────
     if (rawText.length > 50) {
-      const voyageKey = getVoyageKey();
+      const voyageKey = await getVoyageKey();
       const chunks = chunkText(rawText, 512); // ~512 token chunks
       logger.info("Embedding chunks", { count: chunks.length });
 
