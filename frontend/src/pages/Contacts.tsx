@@ -300,9 +300,13 @@ const Contacts = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
-                          {(contact.first_name?.[0] ?? '')}{(contact.last_name?.[0] ?? '')}
-                        </div>
+                        {(contact as any).avatar_url ? (
+                          <img src={(contact as any).avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                        ) : (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
+                            {(contact.first_name?.[0] ?? '')}{(contact.last_name?.[0] ?? '')}
+                          </div>
+                        )}
                         <span className="text-sm font-medium text-foreground">
                           {contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`}
                         </span>

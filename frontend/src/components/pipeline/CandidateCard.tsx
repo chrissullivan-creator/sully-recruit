@@ -33,9 +33,13 @@ export function CandidateCard({ candidate, onClick }: CandidateCardProps) {
       )}
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-          {candidate.firstName[0]}{candidate.lastName[0]}
-        </div>
+        {candidate.avatarUrl ? (
+          <img src={candidate.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+            {candidate.firstName[0]}{candidate.lastName[0]}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
             {candidate.firstName} {candidate.lastName}

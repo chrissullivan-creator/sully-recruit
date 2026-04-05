@@ -155,9 +155,12 @@ export const resolveUnipileIds = schedules.task({
             linkedin_profile_data: JSON.stringify(profile),
           };
 
-          // Extract headline, company, title from profile if not already set
+          // Extract headline, company, title, avatar from profile if not already set
           const headline = profile.headline ?? null;
           if (headline) enrichment.linkedin_headline = headline;
+
+          const avatarUrl = profile.profile_picture_url ?? profile.picture_url ?? profile.image_url ?? null;
+          if (avatarUrl) enrichment.avatar_url = avatarUrl;
 
           const positions = profile.positions ?? profile.experience ?? [];
           if (positions.length > 0) {

@@ -189,9 +189,13 @@ const CompanyDetail = () => {
         <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">
-                <Building className="h-6 w-6" />
-              </div>
+              {(company as any).logo_url ? (
+                <img src={(company as any).logo_url} alt={company.name} className="h-14 w-14 rounded-full object-cover mb-2" />
+              ) : (
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">
+                  <Building className="h-6 w-6" />
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">

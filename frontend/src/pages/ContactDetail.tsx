@@ -399,9 +399,13 @@ const ContactDetail = () => {
         <Button variant="ghost" size="icon" onClick={() => navigate('/contacts')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">
-          {initials}
-        </div>
+        {c.avatar_url ? (
+          <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">
+            {initials}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>

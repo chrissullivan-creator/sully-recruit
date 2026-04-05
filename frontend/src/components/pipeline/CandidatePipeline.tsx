@@ -115,9 +115,13 @@ export function CandidatePipeline() {
                   className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-                      {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
-                    </div>
+                    {candidate.avatar_url ? (
+                      <img src={candidate.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+                        {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
                         {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}

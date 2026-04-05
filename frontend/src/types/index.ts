@@ -62,6 +62,7 @@ export interface Candidate {
   currentTitle: string;
   currentCompany: string;
   linkedinUrl?: string;
+  avatarUrl?: string;
   stage: CandidateStage;
   taggedJobId?: string;
   taggedOpportunityId?: string;

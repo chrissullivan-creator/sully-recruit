@@ -231,6 +231,7 @@ export default function LinkedInSearch() {
         current_company: r.current_company || null,
         location: r.location || null,
         linkedin_url: r.linkedin_url || null,
+        avatar_url: r.profile_picture_url || null,
         source: 'linkedin_search',
         status: 'new',
         owner_id: ownerId,
@@ -257,6 +258,7 @@ export default function LinkedInSearch() {
         last_name: r.last_name,
         title: r.current_title || null,
         linkedin_url: r.linkedin_url || null,
+        avatar_url: r.profile_picture_url || null,
         status: 'active',
         owner_id: userId,
       } as any);
@@ -302,6 +304,7 @@ export default function LinkedInSearch() {
             current_company: r.current_company || null,
             location: r.location || null,
             linkedin_url: r.linkedin_url || null,
+            avatar_url: r.profile_picture_url || null,
             source: 'linkedin_search',
             status: 'new',
             owner_id: ownerId,
@@ -452,9 +455,13 @@ export default function LinkedInSearch() {
                   className="flex items-center gap-4 rounded-lg border border-border bg-card p-4 hover:bg-muted/30 transition-colors"
                 >
                   {/* Avatar */}
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
-                    {r.first_name?.[0] ?? ''}{r.last_name?.[0] ?? ''}
-                  </div>
+                  {r.profile_picture_url ? (
+                    <img src={r.profile_picture_url} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
+                      {r.first_name?.[0] ?? ''}{r.last_name?.[0] ?? ''}
+                    </div>
+                  )}
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">

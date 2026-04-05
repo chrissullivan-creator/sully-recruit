@@ -773,7 +773,11 @@ const CandidateDetail = () => {
         <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">{initials}</div>
+              {c.avatar_url ? (
+                <img src={c.avatar_url} alt={fullName} className="h-14 w-14 rounded-full object-cover mb-2" />
+              ) : (
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">{initials}</div>
+              )}
               <Badge variant="secondary" className="text-xs">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
             </div>
 

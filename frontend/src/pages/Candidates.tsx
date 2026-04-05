@@ -566,9 +566,13 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-                          {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
-                        </div>
+                        {(candidate as any).avatar_url ? (
+                          <img src={(candidate as any).avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                        ) : (
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+                            {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
+                          </div>
+                        )}
                         <span className="text-sm font-medium text-foreground">
                           {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
                         </span>
