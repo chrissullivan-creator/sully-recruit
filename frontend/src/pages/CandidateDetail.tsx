@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
+import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +23,7 @@ import {
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -78,9 +80,9 @@ const ChannelIcon = ({ channel }: { channel?: string | null }) => {
   return null;
 };
 
-const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
+const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
-  type?: string; placeholder?: string;
+  type?: string; placeholder?: string; disabled?: boolean;
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -106,20 +108,20 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
           </Button>
         </div>
       ) : (
-        <div className="flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/10 transition-colors" onClick={() => setEditing(true)}>
+        <div className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 -mx-1.5 transition-colors", disabled ? '' : 'cursor-pointer hover:bg-accent/10')} onClick={() => !disabled && setEditing(true)}>
           <span className={cn('text-sm flex-1 truncate', value ? 'text-foreground' : 'text-muted-foreground italic')}>
             {value || placeholder || '—'}
           </span>
-          <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+          {!disabled && <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />}
         </div>
       )}
     </div>
   );
 };
 
-const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
+const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4, disabled = false }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
-  placeholder?: string; rows?: number;
+  placeholder?: string; rows?: number; disabled?: boolean;
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -130,7 +132,7 @@ const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
-        {!editing && (
+        {!editing && !disabled && (
           <button onClick={() => setEditing(true)} className="text-[10px] text-muted-foreground hover:text-accent flex items-center gap-0.5">
             <Edit className="h-2.5 w-2.5" /> Edit
           </button>
@@ -149,7 +151,7 @@ const EditableTextarea = ({ label, value, onSave, placeholder, rows = 4 }: {
           </div>
         </div>
       ) : (
-        <div className="text-sm text-foreground rounded-md border border-transparent hover:border-border cursor-pointer p-1.5 -mx-1.5 min-h-8 whitespace-pre-wrap" onClick={() => setEditing(true)}>
+        <div className={cn("text-sm text-foreground rounded-md border border-transparent p-1.5 -mx-1.5 min-h-8 whitespace-pre-wrap", disabled ? '' : 'hover:border-border cursor-pointer')} onClick={() => !disabled && setEditing(true)}>
           {value || <span className="text-muted-foreground italic">{placeholder || 'Click to add…'}</span>}
         </div>
       )}
@@ -161,6 +163,7 @@ const CandidateDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user, session } = useAuth();
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
@@ -286,6 +289,14 @@ const CandidateDetail = () => {
   const [savingSendOut, setSavingSendOut] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
+
+  // Permission checks
+  const currentProfile = profiles.find(p => p.id === user?.id);
+  const isAdmin = !!(currentProfile as any)?.is_admin;
+  const isOwner = !!(user && candidate && (candidate as any).owner_id === user.id);
+  const canEdit = isOwner || isAdmin;
+  const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
+  const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
 
   const handleFormattedUpload = async (file: File, versionLabel: string) => {
     if (!id) return;
@@ -622,7 +633,7 @@ const CandidateDetail = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${session?.access_token ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({ messages: apiMessages }),
       });
@@ -751,9 +762,9 @@ const CandidateDetail = () => {
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Contact</h3>
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
-              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." />
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
+              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
@@ -782,11 +793,11 @@ const CandidateDetail = () => {
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Current Role</h3>
-              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} />
-              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" />
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} />
+              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
@@ -796,34 +807,40 @@ const CandidateDetail = () => {
               </button>
               {compExpanded && (
                 <div className="space-y-2 pl-1">
-                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" />
-                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" />
-                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" />
-                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" />
-                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" />
-                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." />
+                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
+                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
+                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
+                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
+                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
+                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
                 </div>
               )}
             </div>
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Preferences</h3>
-              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." />
-              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." />
-              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." />
-              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." />
-              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." />
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} />
+              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest" title="Last recruiter who screened this candidate">Owner (Screener)</h3>
-              <Select value={candidate.owner_id ?? 'none'} onValueChange={async (val) => {
+              <Select value={candidate.owner_id ?? 'none'} onValueChange={(val) => {
                 const newOwnerId = val === 'none' ? null : val;
-                await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-              }}>
+                if (newOwnerId && newOwnerId !== user?.id) {
+                  setPendingOwnerId(newOwnerId);
+                } else {
+                  (async () => {
+                    await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                    toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                  })();
+                }
+              }} disabled={!canEdit}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— Unassigned —</SelectItem>
@@ -840,7 +857,7 @@ const CandidateDetail = () => {
                 queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                 queryClient.invalidateQueries({ queryKey: ['candidates'] });
                 toast.success(newJobId ? 'Job assigned' : 'Job removed');
-              }}>
+              }} disabled={!canEdit}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— None —</SelectItem>
@@ -1576,6 +1593,7 @@ const CandidateDetail = () => {
                       const stageCfg = SEND_OUT_STAGES.find(s => s.value === so.stage);
                       const isRejected = so.stage === 'rejected';
                       const isRejecting = rejectingId === so.id;
+                      const isSendOutOwner = so.recruiter_id === user?.id || isAdmin;
                       return (
                         <div key={so.id} className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
                           <div className="flex items-center justify-between">
@@ -1593,14 +1611,16 @@ const CandidateDetail = () => {
                                   {stageCfg.label}
                                 </span>
                               )}
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-400" onClick={() => handleDeleteSendOut(so.id)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {isSendOutOwner && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-400" onClick={() => handleDeleteSendOut(so.id)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </div>
 
-                          {/* Stage selector */}
-                          {!isRejected && !isRejecting && (
+                          {/* Stage selector — only visible to the recruiter who created this send out */}
+                          {!isRejected && !isRejecting && isSendOutOwner && (
                             <div className="flex items-center gap-1.5 flex-wrap">
                               {SEND_OUT_STAGES.filter(s => s.value !== 'rejected').map(s => (
                                 <button
@@ -1631,7 +1651,7 @@ const CandidateDetail = () => {
                               <p className="text-xs font-medium text-red-400">Rejected {so.rejected_by ? `— ${REJECTED_BY_OPTIONS.find(o => o.value === so.rejected_by)?.label ?? so.rejected_by}` : ''}</p>
                               {so.rejection_reason && <p className="text-xs text-muted-foreground"><span className="font-medium">Reason:</span> {so.rejection_reason}</p>}
                               {so.feedback && <p className="text-xs text-muted-foreground"><span className="font-medium">Feedback:</span> {so.feedback}</p>}
-                              <button onClick={() => { setRejectingId(so.id); setRejectForm({ rejected_by: so.rejected_by || '', rejection_reason: so.rejection_reason || '', feedback: so.feedback || '' }); }} className="text-[10px] text-accent hover:underline mt-1">Edit</button>
+                              {isSendOutOwner && <button onClick={() => { setRejectingId(so.id); setRejectForm({ rejected_by: so.rejected_by || '', rejection_reason: so.rejection_reason || '', feedback: so.feedback || '' }); }} className="text-[10px] text-accent hover:underline mt-1">Edit</button>}
                             </div>
                           )}
 
@@ -1678,6 +1698,30 @@ const CandidateDetail = () => {
         </div>
 
       </div>
+
+      {/* Owner transfer confirmation */}
+      <AlertDialog open={!!pendingOwnerId} onOpenChange={(open) => { if (!open) setPendingOwnerId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Transfer ownership?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to transfer ownership of this candidate to <strong>{pendingOwnerName}</strong>. You will lose the ability to edit this candidate's fields after the transfer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              await supabase.from('candidates').update({ owner_id: pendingOwnerId }).eq('id', id!);
+              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+              queryClient.invalidateQueries({ queryKey: ['candidates'] });
+              toast.success('Owner transferred');
+              setPendingOwnerId(null);
+            }}>
+              Transfer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
     </MainLayout>
