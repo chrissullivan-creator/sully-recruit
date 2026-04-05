@@ -87,6 +87,22 @@ export const processSequenceStep = task({
           } as any)
           .eq("id", payload.enrollmentId);
 
+        // Pipeline automation: when candidate replies, advance send_outs from reached_out to pitch
+        if (payload.candidateId) {
+          const { data: advanced } = await supabase
+            .from("send_outs")
+            .update({ stage: "pitch", updated_at: now.toISOString() } as any)
+            .eq("candidate_id", payload.candidateId)
+            .eq("stage", "reached_out")
+            .select("id");
+          if (advanced && advanced.length > 0) {
+            logger.info("Pipeline auto-advanced to pitch on reply", {
+              candidateId: payload.candidateId,
+              sendOutIds: advanced.map((s: any) => s.id),
+            });
+          }
+        }
+
         logger.info("Enrollment stopped — reply detected", { enrollmentId: payload.enrollmentId });
         return { action: "stopped", reason: "candidate_replied" };
       }
@@ -344,6 +360,25 @@ export const processSequenceStep = task({
           is_read: true,
         })
         .eq("id", conversationId);
+
+      // ── Pipeline automation: auto-advance send_out stage ──────
+      if (payload.candidateId) {
+        // If this is the first step (step_order = 1), move any "new" send_outs to "reached_out"
+        if (nextStepOrder === 1) {
+          const { data: updated } = await supabase
+            .from("send_outs")
+            .update({ stage: "reached_out", updated_at: now.toISOString() } as any)
+            .eq("candidate_id", payload.candidateId)
+            .eq("stage", "new")
+            .select("id");
+          if (updated && updated.length > 0) {
+            logger.info("Pipeline auto-advanced to reached_out", {
+              candidateId: payload.candidateId,
+              sendOutIds: updated.map((s: any) => s.id),
+            });
+          }
+        }
+      }
 
       logger.info("Message sent", {
         enrollmentId: payload.enrollmentId,
