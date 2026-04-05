@@ -2,8 +2,10 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
 const UNIPILE_BASE_URL = "https://api.unipile.com:13111/api/v1";
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 25;
 const DELAY_MS = 350; // ~3 requests/second to avoid rate limits
+const FETCH_TIMEOUT_MS = 10_000; // 10s timeout per Unipile API call
+const MAX_ELAPSED_MS = 240_000; // 4 min safety margin (max duration is 5 min)
 
 /**
  * Scheduled task: resolve Unipile IDs for candidates with LinkedIn URLs.
@@ -67,8 +69,15 @@ export const resolveUnipileIds = schedules.task({
     let resolved = 0;
     let failed = 0;
     let skipped = 0;
+    const startTime = Date.now();
 
     for (const candidate of candidates) {
+      // Break early if approaching max duration
+      if (Date.now() - startTime > MAX_ELAPSED_MS) {
+        logger.warn("Approaching max duration — stopping batch early", { resolved, failed, skipped });
+        break;
+      }
+
       try {
         // Extract LinkedIn slug from URL
         const slug = extractLinkedInSlug(candidate.linkedin_url);
@@ -94,7 +103,7 @@ export const resolveUnipileIds = schedules.task({
 
         const resp = await fetch(
           `${UNIPILE_BASE_URL}/users/${encodeURIComponent(slug)}`,
-          { headers }
+          { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
         );
 
         if (!resp.ok) {
