@@ -623,16 +623,15 @@ const CandidateDetail = () => {
           <Button variant="outline" size="sm" onClick={async () => {
             toast.info('Syncing activity across all channels...');
             try {
-              const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
-              const resp = await fetch(`${backendUrl}/api/sync-activity-timestamps`, {
+              const resp = await fetch('/api/trigger-sync-activity', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entity_type: 'candidate', entity_id: id }),
               });
               const data = await resp.json();
               if (data.error) throw new Error(data.error);
-              toast.success(`Synced: ${data.messages_scanned} messages, ${data.calls_scanned} calls scanned`);
-              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+              toast.success('Activity sync triggered — results will update shortly');
+              setTimeout(() => queryClient.invalidateQueries({ queryKey: ['candidate', id] }), 5000);
             } catch (err: any) {
               toast.error(err.message || 'Sync failed');
             }
