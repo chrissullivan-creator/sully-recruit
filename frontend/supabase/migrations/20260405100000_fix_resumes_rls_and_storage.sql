@@ -2,7 +2,29 @@
 -- Fix missing RLS on resumes table and add storage policies for resumes bucket
 -- ============================================================================
 
--- 1. Enable RLS on resumes table (was never enabled after consolidation from candidate_resumes)
+-- 0. Create resumes table if it doesn't exist (was never created in tracked migrations)
+CREATE TABLE IF NOT EXISTS public.resumes (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  candidate_id UUID REFERENCES public.candidates(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_name TEXT,
+  file_url TEXT,
+  mime_type TEXT,
+  file_size INTEGER,
+  raw_text TEXT,
+  parsed_json JSONB,
+  ai_summary TEXT,
+  parse_status TEXT,
+  parse_error TEXT,
+  source TEXT,
+  storage_bucket TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_resumes_candidate_id ON public.resumes(candidate_id);
+
+-- 1. Enable RLS on resumes table
 ALTER TABLE public.resumes ENABLE ROW LEVEL SECURITY;
 
 -- Match the team-access pattern used by formatted_resumes and other shared tables
