@@ -290,8 +290,11 @@ const CandidateDetail = () => {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
 
-  // Owner-based permission checks
+  // Permission checks
+  const currentProfile = profiles.find(p => p.id === user?.id);
+  const isAdmin = !!(currentProfile as any)?.is_admin;
   const isOwner = !!(user && candidate && (candidate as any).owner_id === user.id);
+  const canEdit = isOwner || isAdmin;
   const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
   const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
 
@@ -759,9 +762,9 @@ const CandidateDetail = () => {
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Contact</h3>
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!isOwner} />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!isOwner} />
-              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!isOwner} />
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
+              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
@@ -790,11 +793,11 @@ const CandidateDetail = () => {
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Current Role</h3>
-              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!isOwner} />
-              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!isOwner} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!isOwner} />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!isOwner} />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!isOwner} />
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} />
+              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
@@ -804,23 +807,23 @@ const CandidateDetail = () => {
               </button>
               {compExpanded && (
                 <div className="space-y-2 pl-1">
-                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!isOwner} />
-                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!isOwner} />
-                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!isOwner} />
-                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!isOwner} />
-                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!isOwner} />
-                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!isOwner} />
+                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
+                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
+                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
+                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
+                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
+                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
                 </div>
               )}
             </div>
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Preferences</h3>
-              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!isOwner} />
-              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!isOwner} />
-              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!isOwner} />
-              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!isOwner} />
-              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." disabled={!isOwner} />
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} />
+              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." disabled={!canEdit} />
             </div>
 
             <div className="space-y-2">
@@ -837,7 +840,7 @@ const CandidateDetail = () => {
                     toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
                   })();
                 }
-              }} disabled={!isOwner}>
+              }} disabled={!canEdit}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— Unassigned —</SelectItem>
@@ -854,7 +857,7 @@ const CandidateDetail = () => {
                 queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                 queryClient.invalidateQueries({ queryKey: ['candidates'] });
                 toast.success(newJobId ? 'Job assigned' : 'Job removed');
-              }} disabled={!isOwner}>
+              }} disabled={!canEdit}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— None —</SelectItem>
@@ -1590,7 +1593,7 @@ const CandidateDetail = () => {
                       const stageCfg = SEND_OUT_STAGES.find(s => s.value === so.stage);
                       const isRejected = so.stage === 'rejected';
                       const isRejecting = rejectingId === so.id;
-                      const isSendOutOwner = so.recruiter_id === user?.id;
+                      const isSendOutOwner = so.recruiter_id === user?.id || isAdmin;
                       return (
                         <div key={so.id} className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
                           <div className="flex items-center justify-between">
