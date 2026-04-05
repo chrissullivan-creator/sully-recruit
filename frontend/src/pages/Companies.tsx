@@ -94,6 +94,7 @@ const Companies = () => {
               <div
                 key={company.id}
                 className="rounded-lg border border-border bg-card p-5 hover:border-accent/50 transition-all duration-150 cursor-pointer hover-lift"
+                onClick={() => navigate(`/companies/${company.id}`)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
