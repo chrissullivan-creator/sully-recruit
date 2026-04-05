@@ -136,7 +136,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           current_step_order: 1,
           next_step_at: new Date().toISOString(),
           enrolled_by: userId,
-          integration_account_id: selectedAccountId,
+          account_id: selectedAccountId,
         });
       }
 
