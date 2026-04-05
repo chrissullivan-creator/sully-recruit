@@ -14,9 +14,10 @@
 
 ### API Pattern
 ```ts
-const UNIPILE_API_URL = Deno.env.get("UNIPILE_API_URL"); // e.g. https://api19.unipile.com:14926
-const UNIPILE_API_KEY = Deno.env.get("UNIPILE_API_KEY");
-headers: { "X-API-KEY": UNIPILE_API_KEY, "Accept": "application/json" }
+// Trigger.dev tasks: use getUnipileBaseUrl() from ./lib/supabase (reads app_settings.UNIPILE_BASE_URL)
+// Supabase edge functions: Deno.env.get("UNIPILE_BASE_URL") with fallback
+const baseUrl = await getUnipileBaseUrl(); // https://api19.unipile.com:14926/api/v1
+headers: { "X-API-KEY": account.access_token, "Accept": "application/json" }
 ```
 
 ### LinkedIn Slug Resolution

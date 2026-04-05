@@ -202,8 +202,7 @@ Returns SSE stream. Parse with: `data: {"content": "..."}` chunks.
 ## Secrets in Supabase (never hardcode)
 ```
 anthropic_api_key        ← lowercase, use fallback pattern above
-UNIPILE_API_KEY
-UNIPILE_API_URL
+UNIPILE_BASE_URL
 MICROSOFT_GRAPH_CLIENT_ID / SECRET / TENANT_ID
 MICROSOFT_CLIENT_ID / SECRET / TENANT_ID
 RINGCENTRAL_*
