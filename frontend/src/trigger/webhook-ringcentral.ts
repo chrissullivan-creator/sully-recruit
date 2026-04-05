@@ -138,6 +138,8 @@ const EXTRACT_PROMPT = `You are an expert recruiting assistant. You just receive
 {
   "call_notes": "- Bullet point summary of call\\n- Key topics discussed\\n- Action items",
   "candidate_summary": "2-3 sentence professional summary of this candidate based on the call",
+  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact",
+  "sentiment_summary": "One sentence about the candidate's interest level and attitude toward the opportunity",
   "extracted_fields": {
     "current_title": "",
     "current_company": "",
@@ -314,6 +316,68 @@ async function transcribeAndExtract(
         entityId: candidateId,
         updatedFields: Object.keys(updates),
       });
+    }
+
+    // ── 5. Sentiment analysis + pipeline automation from call ───────
+    if (result.sentiment && entityType === "candidate") {
+      // Store sentiment
+      await supabase.from("reply_sentiment").insert({
+        candidate_id: candidateId,
+        channel: "phone",
+        sentiment: result.sentiment,
+        summary: result.sentiment_summary || result.candidate_summary || "",
+        raw_message: transcript?.slice(0, 1000) || "",
+        analyzed_at: receivedAt,
+      } as any);
+
+      // Update candidate sentiment fields
+      await supabase
+        .from("candidates")
+        .update({
+          last_sequence_sentiment: result.sentiment,
+          last_sequence_sentiment_note: result.sentiment_summary || result.candidate_summary || "",
+        } as any)
+        .eq("id", candidateId);
+
+      // Pipeline automation
+      const negativeSentiments = ["negative", "not_interested", "do_not_contact"];
+      const positiveSentiments = ["interested", "positive"];
+
+      if (negativeSentiments.includes(result.sentiment)) {
+        const { data: rejected } = await supabase
+          .from("send_outs")
+          .update({
+            stage: "rejected",
+            rejected_by: "candidate",
+            rejection_reason: result.sentiment.replace(/_/g, " "),
+            feedback: result.sentiment_summary || result.candidate_summary || "",
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq("candidate_id", candidateId)
+          .not("stage", "in", '("rejected","placed")')
+          .select("id");
+
+        if (rejected && rejected.length > 0) {
+          logger.info("Pipeline auto-rejected by candidate call sentiment", {
+            candidateId, sentiment: result.sentiment, sendOutIds: rejected.map((s: any) => s.id),
+          });
+        }
+      } else if (positiveSentiments.includes(result.sentiment)) {
+        const { data: advanced } = await supabase
+          .from("send_outs")
+          .update({ stage: "pitch", updated_at: new Date().toISOString() } as any)
+          .eq("candidate_id", candidateId)
+          .in("stage", ["new", "reached_out"])
+          .select("id");
+
+        if (advanced && advanced.length > 0) {
+          logger.info("Pipeline auto-advanced to pitch on positive call sentiment", {
+            candidateId, sentiment: result.sentiment, sendOutIds: advanced.map((s: any) => s.id),
+          });
+        }
+      }
+
+      logger.info("Call sentiment analyzed", { candidateId, sentiment: result.sentiment });
     }
   } catch (err: any) {
     logger.error("Transcribe/extract error", { candidateId, error: err.message });

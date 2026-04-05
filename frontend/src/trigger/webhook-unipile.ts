@@ -372,6 +372,52 @@ async function analyzeSentiment(
       } as any)
       .eq("id", entityId);
 
+    // ── Pipeline automation based on sentiment ──────────────────
+    if (entityColumn === "candidate_id") {
+      const negativeSentiments = ["negative", "not_interested", "do_not_contact"];
+      const positiveSentiments = ["interested", "positive"];
+
+      if (negativeSentiments.includes(analysis.sentiment)) {
+        // Reject all active send_outs for this candidate
+        const { data: rejected } = await supabase
+          .from("send_outs")
+          .update({
+            stage: "rejected",
+            rejected_by: "candidate",
+            rejection_reason: analysis.sentiment.replace(/_/g, " "),
+            feedback: analysis.summary || messageBody.slice(0, 500),
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq("candidate_id", entityId)
+          .not("stage", "in", '("rejected","placed")')
+          .select("id");
+
+        if (rejected && rejected.length > 0) {
+          logger.info("Pipeline auto-rejected by candidate sentiment", {
+            entityId,
+            sentiment: analysis.sentiment,
+            sendOutIds: rejected.map((s: any) => s.id),
+          });
+        }
+      } else if (positiveSentiments.includes(analysis.sentiment)) {
+        // Move reached_out/new → pitch
+        const { data: advanced } = await supabase
+          .from("send_outs")
+          .update({ stage: "pitch", updated_at: new Date().toISOString() } as any)
+          .eq("candidate_id", entityId)
+          .in("stage", ["new", "reached_out"])
+          .select("id");
+
+        if (advanced && advanced.length > 0) {
+          logger.info("Pipeline auto-advanced to pitch on positive sentiment", {
+            entityId,
+            sentiment: analysis.sentiment,
+            sendOutIds: advanced.map((s: any) => s.id),
+          });
+        }
+      }
+    }
+
     logger.info("Sentiment analyzed", { entityId, sentiment: analysis.sentiment });
   } catch (err) {
     logger.error("Sentiment analysis error", { error: err });
