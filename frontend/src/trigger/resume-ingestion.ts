@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey, getVoyageKey } from "./lib/supabase";
+import { generateJoeSays } from "./generate-joe-says";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
 
@@ -118,6 +119,12 @@ export const resumeIngestion = task({
       }
       logger.info("Stored embeddings", { chunks: chunks.length });
     }
+
+    // Chain-trigger Joe Says refresh after resume parsing
+    await generateJoeSays.trigger({
+      entityId: candidateId,
+      entityType: "candidate",
+    });
 
     return { success: true, resumeId, candidateId };
   },

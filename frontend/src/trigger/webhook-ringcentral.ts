@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { generateJoeSays } from "./generate-joe-says";
 
 interface RingCentralWebhookPayload {
   body: any;
@@ -122,6 +123,12 @@ export const processRingcentralEvent = task({
         .eq("id", match.entityId);
     }
 
+    // Chain-trigger Joe Says refresh after processing communication
+    await generateJoeSays.trigger({
+      entityId: match.entityId,
+      entityType: match.entityType as "candidate" | "contact",
+    });
+
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };
   },
 });
@@ -154,7 +161,9 @@ const EXTRACT_PROMPT = `You are an expert recruiting assistant. You just receive
     "relocation_preference": "",
     "target_locations": "",
     "target_roles": "",
-    "skills": []
+    "skills": [],
+    "location": "",
+    "notice_period": ""
   },
   "back_of_resume_points": "Key talking points for the back of resume, separated by newlines"
 }
@@ -278,6 +287,8 @@ async function transcribeAndExtract(
       if (fields.target_locations) updates.target_locations = fields.target_locations;
       if (fields.target_roles) updates.target_roles = fields.target_roles;
       if (fields.skills?.length) updates.skills = fields.skills;
+      if (fields.location) updates.location_text = fields.location;
+      if (fields.notice_period) updates.notice_period = fields.notice_period;
 
       // Update candidate_summary
       if (result.candidate_summary) {

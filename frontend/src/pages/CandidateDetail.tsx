@@ -7,7 +7,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
-import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -20,7 +19,7 @@ import {
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
-  GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send,
+  GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -213,6 +212,12 @@ const CandidateDetail = () => {
   const [eduForm, setEduForm] = useState({ institution: '', degree: '', field_of_study: '', start_year: '', end_year: '' });
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Ask Joe chat state
+  const [joeChatMessages, setJoeChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [joeChatInput, setJoeChatInput] = useState('');
+  const [joeChatLoading, setJoeChatLoading] = useState(false);
+  const joeChatScrollRef = useRef<HTMLDivElement>(null);
 
   const { data: workHistory = [] } = useQuery({
     queryKey: ['candidate_work_history', id],
@@ -562,15 +567,21 @@ const CandidateDetail = () => {
     if (!id) return;
     setGeneratingJoe(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-joe-says`, {
+      const res = await fetch('/api/trigger-generate-joe-says', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
-        body: JSON.stringify({ candidate_id: id }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityId: id, entityType: 'candidate' }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      toast.success('Joe Says updated');
+      if (!data.triggered) throw new Error(data.error || 'Failed to trigger');
+      toast.success('Joe Says generation started — will update shortly');
+      // Poll for the update
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      }, 8000);
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      }, 15000);
     } catch (err: any) {
       toast.error(err.message || 'Failed to generate');
     } finally {
@@ -585,6 +596,79 @@ const CandidateDetail = () => {
     if (error) toast.error('Failed to save note');
     else { toast.success('Note saved'); setNoteText(''); queryClient.invalidateQueries({ queryKey: ['notes', 'candidate', id] }); }
     setSavingNote(false);
+  };
+
+  const handleJoeChatSend = async () => {
+    if (!joeChatInput.trim() || joeChatLoading) return;
+    const userMsg = { role: 'user' as const, content: joeChatInput };
+    const allMessages = [...joeChatMessages, userMsg];
+    setJoeChatMessages(allMessages);
+    setJoeChatInput('');
+    setJoeChatLoading(true);
+
+    // Pre-seed context about this candidate
+    const contextMsg = candidate
+      ? `[Context: You're discussing candidate ${candidate.full_name || `${candidate.first_name} ${candidate.last_name}`}, ${candidate.current_title || ''} at ${candidate.current_company || ''}. Candidate ID: ${id}]`
+      : '';
+
+    let assistantSoFar = '';
+    try {
+      const apiMessages = [
+        ...(contextMsg ? [{ role: 'user', content: contextMsg }, { role: 'assistant', content: 'Got it — I have this candidate pulled up. What do you need?' }] : []),
+        ...allMessages.map((m) => ({ role: m.role, content: m.content })),
+      ];
+
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ask-joe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ messages: apiMessages }),
+      });
+
+      if (!resp.ok || !resp.body) throw new Error(`Request failed (${resp.status})`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (!line.startsWith('data: ') || line.trim() === '') continue;
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.content || parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              assistantSoFar += content;
+              const current = assistantSoFar;
+              setJoeChatMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant' && prev.length > allMessages.length) {
+                  return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: current } : m));
+                }
+                return [...prev, { role: 'assistant', content: current }];
+              });
+            }
+          } catch { /* partial JSON — will be completed next chunk */ }
+        }
+      }
+    } catch (err: any) {
+      setJoeChatMessages((prev) => [...prev, { role: 'assistant', content: `Something went wrong: ${err.message}` }]);
+    } finally {
+      setJoeChatLoading(false);
+      setTimeout(() => { joeChatScrollRef.current?.scrollTo(0, joeChatScrollRef.current.scrollHeight); }, 50);
+    }
   };
 
   if (isLoading) return <MainLayout><div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div></MainLayout>;
@@ -732,7 +816,7 @@ const CandidateDetail = () => {
             </div>
 
             <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Owner</h3>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest" title="Last recruiter who screened this candidate">Owner (Screener)</h3>
               <Select value={candidate.owner_id ?? 'none'} onValueChange={async (val) => {
                 const newOwnerId = val === 'none' ? null : val;
                 await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
@@ -818,12 +902,14 @@ const CandidateDetail = () => {
                     <span className="text-sm">Joe is analyzing this candidate...</span>
                   </div>
                 ) : c.joe_says ? (
-                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1">
-                    {(c.joe_says as string).split('\n').map((line: string, i: number) => (
-                      line.trim() ? (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                    {(c.joe_says as string).split('\n').map((line: string, i: number) => {
+                      if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
+                      if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
+                      return line.trim() ? (
                         <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
-                      ) : <div key={i} className="h-1" />
-                    ))}
+                      ) : <div key={i} className="h-1" />;
+                    })}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
@@ -835,12 +921,200 @@ const CandidateDetail = () => {
                     </Button>
                   </div>
                 )}
+
+                {/* ── Ask Joe Chat ───────────────────────────────────────── */}
+                <div className="mt-6 rounded-xl border border-border">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30 rounded-t-xl">
+                    <Martini className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold">Ask Joe about this candidate</h3>
+                  </div>
+                  <div ref={joeChatScrollRef} className="h-64 overflow-y-auto p-4 space-y-3">
+                    {joeChatMessages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get comp insights, pitch ideas...</p>
+                    )}
+                    {joeChatMessages.map((msg, i) => (
+                      <div key={i} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                        <div className={cn(
+                          'max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
+                          msg.role === 'user' ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground'
+                        )}>
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                    {joeChatLoading && joeChatMessages[joeChatMessages.length - 1]?.role === 'user' && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted rounded-lg px-3 py-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={joeChatInput}
+                        onChange={(e) => setJoeChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJoeChatSend()}
+                        placeholder="Ask Joe anything about this candidate..."
+                        disabled={joeChatLoading}
+                        className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                      />
+                      <Button size="icon" variant="gold" onClick={handleJoeChatSend} disabled={joeChatLoading}>
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </TabsContent>
 
               <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
+
+                {/* ── Work History ──────────────────────────────────────── */}
+                <div className="border-t border-border pt-5">
+                  <Collapsible open={workHistoryOpen} onOpenChange={setWorkHistoryOpen}>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full group">
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="h-4 w-4 text-accent" />
+                        <h3 className="text-sm font-semibold text-foreground">Work History</h3>
+                        <span className="text-xs text-muted-foreground">({workHistory.length})</span>
+                      </div>
+                      {workHistoryOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-3 space-y-3">
+                      {workHistory.length === 0 && !showAddWork && (
+                        <p className="text-sm text-muted-foreground">No work history recorded.</p>
+                      )}
+                      {workHistory.map((w: any) => (
+                        <div key={w.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-foreground">{w.title}</p>
+                            {w.is_current && <Badge variant="secondary" className="text-[9px]">Current</Badge>}
+                          </div>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Building className="h-3 w-3" /> {w.company_name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {w.start_date ? format(new Date(w.start_date), 'MMM yyyy') : '?'}
+                            {' — '}
+                            {w.is_current ? 'Present' : w.end_date ? format(new Date(w.end_date), 'MMM yyyy') : '?'}
+                          </p>
+                          {w.description && <p className="text-xs text-muted-foreground mt-1">{w.description}</p>}
+                        </div>
+                      ))}
+                      {showAddWork ? (
+                        <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+                          <h4 className="text-sm font-semibold">Add Work Experience</h4>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Company *</Label>
+                              <Input className="h-8 text-sm" value={workForm.company_name} onChange={e => setWorkForm(f => ({ ...f, company_name: e.target.value }))} placeholder="Company name" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Title *</Label>
+                              <Input className="h-8 text-sm" value={workForm.title} onChange={e => setWorkForm(f => ({ ...f, title: e.target.value }))} placeholder="Job title" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Start Date</Label>
+                              <Input className="h-8 text-sm" type="date" value={workForm.start_date} onChange={e => setWorkForm(f => ({ ...f, start_date: e.target.value }))} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">End Date</Label>
+                              <Input className="h-8 text-sm" type="date" value={workForm.end_date} onChange={e => setWorkForm(f => ({ ...f, end_date: e.target.value }))} disabled={workForm.is_current} />
+                            </div>
+                          </div>
+                          <label className="flex items-center gap-2 text-xs">
+                            <input type="checkbox" checked={workForm.is_current} onChange={e => setWorkForm(f => ({ ...f, is_current: e.target.checked, end_date: e.target.checked ? '' : f.end_date }))} className="rounded" />
+                            Currently works here
+                          </label>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Description</Label>
+                            <Input className="h-8 text-sm" value={workForm.description} onChange={e => setWorkForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description..." />
+                          </div>
+                          <div className="flex gap-2">
+                            <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddWorkHistory} disabled={savingWork || !workForm.company_name || !workForm.title}>
+                              {savingWork && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(false)}>Cancel</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(true)}>
+                          <Plus className="h-3 w-3 mr-1" /> Add Work Experience
+                        </Button>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+
+                {/* ── Education ─────────────────────────────────────────── */}
+                <div className="border-t border-border pt-5">
+                  <Collapsible open={educationOpen} onOpenChange={setEducationOpen}>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full group">
+                      <div className="flex items-center gap-2">
+                        <GraduationCap className="h-4 w-4 text-accent" />
+                        <h3 className="text-sm font-semibold text-foreground">Education</h3>
+                        <span className="text-xs text-muted-foreground">({education.length})</span>
+                      </div>
+                      {educationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-3 space-y-3">
+                      {education.length === 0 && !showAddEducation && (
+                        <p className="text-sm text-muted-foreground">No education history recorded.</p>
+                      )}
+                      {education.map((e: any) => (
+                        <div key={e.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                          <p className="text-sm font-medium text-foreground">{e.institution}</p>
+                          {(e.degree || e.field_of_study) && (
+                            <p className="text-xs text-muted-foreground">
+                              {e.degree}{e.degree && e.field_of_study ? ' in ' : ''}{e.field_of_study}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground">{e.start_year ?? '?'} — {e.end_year ?? '?'}</p>
+                        </div>
+                      ))}
+                      {showAddEducation ? (
+                        <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+                          <h4 className="text-sm font-semibold">Add Education</h4>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1 col-span-2">
+                              <Label className="text-xs">Institution *</Label>
+                              <Input className="h-8 text-sm" value={eduForm.institution} onChange={e => setEduForm(f => ({ ...f, institution: e.target.value }))} placeholder="University name" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Degree</Label>
+                              <Input className="h-8 text-sm" value={eduForm.degree} onChange={e => setEduForm(f => ({ ...f, degree: e.target.value }))} placeholder="e.g. BS, MBA" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Field of Study</Label>
+                              <Input className="h-8 text-sm" value={eduForm.field_of_study} onChange={e => setEduForm(f => ({ ...f, field_of_study: e.target.value }))} placeholder="e.g. Finance" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Start Year</Label>
+                              <Input className="h-8 text-sm" type="number" value={eduForm.start_year} onChange={e => setEduForm(f => ({ ...f, start_year: e.target.value }))} placeholder="2015" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">End Year</Label>
+                              <Input className="h-8 text-sm" type="number" value={eduForm.end_year} onChange={e => setEduForm(f => ({ ...f, end_year: e.target.value }))} placeholder="2019" />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddEducation} disabled={savingEducation || !eduForm.institution}>
+                              {savingEducation && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(false)}>Cancel</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(true)}>
+                          <Plus className="h-3 w-3 mr-1" /> Add Education
+                        </Button>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
               </TabsContent>
 
               <TabsContent value="communications" className="px-8 py-5 mt-0">
@@ -986,46 +1260,83 @@ const CandidateDetail = () => {
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 mb-4">
                   <History className="h-5 w-5 text-accent" />
                   <h2 className="text-base font-semibold">Activity Timeline</h2>
                 </div>
                 {(() => {
-                  const activities: { date: string; type: string; label: string; detail?: string }[] = [];
-                  (conversations as any[]).forEach(conv => {
-                    if (conv.last_message_at) activities.push({ date: conv.last_message_at, type: 'message', label: `${conv.channel ?? 'Message'} conversation`, detail: conv.last_message_preview });
+                  // Build merged timeline from all data sources
+                  const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
+
+                  // Call logs
+                  (callLogs as any[]).forEach((cl) => {
+                    const dur = cl.duration_seconds ? `${Math.floor(cl.duration_seconds / 60)}:${(cl.duration_seconds % 60).toString().padStart(2, '0')}` : '';
+                    events.push({
+                      date: cl.started_at,
+                      icon: cl.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5 text-info" /> : <PhoneIncoming className="h-3.5 w-3.5 text-success" />,
+                      title: `${cl.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call${dur ? ` (${dur})` : ''}`,
+                      detail: cl.summary?.slice(0, 120) || '',
+                      type: 'call',
+                    });
                   });
-                  (callLogs as any[]).forEach(call => {
-                    if (call.started_at) activities.push({ date: call.started_at, type: 'call', label: `${call.direction === 'outbound' ? 'Outbound' : 'Inbound'} call`, detail: call.phone_number });
+
+                  // Conversations (latest message)
+                  (conversations as any[]).forEach((conv) => {
+                    events.push({
+                      date: conv.last_message_at,
+                      icon: <ChannelIcon channel={conv.channel} />,
+                      title: `${conv.channel === 'linkedin' ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1)} conversation`,
+                      detail: conv.subject ? `${conv.subject} — ${conv.last_message_preview || ''}` : conv.last_message_preview || '',
+                      type: 'message',
+                    });
                   });
-                  (notes as any[]).forEach(n => {
-                    if (n.created_at) activities.push({ date: n.created_at, type: 'note', label: 'Note added', detail: n.note?.replace(/<[^>]+>/g, '').slice(0, 80) });
+
+                  // Notes
+                  (notes as any[]).forEach((n) => {
+                    const text = n.note?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+                    events.push({
+                      date: n.created_at,
+                      icon: <Edit className="h-3.5 w-3.5 text-muted-foreground" />,
+                      title: 'Note added',
+                      detail: text.slice(0, 120),
+                      type: 'note',
+                    });
                   });
-                  sendOuts.forEach((so: any) => {
-                    if (so.created_at) activities.push({ date: so.created_at, type: 'send_out', label: `Added to pipeline: ${so.jobs?.title ?? 'Job'}`, detail: `Stage: ${so.stage}` });
+
+                  // Send-outs
+                  sendOuts.forEach((s: any) => {
+                    events.push({
+                      date: s.created_at,
+                      icon: <Briefcase className="h-3.5 w-3.5 text-accent" />,
+                      title: `Submitted to ${(s.jobs as any)?.title || 'job'}`,
+                      detail: `${(s.jobs as any)?.company_name || ''} — Stage: ${s.stage || '—'}`,
+                      type: 'sendout',
+                    });
                   });
-                  activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                  if (activities.length === 0) return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+
+                  // Sort by date descending
+                  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                  if (events.length === 0) {
+                    return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+                  }
+
                   return (
-                    <div className="space-y-2">
-                      {activities.slice(0, 50).map((a, i) => (
-                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/30 p-3">
-                          <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs',
-                            a.type === 'message' ? 'bg-blue-500/10 text-blue-400' :
-                            a.type === 'call' ? 'bg-green-500/10 text-green-400' :
-                            a.type === 'note' ? 'bg-yellow-500/10 text-yellow-400' :
-                            'bg-accent/10 text-accent'
-                          )}>
-                            {a.type === 'message' ? <MessageSquare className="h-3.5 w-3.5" /> :
-                             a.type === 'call' ? <PhoneCall className="h-3.5 w-3.5" /> :
-                             a.type === 'note' ? <Edit className="h-3.5 w-3.5" /> :
-                             <Send className="h-3.5 w-3.5" />}
+                    <div className="space-y-3">
+                      {events.map((ev, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                            {ev.icon}
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-foreground">{a.label}</p>
-                            {a.detail && <p className="text-xs text-muted-foreground truncate">{a.detail}</p>}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '—'}
+                              </span>
+                            </div>
+                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
                           </div>
-                          <span className="text-xs text-muted-foreground shrink-0">{format(new Date(a.date), 'MMM d, h:mm a')}</span>
                         </div>
                       ))}
                     </div>
@@ -1362,197 +1673,10 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              {/* ── Work History Section ──────────────────────────────────── */}
-              <div className="px-8 py-5 border-t border-border">
-                <Collapsible open={workHistoryOpen} onOpenChange={setWorkHistoryOpen}>
-                  <CollapsibleTrigger className="flex items-center justify-between w-full group">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-accent" />
-                      <h3 className="text-sm font-semibold text-foreground">Work History</h3>
-                      <span className="text-xs text-muted-foreground">({workHistory.length})</span>
-                    </div>
-                    {workHistoryOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-3 space-y-3">
-                    {workHistory.length === 0 && !showAddWork && (
-                      <p className="text-sm text-muted-foreground">No work history recorded.</p>
-                    )}
-                    {workHistory.map((w: any) => (
-                      <div key={w.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-foreground">{w.title}</p>
-                          {w.is_current && <Badge variant="secondary" className="text-[9px]">Current</Badge>}
-                        </div>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Building className="h-3 w-3" /> {w.company_name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {w.start_date ? format(new Date(w.start_date), 'MMM yyyy') : '?'}
-                          {' — '}
-                          {w.is_current ? 'Present' : w.end_date ? format(new Date(w.end_date), 'MMM yyyy') : '?'}
-                        </p>
-                        {w.description && <p className="text-xs text-muted-foreground mt-1">{w.description}</p>}
-                      </div>
-                    ))}
-                    {showAddWork ? (
-                      <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
-                        <h4 className="text-sm font-semibold">Add Work Experience</h4>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Company *</Label>
-                            <Input className="h-8 text-sm" value={workForm.company_name} onChange={e => setWorkForm(f => ({ ...f, company_name: e.target.value }))} placeholder="Company name" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Title *</Label>
-                            <Input className="h-8 text-sm" value={workForm.title} onChange={e => setWorkForm(f => ({ ...f, title: e.target.value }))} placeholder="Job title" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Start Date</Label>
-                            <Input className="h-8 text-sm" type="date" value={workForm.start_date} onChange={e => setWorkForm(f => ({ ...f, start_date: e.target.value }))} />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">End Date</Label>
-                            <Input className="h-8 text-sm" type="date" value={workForm.end_date} onChange={e => setWorkForm(f => ({ ...f, end_date: e.target.value }))} disabled={workForm.is_current} />
-                          </div>
-                        </div>
-                        <label className="flex items-center gap-2 text-xs">
-                          <input type="checkbox" checked={workForm.is_current} onChange={e => setWorkForm(f => ({ ...f, is_current: e.target.checked, end_date: e.target.checked ? '' : f.end_date }))} className="rounded" />
-                          Currently works here
-                        </label>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Description</Label>
-                          <Input className="h-8 text-sm" value={workForm.description} onChange={e => setWorkForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description..." />
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddWorkHistory} disabled={savingWork || !workForm.company_name || !workForm.title}>
-                            {savingWork && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(false)}>Cancel</Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddWork(true)}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Work Experience
-                      </Button>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-              </div>
-
-              {/* ── Education History Section ─────────────────────────────── */}
-              <div className="px-8 py-5 border-t border-border">
-                <Collapsible open={educationOpen} onOpenChange={setEducationOpen}>
-                  <CollapsibleTrigger className="flex items-center justify-between w-full group">
-                    <div className="flex items-center gap-2">
-                      <GraduationCap className="h-4 w-4 text-accent" />
-                      <h3 className="text-sm font-semibold text-foreground">Education</h3>
-                      <span className="text-xs text-muted-foreground">({education.length})</span>
-                    </div>
-                    {educationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-3 space-y-3">
-                    {education.length === 0 && !showAddEducation && (
-                      <p className="text-sm text-muted-foreground">No education history recorded.</p>
-                    )}
-                    {education.map((e: any) => (
-                      <div key={e.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
-                        <p className="text-sm font-medium text-foreground">{e.institution}</p>
-                        {(e.degree || e.field_of_study) && (
-                          <p className="text-xs text-muted-foreground">
-                            {e.degree}{e.degree && e.field_of_study ? ' in ' : ''}{e.field_of_study}
-                          </p>
-                        )}
-                        {(e.start_year || e.end_year) && (
-                          <p className="text-xs text-muted-foreground">
-                            {e.start_year ?? '?'} — {e.end_year ?? '?'}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                    {showAddEducation ? (
-                      <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
-                        <h4 className="text-sm font-semibold">Add Education</h4>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1 col-span-2">
-                            <Label className="text-xs">Institution *</Label>
-                            <Input className="h-8 text-sm" value={eduForm.institution} onChange={e => setEduForm(f => ({ ...f, institution: e.target.value }))} placeholder="University or school name" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Degree</Label>
-                            <Input className="h-8 text-sm" value={eduForm.degree} onChange={e => setEduForm(f => ({ ...f, degree: e.target.value }))} placeholder="e.g. B.S., MBA" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Field of Study</Label>
-                            <Input className="h-8 text-sm" value={eduForm.field_of_study} onChange={e => setEduForm(f => ({ ...f, field_of_study: e.target.value }))} placeholder="e.g. Finance, CS" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Start Year</Label>
-                            <Input className="h-8 text-sm" type="number" value={eduForm.start_year} onChange={e => setEduForm(f => ({ ...f, start_year: e.target.value }))} placeholder="2018" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">End Year</Label>
-                            <Input className="h-8 text-sm" type="number" value={eduForm.end_year} onChange={e => setEduForm(f => ({ ...f, end_year: e.target.value }))} placeholder="2022" />
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddEducation} disabled={savingEducation || !eduForm.institution}>
-                            {savingEducation && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(false)}>Cancel</Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAddEducation(true)}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Education
-                      </Button>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-              </div>
-
-              {/* ── System Information Section ────────────────────────────── */}
-              <div className="px-8 py-5 border-t border-border">
-                <div className="flex items-center gap-2 mb-3">
-                  <Info className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="text-sm font-semibold text-foreground">System Information</h3>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Created On</span>
-                    <p className="text-sm text-foreground mt-0.5">{c.created_at ? format(new Date(c.created_at), 'MMM d, yyyy h:mm a') : '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last Updated On</span>
-                    <p className="text-sm text-foreground mt-0.5">{c.updated_at ? format(new Date(c.updated_at), 'MMM d, yyyy h:mm a') : '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Created By</span>
-                    <p className="text-sm text-foreground mt-0.5">
-                      {(() => {
-                        const owner = profiles.find((p: any) => p.id === c.owner_id);
-                        return owner?.full_name ?? '—';
-                      })()}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last Email Sent On</span>
-                    <p className="text-sm text-foreground mt-0.5">{c.last_email_sent_at ? format(new Date(c.last_email_sent_at), 'MMM d, yyyy h:mm a') : '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Last SMS Sent By</span>
-                    <p className="text-sm text-foreground mt-0.5">{c.last_sms_sent_at ? format(new Date(c.last_sms_sent_at), 'MMM d, yyyy h:mm a') : '—'}</p>
-                  </div>
-                </div>
-              </div>
             </ScrollArea>
           </Tabs>
         </div>
 
-        {id && (
-          <div className="w-72 shrink-0 border-l border-border p-4 overflow-y-auto">
-            <TaskSidebar entityType="candidate" entityId={id} />
-          </div>
-        )}
       </div>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
