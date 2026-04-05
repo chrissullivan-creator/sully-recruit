@@ -121,13 +121,13 @@ export const fetchEntityHistory = task({
       try {
         const { data: liAccounts } = await supabase
           .from("integration_accounts")
-          .select("id, unipile_account_id, provider_config")
+          .select("id, unipile_account_id, access_token")
           .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
           .eq("is_active", true)
           .limit(1);
 
         const liAcct = liAccounts?.[0];
-        const apiKey = liAcct?.provider_config?.unipile_api_key as string | undefined;
+        const apiKey = liAcct?.access_token as string | undefined;
 
         if (liAcct && apiKey) {
           // Get contact's Unipile provider_id

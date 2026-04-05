@@ -23,7 +23,7 @@ export const resolveUnipileIds = schedules.task({
     // 1. Get the active LinkedIn integration account (for API key)
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, provider_config, unipile_account_id")
+      .select("id, access_token, unipile_account_id")
       .or(
         "account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator"
       )
@@ -31,12 +31,12 @@ export const resolveUnipileIds = schedules.task({
       .limit(1);
 
     const account = accounts?.[0];
-    if (!account?.provider_config?.unipile_api_key) {
+    if (!account?.access_token) {
       logger.warn("No active LinkedIn/Unipile account found — skipping");
       return { resolved: 0, failed: 0, skipped: 0 };
     }
 
-    const apiKey = account.provider_config.unipile_api_key as string;
+    const apiKey = account.access_token as string;
     const unipileAccountId = account.unipile_account_id as string | null;
 
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry

@@ -213,11 +213,11 @@ async function getUnipileApiKey(
   if (accountId) {
     const { data: account } = await supabase
       .from("integration_accounts")
-      .select("id, provider_config")
+      .select("id, access_token")
       .eq("id", accountId)
       .single();
-    if (account?.provider_config?.unipile_api_key) {
-      return { apiKey: account.provider_config.unipile_api_key, accountId: account.id };
+    if (account?.access_token) {
+      return { apiKey: account.access_token, accountId: account.id };
     }
   }
 
@@ -225,27 +225,27 @@ async function getUnipileApiKey(
   if (userId) {
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, provider_config")
+      .select("id, access_token")
       .eq("owner_user_id", userId)
       .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
       .eq("is_active", true)
       .limit(1);
 
-    if (accounts?.[0]?.provider_config?.unipile_api_key) {
-      return { apiKey: accounts[0].provider_config.unipile_api_key, accountId: accounts[0].id };
+    if (accounts?.[0]?.access_token) {
+      return { apiKey: accounts[0].access_token, accountId: accounts[0].id };
     }
   }
 
   // 3. Auto-discover any active LinkedIn account
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, provider_config")
+    .select("id, access_token")
     .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
     .eq("is_active", true)
     .limit(1);
 
-  if (accounts?.[0]?.provider_config?.unipile_api_key) {
-    return { apiKey: accounts[0].provider_config.unipile_api_key, accountId: accounts[0].id };
+  if (accounts?.[0]?.access_token) {
+    return { apiKey: accounts[0].access_token, accountId: accounts[0].id };
   }
 
   throw new Error("No active LinkedIn/Unipile account found");
@@ -259,7 +259,7 @@ export async function sendLinkedIn(
   accountId?: string,
   stepChannel?: string,
 ): Promise<{ message_id: string; conversation_id: string }> {
-  const { apiKey } = await getUnipileApiKey(supabase, userId, accountId);
+  const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
   const baseUrl = "https://api.unipile.com:13111/api/v1";
 
   // Resolve LinkedIn URL to provider_id if needed
@@ -287,9 +287,36 @@ export async function sendLinkedIn(
     stepChannel === "linkedin_recruiter";
   const isConnectionRequest = stepChannel === "linkedin_connection";
 
+  // Connection requests use a different Unipile endpoint
+  if (isConnectionRequest) {
+    const invitePayload: any = {
+      provider_id: providerId,
+      account_id: resolvedAccountId,
+      message: body,
+    };
+
+    const response = await fetch(`${baseUrl}/users/invite`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-UNIPILE-CLIENT": "sully-recruit",
+      },
+      body: JSON.stringify(invitePayload),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Unipile invite error: ${error}`);
+    }
+
+    const data = await response.json();
+    return { message_id: data.id || `invite_${Date.now()}`, conversation_id: data.conversation_id || "" };
+  }
+
+  // Regular messages and InMails
   const sendPayload: any = { provider_id: providerId, text: body };
   if (isInMailChannel) sendPayload.message_type = "INMAIL";
-  if (isConnectionRequest) sendPayload.message_type = "CONNECTION_REQUEST";
 
   const response = await fetch(`${baseUrl}/messages`, {
     method: "POST",
@@ -303,6 +330,9 @@ export async function sendLinkedIn(
 
   if (!response.ok) {
     const error = await response.text();
+    if (isInMailChannel && response.status === 422) {
+      throw new Error(`InMail ${response.status}: ${error}`);
+    }
     throw new Error(`Unipile send error: ${error}`);
   }
 
