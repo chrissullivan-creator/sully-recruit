@@ -20,7 +20,7 @@ import {
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
-  GraduationCap, Upload, Plus, Info,
+  GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,17 +28,23 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 
-const JOB_STATUSES = [
+const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
   { value: 'reached_out',  label: 'Reached Out',  color: 'bg-blue-500/15 text-blue-400' },
-  { value: 'pitched',      label: 'Pitched',      color: 'bg-indigo-500/15 text-indigo-400' },
+  { value: 'pitch',        label: 'Pitch',        color: 'bg-indigo-500/15 text-indigo-400' },
   { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'sent',         label: 'Sent',         color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
   { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
   { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
   { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
-  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+];
+
+const REJECTED_BY_OPTIONS = [
+  { value: 'recruiter',    label: 'By Recruiter' },
+  { value: 'sales_person', label: 'By Sales Person' },
+  { value: 'client',       label: 'By Client' },
+  { value: 'candidate',    label: 'By Candidate' },
 ];
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
@@ -265,6 +271,16 @@ const CandidateDetail = () => {
   });
 
   const [uploadingFormatted, setUploadingFormatted] = useState(false);
+  const [uploadingOtherDoc, setUploadingOtherDoc] = useState(false);
+  const [docFolder, setDocFolder] = useState<'resumes' | 'formatted' | 'other'>('resumes');
+  const otherDocInputRef = useRef<HTMLInputElement>(null);
+
+  // Send Out management state
+  const [addingSendOut, setAddingSendOut] = useState(false);
+  const [selectedJobForSendOut, setSelectedJobForSendOut] = useState<string>('');
+  const [savingSendOut, setSavingSendOut] = useState(false);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
 
   const handleFormattedUpload = async (file: File, versionLabel: string) => {
     if (!id) return;
@@ -294,7 +310,48 @@ const CandidateDetail = () => {
     }
   };
 
-  const { data: assignedJobs = [] } = useQuery({
+  const { data: otherDocs = [] } = useQuery({
+    queryKey: ['candidate_documents', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_documents')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const handleOtherDocUpload = async (file: File) => {
+    if (!id) return;
+    setUploadingOtherDoc(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const path = `${session.user.id}/${id}/other/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { error: dbErr } = await supabase.from('candidate_documents').insert({
+        candidate_id: id,
+        file_name: file.name,
+        file_path: path,
+        mime_type: file.type || 'application/octet-stream',
+        file_size: file.size,
+        created_by: session.user.id,
+      } as any);
+      if (dbErr) throw dbErr;
+      queryClient.invalidateQueries({ queryKey: ['candidate_documents', id] });
+      toast.success('Document uploaded');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploadingOtherDoc(false);
+    }
+  };
+
+  const { data: sendOuts = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
     enabled: !!id,
     queryFn: async () => {
@@ -307,6 +364,65 @@ const CandidateDetail = () => {
       return data as any[];
     },
   });
+
+  const handleAddSendOut = async () => {
+    if (!id || !selectedJobForSendOut) return;
+    setSavingSendOut(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { error } = await supabase.from('send_outs').insert({
+        candidate_id: id,
+        job_id: selectedJobForSendOut,
+        stage: 'new',
+        recruiter_id: session?.user?.id ?? null,
+      } as any);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+      setSelectedJobForSendOut('');
+      setAddingSendOut(false);
+      toast.success('Candidate added to job pipeline');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSavingSendOut(false);
+    }
+  };
+
+  const handleUpdateStage = async (sendOutId: string, newStage: string) => {
+    const updates: any = { stage: newStage, updated_at: new Date().toISOString() };
+    if (newStage === 'sent_to_client') updates.sent_to_client_at = new Date().toISOString();
+    if (newStage === 'interviewing') updates.interview_at = new Date().toISOString();
+    if (newStage === 'offer') updates.offer_at = new Date().toISOString();
+    if (newStage === 'placed') updates.placed_at = new Date().toISOString();
+
+    const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOutId);
+    if (error) { toast.error('Failed to update stage'); return; }
+    queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === newStage)?.label ?? newStage}`);
+  };
+
+  const handleReject = async (sendOutId: string) => {
+    if (!rejectForm.rejected_by) { toast.error('Please select who rejected'); return; }
+    const { error } = await supabase.from('send_outs').update({
+      stage: 'rejected',
+      rejected_by: rejectForm.rejected_by,
+      rejection_reason: rejectForm.rejection_reason || null,
+      feedback: rejectForm.feedback || null,
+      updated_at: new Date().toISOString(),
+    } as any).eq('id', sendOutId);
+    if (error) { toast.error('Failed to reject'); return; }
+    queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+    setRejectingId(null);
+    setRejectForm({ rejected_by: '', rejection_reason: '', feedback: '' });
+    toast.success('Send out rejected');
+  };
+
+  const handleDeleteSendOut = async (sendOutId: string) => {
+    const { error } = await supabase.from('send_outs').delete().eq('id', sendOutId);
+    if (error) { toast.error('Failed to remove'); return; }
+    queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+    toast.success('Removed from pipeline');
+  };
 
   const handleAddWorkHistory = async () => {
     if (!id || !workForm.company_name || !workForm.title) return;
@@ -652,7 +768,7 @@ const CandidateDetail = () => {
                 <Select value={c.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
                   <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Set status…" /></SelectTrigger>
                   <SelectContent>
-                    {JOB_STATUSES.map(s => (
+                    {SEND_OUT_STAGES.map(s => (
                       <SelectItem key={s.value} value={s.value}>
                         <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
                       </SelectItem>
@@ -676,9 +792,8 @@ const CandidateDetail = () => {
                 <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
                 <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
-                <TabsTrigger value="files" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Files</TabsTrigger>
-                <TabsTrigger value="formatted" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Formatted</TabsTrigger>
-                <TabsTrigger value="assigned-jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Assigned Jobs</TabsTrigger>
+                <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
+                <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
               </TabsList>
             </div>
 
@@ -863,164 +978,247 @@ const CandidateDetail = () => {
                 <p className="text-sm text-muted-foreground">Activity history will appear here.</p>
               </TabsContent>
 
-              {/* ── Files Tab ─────────────────────────────────────────────── */}
-              <TabsContent value="files" className="px-8 py-5 mt-0 space-y-4">
+              {/* ── Documents Tab (Resumes / Formatted / Other) ────────── */}
+              <TabsContent value="documents" className="px-8 py-5 mt-0 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Files</h2>
-                    <span className="text-xs text-muted-foreground">({candidateResumes.length})</span>
+                    <FolderOpen className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Documents</h2>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingFile}>
-                    {uploadingFile ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
-                    Upload File
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.csv"
-                    className="hidden"
-                    onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file);
-                      e.target.value = '';
-                    }}
-                  />
                 </div>
-                {candidateResumes.length === 0 ? (
+                {/* Sub-folder tabs */}
+                <div className="flex gap-1 border-b border-border">
+                  {([
+                    { key: 'resumes' as const, label: 'Resumes', count: candidateResumes.length },
+                    { key: 'formatted' as const, label: 'Formatted', count: formattedResumes.length },
+                    { key: 'other' as const, label: 'Other', count: otherDocs.length },
+                  ]).map(f => (
+                    <button
+                      key={f.key}
+                      onClick={() => setDocFolder(f.key)}
+                      className={cn(
+                        'px-3 py-1.5 text-xs font-medium border-b-2 transition-colors -mb-px',
+                        docFolder === f.key
+                          ? 'border-accent text-accent'
+                          : 'border-transparent text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {f.label} <span className="ml-1 text-muted-foreground">({f.count})</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Resumes folder */}
+                {docFolder === 'resumes' && (
+                  <div className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingFile}>
+                        {uploadingFile ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                        Upload Resume
+                      </Button>
+                      <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.rtf" className="hidden"
+                        onChange={e => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }} />
+                    </div>
+                    {candidateResumes.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border p-8 text-center">
+                        <FileText className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">No resumes uploaded yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {candidateResumes.map((r: any) => {
+                          const downloadUrl = r.file_url || (r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null);
+                          return (
+                            <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <FileText className="h-4 w-4 text-accent shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{r.file_name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                                    {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                                  </p>
+                                </div>
+                              </div>
+                              {downloadUrl && (
+                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
+                                  <ExternalLink className="h-3.5 w-3.5" /> View
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Formatted folder */}
+                {docFolder === 'formatted' && (
+                  <div className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file'; input.accept = '.pdf,.doc,.docx';
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) {
+                            const label = prompt('Version label (e.g. v1, final, client-ready):', `v${formattedResumes.length + 1}`);
+                            if (label !== null) handleFormattedUpload(file, label);
+                          }
+                        };
+                        input.click();
+                      }} disabled={uploadingFormatted}>
+                        {uploadingFormatted ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                        Upload Formatted
+                      </Button>
+                    </div>
+                    {formattedResumes.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border p-8 text-center">
+                        <FileText className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">No formatted resumes yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {formattedResumes.map((r: any) => {
+                          const downloadUrl = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                          return (
+                            <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <FileText className="h-4 w-4 text-accent shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">
+                                    {r.file_name}
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent">{r.version_label}</span>
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                                    {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                                  </p>
+                                </div>
+                              </div>
+                              {downloadUrl && (
+                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
+                                  <ExternalLink className="h-3.5 w-3.5" /> View
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Other folder */}
+                {docFolder === 'other' && (
+                  <div className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => otherDocInputRef.current?.click()} disabled={uploadingOtherDoc}>
+                        {uploadingOtherDoc ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                        Upload Document
+                      </Button>
+                      <input ref={otherDocInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.csv,.png,.jpg,.jpeg" className="hidden"
+                        onChange={e => { const file = e.target.files?.[0]; if (file) handleOtherDocUpload(file); e.target.value = ''; }} />
+                    </div>
+                    {otherDocs.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border p-8 text-center">
+                        <FileText className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">No other documents yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {otherDocs.map((d: any) => {
+                          const downloadUrl = d.file_path ? supabase.storage.from('resumes').getPublicUrl(d.file_path).data?.publicUrl : null;
+                          return (
+                            <div key={d.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <FileText className="h-4 w-4 text-accent shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{d.file_name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {d.file_size && <span className="mr-2">{(d.file_size / 1024).toFixed(0)} KB</span>}
+                                    {d.created_at && format(new Date(d.created_at), 'MMM d, yyyy')}
+                                  </p>
+                                </div>
+                              </div>
+                              {downloadUrl && (
+                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
+                                  <ExternalLink className="h-3.5 w-3.5" /> View
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Send Outs Tab ─────────────────────────────────────────── */}
+              <TabsContent value="send-outs" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Send className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Send Outs</h2>
+                    <span className="text-xs text-muted-foreground">({sendOuts.length})</span>
+                  </div>
+                  {!addingSendOut && (
+                    <Button variant="gold" size="sm" onClick={() => setAddingSendOut(true)}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add to Job
+                    </Button>
+                  )}
+                </div>
+
+                {/* Add send out form */}
+                {addingSendOut && (
+                  <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+                    <h4 className="text-sm font-semibold">Add Candidate to Job Pipeline</h4>
+                    <Select value={selectedJobForSendOut} onValueChange={setSelectedJobForSendOut}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a job..." /></SelectTrigger>
+                      <SelectContent>
+                        {openJobs.map((j: any) => (
+                          <SelectItem key={j.id} value={j.id}>
+                            {j.title}{j.companies?.name ? ` — ${j.companies.name}` : j.company_name ? ` — ${j.company_name}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="flex gap-2">
+                      <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddSendOut} disabled={savingSendOut || !selectedJobForSendOut}>
+                        {savingSendOut && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Add
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setAddingSendOut(false); setSelectedJobForSendOut(''); }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                {sendOuts.length === 0 && !addingSendOut ? (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No files yet</p>
-                    <p className="text-xs text-muted-foreground mb-4">Upload resumes, cover letters, or other documents.</p>
-                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-                      <Upload className="h-3.5 w-3.5 mr-1" /> Upload File
+                    <Send className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No send outs</p>
+                    <p className="text-xs text-muted-foreground mb-4">Add this candidate to a job pipeline to track their progress.</p>
+                    <Button variant="gold" size="sm" onClick={() => setAddingSendOut(true)}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add to Job
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {candidateResumes.map((r: any) => {
-                      const downloadUrl = r.file_url || (r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null);
-                      return (
-                        <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <FileText className="h-4 w-4 text-accent shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">{r.file_name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {r.mime_type && <span className="mr-2">{r.mime_type}</span>}
-                                {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
-                                {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                          </div>
-                          {downloadUrl && (
-                            <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                              <ExternalLink className="h-3.5 w-3.5" /> Download
-                            </a>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* ── Formatted Resumes Tab ──────────────────────────────────── */}
-              <TabsContent value="formatted" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Formatted Resumes</h2>
-                    <span className="text-xs text-muted-foreground">({formattedResumes.length})</span>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = '.pdf,.doc,.docx';
-                    input.onchange = (e) => {
-                      const file = (e.target as HTMLInputElement).files?.[0];
-                      if (file) {
-                        const label = prompt('Version label (e.g. v1, final, client-ready):', `v${formattedResumes.length + 1}`);
-                        if (label !== null) handleFormattedUpload(file, label);
-                      }
-                    };
-                    input.click();
-                  }} disabled={uploadingFormatted}>
-                    {uploadingFormatted ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
-                    Upload Formatted Resume
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">Client-facing resume versions formatted for submission.</p>
-                {formattedResumes.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No formatted resumes yet</p>
-                    <p className="text-xs text-muted-foreground mb-4">Upload client-ready versions of this candidate's resume.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {formattedResumes.map((r: any) => {
-                      const downloadUrl = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
-                      return (
-                        <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <FileText className="h-4 w-4 text-accent shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">
-                                {r.file_name}
-                                <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent">{r.version_label}</span>
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
-                                {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
-                                {r.notes && <span className="ml-2">— {r.notes}</span>}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {downloadUrl && (
-                              <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
-                                <ExternalLink className="h-3.5 w-3.5" /> View
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* ── Assigned Jobs Tab ─────────────────────────────────────── */}
-              <TabsContent value="assigned-jobs" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Briefcase className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Assigned Jobs</h2>
-                  <span className="text-xs text-muted-foreground">({assignedJobs.length})</span>
-                </div>
-                {assignedJobs.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No job assignments</p>
-                    <p className="text-xs text-muted-foreground">Send outs linked to this candidate will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {assignedJobs.map((so: any) => {
+                  <div className="space-y-3">
+                    {sendOuts.map((so: any) => {
                       const j = so.jobs;
-                      const stageCfg = JOB_STATUSES.find(s => s.value === so.stage);
+                      const stageCfg = SEND_OUT_STAGES.find(s => s.value === so.stage);
+                      const isRejected = so.stage === 'rejected';
+                      const isRejecting = rejectingId === so.id;
                       return (
-                        <div
-                          key={so.id}
-                          className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 cursor-pointer transition-colors"
-                          onClick={() => j?.id && navigate(`/jobs/${j.id}`)}
-                        >
+                        <div key={so.id} className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">{j?.title ?? 'Unknown Job'}</p>
+                            <div className="min-w-0 cursor-pointer" onClick={() => j?.id && navigate(`/jobs/${j.id}`)}>
+                              <p className="text-sm font-medium text-foreground hover:text-accent transition-colors">{j?.title ?? 'Unknown Job'}</p>
                               <p className="text-xs text-muted-foreground">
                                 {j?.company_name && <span>{j.company_name}</span>}
                                 {j?.location && <span> &middot; {j.location}</span>}
+                                <span className="ml-2">{so.created_at ? format(new Date(so.created_at), 'MMM d, yyyy') : ''}</span>
                               </p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
@@ -1029,9 +1227,79 @@ const CandidateDetail = () => {
                                   {stageCfg.label}
                                 </span>
                               )}
-                              <span className="text-xs text-muted-foreground">{so.created_at ? format(new Date(so.created_at), 'MMM d, yyyy') : ''}</span>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-400" onClick={() => handleDeleteSendOut(so.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           </div>
+
+                          {/* Stage selector */}
+                          {!isRejected && !isRejecting && (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {SEND_OUT_STAGES.filter(s => s.value !== 'rejected').map(s => (
+                                <button
+                                  key={s.value}
+                                  onClick={() => handleUpdateStage(so.id, s.value)}
+                                  className={cn(
+                                    'px-2 py-0.5 rounded text-[10px] font-medium transition-all border',
+                                    so.stage === s.value
+                                      ? cn(s.color, 'border-current')
+                                      : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                  )}
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => { setRejectingId(so.id); setRejectForm({ rejected_by: '', rejection_reason: '', feedback: '' }); }}
+                                className="px-2 py-0.5 rounded text-[10px] font-medium border border-transparent text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Rejection details (when already rejected) */}
+                          {isRejected && !isRejecting && (
+                            <div className="rounded-md bg-red-500/5 border border-red-500/20 p-3 space-y-1">
+                              <p className="text-xs font-medium text-red-400">Rejected {so.rejected_by ? `— ${REJECTED_BY_OPTIONS.find(o => o.value === so.rejected_by)?.label ?? so.rejected_by}` : ''}</p>
+                              {so.rejection_reason && <p className="text-xs text-muted-foreground"><span className="font-medium">Reason:</span> {so.rejection_reason}</p>}
+                              {so.feedback && <p className="text-xs text-muted-foreground"><span className="font-medium">Feedback:</span> {so.feedback}</p>}
+                              <button onClick={() => { setRejectingId(so.id); setRejectForm({ rejected_by: so.rejected_by || '', rejection_reason: so.rejection_reason || '', feedback: so.feedback || '' }); }} className="text-[10px] text-accent hover:underline mt-1">Edit</button>
+                            </div>
+                          )}
+
+                          {/* Rejection form */}
+                          {isRejecting && (
+                            <div className="rounded-md border border-red-500/30 bg-red-500/5 p-4 space-y-3">
+                              <h5 className="text-xs font-semibold text-red-400">Rejection Details</h5>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Rejected By *</Label>
+                                <Select value={rejectForm.rejected_by} onValueChange={v => setRejectForm(f => ({ ...f, rejected_by: v }))}>
+                                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Who rejected?" /></SelectTrigger>
+                                  <SelectContent>
+                                    {REJECTED_BY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Reason</Label>
+                                <Input className="h-8 text-sm" value={rejectForm.rejection_reason} onChange={e => setRejectForm(f => ({ ...f, rejection_reason: e.target.value }))} placeholder="Why was this rejected?" />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Feedback</Label>
+                                <textarea value={rejectForm.feedback} onChange={e => setRejectForm(f => ({ ...f, feedback: e.target.value }))}
+                                  className="w-full rounded-md border border-input bg-background text-foreground p-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                                  rows={2} placeholder="Additional feedback..." />
+                              </div>
+                              <div className="flex gap-2">
+                                <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={() => handleReject(so.id)} disabled={!rejectForm.rejected_by}>
+                                  Confirm Rejection
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setRejectingId(null)}>Cancel</Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
