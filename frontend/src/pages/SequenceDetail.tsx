@@ -483,7 +483,7 @@ const SequenceDetail = () => {
               {/* Analytics */}
               <SequenceAnalytics
                 steps={steps.map(s => ({ id: s.id, order: s.order, channel: s.channel }))}
-                enrollments={enrollments.map(e => ({ id: e.id, status: e.status, current_step_order: e.current_step_order }))}
+                enrollments={enrollments.map(e => ({ id: e.id, status: e.status, current_step_order: e.current_step_order, reply_sentiment: (e as any).reply_sentiment }))}
                 executions={executions}
               />
 
@@ -693,7 +693,6 @@ const SequenceDetail = () => {
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Step</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Result</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Connection</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
                         <th className="w-10 px-4 py-2.5"></th>
                       </tr>
@@ -785,16 +784,6 @@ const SequenceDetail = () => {
                               {lastResult === 'bounced' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#DC2626', background: '#FEF2F2' }}>Bounced</span>}
                               {lastResult === 'sent' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#6B7280', background: '#F3F4F6' }}>Sent</span>}
                               {!lastResult && <span className="text-xs text-muted-foreground">—</span>}
-                            </td>
-                            <td className="px-4 py-2.5">
-                              {(() => {
-                                const connStatus = (enrollment as any).linkedin_connection_status;
-                                if (connStatus === 'requested' || connStatus === 'pending')
-                                  return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#C9A84C', background: '#FBF4E3' }}>⏳ Awaiting</span>;
-                                if (connStatus === 'accepted')
-                                  return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#2A5C42', background: '#EAF2EC' }}>✓ Connected</span>;
-                                return <span className="text-xs text-muted-foreground">—</span>;
-                              })()}
                             </td>
                             <td className="px-4 py-2.5">
                               {(() => {
@@ -901,8 +890,9 @@ const SequenceDetail = () => {
                             </td>
                             {steps.sort((a, b) => a.order - b.order).map((step) => {
                               const exec = enrollExecs.find(x => x.sequence_step_id === step.id);
-                              const isPending = !exec && enrollment.status === 'active' && (enrollment.current_step_order || 1) <= step.order;
-                              const isUpcoming = isPending && enrollment.current_step_order === step.order;
+                              const currentOrder = enrollment.current_step_order ?? 0;
+                              const isPending = !exec && enrollment.status === 'active' && currentOrder < step.order;
+                              const isUpcoming = isPending && step.order === currentOrder + 1;
 
                               // Calculate scheduled time
                               let scheduledTime = '';
