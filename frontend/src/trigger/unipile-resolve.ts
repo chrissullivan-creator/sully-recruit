@@ -2,10 +2,10 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
 const UNIPILE_BASE_URL = "https://api.unipile.com:13111/api/v1";
-const BATCH_SIZE = 10;
-const DELAY_MS = 300; // ~3 requests/second to avoid rate limits
-const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per Unipile API call
-const MAX_ELAPSED_MS = 200_000; // 3m20s safety margin (max duration is 5 min)
+const BATCH_SIZE = 5;
+const DELAY_MS = 300;
+const FETCH_TIMEOUT_MS = 3_000; // 3s hard timeout per API call
+const MAX_ELAPSED_MS = 120_000; // 2 min safety margin
 
 /**
  * Scheduled task: resolve Unipile IDs for candidates with LinkedIn URLs.
@@ -19,6 +19,7 @@ const MAX_ELAPSED_MS = 200_000; // 3m20s safety margin (max duration is 5 min)
  */
 export const resolveUnipileIds = schedules.task({
   id: "resolve-unipile-ids",
+  maxDuration: 180, // 3 min hard cap for this task
   run: async () => {
     const supabase = getSupabaseAdmin();
 
@@ -101,9 +102,10 @@ export const resolveUnipileIds = schedules.task({
           "X-UNIPILE-CLIENT": "sully-recruit",
         };
 
-        const resp = await fetch(
+        const resp = await fetchWithTimeout(
           `${UNIPILE_BASE_URL}/users/${encodeURIComponent(slug)}`,
-          { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+          { headers },
+          FETCH_TIMEOUT_MS
         );
 
         if (!resp.ok) {
@@ -207,4 +209,18 @@ function extractLinkedInSlug(url: string | null): string | null {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
