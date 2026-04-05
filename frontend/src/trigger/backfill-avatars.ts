@@ -159,39 +159,80 @@ export const backfillAvatars = schedules.task({
       // ── 4. Backfill company logos ──
       const { data: companies } = await supabase
         .from("companies")
-        .select("id, name, linkedin_url")
+        .select("id, name, linkedin_url, website")
         .is("logo_url", null)
-        .not("linkedin_url", "is", null)
-        .limit(20);
+        .limit(30);
 
       for (const company of companies || []) {
-        const slug = company.linkedin_url?.match(/linkedin\.com\/company\/([^/?#]+)/)?.[1];
-        if (!slug) continue;
-
         try {
-          const resp = await fetch(
-            `${baseUrl}/companies/${encodeURIComponent(slug)}`,
-            {
-              headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
-              signal: AbortSignal.timeout(5_000),
-            },
-          );
+          let logoUrl: string | null = null;
 
-          if (resp.ok) {
-            const profile = await resp.json();
-            const logoUrl =
-              profile.logo_url ?? profile.profile_picture_url ?? profile.picture_url ?? null;
+          // Strategy A: LinkedIn company page via Unipile
+          const slug = company.linkedin_url?.match(/linkedin\.com\/company\/([^/?#]+)/)?.[1];
+          if (slug) {
+            const resp = await fetch(
+              `${baseUrl}/companies/${encodeURIComponent(slug)}`,
+              {
+                headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+                signal: AbortSignal.timeout(5_000),
+              },
+            );
+            if (resp.ok) {
+              const profile = await resp.json();
+              logoUrl = profile.logo_url ?? profile.profile_picture_url ?? profile.picture_url ?? null;
+            }
+            await delay(DELAY_MS);
+          }
 
-            if (logoUrl) {
-              await supabase
-                .from("companies")
-                .update({ logo_url: logoUrl } as any)
-                .eq("id", company.id);
-              companiesUpdated++;
+          // Strategy B: Search Unipile for company by name (if no LinkedIn URL)
+          if (!logoUrl && !slug && company.name) {
+            const searchResp = await fetch(
+              `${baseUrl}/companies/search?keywords=${encodeURIComponent(company.name)}&limit=1`,
+              {
+                headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+                signal: AbortSignal.timeout(5_000),
+              },
+            );
+            if (searchResp.ok) {
+              const searchData = await searchResp.json();
+              const match = (searchData.items || searchData)?.[0];
+              if (match) {
+                logoUrl = match.logo_url ?? match.profile_picture_url ?? null;
+                // Also save the LinkedIn URL for future lookups
+                const matchUrl = match.linkedin_url || match.url;
+                if (matchUrl) {
+                  await supabase
+                    .from("companies")
+                    .update({ linkedin_url: matchUrl } as any)
+                    .eq("id", company.id);
+                }
+              }
+            }
+            await delay(DELAY_MS);
+          }
+
+          // Strategy C: Clearbit Logo API (free, no auth, by domain)
+          if (!logoUrl && company.website) {
+            const domain = extractDomain(company.website);
+            if (domain) {
+              const clearbitUrl = `https://logo.clearbit.com/${domain}`;
+              const headResp = await fetch(clearbitUrl, {
+                method: "HEAD",
+                signal: AbortSignal.timeout(3_000),
+              });
+              if (headResp.ok) {
+                logoUrl = clearbitUrl;
+              }
             }
           }
 
-          await delay(DELAY_MS);
+          if (logoUrl) {
+            await supabase
+              .from("companies")
+              .update({ logo_url: logoUrl } as any)
+              .eq("id", company.id);
+            companiesUpdated++;
+          }
         } catch {
           // Skip failures
         }
@@ -206,4 +247,13 @@ export const backfillAvatars = schedules.task({
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractDomain(url: string): string | null {
+  try {
+    const u = url.startsWith("http") ? url : `https://${url}`;
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
