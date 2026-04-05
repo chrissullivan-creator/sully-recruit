@@ -31,7 +31,15 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
   const { data: integrationAccounts = [] } = useIntegrationAccounts();
-  const allAccounts = (integrationAccounts as any[]).filter(a => a.is_active !== false);
+  const activeAccounts = (integrationAccounts as any[]).filter(a => a.is_active !== false);
+  // Deduplicate by owner — show each person once regardless of channel
+  const seenOwners = new Set<string>();
+  const allAccounts = activeAccounts.filter((a: any) => {
+    const key = a.owner_user_id || a.id;
+    if (seenOwners.has(key)) return false;
+    seenOwners.add(key);
+    return true;
+  });
   const queryClient = useQueryClient();
 
   const isPeoplePicker = !!preselectedSequenceId && candidateIds.length === 0;
@@ -133,7 +141,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 1,
+          current_step_order: 0,
           next_step_at: new Date().toISOString(),
           enrolled_by: userId,
           account_id: selectedAccountId,
@@ -219,12 +227,14 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 </SelectTrigger>
                 <SelectContent>
                   {allAccounts.map((acct: any) => {
-                    const isLi = acct.account_type?.startsWith('linkedin');
+                    const label = (acct.account_label || acct.account_type || '')
+                      .replace(/\s*(Email|LinkedIn|SMS|Phone|SMTP|Gmail|Outlook)\s*$/i, '').trim()
+                      || acct.account_label || acct.account_type;
                     return (
                       <SelectItem key={acct.id} value={acct.id}>
                         <span className="flex items-center gap-2">
-                          {isLi ? <Linkedin className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
-                          {acct.account_label || acct.account_type}{acct.email_address ? ` — ${acct.email_address}` : ''}
+                          <Users className="h-3.5 w-3.5" />
+                          {label}
                         </span>
                       </SelectItem>
                     );
