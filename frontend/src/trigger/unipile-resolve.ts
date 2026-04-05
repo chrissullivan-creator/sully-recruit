@@ -13,7 +13,7 @@ const DELAY_MS = 350; // ~3 requests/second to avoid rate limits
  *
  * Schedule in Trigger.dev Dashboard:
  *   Task: resolve-unipile-ids
- *   Cron: 0 */2 * * * (every 2 hours)
+ *   Cron: every 2 hours (0 at minute 0)
  */
 export const resolveUnipileIds = schedules.task({
   id: "resolve-unipile-ids",
