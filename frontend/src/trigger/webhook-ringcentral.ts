@@ -183,7 +183,7 @@ async function transcribeAndExtract(
   entityType: string = "candidate",
 ) {
   try {
-    const anthropicKey = getAnthropicKey();
+    const anthropicKey = await getAnthropicKey();
 
     // ── 1. Try to fetch call recording from RingCentral ─────────────
     let transcript: string | null = null;

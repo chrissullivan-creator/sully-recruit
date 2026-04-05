@@ -307,7 +307,7 @@ async function analyzeSentiment(
   receivedAt: string,
 ) {
   try {
-    const apiKey = getAnthropicKey();
+    const apiKey = await getAnthropicKey();
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

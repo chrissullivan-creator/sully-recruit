@@ -378,7 +378,7 @@ const CandidateDetail = () => {
       const { error } = await supabase.from('send_outs').insert({
         candidate_id: id,
         job_id: selectedJobForSendOut,
-        stage: 'new',
+        stage: 'lead',
         recruiter_id: session?.user?.id ?? null,
       } as any);
       if (error) throw error;
