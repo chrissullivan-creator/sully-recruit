@@ -87,6 +87,9 @@ export const processSequenceStep = task({
           } as any)
           .eq("id", payload.enrollmentId);
 
+        // Note: Pipeline stage changes (pitch/rejected) are now handled by sentiment
+        // analysis in the webhook handlers (webhook-microsoft, webhook-unipile, webhook-ringcentral)
+
         logger.info("Enrollment stopped — reply detected", { enrollmentId: payload.enrollmentId });
         return { action: "stopped", reason: "candidate_replied" };
       }
@@ -344,6 +347,25 @@ export const processSequenceStep = task({
           is_read: true,
         })
         .eq("id", conversationId);
+
+      // ── Pipeline automation: auto-advance send_out stage ──────
+      if (payload.candidateId) {
+        // If this is the first step (step_order = 1), move any "new" send_outs to "reached_out"
+        if (nextStepOrder === 1) {
+          const { data: updated } = await supabase
+            .from("send_outs")
+            .update({ stage: "reached_out", updated_at: now.toISOString() } as any)
+            .eq("candidate_id", payload.candidateId)
+            .eq("stage", "new")
+            .select("id");
+          if (updated && updated.length > 0) {
+            logger.info("Pipeline auto-advanced to reached_out", {
+              candidateId: payload.candidateId,
+              sendOutIds: updated.map((s: any) => s.id),
+            });
+          }
+        }
+      }
 
       logger.info("Message sent", {
         enrollmentId: payload.enrollmentId,
