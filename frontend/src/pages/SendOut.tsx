@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useCandidate, useJobs, useContacts } from '@/hooks/useData';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -248,6 +249,7 @@ export default function SendOut() {
   const { data: candidate, isLoading: candLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: contacts = [] } = useContacts();
+  const { data: profiles = [] } = useProfiles();
 
   // Steps: pick_resume → parse → edit → template → email
   const [step, setStep] = useState<'pick_resume' | 'parse' | 'edit' | 'template' | 'email'>('pick_resume');
@@ -257,14 +259,17 @@ export default function SendOut() {
   const [resumeText, setResumeText] = useState('');
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [jobPrompt, setJobPrompt] = useState('');
+  const [usingExistingFormatted, setUsingExistingFormatted] = useState<any>(null);
 
   // Email state
   const [emailTo, setEmailTo] = useState('');
+  const [emailFrom, setEmailFrom] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [emailGreeting, setEmailGreeting] = useState('Hi,');
   const [generatingEmail, setGeneratingEmail] = useState(false);
   const [sending, setSending] = useState(false);
+  const [attachmentMode, setAttachmentMode] = useState<'generated' | 'existing'>('generated');
 
   // Resumes for this candidate
   const { data: resumes = [] } = useQuery({
@@ -273,6 +278,21 @@ export default function SendOut() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('resumes')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // Formatted resumes for this candidate
+  const { data: formattedResumes = [] } = useQuery({
+    queryKey: ['formatted_resumes', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('formatted_resumes')
         .select('*')
         .eq('candidate_id', id!)
         .order('created_at', { ascending: false });
@@ -313,14 +333,22 @@ export default function SendOut() {
     }
   }, [candidate]);
 
-  // Pre-fill email when job selected
+  // Default "from" to Chris Sullivan or current user
+  useEffect(() => {
+    if (profiles.length > 0 && !emailFrom) {
+      const chris = profiles.find((p: any) => p.full_name?.toLowerCase().includes('chris'));
+      setEmailFrom(chris?.email || user?.email || '');
+    }
+  }, [profiles, user]);
+
+  // Pre-fill email when job selected — auto-populate ALL job contacts
   useEffect(() => {
     if (selectedJob && candidate) {
       const c = candidate as any;
       const name = c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
       setEmailSubject(`${name} | ${(selectedJob as any).title}`);
 
-      // Pre-fill contacts' emails
+      // Pre-fill ALL contacts' emails
       const contactEmails = jobContacts
         .map((jc: any) => jc.contacts?.email)
         .filter(Boolean);
@@ -430,39 +458,92 @@ export default function SendOut() {
     if (!emailTo || !emailBody) { toast.error('Recipient and body required'); return; }
     setSending(true);
     try {
-      // Generate PDF blob for attachment reference
-      const fullEmail = `${emailGreeting}\n\n${emailBody}\n\nThanks,\n${user?.user_metadata?.display_name || 'Emerald Recruiting'}`;
+      const senderProfile = profiles.find((p: any) => p.email === emailFrom);
+      const senderName = senderProfile?.full_name || user?.user_metadata?.display_name || 'Emerald Recruiting';
+      const fullEmail = `${emailGreeting}\n\n${emailBody}\n\nThanks,\n${senderName}`;
 
       // Send via edge function
       const { data, error } = await supabase.functions.invoke('send-message', {
         body: {
           channel: 'email',
           to: emailTo.split(',')[0].trim(),
+          cc: emailTo.split(',').slice(1).map((e: string) => e.trim()).filter(Boolean).join(',') || undefined,
           subject: emailSubject,
           body: fullEmail,
           candidate_id: id,
+          from_email: emailFrom || undefined,
         },
       });
       if (error) throw error;
 
-      // Update candidate status to send_out
-      if (id) {
-        await supabase.from('candidates').update({ job_status: 'send_out' } as any).eq('id', id);
+      // Auto-save as formatted resume (if we generated a new one, not reusing existing)
+      if (id && attachmentMode === 'generated') {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const doc = generatePDF(resumeData, template);
+            const pdfBlob = doc.output('blob');
+            const fileName = `${resumeData.name.replace(/\s+/g, '_')}_Resume.pdf`;
+            const path = `${session.user.id}/${id}/formatted/${Date.now()}_${fileName}`;
+            await supabase.storage.from('resumes').upload(path, pdfBlob, { upsert: true, contentType: 'application/pdf' });
+            await supabase.from('formatted_resumes').insert({
+              candidate_id: id,
+              file_name: fileName,
+              file_path: path,
+              mime_type: 'application/pdf',
+              file_size: pdfBlob.size,
+              version_label: selectedJob ? `${(selectedJob as any).title}` : `v${formattedResumes.length + 1}`,
+              job_id: selectedJobId || null,
+              created_by: session.user.id,
+            } as any);
+          }
+        } catch (saveErr: any) {
+          // Non-critical — email was sent, just log
+          console.error('Failed to save formatted resume:', saveErr);
+        }
+      }
 
-        // Create send_out record if job is tagged
-        if (selectedJobId) {
+      // Update send_out stage or create send_out record
+      if (id && selectedJobId) {
+        // Check if send_out exists for this candidate + job
+        const { data: existingSO } = await supabase
+          .from('send_outs')
+          .select('id, stage')
+          .eq('candidate_id', id)
+          .eq('job_id', selectedJobId)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingSO) {
+          // Advance to 'sent' if currently at new/reached_out/pitch/send_out
+          if (['new', 'reached_out', 'pitch', 'send_out'].includes(existingSO.stage)) {
+            await supabase.from('send_outs').update({
+              stage: 'sent',
+              sent_to_client_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            } as any).eq('id', existingSO.id);
+          }
+        } else {
           await supabase.from('send_outs').insert({
             job_id: selectedJobId,
             candidate_id: id,
             stage: 'sent',
             recruiter_id: user?.id,
+            sent_to_client_at: new Date().toISOString(),
           } as any);
         }
       }
 
+      // Update candidate status
+      if (id) {
+        await supabase.from('candidates').update({ job_status: 'send_out' } as any).eq('id', id);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      toast.success('Send-out email sent! Status updated.');
+      queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+      queryClient.invalidateQueries({ queryKey: ['formatted_resumes', id] });
+      toast.success('Send-out email sent! Resume saved & status updated.');
       navigate(`/candidates/${id}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
@@ -512,12 +593,12 @@ export default function SendOut() {
 
               {/* Job selection */}
               <div className="space-y-2">
-                <Label>Tag to Job (optional)</Label>
+                <Label>Tag to Job <span className="text-muted-foreground">(required for send out)</span></Label>
                 <Select value={selectedJobId || 'none'} onValueChange={(v) => setSelectedJobId(v === 'none' ? '' : v)}>
                   <SelectTrigger><SelectValue placeholder="Select a job..." /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No job tagged</SelectItem>
-                    {(jobs as any[]).filter(j => j.status === 'lead' || j.status === 'hot').map(j => (
+                    {(jobs as any[]).filter(j => ['lead', 'hot', 'offer_made'].includes(j.status)).map(j => (
                       <SelectItem key={j.id} value={j.id}>{j.title}{j.company_name ? ` — ${j.company_name}` : ''}</SelectItem>
                     ))}
                   </SelectContent>
@@ -531,15 +612,56 @@ export default function SendOut() {
                 </div>
               )}
 
-              {/* Existing resumes */}
+              {/* Existing formatted resumes — offer to reuse */}
+              {formattedResumes.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-400" /> Existing Formatted Resumes
+                  </Label>
+                  <p className="text-xs text-muted-foreground">A formatted resume already exists. Use it or create a new one below.</p>
+                  <div className="space-y-2">
+                    {formattedResumes.map((r: any) => {
+                      const url = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                      return (
+                        <button
+                          key={r.id}
+                          onClick={() => {
+                            setUsingExistingFormatted(r);
+                            setAttachmentMode('existing');
+                            setStep('email');
+                            handleGenerateEmail();
+                          }}
+                          className="w-full flex items-center gap-3 rounded-lg border-2 border-green-500/30 bg-green-500/5 p-3 hover:border-green-500/60 transition-colors text-left"
+                        >
+                          <FileText className="h-5 w-5 text-green-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{r.file_name || 'Formatted Resume'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {r.version_label && <span className="mr-2 text-accent">{r.version_label}</span>}
+                              {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                              {r.created_at && format(new Date(r.created_at), 'MMM d, yyyy')}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="text-[10px] shrink-0">Use This</Badge>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Existing resumes from files */}
               {resumes.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Uploaded Resumes</Label>
+                  <Label>Resumes on File</Label>
+                  <p className="text-xs text-muted-foreground">Select a resume to auto-format with Emerald branding.</p>
                   <div className="space-y-2">
                     {resumes.map((r: any) => (
                       <button
                         key={r.id}
                         onClick={() => {
+                          setAttachmentMode('generated');
+                          setUsingExistingFormatted(null);
                           const text = r.raw_text || r.ai_summary || '';
                           if (text) { setResumeText(text); handleParse(text); }
                           else toast.error('No resume text available — re-upload the file');
@@ -549,9 +671,12 @@ export default function SendOut() {
                         <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{r.file_name || 'Resume'}</p>
-                          <p className="text-xs text-muted-foreground">{r.created_at ? format(new Date(r.created_at), 'MMM d, yyyy') : ''}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {r.file_size && <span className="mr-2">{(r.file_size / 1024).toFixed(0)} KB</span>}
+                            {r.created_at ? format(new Date(r.created_at), 'MMM d, yyyy') : ''}
+                          </p>
                         </div>
-                        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-xs text-accent shrink-0">Format →</span>
                       </button>
                     ))}
                   </div>
@@ -578,7 +703,7 @@ export default function SendOut() {
                   placeholder="Paste resume content here..."
                 />
                 {resumeText && (
-                  <Button variant="gold" onClick={() => handleParse(resumeText)}>
+                  <Button variant="gold" onClick={() => { setAttachmentMode('generated'); setUsingExistingFormatted(null); handleParse(resumeText); }}>
                     <Sparkles className="h-4 w-4 mr-1" /> Parse with AI
                   </Button>
                 )}
@@ -731,59 +856,152 @@ export default function SendOut() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold flex items-center gap-2"><Mail className="h-5 w-5 text-accent" /> Send Out Email</h2>
-                <Button variant="outline" onClick={() => setStep('template')}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button variant="outline" onClick={() => usingExistingFormatted ? setStep('pick_resume') : setStep('template')}>
+                  <ArrowLeft className="h-4 w-4 mr-1" /> Back
+                </Button>
               </div>
 
               <div className="space-y-4">
+                {/* From */}
                 <div className="space-y-1.5">
-                  <Label>To (comma separated emails)</Label>
+                  <Label>From</Label>
+                  <Select value={emailFrom} onValueChange={setEmailFrom}>
+                    <SelectTrigger><SelectValue placeholder="Select sender..." /></SelectTrigger>
+                    <SelectContent>
+                      {profiles.filter((p: any) => p.email).map((p: any) => (
+                        <SelectItem key={p.id} value={p.email}>{p.full_name} ({p.email})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* To */}
+                <div className="space-y-1.5">
+                  <Label>To (comma separated — all job contacts auto-added)</Label>
                   <Input value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="client@company.com" />
                   {jobContacts.length > 0 && (
                     <div className="flex gap-1 flex-wrap mt-1">
                       {jobContacts.map((jc: any) => jc.contacts?.email && (
-                        <button key={jc.contact_id} onClick={() => setEmailTo(prev => prev ? `${prev}, ${jc.contacts.email}` : jc.contacts.email)} className="text-[10px] px-2 py-0.5 rounded border border-border hover:border-accent/50 text-muted-foreground">
-                          + {jc.contacts.full_name}
+                        <button key={jc.contact_id} onClick={() => {
+                          const current = emailTo.split(',').map(e => e.trim()).filter(Boolean);
+                          if (!current.includes(jc.contacts.email)) {
+                            setEmailTo(prev => prev ? `${prev}, ${jc.contacts.email}` : jc.contacts.email);
+                          }
+                        }} className={cn(
+                          'text-[10px] px-2 py-0.5 rounded border transition-colors',
+                          emailTo.includes(jc.contacts.email)
+                            ? 'border-accent/50 bg-accent/10 text-accent'
+                            : 'border-border hover:border-accent/50 text-muted-foreground'
+                        )}>
+                          {emailTo.includes(jc.contacts.email) ? '✓' : '+'} {jc.contacts.full_name}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
 
+                {/* Subject */}
                 <div className="space-y-1.5">
                   <Label>Subject</Label>
                   <Input value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
                 </div>
 
+                {/* Email body */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label>Email Body</Label>
                     <Button variant="ghost" size="sm" onClick={handleGenerateEmail} disabled={generatingEmail} className="text-xs gap-1">
                       {generatingEmail ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                      {generatingEmail ? 'Generating...' : 'Regenerate with AI'}
+                      {generatingEmail ? 'Ask Joe is writing...' : 'Ask Joe to Write'}
                     </Button>
                   </div>
-                  <div className="rounded-lg border border-border p-4 space-y-2 bg-card">
-                    <Input value={emailGreeting} onChange={(e) => setEmailGreeting(e.target.value)} className="border-0 p-0 h-auto text-sm font-medium focus-visible:ring-0" />
-                    <Textarea rows={8} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} className="border-0 p-0 resize-none focus-visible:ring-0 text-sm" />
-                    <p className="text-sm text-muted-foreground">
-                      Thanks,<br />
-                      {user?.user_metadata?.display_name || 'Emerald Recruiting'}
-                    </p>
+                  {generatingEmail ? (
+                    <div className="rounded-lg border border-accent/30 bg-accent/5 p-6 flex items-center gap-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-accent" />
+                      <span className="text-sm text-muted-foreground">Joe is crafting the perfect send-out email in the Emerald voice...</span>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border p-4 space-y-2 bg-card">
+                      <Input value={emailGreeting} onChange={(e) => setEmailGreeting(e.target.value)} className="border-0 p-0 h-auto text-sm font-medium focus-visible:ring-0" />
+                      <Textarea rows={8} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} className="border-0 p-0 resize-none focus-visible:ring-0 text-sm" />
+                      <p className="text-sm text-muted-foreground">
+                        Thanks,<br />
+                        {profiles.find((p: any) => p.email === emailFrom)?.full_name || user?.user_metadata?.display_name || 'Emerald Recruiting'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Attachment */}
+                <div className="rounded-lg border border-border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-1.5"><FileText className="h-4 w-4 text-accent" /> Attachment</Label>
+                    <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
+                      setAttachmentMode(attachmentMode === 'generated' ? 'existing' : 'generated');
+                      if (attachmentMode === 'generated' && formattedResumes.length > 0) {
+                        setUsingExistingFormatted(formattedResumes[0]);
+                      } else {
+                        setUsingExistingFormatted(null);
+                      }
+                    }}>
+                      Change Attachment
+                    </Button>
                   </div>
+
+                  {attachmentMode === 'existing' && usingExistingFormatted ? (
+                    <div className="flex items-center gap-3 rounded-md bg-green-500/5 border border-green-500/20 p-3">
+                      <FileText className="h-5 w-5 text-green-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{usingExistingFormatted.file_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Existing formatted resume
+                          {usingExistingFormatted.version_label && <span className="ml-1 text-accent">({usingExistingFormatted.version_label})</span>}
+                        </p>
+                      </div>
+                      {usingExistingFormatted.file_path && (
+                        <a
+                          href={supabase.storage.from('resumes').getPublicUrl(usingExistingFormatted.file_path).data?.publicUrl || '#'}
+                          target="_blank" rel="noreferrer"
+                          className="text-xs text-accent hover:underline shrink-0"
+                        >
+                          Preview
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-md bg-accent/5 border border-accent/20 p-3">
+                      <FileText className="h-5 w-5 text-accent shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{resumeData.name.replace(/\s+/g, '_')}_Resume.pdf</p>
+                        <p className="text-xs text-muted-foreground">
+                          Newly formatted • {TEMPLATES.find(t => t.value === template)?.label} template
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="sm" className="text-xs shrink-0" onClick={handleDownloadPDF}>
+                        <Download className="h-3.5 w-3.5 mr-1" /> Preview
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Quick swap between formatted resumes */}
+                  {formattedResumes.length > 0 && attachmentMode === 'existing' && (
+                    <div className="space-y-1">
+                      {formattedResumes.filter((r: any) => r.id !== usingExistingFormatted?.id).map((r: any) => (
+                        <button key={r.id} onClick={() => setUsingExistingFormatted(r)}
+                          className="w-full flex items-center gap-2 rounded border border-border p-2 hover:border-accent/40 text-left text-xs">
+                          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="truncate">{r.file_name}</span>
+                          {r.version_label && <Badge variant="secondary" className="text-[9px] shrink-0">{r.version_label}</Badge>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5" />
-                  PDF attachment: {resumeData.name.replace(/\s+/g, '_')}_Resume.pdf ({TEMPLATES.find(t => t.value === template)?.label} template)
-                </div>
-
-                <Button variant="outline" onClick={handleDownloadPDF} className="w-full gap-2 mb-2">
-                  <Download className="h-4 w-4" /> Download PDF Preview
-                </Button>
-
+                {/* Send */}
                 <Button variant="gold" onClick={handleSend} disabled={sending || !emailTo || !emailBody} className="w-full gap-2">
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  {sending ? 'Sending...' : 'Send Email & Update Status'}
+                  {sending ? 'Sending & Saving...' : 'Send Email, Save Resume & Update Pipeline'}
                 </Button>
               </div>
             </div>
