@@ -140,7 +140,7 @@ export const fetchEntityHistory = task({
 
           if (channel?.external_conversation_id) {
             // Fetch conversation messages from Unipile
-            const baseUrl = "https://api.unipile.com:13111/api/v1";
+            const baseUrl = "https://api19.unipile.com:14926/api/v1";
             const convResp = await fetch(
               `${baseUrl}/messages?conversation_id=${channel.external_conversation_id}&limit=50`,
               { headers: { "X-API-KEY": apiKey, Accept: "application/json" } },

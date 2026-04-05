@@ -1,11 +1,11 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
-const UNIPILE_BASE_URL = "https://api.unipile.com:13111/api/v1";
-const BATCH_SIZE = 5;
-const DELAY_MS = 300;
-const FETCH_TIMEOUT_MS = 3_000; // 3s hard timeout per API call
-const MAX_ELAPSED_MS = 120_000; // 2 min safety margin
+const UNIPILE_BASE_URL = "https://api19.unipile.com:14926/api/v1";
+const BATCH_SIZE = 25;
+const DELAY_MS = 350;
+const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per API call
+const MAX_ELAPSED_MS = 240_000; // 4 min safety margin
 
 /**
  * Scheduled task: resolve Unipile IDs for candidates with LinkedIn URLs.

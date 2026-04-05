@@ -260,7 +260,7 @@ export async function sendLinkedIn(
   stepChannel?: string,
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = "https://api.unipile.com:13111/api/v1";
+  const baseUrl = "https://api19.unipile.com:14926/api/v1";
 
   // Resolve LinkedIn URL to provider_id if needed
   let providerId = to;
@@ -391,7 +391,7 @@ export async function resolveRecipient(
 
   // Get Unipile API key for this user
   const { apiKey } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = "https://api.unipile.com:13111/api/v1";
+  const baseUrl = "https://api19.unipile.com:14926/api/v1";
 
   const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
     headers: { Authorization: `Bearer ${apiKey}`, "X-UNIPILE-CLIENT": "sully-recruit" },
