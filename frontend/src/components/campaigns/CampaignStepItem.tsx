@@ -43,6 +43,7 @@ interface IntegrationAccount {
   provider: string;
   account_label: string | null;
   is_active: boolean;
+  owner_user_id?: string | null;
 }
 
 interface CampaignStepItemProps {
@@ -64,17 +65,6 @@ const isLinkedInChannel = (ch: ChannelType) =>
 const needsSubject = (ch: ChannelType) =>
   ['linkedin_recruiter', 'email'].includes(ch);
 
-/** Map step channel to relevant account_type values */
-const channelToAccountTypes = (ch: ChannelType): string[] => {
-  // InMails require a Recruiter seat
-  if (ch === 'linkedin_recruiter') return ['linkedin_recruiter', 'linkedin'];
-  // Messages & connections go through classic LinkedIn accounts
-  if (ch === 'linkedin_message' || ch === 'linkedin_connection') return ['linkedin'];
-  if (ch === 'email') return ['email', 'smtp', 'gmail', 'outlook'];
-  if (ch === 'sms') return ['sms', 'twilio'];
-  if (ch === 'phone') return ['phone', 'voip', 'twilio'];
-  return [];
-};
 
 export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, onDelete, jobTitle, jobCompany, sequenceName, sequenceDescription }: CampaignStepItemProps) => {
   const {
@@ -182,11 +172,21 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
       onUpdate(step.id, { content: step.content + token });
     }
   };
-  // Filter accounts relevant to this step's channel
-  const relevantAccountTypes = channelToAccountTypes(step.channel);
-  const relevantAccounts = accounts.filter(
-    a => a.is_active && relevantAccountTypes.some(t => a.account_type.toLowerCase().includes(t) || a.provider.toLowerCase().includes(t))
-  );
+  // Deduplicate accounts by owner — show each person once regardless of channel
+  const activeAccounts = accounts.filter(a => a.is_active);
+  const seenOwners = new Set<string>();
+  const senderAccounts = activeAccounts.filter(a => {
+    const key = a.owner_user_id || a.id;
+    if (seenOwners.has(key)) return false;
+    seenOwners.add(key);
+    return true;
+  });
+
+  /** Strip channel suffixes like "Email", "LinkedIn", etc. from account labels */
+  const senderLabel = (acc: IntegrationAccount) => {
+    const label = acc.account_label || `${acc.provider} – ${acc.account_type}`;
+    return label.replace(/\s*(Email|LinkedIn|SMS|Phone|SMTP|Gmail|Outlook)\s*$/i, '').trim() || label;
+  };
 
   // Find previous email step's subject for reply context
   const prevEmailStep = allSteps
@@ -276,7 +276,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
                     <Send className="h-3.5 w-3.5 text-muted-foreground" />
                     <span>
                       {step.accountId
-                        ? accounts.find(a => a.id === step.accountId)?.account_label || 'Selected account'
+                        ? senderLabel(accounts.find(a => a.id === step.accountId) || { account_label: 'Selected account', provider: '', account_type: '', id: '', is_active: true })
                         : 'Select sender'}
                     </span>
                   </div>
@@ -286,19 +286,11 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
                 <SelectItem value="_none">
                   <span className="text-muted-foreground">Auto (default account)</span>
                 </SelectItem>
-                {relevantAccounts.length > 0 ? (
-                  relevantAccounts.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id}>
-                      {acc.account_label || `${acc.provider} – ${acc.account_type}`}
-                    </SelectItem>
-                  ))
-                ) : (
-                  accounts.filter(a => a.is_active).map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id}>
-                      {acc.account_label || `${acc.provider} – ${acc.account_type}`}
-                    </SelectItem>
-                  ))
-                )}
+                {senderAccounts.map((acc) => (
+                  <SelectItem key={acc.id} value={acc.id}>
+                    {senderLabel(acc)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
