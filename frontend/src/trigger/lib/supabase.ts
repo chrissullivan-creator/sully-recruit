@@ -120,6 +120,14 @@ export async function getVoyageKey(): Promise<string> {
 }
 
 /**
+ * Get Unipile base URL from app_settings.
+ * Centralised so the DSN is configured once, not hardcoded in every file.
+ */
+export async function getUnipileBaseUrl(): Promise<string> {
+  return getAppSetting("UNIPILE_BASE_URL");
+}
+
+/**
  * Get Microsoft Graph app credentials from app_settings.
  */
 export async function getMicrosoftGraphCredentials(): Promise<{

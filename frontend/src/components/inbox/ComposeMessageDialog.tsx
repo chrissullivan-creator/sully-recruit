@@ -113,17 +113,10 @@ export function ComposeMessageDialog({
         last_message_preview: body.substring(0, 100),
       };
 
-      // We need a candidate_id for conversations (required field)
-      // If sending to a contact, we still need to provide candidate_id somehow
-      // For now, if it's a contact, we'll skip candidate_id and let the DB handle it
+      // For contacts, try to find a linked candidate — if none, insert with contact_id only
       if (selectedRecipient.entity_type === 'contact') {
-        // Conversations require candidate_id — create a placeholder approach
-        // Actually, let's check the schema: candidate_id is NOT NULL
-        // So we need to handle this. For contact-only, we'll need to find or skip.
-        // For MVP, we'll only support candidates or require a linked candidate
-        toast.error('Direct contact messaging requires a linked candidate. Coming soon!');
-        setSending(false);
-        return;
+        delete convInsert.candidate_id;
+        convInsert.contact_id = selectedRecipient.id;
       }
 
       const { data: conv, error: convError } = await supabase
@@ -136,11 +129,13 @@ export function ComposeMessageDialog({
 
       // Resolve LinkedIn provider_id if needed
       let resolvedTo = toAddress;
-      if (channel === 'linkedin' && selectedRecipient.entity_type === 'candidate') {
+      if (channel === 'linkedin') {
+        const channelTable = selectedRecipient.entity_type === 'candidate' ? 'candidate_channels' : 'contact_channels';
+        const idCol = selectedRecipient.entity_type === 'candidate' ? 'candidate_id' : 'contact_id';
         const { data: channelData } = await supabase
-          .from('candidate_channels')
+          .from(channelTable)
           .select('provider_id, unipile_id')
-          .eq('candidate_id', selectedRecipient.id)
+          .eq(idCol, selectedRecipient.id)
           .eq('channel', 'linkedin')
           .maybeSingle();
         if (channelData?.provider_id || channelData?.unipile_id) {
@@ -149,16 +144,19 @@ export function ComposeMessageDialog({
       }
 
       // Send via edge function
-      const { data, error } = await supabase.functions.invoke('send-message', {
-        body: {
-          channel,
-          conversation_id: conv.id,
-          candidate_id: selectedRecipient.id,
-          to: resolvedTo,
-          subject: channel === 'email' ? subject || undefined : undefined,
-          body: body.trim(),
-        },
-      });
+      const sendPayload: any = {
+        channel,
+        conversation_id: conv.id,
+        to: resolvedTo,
+        subject: channel === 'email' ? subject || undefined : undefined,
+        body: body.trim(),
+      };
+      if (selectedRecipient.entity_type === 'candidate') {
+        sendPayload.candidate_id = selectedRecipient.id;
+      } else {
+        sendPayload.contact_id = selectedRecipient.id;
+      }
+      const { data, error } = await supabase.functions.invoke('send-message', sendPayload);
 
       if (error) throw error;
       if (!data.success) throw new Error(data.error || 'Send failed');

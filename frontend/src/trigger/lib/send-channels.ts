@@ -1,5 +1,5 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getMicrosoftGraphCredentials } from "./supabase";
+import { getMicrosoftGraphCredentials, getUnipileBaseUrl } from "./supabase";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -251,6 +251,34 @@ async function getUnipileApiKey(
   throw new Error("No active LinkedIn/Unipile account found");
 }
 
+/**
+ * Verify that the Unipile account is still connected and healthy.
+ * Throws if the account is disconnected or the API is unreachable.
+ */
+async function verifyUnipileAccountHealth(apiKey: string, accountId: string): Promise<void> {
+  const baseUrl = await getUnipileBaseUrl();
+  try {
+    const resp = await fetch(`${baseUrl}/accounts/${encodeURIComponent(accountId)}`, {
+      headers: { "X-API-KEY": apiKey, Accept: "application/json" },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!resp.ok) {
+      throw new Error(`Unipile account check failed: HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const status = data.status || data.connection_status;
+    if (status && status !== "OK" && status !== "CONNECTED" && status !== "connected") {
+      logger.warn("Unipile account unhealthy", { accountId, status });
+      throw new Error(`Unipile account ${accountId} is ${status} — reconnect in Unipile dashboard`);
+    }
+  } catch (err: any) {
+    if (err.name === "AbortError" || err.name === "TimeoutError") {
+      throw new Error("Unipile API unreachable — health check timed out");
+    }
+    throw err;
+  }
+}
+
 export async function sendLinkedIn(
   supabase: any,
   to: string,
@@ -260,7 +288,10 @@ export async function sendLinkedIn(
   stepChannel?: string,
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = "https://api19.unipile.com:14926/api/v1";
+  const baseUrl = await getUnipileBaseUrl();
+
+  // Verify account is healthy before sending
+  await verifyUnipileAccountHealth(apiKey, resolvedAccountId);
 
   // Resolve LinkedIn URL to provider_id if needed
   let providerId = to;
@@ -391,7 +422,7 @@ export async function resolveRecipient(
 
   // Get Unipile API key for this user
   const { apiKey } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = "https://api19.unipile.com:14926/api/v1";
+  const baseUrl = await getUnipileBaseUrl();
 
   const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
     headers: { Authorization: `Bearer ${apiKey}`, "X-UNIPILE-CLIENT": "sully-recruit" },

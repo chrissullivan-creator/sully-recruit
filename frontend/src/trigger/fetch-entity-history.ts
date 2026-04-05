@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
+import { getSupabaseAdmin, getMicrosoftGraphCredentials, getUnipileBaseUrl } from "./lib/supabase";
 
 /**
  * Fetch historical email and LinkedIn messages for a contact.
@@ -140,7 +140,7 @@ export const fetchEntityHistory = task({
 
           if (channel?.external_conversation_id) {
             // Fetch conversation messages from Unipile
-            const baseUrl = "https://api19.unipile.com:14926/api/v1";
+            const baseUrl = await getUnipileBaseUrl();
             const convResp = await fetch(
               `${baseUrl}/messages?conversation_id=${channel.external_conversation_id}&limit=50`,
               { headers: { "X-API-KEY": apiKey, Accept: "application/json" } },

@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting, getUnipileBaseUrl } from "./lib/supabase";
 
 const BATCH_SIZE = 100;
 const DELAY_MS = 500; // ~2 requests/second to avoid Unipile rate limits
@@ -116,7 +116,7 @@ async function backfillFromApi(
 ) {
   const companyCol = table === "candidates" ? "current_company" : "company_name";
   const titleCol = table === "candidates" ? "current_title" : "title";
-  const baseUrl = "https://api19.unipile.com:14926/api/v1";
+  const baseUrl = await getUnipileBaseUrl();
 
   const { data: records, error } = await supabase
     .from(table)

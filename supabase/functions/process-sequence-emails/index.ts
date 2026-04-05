@@ -649,7 +649,7 @@ async function sendLinkedIn(
   }
 
   const apiKey = account.provider_config.unipile_api_key;
-  const baseUrl = 'https://api19.unipile.com:14926/api/v1';
+  const baseUrl = Deno.env.get('UNIPILE_BASE_URL') || 'https://api19.unipile.com:14926/api/v1';
 
   // Send message
   const response = await fetch(`${baseUrl}/messages`, {

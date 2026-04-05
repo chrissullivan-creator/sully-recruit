@@ -1,7 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-
-const UNIPILE_BASE_URL = "https://api19.unipile.com:14926/api/v1";
+import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
 const BATCH_SIZE = 25;
 const DELAY_MS = 350;
 const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per API call
@@ -41,6 +39,7 @@ export const resolveUnipileIds = schedules.task({
 
     const apiKey = account.access_token as string;
     const unipileAccountId = account.unipile_account_id as string | null;
+    const UNIPILE_BASE_URL = await getUnipileBaseUrl();
 
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry
     //    Order by created_at DESC (newest first) as user requested
@@ -148,14 +147,32 @@ export const resolveUnipileIds = schedules.task({
             { onConflict: "candidate_id,channel" }
           );
 
-          // Update candidate resolve status + store IDs on candidate record
+          // Update candidate resolve status + store IDs + full profile data
+          const enrichment: Record<string, any> = {
+            unipile_id: unipileId,
+            unipile_provider_id: providerId,
+            unipile_resolve_status: "resolved",
+            linkedin_profile_data: JSON.stringify(profile),
+          };
+
+          // Extract headline, company, title from profile if not already set
+          const headline = profile.headline ?? null;
+          if (headline) enrichment.linkedin_headline = headline;
+
+          const positions = profile.positions ?? profile.experience ?? [];
+          if (positions.length > 0) {
+            const current = positions.find((p: any) => p.is_current || !p.end_date) ?? positions[0];
+            if (current?.company?.name || current?.company_name) {
+              enrichment.current_company = current.company?.name ?? current.company_name;
+            }
+            if (current?.title || current?.role) {
+              enrichment.current_title = current.title ?? current.role;
+            }
+          }
+
           await supabase
             .from("candidates")
-            .update({
-              unipile_id: unipileId,
-              unipile_provider_id: providerId,
-              unipile_resolve_status: "resolved",
-            } as any)
+            .update(enrichment as any)
             .eq("id", candidate.id);
 
           resolved++;
