@@ -1,0 +1,19 @@
+project_id = "xlobevmhzimxjtpiontf"
+
+# Client-facing functions: JWT verified at gateway
+[functions.suggest-campaign-steps]
+verify_jwt = true
+
+[functions.ask-joe]
+verify_jwt = true
+
+[functions.resolve-unipile-id]
+verify_jwt = true
+
+# Server-to-server functions: called from Trigger.dev / backend with service_role key
+# Manual auth verification is performed inside send-message
+[functions.send-message]
+verify_jwt = false
+
+[functions.match-entity]
+verify_jwt = false
