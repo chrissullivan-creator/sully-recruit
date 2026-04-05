@@ -1,4 +1,4 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
+import { task, logger, tasks } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./lib/send-channels";
 
@@ -200,6 +200,24 @@ export const processSequenceStep = task({
           count: relevantCount,
         });
         return { action: "rescheduled", reason: "daily_cap_reached" };
+      }
+    }
+
+    // ── 4b. Warmup: engage with candidate's LinkedIn posts before first outreach
+    if (isConnection && nextStepOrder === 1 && payload.candidateId) {
+      try {
+        await tasks.trigger("warmup-candidate", {
+          candidate_id: payload.candidateId,
+          user_id: payload.enrolledBy,
+          account_id: step.account_id || payload.accountId,
+          max_engagements: 2,
+        });
+        logger.info("Triggered LinkedIn warmup before connection request", {
+          candidateId: payload.candidateId,
+        });
+      } catch (err: any) {
+        // Non-fatal — don't block the sequence if warmup fails
+        logger.warn("Warmup trigger failed (non-fatal)", { error: err.message });
       }
     }
 
