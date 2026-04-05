@@ -395,15 +395,14 @@ const Contacts = () => {
                             onClick={async () => {
                               setFetchingHistoryId(contact.id);
                               try {
-                                const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-entity-history`, {
+                                const resp = await fetch('/api/trigger-fetch-history', {
                                   method: 'POST',
-                                  headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+                                  headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({ contact_id: contact.id }),
                                 });
                                 const data = await resp.json();
                                 if (data.error) throw new Error(data.error);
-                                const total = (data.email_history?.inserted ?? 0) + (data.linkedin_history?.inserted ?? 0);
-                                toast(total > 0 ? `Found ${total} historical message${total !== 1 ? 's' : ''}` : 'No new history found');
+                                toast.success('History fetch triggered — messages will appear shortly');
                               } catch (err: any) {
                                 toast.error(err.message || 'History fetch failed');
                               } finally {

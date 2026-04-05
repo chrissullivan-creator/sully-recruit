@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useTasks, useBulkUpdateTasks, useBulkDeleteTasks } from '@/hooks/useTasks';
+import { useQueryClient } from '@tanstack/react-query';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { Button } from '@/components/ui/button';
@@ -153,6 +154,7 @@ function CalendarView({ tasks, isAdmin }: { tasks: any[]; isAdmin: boolean }) {
 // ---- Main Page ----
 export default function Tasks() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { data: allTasks = [], isLoading } = useTasks();
   const bulkUpdate = useBulkUpdateTasks();
   const bulkDelete = useBulkDeleteTasks();
@@ -239,11 +241,11 @@ export default function Tasks() {
           <Button variant="ghost" size="sm" onClick={async () => {
             toast.info('Syncing Outlook events...');
             try {
-              const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
-              const resp = await fetch(`${backendUrl}/api/sync-outlook-events`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+              const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
               const data = await resp.json();
               if (data.error) { toast.error(data.error); return; }
-              toast.success(`Synced ${data.events_synced} events, ${data.events_matched} matched to records`);
+              toast.success('Outlook sync triggered — events will appear shortly');
+              setTimeout(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }), 8000);
             } catch (err: any) { toast.error(err.message || 'Sync failed'); }
           }}>
             <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
@@ -252,11 +254,11 @@ export default function Tasks() {
             <Button variant="ghost" size="sm" onClick={async () => {
               toast.info('Running nudge check...');
               try {
-                const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
-                const resp = await fetch(`${backendUrl}/api/run-nudge-check`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const resp = await fetch('/api/trigger-nudge-check', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
                 const data = await resp.json();
                 if (data.error) { toast.error(data.error); return; }
-                toast.success(`Found ${data.stagnant_candidates} stagnant, created ${data.tasks_created} tasks${data.nudge_sent ? ', emailed Chris' : ''}`);
+                toast.success('Nudge check triggered — tasks will be created shortly');
+                setTimeout(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }), 8000);
               } catch (err: any) { toast.error(err.message || 'Nudge check failed'); }
             }}>
               <Bell className="h-4 w-4 mr-1" /> Run Nudge
