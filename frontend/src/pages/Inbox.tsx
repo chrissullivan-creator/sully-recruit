@@ -189,6 +189,100 @@ function CreatePersonDialog({
   const [linking, setLinking] = useState(false);
   const dbSearchedRef = useRef(false);
 
+  // Helper: run Unipile profile resolution given a LinkedIn slug or provider ID
+  const resolveUnipileProfile = async (slug: string) => {
+    if (!slug || resolvedRef.current) return;
+    resolvedRef.current = true;
+    setResolving(true);
+
+    try {
+      // Extract slug from full URL if needed
+      const urlMatch = slug.match(/linkedin\.com\/in\/([^/?#]+)/);
+      const identifier = urlMatch ? urlMatch[1] : slug;
+
+      // Find any active Unipile account (prefer current user's, fallback to any)
+      const { data: accounts } = await supabase
+        .from('integration_accounts')
+        .select('unipile_account_id')
+        .not('unipile_account_id', 'is', null)
+        .eq('is_active', true)
+        .limit(3);
+
+      const accountId = accounts?.[0]?.unipile_account_id;
+      if (!accountId) {
+        console.warn('No active Unipile account found — skipping profile resolution');
+        return;
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+        body: JSON.stringify({ linkedin_slug: identifier, account_id: accountId }),
+      });
+
+      if (resp.ok) {
+        const profile = await resp.json();
+
+        // Try getting full profile data from Unipile for richer fields
+        const { data: unipileCfg } = await supabase
+          .from('user_integrations')
+          .select('config')
+          .eq('integration_type', 'unipile')
+          .limit(1)
+          .maybeSingle();
+
+        const cfg = unipileCfg?.config as any;
+        let fullProfile: any = null;
+
+        if (cfg?.api_key && cfg?.base_url && (profile.unipile_id || identifier)) {
+          try {
+            const profileResp = await fetch(
+              `${cfg.base_url.replace(/\/+$/, '')}/api/v1/users/${profile.unipile_id || identifier}` +
+              (accountId ? `?account_id=${accountId}` : ''),
+              {
+                headers: {
+                  'X-API-KEY': cfg.api_key,
+                  'Accept': 'application/json',
+                },
+              }
+            );
+            if (profileResp.ok) {
+              fullProfile = await profileResp.json();
+            }
+          } catch (e) {
+            console.warn('Full profile fetch failed:', e);
+          }
+        }
+
+        // Prefill from resolved data
+        setForm(prev => ({
+          ...prev,
+          first_name: fullProfile?.first_name || profile.name?.split(' ')[0] || prev.first_name,
+          last_name: fullProfile?.last_name || profile.name?.split(' ').slice(1).join(' ') || prev.last_name,
+          title: fullProfile?.headline || fullProfile?.title || fullProfile?.current_title || prev.title,
+          company: fullProfile?.company || fullProfile?.current_company || fullProfile?.company_name || prev.company,
+          location: fullProfile?.location || fullProfile?.region || prev.location,
+          linkedin_url: fullProfile?.public_profile_url || fullProfile?.linkedin_url || (identifier.startsWith('http') ? identifier : `https://linkedin.com/in/${identifier}`),
+          email: fullProfile?.email || prev.email,
+          phone: fullProfile?.phone || fullProfile?.phone_number || prev.phone,
+        }));
+      }
+    } catch (err) {
+      console.warn('Unipile profile resolution failed:', err);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  // For LinkedIn channels: instantly trigger Unipile search when dialog opens
+  useEffect(() => {
+    if (!open || channel !== 'linkedin' || !prefill.address) return;
+    resolveUnipileProfile(prefill.address);
+  }, [open]);
+
   // Auto-search database for existing matches when dialog opens
   useEffect(() => {
     if (!open || dbSearchedRef.current) return;
@@ -232,6 +326,11 @@ function CreatePersonDialog({
             company: (best as any).current_company || prev.company,
             location: (best as any).location || prev.location,
           }));
+
+          // For non-LinkedIn channels: if DB match has a LinkedIn URL, resolve via Unipile
+          if (channel !== 'linkedin' && best.linkedin_url) {
+            resolveUnipileProfile(best.linkedin_url);
+          }
         }
       } catch (err) {
         console.warn('DB match search failed:', err);
@@ -240,108 +339,6 @@ function CreatePersonDialog({
       }
     })();
   }, [open, prefill.name, prefill.address]);
-
-  // Auto-resolve Unipile profile when dialog opens for LinkedIn senders
-  // OR when a DB match provides a LinkedIn URL for email/SMS channels
-  useEffect(() => {
-    if (!open || resolvedRef.current) return;
-
-    // For LinkedIn channel, use the prefill address as the slug
-    let slug = channel === 'linkedin' ? prefill.address : '';
-
-    // For non-LinkedIn channels, try to use LinkedIn URL from DB match
-    if (!slug && dbMatches.length > 0) {
-      const matchUrl = dbMatches[0]?.linkedin_url;
-      if (matchUrl) {
-        const m = matchUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
-        if (m) slug = m[1];
-      }
-    }
-
-    if (!slug) return;
-
-    resolvedRef.current = true;
-    setResolving(true);
-
-    (async () => {
-      try {
-        // Get Chris's Unipile account for resolution
-        const { data: chrisAcct } = await supabase
-          .from('integration_accounts')
-          .select('unipile_account_id')
-          .ilike('account_label', '%Chris Sullivan%')
-          .eq('is_active', true)
-          .maybeSingle();
-
-        const accountId = chrisAcct?.unipile_account_id;
-        if (!accountId) {
-          console.warn('No Unipile account found for Chris — skipping profile resolution');
-          return;
-        }
-
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-        // Try resolve-unipile-id for the sender's LinkedIn slug
-        const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
-          body: JSON.stringify({ linkedin_slug: slug, account_id: accountId }),
-        });
-
-        if (resp.ok) {
-          const profile = await resp.json();
-          // Also try getting full profile data from Unipile
-          const { data: unipileCfg } = await supabase
-            .from('user_integrations')
-            .select('config')
-            .eq('integration_type', 'unipile')
-            .limit(1)
-            .maybeSingle();
-
-          const cfg = unipileCfg?.config as any;
-          let fullProfile: any = null;
-
-          if (cfg?.api_key && cfg?.base_url && (profile.unipile_id || slug)) {
-            try {
-              const profileResp = await fetch(
-                `${cfg.base_url.replace(/\/+$/, '')}/api/v1/users/${profile.unipile_id || slug}` +
-                (accountId ? `?account_id=${accountId}` : ''),
-                {
-                  headers: {
-                    'X-API-KEY': cfg.api_key,
-                    'Accept': 'application/json',
-                  },
-                }
-              );
-              if (profileResp.ok) {
-                fullProfile = await profileResp.json();
-              }
-            } catch (e) {
-              console.warn('Full profile fetch failed:', e);
-            }
-          }
-
-          // Prefill from resolved data
-          setForm(prev => ({
-            ...prev,
-            first_name: fullProfile?.first_name || profile.name?.split(' ')[0] || prev.first_name,
-            last_name: fullProfile?.last_name || profile.name?.split(' ').slice(1).join(' ') || prev.last_name,
-            title: fullProfile?.headline || fullProfile?.title || fullProfile?.current_title || prev.title,
-            company: fullProfile?.company || fullProfile?.current_company || fullProfile?.company_name || prev.company,
-            location: fullProfile?.location || fullProfile?.region || prev.location,
-            linkedin_url: fullProfile?.public_profile_url || fullProfile?.linkedin_url || (slug.startsWith('http') ? slug : `https://linkedin.com/in/${slug}`),
-            email: fullProfile?.email || prev.email,
-            phone: fullProfile?.phone || fullProfile?.phone_number || prev.phone,
-          }));
-        }
-      } catch (err) {
-        console.warn('Unipile profile resolution failed:', err);
-      } finally {
-        setResolving(false);
-      }
-    })();
-  }, [open, channel, prefill.address, dbMatches]);
 
   // Reset form when dialog opens with new prefill
   const resetForm = () => {
