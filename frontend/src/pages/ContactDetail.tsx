@@ -6,7 +6,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useNotes, useJobs } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,6 +17,8 @@ import {
   Edit, Briefcase, MessageSquare, History, User,
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
+  Sparkles, RefreshCw, Martini, Send as SendIcon,
+  PhoneCall, PhoneIncoming, PhoneOutgoing,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -188,13 +189,34 @@ const ContactDetail = () => {
   const { data: sendOuts = [] } = useContactSendOuts(id);
   const { data: linkedJobs = [] } = useContactJobs(id);
 
+  // Call logs
+  const { data: callLogs = [] } = useQuery({
+    queryKey: ['call_logs', 'contact', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('call_logs')
+        .select('*')
+        .eq('linked_entity_id', id!)
+        .eq('linked_entity_type', 'contact')
+        .order('started_at', { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
   // Local state
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
-  const [activeTab, setActiveTab] = useState('jobs');
+  const [activeTab, setActiveTab] = useState('joe');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [commFilter, setCommFilter] = useState<'all' | 'email' | 'linkedin' | 'sms'>('all');
+  const [generatingJoe, setGeneratingJoe] = useState(false);
+  const [joeChatMessages, setJoeChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [joeChatInput, setJoeChatInput] = useState('');
+  const [joeChatLoading, setJoeChatLoading] = useState(false);
+  const joeChatScrollRef = useRef<HTMLDivElement>(null);
 
   /* ---- mutations ---- */
 
@@ -227,6 +249,100 @@ const ContactDetail = () => {
       queryClient.invalidateQueries({ queryKey: ['notes', 'contact', id] });
     }
     setSavingNote(false);
+  };
+
+  const generateJoeSays = async () => {
+    if (!id) return;
+    setGeneratingJoe(true);
+    try {
+      const res = await fetch('/api/trigger-generate-joe-says', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityId: id, entityType: 'contact' }),
+      });
+      const data = await res.json();
+      if (!data.triggered) throw new Error(data.error || 'Failed to trigger');
+      toast.success('Joe Says generation started — will update shortly');
+      setTimeout(() => { queryClient.invalidateQueries({ queryKey: ['contact', id] }); }, 8000);
+      setTimeout(() => { queryClient.invalidateQueries({ queryKey: ['contact', id] }); }, 15000);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate');
+    } finally {
+      setGeneratingJoe(false);
+    }
+  };
+
+  const handleJoeChatSend = async () => {
+    if (!joeChatInput.trim() || joeChatLoading) return;
+    const userMsg = { role: 'user' as const, content: joeChatInput };
+    const allMessages = [...joeChatMessages, userMsg];
+    setJoeChatMessages(allMessages);
+    setJoeChatInput('');
+    setJoeChatLoading(true);
+
+    const cName = (contact as any).company_name || (contact as any).companies?.name || '';
+    const contextMsg = contact
+      ? `[Context: You're discussing contact ${contact.full_name || `${contact.first_name} ${contact.last_name}`}, ${contact.title || ''} at ${cName}. Contact ID: ${id}]`
+      : '';
+
+    let assistantSoFar = '';
+    try {
+      const apiMessages = [
+        ...(contextMsg ? [{ role: 'user', content: contextMsg }, { role: 'assistant', content: 'Got it — I have this contact pulled up. What do you need?' }] : []),
+        ...allMessages.map((m) => ({ role: m.role, content: m.content })),
+      ];
+
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ask-joe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ messages: apiMessages }),
+      });
+
+      if (!resp.ok || !resp.body) throw new Error(`Request failed (${resp.status})`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (!line.startsWith('data: ') || line.trim() === '') continue;
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.content || parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              assistantSoFar += content;
+              const current = assistantSoFar;
+              setJoeChatMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant' && prev.length > allMessages.length) {
+                  return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: current } : m));
+                }
+                return [...prev, { role: 'assistant', content: current }];
+              });
+            }
+          } catch { /* partial JSON — will be completed next chunk */ }
+        }
+      }
+    } catch (err: any) {
+      setJoeChatMessages((prev) => [...prev, { role: 'assistant', content: `Something went wrong: ${err.message}` }]);
+    } finally {
+      setJoeChatLoading(false);
+      setTimeout(() => { joeChatScrollRef.current?.scrollTo(0, joeChatScrollRef.current.scrollHeight); }, 50);
+    }
   };
 
   /* ---- loading / not found ---- */
@@ -363,6 +479,9 @@ const ContactDetail = () => {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-3 border-b border-border">
               <TabsList className="bg-secondary">
+                <TabsTrigger value="joe" className="gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" /> Joe Says
+                </TabsTrigger>
                 <TabsTrigger value="jobs" className="gap-1.5">
                   <Briefcase className="h-3.5 w-3.5" /> Jobs ({linkedJobs.length})
                 </TabsTrigger>
@@ -372,10 +491,100 @@ const ContactDetail = () => {
                 <TabsTrigger value="communications" className="gap-1.5">
                   <MessageSquare className="h-3.5 w-3.5" /> Communications ({(conversations as any[]).length})
                 </TabsTrigger>
+                <TabsTrigger value="activity" className="gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Activity
+                </TabsTrigger>
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
+              {/* ---------- JOE SAYS TAB ---------- */}
+              <TabsContent value="joe" className="px-8 py-5 mt-0">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Joe Says</h2>
+                    {c.joe_says_updated_at && (
+                      <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
+                    )}
+                  </div>
+                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                    {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                    {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
+                  </Button>
+                </div>
+
+                {generatingJoe ? (
+                  <div className="flex items-center gap-3 py-10 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-sm">Joe is analyzing this contact...</span>
+                  </div>
+                ) : c.joe_says ? (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                    {(c.joe_says as string).split('\n').map((line: string, i: number) => {
+                      if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
+                      if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
+                      return line.trim() ? (
+                        <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
+                      ) : <div key={i} className="h-1" />;
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No Joe Says yet</p>
+                    <p className="text-xs text-muted-foreground mb-4">AI brief using notes, communications, and contact history.</p>
+                    <Button variant="gold" size="sm" onClick={generateJoeSays}>
+                      <Sparkles className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
+                    </Button>
+                  </div>
+                )}
+
+                {/* ── Ask Joe Chat ───────────────────────────────────────── */}
+                <div className="mt-6 rounded-xl border border-border">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30 rounded-t-xl">
+                    <Martini className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold">Ask Joe about this contact</h3>
+                  </div>
+                  <div ref={joeChatScrollRef} className="h-64 overflow-y-auto p-4 space-y-3">
+                    {joeChatMessages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get relationship context, meeting prep...</p>
+                    )}
+                    {joeChatMessages.map((msg, i) => (
+                      <div key={i} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                        <div className={cn(
+                          'max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
+                          msg.role === 'user' ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground'
+                        )}>
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                    {joeChatLoading && joeChatMessages[joeChatMessages.length - 1]?.role === 'user' && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted rounded-lg px-3 py-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={joeChatInput}
+                        onChange={(e) => setJoeChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJoeChatSend()}
+                        placeholder="Ask Joe anything about this contact..."
+                        disabled={joeChatLoading}
+                        className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                      />
+                      <Button size="icon" variant="gold" onClick={handleJoeChatSend} disabled={joeChatLoading}>
+                        <SendIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
               {/* ---------- JOBS TAB ---------- */}
               <TabsContent value="jobs" className="px-8 py-5 mt-0">
                 {linkedJobs.length === 0 ? (
@@ -589,7 +798,10 @@ const ContactDetail = () => {
               {(sidebarTab === 'all' || sidebarTab === 'tasks') && id && (
                 <div>
                   {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <TaskSidebar entityType="contact" entityId={id} />
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <FileText className="h-3 w-3" /> Tasks
+                  </h3>
+                  <p className="text-xs text-muted-foreground">No tasks yet.</p>
                 </div>
               )}
 

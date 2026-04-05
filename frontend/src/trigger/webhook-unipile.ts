@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { generateJoeSays } from "./generate-joe-says";
 
 interface UnipileWebhookPayload {
   body: {
@@ -205,6 +206,13 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   await analyzeSentiment(supabase, entityId, entityColumn, messageBody, receivedAt);
 
   logger.info("LinkedIn message logged", { entityId, entityType });
+
+  // Chain-trigger Joe Says refresh
+  await generateJoeSays.trigger({
+    entityId,
+    entityType: entityType as "candidate" | "contact",
+  });
+
   return { action: "logged", entityId, entityType, type: "linkedin_message" };
 }
 

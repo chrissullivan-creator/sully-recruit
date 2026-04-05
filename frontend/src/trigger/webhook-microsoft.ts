@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey } from "./lib/supabase";
+import { generateJoeSays } from "./generate-joe-says";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -159,6 +160,13 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
   }
 
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
+
+  // Chain-trigger Joe Says refresh
+  await generateJoeSays.trigger({
+    entityId: match.entityId,
+    entityType: match.entityType as "candidate" | "contact",
+  });
+
   return { action: "logged", entityId: match.entityId, type: "email" };
 }
 
