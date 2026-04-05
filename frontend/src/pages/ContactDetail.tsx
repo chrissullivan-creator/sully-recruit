@@ -726,6 +726,97 @@ const ContactDetail = () => {
                   </div>
                 )}
               </TabsContent>
+
+              {/* ---------- ACTIVITY TAB ---------- */}
+              <TabsContent value="activity" className="px-8 py-5 mt-0">
+                <div className="flex items-center gap-2 mb-4">
+                  <History className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">Activity Timeline</h2>
+                </div>
+                {(() => {
+                  // Build merged timeline from all data sources
+                  const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
+
+                  // Call logs
+                  (callLogs as any[]).forEach((cl) => {
+                    const dur = cl.duration_seconds ? `${Math.floor(cl.duration_seconds / 60)}:${(cl.duration_seconds % 60).toString().padStart(2, '0')}` : '';
+                    events.push({
+                      date: cl.started_at,
+                      icon: cl.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5 text-info" /> : <PhoneIncoming className="h-3.5 w-3.5 text-success" />,
+                      title: `${cl.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call${dur ? ` (${dur})` : ''}`,
+                      detail: cl.summary?.slice(0, 120) || '',
+                      type: 'call',
+                    });
+                  });
+
+                  // Conversations (latest message)
+                  (conversations as any[]).forEach((conv) => {
+                    const ch = conv.channel || '';
+                    const chLabel = ch === 'linkedin' || ch.startsWith('linkedin') ? 'LinkedIn' : ch.charAt(0).toUpperCase() + ch.slice(1);
+                    events.push({
+                      date: conv.last_message_at,
+                      icon: ch === 'email' ? <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                        : (ch === 'linkedin' || ch.startsWith('linkedin')) ? <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />
+                        : ch === 'phone' ? <PhoneCall className="h-3.5 w-3.5 text-muted-foreground" />
+                        : <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />,
+                      title: `${chLabel} conversation`,
+                      detail: conv.subject ? `${conv.subject} — ${conv.last_message_preview || ''}` : conv.last_message_preview || '',
+                      type: 'message',
+                    });
+                  });
+
+                  // Notes
+                  (notes as any[]).forEach((n) => {
+                    const text = n.note?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+                    events.push({
+                      date: n.created_at,
+                      icon: <Edit className="h-3.5 w-3.5 text-muted-foreground" />,
+                      title: 'Note added',
+                      detail: text.slice(0, 120),
+                      type: 'note',
+                    });
+                  });
+
+                  // Send-outs
+                  (sendOuts as any[]).forEach((s) => {
+                    events.push({
+                      date: s.created_at,
+                      icon: <Briefcase className="h-3.5 w-3.5 text-accent" />,
+                      title: `Candidate pitched: ${s.candidates?.full_name || s.candidates?.first_name || 'Unknown'}`,
+                      detail: `${(s.jobs as any)?.title || 'Job'} — Stage: ${s.stage || '\u2014'}`,
+                      type: 'sendout',
+                    });
+                  });
+
+                  // Sort by date descending
+                  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                  if (events.length === 0) {
+                    return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {events.map((ev, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                            {ev.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '\u2014'}
+                              </span>
+                            </div>
+                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </TabsContent>
             </ScrollArea>
           </Tabs>
         </div>
