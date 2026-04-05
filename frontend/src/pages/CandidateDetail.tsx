@@ -846,10 +846,22 @@ const CandidateDetail = () => {
 
               <TabsContent value="communications" className="px-8 py-5 mt-0">
                 <div className="flex items-center gap-2 mb-5">
-                  <Button variant="outline" size="sm"><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
-                  <Button variant="outline" size="sm"><Phone className="h-3.5 w-3.5 mr-1" /> Call</Button>
-                  <Button variant="outline" size="sm"><Linkedin className="h-3.5 w-3.5 mr-1" /> LinkedIn</Button>
-                  <Button variant="outline" size="sm"><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.email) { window.location.href = `mailto:${candidate.email}`; }
+                    else { toast.error('No email address on file'); }
+                  }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.phone) { window.location.href = `tel:${candidate.phone}`; }
+                    else { toast.error('No phone number on file'); }
+                  }}><Phone className="h-3.5 w-3.5 mr-1" /> Call</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.linkedin_url) { window.open(candidate.linkedin_url, '_blank'); }
+                    else { toast.error('No LinkedIn URL on file'); }
+                  }}><Linkedin className="h-3.5 w-3.5 mr-1" /> LinkedIn</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.phone) { window.location.href = `sms:${candidate.phone}`; }
+                    else { toast.error('No phone number on file'); }
+                  }}><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
                 </div>
                 {(conversations as any[]).length === 0 ? (
                   <p className="text-sm text-muted-foreground">No communications yet.</p>
@@ -974,8 +986,52 @@ const CandidateDetail = () => {
                 />
               </TabsContent>
 
-              <TabsContent value="activity" className="px-8 py-5 mt-0">
-                <p className="text-sm text-muted-foreground">Activity history will appear here.</p>
+              <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">Activity Timeline</h2>
+                </div>
+                {(() => {
+                  const activities: { date: string; type: string; label: string; detail?: string }[] = [];
+                  (conversations as any[]).forEach(conv => {
+                    if (conv.last_message_at) activities.push({ date: conv.last_message_at, type: 'message', label: `${conv.channel ?? 'Message'} conversation`, detail: conv.last_message_preview });
+                  });
+                  (callLogs as any[]).forEach(call => {
+                    if (call.started_at) activities.push({ date: call.started_at, type: 'call', label: `${call.direction === 'outbound' ? 'Outbound' : 'Inbound'} call`, detail: call.phone_number });
+                  });
+                  (notes as any[]).forEach(n => {
+                    if (n.created_at) activities.push({ date: n.created_at, type: 'note', label: 'Note added', detail: n.note?.replace(/<[^>]+>/g, '').slice(0, 80) });
+                  });
+                  sendOuts.forEach((so: any) => {
+                    if (so.created_at) activities.push({ date: so.created_at, type: 'send_out', label: `Added to pipeline: ${so.jobs?.title ?? 'Job'}`, detail: `Stage: ${so.stage}` });
+                  });
+                  activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  if (activities.length === 0) return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+                  return (
+                    <div className="space-y-2">
+                      {activities.slice(0, 50).map((a, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs',
+                            a.type === 'message' ? 'bg-blue-500/10 text-blue-400' :
+                            a.type === 'call' ? 'bg-green-500/10 text-green-400' :
+                            a.type === 'note' ? 'bg-yellow-500/10 text-yellow-400' :
+                            'bg-accent/10 text-accent'
+                          )}>
+                            {a.type === 'message' ? <MessageSquare className="h-3.5 w-3.5" /> :
+                             a.type === 'call' ? <PhoneCall className="h-3.5 w-3.5" /> :
+                             a.type === 'note' ? <Edit className="h-3.5 w-3.5" /> :
+                             <Send className="h-3.5 w-3.5" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">{a.label}</p>
+                            {a.detail && <p className="text-xs text-muted-foreground truncate">{a.detail}</p>}
+                          </div>
+                          <span className="text-xs text-muted-foreground shrink-0">{format(new Date(a.date), 'MMM d, h:mm a')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </TabsContent>
 
               {/* ── Documents Tab (Resumes / Formatted / Other) ────────── */}
