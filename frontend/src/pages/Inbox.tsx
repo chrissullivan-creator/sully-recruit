@@ -184,13 +184,80 @@ function CreatePersonDialog({
   const [creating, setCreating] = useState(false);
   const [resolving, setResolving] = useState(false);
   const resolvedRef = useRef(false);
+  const [dbMatches, setDbMatches] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const dbSearchedRef = useRef(false);
+
+  // Auto-search database for existing matches when dialog opens
+  useEffect(() => {
+    if (!open || dbSearchedRef.current) return;
+    const name = prefill.name?.trim();
+    const address = prefill.address?.trim();
+    if (!name && !address) return;
+
+    dbSearchedRef.current = true;
+    setSearching(true);
+
+    (async () => {
+      try {
+        const filters: string[] = [];
+        if (name) filters.push(`full_name.ilike.%${name}%`);
+        if (address && address.includes('@')) filters.push(`email.ilike.%${address}%`);
+        const orFilter = filters.join(',');
+        if (!orFilter) return;
+
+        const [cRes, ctRes] = await Promise.all([
+          supabase.from('candidates').select('id, full_name, email, current_title, current_company, phone, linkedin_url, location').or(orFilter).limit(3),
+          supabase.from('contacts').select('id, full_name, email, title, phone, linkedin_url').or(orFilter).limit(3),
+        ]);
+
+        const results = [
+          ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' as const })),
+          ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' as const })),
+        ];
+        setDbMatches(results);
+
+        // Pre-fill form from best match
+        if (results.length > 0) {
+          const best = results[0];
+          setForm(prev => ({
+            ...prev,
+            first_name: best.full_name?.split(' ')[0] || prev.first_name,
+            last_name: best.full_name?.split(' ').slice(1).join(' ') || prev.last_name,
+            email: best.email || prev.email,
+            phone: best.phone || prev.phone,
+            linkedin_url: best.linkedin_url || prev.linkedin_url,
+            title: (best as any).current_title || (best as any).title || prev.title,
+            company: (best as any).current_company || prev.company,
+            location: (best as any).location || prev.location,
+          }));
+        }
+      } catch (err) {
+        console.warn('DB match search failed:', err);
+      } finally {
+        setSearching(false);
+      }
+    })();
+  }, [open, prefill.name, prefill.address]);
 
   // Auto-resolve Unipile profile when dialog opens for LinkedIn senders
+  // OR when a DB match provides a LinkedIn URL for email/SMS channels
   useEffect(() => {
     if (!open || resolvedRef.current) return;
-    if (channel !== 'linkedin') return;
 
-    const slug = prefill.address;
+    // For LinkedIn channel, use the prefill address as the slug
+    let slug = channel === 'linkedin' ? prefill.address : '';
+
+    // For non-LinkedIn channels, try to use LinkedIn URL from DB match
+    if (!slug && dbMatches.length > 0) {
+      const matchUrl = dbMatches[0]?.linkedin_url;
+      if (matchUrl) {
+        const m = matchUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
+        if (m) slug = m[1];
+      }
+    }
+
     if (!slug) return;
 
     resolvedRef.current = true;
@@ -274,13 +341,15 @@ function CreatePersonDialog({
         setResolving(false);
       }
     })();
-  }, [open, channel, prefill.address]);
+  }, [open, channel, prefill.address, dbMatches]);
 
   // Reset form when dialog opens with new prefill
   const resetForm = () => {
     const parts = prefill.name.split(' ');
     const emailAddr = prefill.address.includes('@');
     resolvedRef.current = false;
+    dbSearchedRef.current = false;
+    setDbMatches([]);
     setForm({
       first_name: parts[0] || '',
       last_name: parts.slice(1).join(' ') || '',
@@ -292,6 +361,30 @@ function CreatePersonDialog({
       location: '',
     });
     setType(defaultType);
+  };
+
+  // Link conversation to an existing record instead of creating new
+  const handleLinkExisting = async (entityType: string, entityId: string, entityName: string) => {
+    setLinking(true);
+    try {
+      const update: any = {};
+      if (entityType === 'candidate') update.candidate_id = entityId;
+      if (entityType === 'contact') update.contact_id = entityId;
+
+      const { error } = await supabase.from('conversations').update(update).eq('id', threadId);
+      if (error) throw error;
+
+      toast.success(`Linked to ${entityName}`);
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error('Failed to link: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLinking(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -367,10 +460,52 @@ function CreatePersonDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {searching && (
+          <div className="flex items-center gap-2 rounded-lg border border-muted/30 bg-muted/5 px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Searching for existing records…
+          </div>
+        )}
+
         {resolving && (
           <div className="flex items-center gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Resolving LinkedIn profile via Recruiter…
+          </div>
+        )}
+
+        {/* Existing match banner */}
+        {dbMatches.length > 0 && !searching && (
+          <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-warning shrink-0" />
+              <p className="text-xs font-medium text-warning">
+                {dbMatches.length === 1 ? 'Possible match found' : `${dbMatches.length} possible matches found`}
+              </p>
+            </div>
+            {dbMatches.slice(0, 3).map((match) => (
+              <div key={match.id + match.entity_type} className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+                {match.entity_type === 'candidate'
+                  ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                  : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{match.full_name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate capitalize">
+                    {match.entity_type} · {match.current_title || match.title || match.email || ''}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[10px] gap-1 shrink-0"
+                  disabled={linking}
+                  onClick={() => handleLinkExisting(match.entity_type, match.id, match.full_name)}
+                >
+                  {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <LinkIcon className="h-3 w-3" />}
+                  Link
+                </Button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -479,17 +614,15 @@ function CreatePersonDialog({
             </div>
           )}
 
-          {channel === 'linkedin' && (
-            <div className="space-y-1.5">
-              <Label className="text-xs">LinkedIn URL</Label>
-              <Input
-                value={form.linkedin_url}
-                onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
-                placeholder="https://linkedin.com/in/..."
-                className="h-9"
-              />
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label className="text-xs">LinkedIn URL</Label>
+            <Input
+              value={form.linkedin_url}
+              onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+              placeholder="https://linkedin.com/in/..."
+              className="h-9"
+            />
+          </div>
         </div>
 
         <DialogFooter>
@@ -1303,14 +1436,13 @@ export default function Inbox() {
         .from('inbox_threads').select('*')
         .order('last_message_at', { ascending: false, nullsFirst: false });
 
-      // Non-admin: only show threads owned by this user or using their integration accounts
+      // Non-admin: only show threads from this user's integration accounts
       if (!isAdmin && userId) {
-        const filters: string[] = [`owner_id.eq.${userId}`];
         if (myAccounts.length > 0) {
-          filters.push(`integration_account_id.in.(${myAccounts.join(',')})`);
-          filters.push(`account_id.in.(${myAccounts.join(',')})`);
+          query = query.in('account_id', myAccounts);
+        } else {
+          return [];
         }
-        query = query.or(filters.join(','));
       }
 
       const { data, error } = await query;
