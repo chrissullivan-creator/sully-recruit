@@ -467,10 +467,6 @@ async function sendSequenceMessage(
       result = await sendEmail(supabase, to, subject, body);
       externalMessageId = result.messageId;
       break;
-    case 'sms':
-      result = await sendSms(supabase, to, body);
-      externalMessageId = result.id?.toString();
-      break;
     case 'linkedin':
     case 'linkedin_connection':
     case 'linkedin_recruiter':
@@ -570,62 +566,6 @@ async function sendEmail(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SMS via RingCentral
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendSms(
-  supabase: any,
-  to: string,
-  body: string
-): Promise<{ id: string; sender: string }> {
-  const ringcentralConfig = await getRingCentralConfig(supabase);
-  if (!ringcentralConfig) {
-    throw new Error('RingCentral not configured');
-  }
-
-  const authResponse = await fetch(`https://platform.ringcentral.com/restapi/oauth/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${btoa(`${ringcentralConfig.client_id}:${ringcentralConfig.client_secret}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'password',
-      username: ringcentralConfig.phone_number,
-      password: ringcentralConfig.jwt_token,
-      extension: '',
-    }),
-  });
-
-  if (!authResponse.ok) {
-    throw new Error('RingCentral auth failed');
-  }
-
-  const authData = await authResponse.json();
-  const accessToken = authData.access_token;
-
-  const smsResponse = await fetch(`https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/sms`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      to: [{ phoneNumber: to }],
-      from: { phoneNumber: ringcentralConfig.phone_number },
-      text: body,
-    }),
-  });
-
-  if (!smsResponse.ok) {
-    const error = await smsResponse.text();
-    throw new Error(`RingCentral SMS error: ${error}`);
-  }
-
-  const smsData = await smsResponse.json();
-  return { id: smsData.id, sender: ringcentralConfig.phone_number };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // LINKEDIN via Unipile
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendLinkedIn(
@@ -688,20 +628,6 @@ async function getSmtpConfig(supabase: any): Promise<any> {
       smtp_pass: Deno.env.get('SMTP_PASS'),
       from_email: Deno.env.get('SMTP_FROM_EMAIL'),
       from_name: Deno.env.get('SMTP_FROM_NAME'),
-    };
-  }
-  return null;
-}
-
-async function getRingCentralConfig(supabase: any): Promise<any> {
-  const clientId = Deno.env.get('RINGCENTRAL_CLIENT_ID');
-  if (clientId) {
-    return {
-      client_id: clientId,
-      client_secret: Deno.env.get('RINGCENTRAL_CLIENT_SECRET'),
-      jwt_token: Deno.env.get('RINGCENTRAL_JWT_TOKEN'),
-      server_url: Deno.env.get('RINGCENTRAL_SERVER_URL'),
-      phone_number: Deno.env.get('RINGCENTRAL_PHONE_NUMBER'),
     };
   }
   return null;
