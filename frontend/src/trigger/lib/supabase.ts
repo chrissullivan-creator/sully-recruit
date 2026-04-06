@@ -46,14 +46,22 @@ export async function getAppSetting(key: string): Promise<string> {
     .eq("key", key)
     .single();
 
-  if (error || !data?.value) {
-    throw new Error(
-      `Missing app setting: ${key}. Add it in Supabase → Table Editor → app_settings.`,
-    );
+  if (data?.value) {
+    settingsCache.set(key, { value: data.value, fetchedAt: Date.now() });
+    return data.value;
   }
 
-  settingsCache.set(key, { value: data.value, fetchedAt: Date.now() });
-  return data.value;
+  // Fallback: check environment variable (e.g. set in Trigger.dev dashboard)
+  const envValue = process.env[key];
+  if (envValue) {
+    logger.warn(`app_settings.${key} is empty — falling back to env var`);
+    settingsCache.set(key, { value: envValue, fetchedAt: Date.now() });
+    return envValue;
+  }
+
+  throw new Error(
+    `Missing app setting: ${key}. Add it in Supabase → Table Editor → app_settings, or set it as an environment variable in Trigger.dev.`,
+  );
 }
 
 /**
@@ -93,12 +101,19 @@ export async function getAppSettings(...keys: string[]): Promise<Record<string, 
     }
   }
 
-  // Check all requested keys are present
+  // Check all requested keys are present, fall back to env vars
   for (const key of keys) {
     if (!result[key]) {
-      throw new Error(
-        `Missing app setting: ${key}. Add it in Supabase → Table Editor → app_settings.`,
-      );
+      const envValue = process.env[key];
+      if (envValue) {
+        logger.warn(`app_settings.${key} is empty — falling back to env var`);
+        result[key] = envValue;
+        settingsCache.set(key, { value: envValue, fetchedAt: Date.now() });
+      } else {
+        throw new Error(
+          `Missing app setting: ${key}. Add it in Supabase → Table Editor → app_settings, or set it as an environment variable in Trigger.dev.`,
+        );
+      }
     }
   }
 
