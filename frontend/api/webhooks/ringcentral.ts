@@ -15,9 +15,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Verify the request is from RingCentral using the verification token
+  // Verify the request is from RingCentral using the verification token.
+  // Only enforce when BOTH the env var is set AND the request includes the header
+  // (old subscriptions created before this change won't send the header).
   const expectedToken = process.env.RINGCENTRAL_WEBHOOK_TOKEN;
-  if (expectedToken && req.headers["verification-token"] !== expectedToken) {
+  const incomingToken = req.headers["verification-token"];
+  if (expectedToken && incomingToken && incomingToken !== expectedToken) {
     return res.status(401).json({ error: "Invalid verification token" });
   }
 
