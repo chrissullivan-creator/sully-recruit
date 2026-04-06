@@ -10,6 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -20,7 +22,7 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare, Plus,
+  PenSquare, Plus, ChevronsUpDown,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
@@ -188,6 +190,18 @@ function CreatePersonDialog({
   const [searching, setSearching] = useState(false);
   const [linking, setLinking] = useState(false);
   const dbSearchedRef = useRef(false);
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
+
+  // Fetch companies for autocomplete
+  const { data: companies = [] } = useQuery({
+    queryKey: ['companies_autocomplete'],
+    queryFn: async () => {
+      const { data } = await supabase.from('companies').select('id, name').order('name');
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Helper: run Unipile profile resolution given a LinkedIn slug or provider ID
   const resolveUnipileProfile = async (slug: string) => {
@@ -358,6 +372,7 @@ function CreatePersonDialog({
       location: '',
     });
     setType(defaultType);
+    setCompanyId(null);
   };
 
   // Link conversation to an existing record instead of creating new
@@ -432,6 +447,7 @@ function CreatePersonDialog({
           phone: form.phone.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,
           title: form.title.trim() || null,
+          company_id: companyId || null,
           company_name: form.company.trim() || null,
           location: form.location.trim() || null,
           status: 'active',
@@ -634,12 +650,70 @@ function CreatePersonDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
-                  <Input
-                    value={form.company}
-                    onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
-                    placeholder="Company name"
-                    className="h-9"
-                  />
+                  <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={companyOpen}
+                        className="h-9 w-full justify-between font-normal text-sm"
+                      >
+                        <span className={cn('truncate', !form.company && 'text-muted-foreground')}>
+                          {form.company || 'Search companies...'}
+                        </span>
+                        <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[240px] p-0" align="start">
+                      <Command>
+                        <CommandInput
+                          placeholder="Type to search..."
+                          value={form.company}
+                          onValueChange={(v) => {
+                            setForm(f => ({ ...f, company: v }));
+                            setCompanyId(null);
+                          }}
+                        />
+                        <CommandList>
+                          <CommandEmpty>
+                            {form.company.trim() ? (
+                              <button
+                                className="w-full px-2 py-1.5 text-xs text-left text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  setCompanyId(null);
+                                  setCompanyOpen(false);
+                                }}
+                              >
+                                Use "{form.company}" as new company
+                              </button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No companies found</span>
+                            )}
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {companies
+                              .filter((c: any) => c.name?.toLowerCase().includes((form.company || '').toLowerCase()))
+                              .slice(0, 8)
+                              .map((c: any) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.name}
+                                  onSelect={() => {
+                                    setForm(f => ({ ...f, company: c.name }));
+                                    setCompanyId(c.id);
+                                    setCompanyOpen(false);
+                                  }}
+                                >
+                                  <Building className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                                  {c.name}
+                                  {companyId === c.id && <Check className="ml-auto h-3.5 w-3.5 text-success" />}
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Location</Label>
