@@ -84,7 +84,8 @@ const Candidates = () => {
         (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
       const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
-      const matchesOwner = ownerFilter === 'all' ? true : ownerFilter === 'mine' ? c.owner_id === user?.id : c.owner_id === ownerFilter;
+      const ownerId = (c as any).owner_user_id ?? c.owner_id;
+      const matchesOwner = ownerFilter === 'all' ? true : ownerFilter === 'mine' ? ownerId === user?.id : ownerId === ownerFilter;
       return matchesSearch && matchesStatus && matchesJobTag && matchesOwner;
     });
 
@@ -340,7 +341,8 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       {(() => {
-                        const ownerProfile = candidate.owner_id ? profileMap[candidate.owner_id] : null;
+                        const candidateOwnerId = (candidate as any).owner_user_id ?? candidate.owner_id;
+                        const ownerProfile = candidateOwnerId ? profileMap[candidateOwnerId] : null;
                         const ownerName = ownerProfile?.full_name;
                         const ownerInitials = ownerName ? ownerName.split(' ').map((n: string) => n[0]).join('').slice(0, 2) : '';
                         return ownerName ? (

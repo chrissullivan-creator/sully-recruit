@@ -9,12 +9,23 @@ export function useCandidates() {
   const query = useQuery({
     queryKey: ['candidates'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('candidates')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
+      // Supabase defaults to 1000 rows — paginate to fetch all candidates
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('candidates')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      return allData;
     },
   });
 
