@@ -7,6 +7,20 @@
         "UNIPILE_BASE_URL": "https://api19.unipile.com:14926/api/v1",
         "UNIPILE_API_KEY": "vqxVUUYs.gJux2OaPKhqMhCsB2PdPqa3QbFn4Rp+uXb8zgQWhTRw="
       }
+    },
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref", "xlobevmhzimxjtpiontf"],
+      "env": {
+        "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhsb2Jldm1oemlteGp0cGlvbnRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjQ4NzYxNywiZXhwIjoyMDg4MDYzNjE3fQ.a-q6Jhr3DgFHAmD8plwnaxkYcLwrUfWSnB1ZgCh0D3w"
+      }
+    },
+    "trigger": {
+      "command": "npx",
+      "args": ["-y", "@trigger.dev/mcp-server@latest"],
+      "env": {
+        "TRIGGER_SECRET_KEY": "tr_prod_EbAkTQbyHRnlHqQzaIPT"
+      }
     }
   }
 }
