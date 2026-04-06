@@ -183,7 +183,7 @@ export const processSequenceStep = task({
         relevantCount = (todayExecs ?? []).length;
       }
 
-      const dailyCap = isConnection ? 40 : 180;
+      const dailyCap = isConnection ? 40 : 150;
       if (relevantCount >= dailyCap) {
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -266,6 +266,29 @@ export const processSequenceStep = task({
     }
 
     try {
+      // ── 8a. Merge-tag substitution ──────────────────────────────
+      const entityTable = entityType === "candidate" ? "candidates" : "contacts";
+      const { data: entity } = await supabase
+        .from(entityTable)
+        .select("first_name, last_name, full_name, email")
+        .eq("id", entityId)
+        .single();
+
+      const mergeVars: Record<string, string> = {
+        first_name: entity?.first_name || "",
+        last_name: entity?.last_name || "",
+        full_name: entity?.full_name || `${entity?.first_name ?? ""} ${entity?.last_name ?? ""}`.trim(),
+        email: entity?.email || "",
+      };
+
+      const applyMergeTags = (text: string | null): string => {
+        if (!text) return "";
+        return text.replace(/\{\{(\w+)\}\}/g, (_, key) => mergeVars[key] ?? "");
+      };
+
+      const mergedBody = applyMergeTags(step.body);
+      const mergedSubject = applyMergeTags(step.subject);
+
       const { to, conversationId: cachedConvId } = await resolveRecipient(
         supabase,
         stepChannel,
@@ -299,12 +322,12 @@ export const processSequenceStep = task({
 
       switch (stepChannel) {
         case "email": {
-          const result = await sendEmail(supabase, to, step.subject, step.body, payload.enrolledBy);
+          const result = await sendEmail(supabase, to, mergedSubject, mergedBody, payload.enrolledBy);
           externalMessageId = result.messageId;
           break;
         }
         case "sms": {
-          const result = await sendSms(supabase, to, step.body, payload.enrolledBy);
+          const result = await sendSms(supabase, to, mergedBody, payload.enrolledBy);
           externalMessageId = result.id;
           break;
         }
@@ -313,7 +336,7 @@ export const processSequenceStep = task({
           const result = await sendLinkedIn(
             supabase,
             to,
-            step.body,
+            mergedBody,
             payload.enrolledBy,
             step.account_id || payload.accountId,
             stepChannel,
@@ -346,8 +369,8 @@ export const processSequenceStep = task({
         contact_id: payload.contactId || null,
         channel: stepChannel,
         direction: "outbound",
-        subject: step.subject || null,
-        body: step.body,
+        subject: mergedSubject || null,
+        body: mergedBody,
         recipient_address: to,
         sent_at: now.toISOString(),
         external_message_id: externalMessageId,
@@ -361,7 +384,7 @@ export const processSequenceStep = task({
         .from("conversations")
         .update({
           last_message_at: now.toISOString(),
-          last_message_preview: step.body.substring(0, 100),
+          last_message_preview: mergedBody.substring(0, 100),
           is_read: true,
         })
         .eq("id", conversationId);

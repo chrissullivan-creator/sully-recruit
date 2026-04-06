@@ -41,7 +41,9 @@ export const sequenceSweep = schedules.task({
       `)
       .eq("status", "active")
       .eq("sequences.status", "active")
-      .lte("next_step_at", now.toISOString());
+      .lte("next_step_at", now.toISOString())
+      .order("next_step_at", { ascending: true })
+      .limit(3);
 
     if (enrollError) {
       logger.error("Error fetching enrollments", { error: enrollError });
