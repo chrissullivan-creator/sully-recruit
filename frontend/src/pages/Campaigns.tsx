@@ -23,6 +23,11 @@ const statusColors: Record<string, string> = {
 
 const channelIcons: Record<string, React.ReactNode> = {
   linkedin: <Linkedin className="h-3.5 w-3.5" />,
+  linkedin_recruiter: <Linkedin className="h-3.5 w-3.5" />,
+  linkedin_message: <Linkedin className="h-3.5 w-3.5" />,
+  linkedin_connection: <Linkedin className="h-3.5 w-3.5" />,
+  recruiter_inmail: <Linkedin className="h-3.5 w-3.5" />,
+  sales_nav_inmail: <Linkedin className="h-3.5 w-3.5" />,
   email: <Mail className="h-3.5 w-3.5" />,
   sms: <MessageSquare className="h-3.5 w-3.5" />,
   phone: <Phone className="h-3.5 w-3.5" />,
