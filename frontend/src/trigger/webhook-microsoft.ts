@@ -192,6 +192,19 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     return { action: "no_match", reason: "no_matching_attendees" };
   }
 
+  // Dedup by event ID to avoid duplicate tasks on updates
+  const externalEventId = event.id || event.iCalUId;
+  if (externalEventId) {
+    const { data: existing } = await supabase
+      .from("tasks")
+      .select("id")
+      .eq("external_id", externalEventId)
+      .limit(1);
+    if (existing?.length) {
+      return { action: "skipped", reason: "duplicate_calendar_event" };
+    }
+  }
+
   // Create tasks for matched entities (calendar events → tasks)
   for (const match of matches) {
     await supabase.from("tasks").insert({
@@ -202,6 +215,7 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
       status: "pending",
       task_type: "meeting",
       created_at: receivedAt,
+      external_id: externalEventId || null,
     } as any);
   }
 
