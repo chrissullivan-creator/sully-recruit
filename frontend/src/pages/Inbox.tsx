@@ -19,7 +19,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
-  UserCheck, Target, Send, Loader2, MoreVertical,
+  UserCheck, Target, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, ChevronsUpDown,
