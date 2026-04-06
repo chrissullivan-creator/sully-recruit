@@ -50,6 +50,11 @@ export const processMicrosoftEvent = task({
     });
 
     if (!resourceResp.ok) {
+      // 404 = resource deleted or no longer available — skip silently
+      if (resourceResp.status === 404) {
+        logger.info("Resource not found (likely deleted)", { resource: notification.resource });
+        return { action: "skipped", reason: "resource_not_found" };
+      }
       logger.error("Failed to fetch resource", {
         status: resourceResp.status,
         resource: notification.resource,
@@ -241,7 +246,7 @@ async function analyzeEmailSentiment(
   receivedAt: string,
 ) {
   try {
-    const apiKey = getAnthropicKey();
+    const apiKey = await getAnthropicKey();
     // Strip HTML tags for analysis
     const plainText = messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     if (plainText.length < 10) return;
