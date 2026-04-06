@@ -1,5 +1,5 @@
 import { task, logger, tasks } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./lib/send-channels";
 
 interface SequenceStepPayload {
@@ -78,20 +78,111 @@ export const processSequenceStep = task({
             .eq("id", latestExec[0].id);
         }
 
+        // Fetch the reply body for sentiment analysis
+        const { data: replyMsg } = await supabase
+          .from("messages")
+          .select("body, subject")
+          .eq(entityColumn, entityId)
+          .eq("direction", "inbound")
+          .gte("created_at", payload.enrolledAt || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const replyText = (replyMsg?.body || replyMsg?.subject || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+        // Analyze sentiment + OOO detection via Claude
+        let sentiment = "unknown";
+        let summary = "";
+        let oooReturnDate: string | null = null;
+
+        if (replyText.length > 5) {
+          try {
+            const apiKey = await getAnthropicKey();
+            const resp = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+              },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 250,
+                system: `Analyze this recruiting email reply. Determine sentiment and if it's an out-of-office (OOO) auto-reply with a return date. Return ONLY valid JSON:
+{
+  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact|ooo",
+  "summary": "one sentence summary",
+  "ooo_return_date": "YYYY-MM-DD or null if not OOO or no return date mentioned"
+}
+Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
+                messages: [{ role: "user", content: replyText.slice(0, 2000) }],
+                temperature: 0,
+              }),
+            });
+
+            if (resp.ok) {
+              const data = await resp.json();
+              const text = data.content?.[0]?.text || "";
+              const jsonMatch = text.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const analysis = JSON.parse(jsonMatch[0]);
+                sentiment = analysis.sentiment || "unknown";
+                summary = analysis.summary || "";
+                oooReturnDate = analysis.ooo_return_date || null;
+              }
+            }
+          } catch (err: any) {
+            logger.warn("Sentiment analysis failed (non-fatal)", { error: err.message });
+          }
+        }
+
+        // Update enrollment with sentiment
+        await supabase
+          .from("sequence_enrollments")
+          .update({
+            reply_sentiment: sentiment,
+            reply_sentiment_note: summary,
+          } as any)
+          .eq("id", payload.enrollmentId);
+
+        // OOO with return date → pause and reschedule for 1 day after return
+        if (sentiment === "ooo" && oooReturnDate) {
+          const returnDate = new Date(oooReturnDate);
+          returnDate.setDate(returnDate.getDate() + 1);
+          returnDate.setHours(14, Math.floor(Math.random() * 60), 0, 0); // ~10 AM ET next day
+
+          await supabase
+            .from("sequence_enrollments")
+            .update({
+              next_step_at: returnDate.toISOString(),
+            } as any)
+            .eq("id", payload.enrollmentId);
+
+          logger.info("OOO detected — rescheduled after return", {
+            enrollmentId: payload.enrollmentId,
+            returnDate: oooReturnDate,
+            nextStepAt: returnDate.toISOString(),
+          });
+          return { action: "rescheduled", reason: "ooo_return_date", returnDate: oooReturnDate };
+        }
+
+        // All other replies → stop the enrollment
         await supabase
           .from("sequence_enrollments")
           .update({
             status: "stopped",
-            stopped_reason: "candidate_replied",
+            stopped_reason: sentiment === "ooo" ? "ooo_no_return_date" : "contact_replied",
             completed_at: now.toISOString(),
           } as any)
           .eq("id", payload.enrollmentId);
 
-        // Note: Pipeline stage changes (pitch/rejected) are now handled by sentiment
-        // analysis in the webhook handlers (webhook-microsoft, webhook-unipile, webhook-ringcentral)
-
-        logger.info("Enrollment stopped — reply detected", { enrollmentId: payload.enrollmentId });
-        return { action: "stopped", reason: "candidate_replied" };
+        logger.info("Enrollment stopped — reply detected", {
+          enrollmentId: payload.enrollmentId,
+          sentiment,
+          summary,
+        });
+        return { action: "stopped", reason: "contact_replied", sentiment };
       }
     }
 
@@ -124,17 +215,26 @@ export const processSequenceStep = task({
     }
 
     // ── 3. Check send window ────────────────────────────────────────
-    const sendStart = step.send_window_start ?? 6;
-    const sendEnd = step.send_window_end ?? 23;
+    // Contacts: 6:30 AM – 6 PM EST (10:30 – 22:00 UTC)
+    // Candidates: 6:30 AM – 9:30 PM EST (10:30 – 01:30 UTC next day)
+    const isContact = entityType === "contact";
+    const defaultStart = 10; // 6 AM EST in UTC (rounded down — jitter covers the :30)
+    const defaultEnd = isContact ? 22 : 25; // 6 PM EST or 9:30 PM EST in UTC (25 = 1 AM next day)
+    const sendStart = step.send_window_start ?? defaultStart;
+    const sendEnd = step.send_window_end ?? defaultEnd;
 
-    if (currentHour < sendStart || currentHour >= sendEnd) {
+    // Normalize current hour for windows that cross midnight (candidate window)
+    const effectiveHour = currentHour < sendStart && sendEnd > 24 ? currentHour + 24 : currentHour;
+    const outsideWindow = effectiveHour < sendStart || effectiveHour >= sendEnd;
+
+    if (outsideWindow) {
       const nextWindow = new Date(now);
-      if (currentHour >= sendEnd) {
+      if (effectiveHour >= sendEnd || currentHour >= (sendEnd % 24)) {
         nextWindow.setDate(nextWindow.getDate() + 1);
       }
       nextWindow.setHours(sendStart, 0, 0, 0);
-      const jitterMinutes = Math.floor(Math.random() * 10);
-      nextWindow.setMinutes(jitterMinutes);
+      // 0-45 min random jitter for more human-like start times
+      const jitterMinutes = Math.floor(Math.random() * 45);
 
       await supabase
         .from("sequence_enrollments")
@@ -187,7 +287,7 @@ export const processSequenceStep = task({
       if (relevantCount >= dailyCap) {
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+        tomorrow.setHours(sendStart, Math.floor(Math.random() * 45), 0, 0);
 
         await supabase
           .from("sequence_enrollments")
@@ -221,8 +321,9 @@ export const processSequenceStep = task({
       }
     }
 
-    // ── 5. Jitter delay ─────────────────────────────────────────────
-    const randomDelayMinutes = isInMail ? 0 : 2 + Math.floor(Math.random() * 8);
+    // ── 5. Jitter delay — randomize send time to look human ────────
+    // 1-15 minute random delay (InMails skip jitter)
+    const randomDelayMinutes = isInMail ? 0 : 1 + Math.floor(Math.random() * 15);
     const scheduledSendAt = new Date(now.getTime() + randomDelayMinutes * 60 * 1000);
 
     // ── 6. Create execution record ──────────────────────────────────
@@ -248,7 +349,7 @@ export const processSequenceStep = task({
       if (nextHour >= sendEnd) {
         nextStepAt.setDate(nextStepAt.getDate() + 1);
       }
-      nextStepAt.setHours(sendStart, Math.floor(Math.random() * 10), 0, 0);
+      nextStepAt.setHours(sendStart, Math.floor(Math.random() * 45), 0, 0);
     }
 
     await supabase
