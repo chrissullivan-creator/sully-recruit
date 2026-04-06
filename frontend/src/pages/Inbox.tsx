@@ -371,6 +371,12 @@ function CreatePersonDialog({
       const { error } = await supabase.from('conversations').update(update).eq('id', threadId);
       if (error) throw error;
 
+      // Backfill messages in this conversation
+      const msgUpdate: any = {};
+      if (entityType === 'candidate') msgUpdate.candidate_id = entityId;
+      if (entityType === 'contact') msgUpdate.contact_id = entityId;
+      await supabase.from('messages').update(msgUpdate).eq('conversation_id', threadId).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
+
       toast.success(`Linked to ${entityName}`);
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
       queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
@@ -412,6 +418,10 @@ function CreatePersonDialog({
         // Auto-link conversation
         const { error: linkErr } = await supabase.from('conversations').update({ candidate_id: newRecord.id } as any).eq('id', threadId);
         if (linkErr) throw linkErr;
+
+        // Also backfill messages in this conversation
+        await supabase.from('messages').update({ candidate_id: newRecord.id } as any).eq('conversation_id', threadId).is('candidate_id', null);
+
         toast.success(`Candidate "${newRecord.full_name || form.first_name}" created & linked`);
       } else {
         const { data: newRecord, error } = await supabase.from('contacts').insert({
@@ -422,6 +432,8 @@ function CreatePersonDialog({
           phone: form.phone.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,
           title: form.title.trim() || null,
+          company_name: form.company.trim() || null,
+          location: form.location.trim() || null,
           status: 'active',
           owner_id: userId,
         } as any).select('id, full_name').single();
@@ -429,6 +441,10 @@ function CreatePersonDialog({
 
         const { error: linkErr } = await supabase.from('conversations').update({ contact_id: newRecord.id } as any).eq('id', threadId);
         if (linkErr) throw linkErr;
+
+        // Also backfill messages in this conversation
+        await supabase.from('messages').update({ contact_id: newRecord.id } as any).eq('conversation_id', threadId).is('contact_id', null);
+
         toast.success(`Contact "${newRecord.full_name || form.first_name}" created & linked`);
       }
 
@@ -588,28 +604,26 @@ function CreatePersonDialog({
             />
           </div>
 
-          {type === 'candidate' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Current Company</Label>
-                <Input
-                  value={form.company}
-                  onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
-                  placeholder="Company name"
-                  className="h-9"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Location</Label>
-                <Input
-                  value={form.location}
-                  onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
-                  placeholder="City, State"
-                  className="h-9"
-                />
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
+              <Input
+                value={form.company}
+                onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
+                placeholder="Company name"
+                className="h-9"
+              />
             </div>
-          )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Location</Label>
+              <Input
+                value={form.location}
+                onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
+                placeholder="City, State"
+                className="h-9"
+              />
+            </div>
+          </div>
 
           <div className="space-y-1.5">
             <Label className="text-xs">LinkedIn URL</Label>
@@ -711,6 +725,8 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     if (error) {
       toast.error('Failed to link: ' + error.message);
     } else {
+      // Backfill messages in this conversation
+      await supabase.from('messages').update(update).eq('conversation_id', thread.id).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
       toast.success(`Linked to ${entityName}`);
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
       queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
