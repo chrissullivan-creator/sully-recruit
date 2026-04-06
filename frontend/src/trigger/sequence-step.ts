@@ -427,9 +427,12 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
     try {
       // ── 8a. Merge-tag substitution ──────────────────────────────
       const entityTable = entityType === "candidate" ? "candidates" : "contacts";
+      const selectFields = entityType === "candidate"
+        ? "first_name, last_name, full_name, email, current_title, current_company"
+        : "first_name, last_name, full_name, email, title, company_name";
       const { data: entity } = await supabase
         .from(entityTable)
-        .select("first_name, last_name, full_name, email")
+        .select(selectFields)
         .eq("id", entityId)
         .single();
 
@@ -438,6 +441,9 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
         last_name: entity?.last_name || "",
         full_name: entity?.full_name || `${entity?.first_name ?? ""} ${entity?.last_name ?? ""}`.trim(),
         email: entity?.email || "",
+        title: entity?.current_title || entity?.title || "",
+        company: entity?.current_company || entity?.company_name || "",
+        company_name: entity?.current_company || entity?.company_name || "",
       };
 
       const applyMergeTags = (text: string | null): string => {
@@ -445,8 +451,14 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
         return text.replace(/\{\{(\w+)\}\}/g, (_, key) => mergeVars[key] ?? "");
       };
 
-      const mergedBody = applyMergeTags(step.body);
       const mergedSubject = applyMergeTags(step.subject);
+      const rawBody = applyMergeTags(step.body);
+      // Convert plain-text newlines to HTML so email renders with proper paragraphs
+      const mergedBody = rawBody.includes("<") ? rawBody : rawBody
+        .replace(/\n\n+/g, "</p><p>")
+        .replace(/\n/g, "<br>")
+        .replace(/^/, "<p>")
+        .replace(/$/, "</p>");
 
       const { to, conversationId: cachedConvId } = await resolveRecipient(
         supabase,
