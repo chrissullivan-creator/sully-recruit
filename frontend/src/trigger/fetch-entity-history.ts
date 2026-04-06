@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getMicrosoftGraphCredentials, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 /**
  * Fetch historical email and LinkedIn messages for a contact.
@@ -119,15 +119,16 @@ export const fetchEntityHistory = task({
     // 3. Search LinkedIn history via Unipile
     if (contact.linkedin_url) {
       try {
+        const apiKey = await getAppSetting("UNIPILE_API_KEY");
         const { data: liAccounts } = await supabase
           .from("integration_accounts")
-          .select("id, unipile_account_id, access_token")
-          .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+          .select("id, unipile_account_id")
+          .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
           .eq("is_active", true)
+          .not("unipile_account_id", "is", null)
           .limit(1);
 
         const liAcct = liAccounts?.[0];
-        const apiKey = liAcct?.access_token as string | undefined;
 
         if (liAcct && apiKey) {
           // Get contact's Unipile provider_id

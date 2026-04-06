@@ -45,7 +45,11 @@ export const syncOutlookEvents = schedules.task({
         );
 
         if (graphResp.status === 401) {
-          logger.info(`Microsoft token expired for account ${acct.id}`);
+          logger.warn(`Microsoft token expired for account ${acct.id} — marking for reconnection`);
+          await supabase
+            .from("integration_accounts")
+            .update({ is_active: false } as any)
+            .eq("id", acct.id);
           continue;
         }
         if (!graphResp.ok) continue;
