@@ -69,9 +69,28 @@ export async function sendEmail(
   subject: string | undefined,
   body: string,
   userId: string,
-): Promise<{ messageId: string; sender: string }> {
+  threadingOptions?: {
+    inReplyTo?: string;
+    references?: string;
+  },
+): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
+
+  // Build the message payload
+  const message: any = {
+    subject: subject || "",
+    body: { contentType: "HTML", content: body },
+    toRecipients: [{ emailAddress: { address: to } }],
+  };
+
+  // Add reply threading headers if this is a follow-up
+  if (threadingOptions?.inReplyTo) {
+    message.internetMessageHeaders = [
+      { name: "In-Reply-To", value: threadingOptions.inReplyTo },
+      { name: "References", value: threadingOptions.references || threadingOptions.inReplyTo },
+    ];
+  }
 
   const response = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
@@ -81,14 +100,7 @@ export async function sendEmail(
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        message: {
-          subject: subject || "",
-          body: { contentType: "HTML", content: body },
-          toRecipients: [{ emailAddress: { address: to } }],
-        },
-        saveToSentItems: true,
-      }),
+      body: JSON.stringify({ message, saveToSentItems: true }),
     },
   );
 
@@ -97,9 +109,24 @@ export async function sendEmail(
     throw new Error(`Microsoft Graph sendMail error (${fromEmail}): ${error}`);
   }
 
-  const messageId = `graph_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  logger.info("Email sent via Graph", { from: fromEmail, to });
-  return { messageId, sender: fromEmail };
+  // Try to capture the real internetMessageId from Sent Items
+  let internetMessageId: string | undefined;
+  try {
+    const sentResp = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/mailFolders/SentItems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId&$filter=toRecipients/any(r:r/emailAddress/address eq '${to}')`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (sentResp.ok) {
+      const sentData = await sentResp.json();
+      internetMessageId = sentData.value?.[0]?.internetMessageId;
+    }
+  } catch {
+    // Non-fatal — worst case we don't get threading on next reply step
+  }
+
+  const messageId = internetMessageId || `graph_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  logger.info("Email sent via Graph", { from: fromEmail, to, hasThreading: !!threadingOptions?.inReplyTo });
+  return { messageId, sender: fromEmail, internetMessageId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
