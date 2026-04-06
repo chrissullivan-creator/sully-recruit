@@ -261,17 +261,13 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
     const isSms = stepChannel === "sms";
     const isEmail = stepChannel === "email";
 
-    // Per-channel daily caps
-    // LinkedIn connections: 40/day (LinkedIn enforced)
-    // LinkedIn messages: 50/day
-    // InMails: no cap (LinkedIn credits-based, skip rate limiting)
-    // SMS: 50/day
-    // Email: 150/day
-    const channelCaps: Record<string, number> = {
-      linkedin_connection: 40,
-      linkedin_message: 50,
-      sms: 50,
-      email: 150,
+    // Per-channel limits
+    // Daily caps + hourly caps to prevent bursts
+    const channelCaps: Record<string, { daily: number; hourly: number }> = {
+      linkedin_connection: { daily: 40, hourly: 8 },
+      linkedin_message:    { daily: 50, hourly: 10 },
+      sms:                 { daily: 50, hourly: 10 },
+      email:               { daily: 150, hourly: 15 },
     };
 
     const capCategory = isConnection ? "linkedin_connection"
@@ -283,39 +279,69 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
     if (capCategory && !isInMail) {
       const todayStart = new Date(now);
       todayStart.setHours(0, 0, 0, 0);
+      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
+      // Fetch today's executions
       const { data: todayExecs } = await supabase
         .from("sequence_step_executions")
-        .select("id, sequence_step_id")
+        .select("id, sequence_step_id, executed_at")
         .gte("executed_at", todayStart.toISOString())
         .in("status", ["sent", "scheduled"]);
 
-      // Count only executions for the same channel category
-      let relevantCount = 0;
+      // Match executions to their channel category
+      const channelFilter = (s: any) => {
+        const ch = s.channel || s.step_type || "";
+        if (capCategory === "linkedin_connection") return ch === "linkedin_connection";
+        if (capCategory === "linkedin_message") return ch === "linkedin_message" || ch === "classic_message";
+        if (capCategory === "sms") return ch === "sms";
+        return ch === "email";
+      };
+
+      let dailyCount = 0;
+      let hourlyCount = 0;
       if (todayExecs && todayExecs.length > 0) {
-        const stepIds = todayExecs.map((e: any) => e.sequence_step_id);
+        const stepIds = [...new Set(todayExecs.map((e: any) => e.sequence_step_id))];
         const { data: matchedSteps } = await supabase
           .from("sequence_steps")
           .select("id, channel, step_type")
           .in("id", stepIds);
 
-        if (matchedSteps) {
-          relevantCount = matchedSteps.filter((s: any) => {
-            const ch = s.channel || s.step_type || "";
-            if (capCategory === "linkedin_connection")
-              return ch === "linkedin_connection";
-            if (capCategory === "linkedin_message")
-              return ch === "linkedin_message" || ch === "classic_message";
-            if (capCategory === "sms")
-              return ch === "sms";
-            // email — everything that's not linkedin/sms
-            return ch === "email";
-          }).length;
+        const matchingStepIds = new Set(
+          (matchedSteps ?? []).filter(channelFilter).map((s: any) => s.id)
+        );
+
+        for (const exec of todayExecs) {
+          if (matchingStepIds.has(exec.sequence_step_id)) {
+            dailyCount++;
+            if (new Date(exec.executed_at) >= oneHourAgo) {
+              hourlyCount++;
+            }
+          }
         }
       }
 
-      const dailyCap = channelCaps[capCategory] ?? 150;
-      if (relevantCount >= dailyCap) {
+      const caps = channelCaps[capCategory] ?? { daily: 150, hourly: 15 };
+
+      // Hourly cap → reschedule 30-60 min from now
+      if (hourlyCount >= caps.hourly) {
+        const later = new Date(now.getTime() + (30 + Math.floor(Math.random() * 30)) * 60 * 1000);
+
+        await supabase
+          .from("sequence_enrollments")
+          .update({ next_step_at: later.toISOString() } as any)
+          .eq("id", payload.enrollmentId);
+
+        logger.info("Hourly cap reached — rescheduled", {
+          enrollmentId: payload.enrollmentId,
+          channel: capCategory,
+          hourlyCap: caps.hourly,
+          hourlyCount,
+        });
+        return { action: "rescheduled", reason: "hourly_cap_reached" };
+      }
+
+      // Daily cap → reschedule to tomorrow morning
+      if (dailyCount >= caps.daily) {
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(sendStart, Math.floor(Math.random() * 45), 0, 0);
@@ -328,8 +354,8 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
         logger.info("Daily cap reached — rescheduled", {
           enrollmentId: payload.enrollmentId,
           channel: capCategory,
-          cap: dailyCap,
-          count: relevantCount,
+          dailyCap: caps.daily,
+          dailyCount,
         });
         return { action: "rescheduled", reason: "daily_cap_reached" };
       }
