@@ -36,10 +36,12 @@ export const sequenceSweep = schedules.task({
         sequences!inner (
           id,
           stop_on_reply,
-          channel
+          channel,
+          status
         )
       `)
       .eq("status", "active")
+      .eq("sequences.status", "active")
       .lte("next_step_at", now.toISOString());
 
     if (enrollError) {
