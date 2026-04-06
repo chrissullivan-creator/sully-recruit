@@ -460,6 +460,15 @@ function CreatePersonDialog({
     }
   };
 
+  const isProcessing = searching || resolving;
+  const isReady = !isProcessing;
+
+  // Processing status messages
+  const processingSteps = [
+    { label: 'Searching database for existing records', done: !searching, active: searching },
+    ...(channel === 'linkedin' ? [{ label: 'Pulling LinkedIn profile via Unipile', done: !resolving && resolvedRef.current, active: resolving }] : []),
+  ];
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
       <DialogContent className="max-w-md">
@@ -469,185 +478,205 @@ function CreatePersonDialog({
             Add New {type === 'candidate' ? 'Candidate' : 'Contact'}
           </DialogTitle>
           <DialogDescription>
-            Create a new record and automatically link this conversation to it.
+            {isProcessing
+              ? 'Looking up this person — hang tight...'
+              : 'Review the details below and edit anything before saving.'}
           </DialogDescription>
         </DialogHeader>
 
-        {searching && (
-          <div className="flex items-center gap-2 rounded-lg border border-muted/30 bg-muted/5 px-3 py-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Searching for existing records…
-          </div>
-        )}
-
-        {resolving && (
-          <div className="flex items-center gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Resolving LinkedIn profile via Recruiter…
-          </div>
-        )}
-
-        {/* Existing match banner */}
-        {dbMatches.length > 0 && !searching && (
-          <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-warning shrink-0" />
-              <p className="text-xs font-medium text-warning">
-                {dbMatches.length === 1 ? 'Possible match found' : `${dbMatches.length} possible matches found`}
-              </p>
+        {/* ── Phase 1: Processing ── */}
+        {isProcessing && (
+          <div className="py-8 space-y-4">
+            <div className="flex justify-center">
+              <div className="relative">
+                <Loader2 className="h-10 w-10 animate-spin text-accent" />
+              </div>
             </div>
-            {dbMatches.slice(0, 3).map((match) => (
-              <div key={match.id + match.entity_type} className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-                {match.entity_type === 'candidate'
-                  ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
-                  : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-foreground truncate">{match.full_name}</p>
-                  <p className="text-[10px] text-muted-foreground truncate capitalize">
-                    {match.entity_type} · {match.current_title || match.title || match.email || ''}
+            <div className="space-y-2.5">
+              {processingSteps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2.5 px-2">
+                  {step.active ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-accent shrink-0" />
+                  ) : step.done ? (
+                    <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                  ) : (
+                    <div className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                  )}
+                  <span className={cn('text-sm', step.active ? 'text-foreground' : step.done ? 'text-muted-foreground' : 'text-muted-foreground/50')}>
+                    {step.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Phase 2: Review & Edit ── */}
+        {isReady && (
+          <>
+            {/* Existing match banner */}
+            {dbMatches.length > 0 && (
+              <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-warning shrink-0" />
+                  <p className="text-xs font-medium text-warning">
+                    {dbMatches.length === 1 ? 'Possible match found — link instead?' : `${dbMatches.length} possible matches — link instead?`}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[10px] gap-1 shrink-0"
-                  disabled={linking}
-                  onClick={() => handleLinkExisting(match.entity_type, match.id, match.full_name)}
-                >
-                  {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <LinkIcon className="h-3 w-3" />}
-                  Link
-                </Button>
+                {dbMatches.slice(0, 3).map((match) => (
+                  <div key={match.id + match.entity_type} className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+                    {match.entity_type === 'candidate'
+                      ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                      : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{match.full_name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate capitalize">
+                        {match.entity_type} · {match.current_title || match.title || match.email || ''}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[10px] gap-1 shrink-0"
+                      disabled={linking}
+                      onClick={() => handleLinkExisting(match.entity_type, match.id, match.full_name)}
+                    >
+                      {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <LinkIcon className="h-3 w-3" />}
+                      Link
+                    </Button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+
+            <div className="space-y-4 py-2">
+              {/* Type toggle */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setType('candidate')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                    type === 'candidate'
+                      ? 'bg-success/10 text-success border-success/30'
+                      : 'border-border text-muted-foreground hover:border-success/30 hover:text-foreground'
+                  )}
+                >
+                  <UserCheck className="h-4 w-4" />
+                  Candidate
+                </button>
+                <button
+                  onClick={() => setType('contact')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                    type === 'contact'
+                      ? 'bg-info/10 text-info border-info/30'
+                      : 'border-border text-muted-foreground hover:border-info/30 hover:text-foreground'
+                  )}
+                >
+                  <Users className="h-4 w-4" />
+                  Contact
+                </button>
+              </div>
+
+              {/* Form fields */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">First Name</Label>
+                  <Input
+                    value={form.first_name}
+                    onChange={(e) => setForm(f => ({ ...f, first_name: e.target.value }))}
+                    placeholder="First name"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Last Name</Label>
+                  <Input
+                    value={form.last_name}
+                    onChange={(e) => setForm(f => ({ ...f, last_name: e.target.value }))}
+                    placeholder="Last name"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Email</Label>
+                  <Input
+                    value={form.email}
+                    onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="email@example.com"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Phone</Label>
+                  <Input
+                    value={form.phone}
+                    onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="Phone number"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
+                <Input
+                  value={form.title}
+                  onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="Job title"
+                  className="h-9"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
+                  <Input
+                    value={form.company}
+                    onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
+                    placeholder="Company name"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Location</Label>
+                  <Input
+                    value={form.location}
+                    onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
+                    placeholder="City, State"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">LinkedIn URL</Label>
+                <Input
+                  value={form.linkedin_url}
+                  onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+                  placeholder="https://linkedin.com/in/..."
+                  className="h-9"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button
+                variant="gold"
+                onClick={handleCreate}
+                disabled={creating || (!form.first_name.trim() && !form.last_name.trim())}
+                className="gap-1.5"
+              >
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Create & Link
+              </Button>
+            </DialogFooter>
+          </>
         )}
-
-        <div className="space-y-4 py-2">
-          {/* Type toggle */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setType('candidate')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
-                type === 'candidate'
-                  ? 'bg-success/10 text-success border-success/30'
-                  : 'border-border text-muted-foreground hover:border-success/30 hover:text-foreground'
-              )}
-            >
-              <UserCheck className="h-4 w-4" />
-              Candidate
-            </button>
-            <button
-              onClick={() => setType('contact')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
-                type === 'contact'
-                  ? 'bg-info/10 text-info border-info/30'
-                  : 'border-border text-muted-foreground hover:border-info/30 hover:text-foreground'
-              )}
-            >
-              <Users className="h-4 w-4" />
-              Contact
-            </button>
-          </div>
-
-          {/* Form fields */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">First Name</Label>
-              <Input
-                value={form.first_name}
-                onChange={(e) => setForm(f => ({ ...f, first_name: e.target.value }))}
-                placeholder="First name"
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Last Name</Label>
-              <Input
-                value={form.last_name}
-                onChange={(e) => setForm(f => ({ ...f, last_name: e.target.value }))}
-                placeholder="Last name"
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Email</Label>
-              <Input
-                value={form.email}
-                onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="email@example.com"
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Phone</Label>
-              <Input
-                value={form.phone}
-                onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="Phone number"
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
-            <Input
-              value={form.title}
-              onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
-              placeholder="Job title"
-              className="h-9"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
-              <Input
-                value={form.company}
-                onChange={(e) => setForm(f => ({ ...f, company: e.target.value }))}
-                placeholder="Company name"
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Location</Label>
-              <Input
-                value={form.location}
-                onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
-                placeholder="City, State"
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">LinkedIn URL</Label>
-            <Input
-              value={form.linkedin_url}
-              onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
-              placeholder="https://linkedin.com/in/..."
-              className="h-9"
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            variant="gold"
-            onClick={handleCreate}
-            disabled={creating || resolving || (!form.first_name.trim() && !form.last_name.trim())}
-            className="gap-1.5"
-          >
-            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Create & Link
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
