@@ -192,6 +192,14 @@ function CreatePersonDialog({
   const dbSearchedRef = useRef(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [minDelayDone, setMinDelayDone] = useState(false);
+
+  // Show processing phase for at least 800ms so user sees the steps
+  useEffect(() => {
+    if (!open) { setMinDelayDone(false); return; }
+    const timer = setTimeout(() => setMinDelayDone(true), 800);
+    return () => clearTimeout(timer);
+  }, [open]);
 
   // Fetch companies for autocomplete
   const { data: companies = [] } = useQuery({
@@ -302,7 +310,6 @@ function CreatePersonDialog({
     if (!open || dbSearchedRef.current) return;
     const name = prefill.name?.trim();
     const address = prefill.address?.trim();
-    if (!name && !address) return;
 
     dbSearchedRef.current = true;
     setSearching(true);
@@ -313,7 +320,10 @@ function CreatePersonDialog({
         if (name) filters.push(`full_name.ilike.%${name}%`);
         if (address && address.includes('@')) filters.push(`email.ilike.%${address}%`);
         const orFilter = filters.join(',');
-        if (!orFilter) return;
+        if (!orFilter) {
+          setSearching(false);
+          return;
+        }
 
         const [cRes, ctRes] = await Promise.all([
           supabase.from('candidates').select('id, full_name, email, current_title, current_company, phone, linkedin_url, location').or(orFilter).limit(3),
@@ -373,6 +383,7 @@ function CreatePersonDialog({
     });
     setType(defaultType);
     setCompanyId(null);
+    setMinDelayDone(false);
   };
 
   // Link conversation to an existing record instead of creating new
@@ -476,7 +487,7 @@ function CreatePersonDialog({
     }
   };
 
-  const isProcessing = searching || resolving;
+  const isProcessing = searching || resolving || !minDelayDone;
   const isReady = !isProcessing;
 
   // Processing status messages
