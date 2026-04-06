@@ -19,7 +19,7 @@
       "command": "npx",
       "args": ["-y", "@trigger.dev/mcp-server@latest"],
       "env": {
-        "TRIGGER_SECRET_KEY": "tr_prod_EbAkTQbyHRnlHqQzaIPT"
+        "TRIGGER_SECRET_KEY": "tr_prod_gSPvVJtXYRkiI77nOyPD"
       }
     }
   }
