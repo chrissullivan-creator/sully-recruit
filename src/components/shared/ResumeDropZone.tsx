@@ -198,7 +198,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             file_path,
             file_name,
             mime_type: mimeType,
-            parse_status: 'completed',
+            parsing_status: 'completed',
           } as any);
         }
 
@@ -310,7 +310,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           file_path:    parsed.file_path,
           file_name:    parsed.file_name,
           mime_type:    mimeType,
-          parse_status: 'completed',
+          parsing_status: 'completed',
         } as any);
       }
 
