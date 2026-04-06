@@ -13,7 +13,7 @@ const DELAY_MS = 400;
  *
  * Schedule in Trigger.dev Dashboard:
  *   Task: check-connections
- *   Cron: 0 *\/4 * * * (every 4 hours)
+ *   Cron: 0 0/4 * * * (every 4 hours)
  */
 export const checkConnections = schedules.task({
   id: "check-connections",

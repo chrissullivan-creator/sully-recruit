@@ -11,7 +11,7 @@ import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
  *
  * Schedule in Trigger.dev Dashboard:
  *   Task: track-profile-viewers
- *   Cron: 0 */6 * * * (every 6 hours)
+ *   Cron: 0 0/6 * * * (every 6 hours)
  */
 export const trackProfileViewers = schedules.task({
   id: "track-profile-viewers",

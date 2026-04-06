@@ -12,7 +12,7 @@ const DELAY_MS = 500;
  *
  * Schedule in Trigger.dev Dashboard:
  *   Task: auto-accept-connections
- *   Cron: 0 */3 * * * (every 3 hours)
+ *   Cron: 0 0/3 * * * (every 3 hours)
  */
 export const autoAcceptConnections = schedules.task({
   id: "auto-accept-connections",

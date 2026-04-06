@@ -12,7 +12,7 @@ const DELAY_MS = 400;
  *
  * Schedule in Trigger.dev Dashboard:
  *   Task: sync-conversations
- *   Cron: 0 *\/2 * * * (every 2 hours)
+ *   Cron: 0 0/2 * * * (every 2 hours)
  */
 export const syncConversations = schedules.task({
   id: "sync-conversations",
