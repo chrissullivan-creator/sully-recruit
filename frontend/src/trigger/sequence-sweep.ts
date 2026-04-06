@@ -9,8 +9,7 @@ import { processSequenceStep } from "./sequence-step";
  */
 export const sequenceSweep = schedules.task({
   id: "sequence-sweep",
-  // Register a 5-minute cron in Trigger.dev dashboard:
-  // cron: "*/5 * * * *"
+  cron: "*/5 * * * *",
   run: async () => {
     const supabase = getSupabaseAdmin();
     const now = new Date();
