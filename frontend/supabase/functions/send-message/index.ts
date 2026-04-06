@@ -330,7 +330,8 @@ async function sendLinkedIn(
   }
 
   // Send message via Unipile
-  const response = await fetch(`${unipileBaseUrl}/api/v1/messages`, {
+  const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
+  const response = await fetch(`${base}/api/v1/messages`, {
     method: 'POST',
     headers: {
       'X-API-KEY': unipileApiKey,

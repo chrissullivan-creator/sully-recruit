@@ -205,7 +205,8 @@ async function backfillFromApi(supabase: any, table: string, limit: number, acco
     if (!providerId) { failed++; continue; }
 
     try {
-      const url = `${unipileBaseUrl}/api/v1/users/${encodeURIComponent(providerId)}?account_id=${encodeURIComponent(accountId)}`;
+      const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
+      const url = `${base}/api/v1/users/${encodeURIComponent(providerId)}?account_id=${encodeURIComponent(accountId)}`;
       const res = await fetch(url, { headers: { 'X-API-KEY': unipileApiKey } });
 
       if (!res.ok) {

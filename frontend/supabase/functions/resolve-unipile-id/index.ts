@@ -34,7 +34,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // Resolve the LinkedIn profile via Unipile's user profile endpoint
-    const profileUrl = `${unipileBaseUrl}/api/v1/users/${linkedin_slug}`;
+    const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
+    const profileUrl = `${base}/api/v1/users/${linkedin_slug}`;
     const headers: Record<string, string> = {
       "X-API-KEY": unipileApiKey,
       "Accept": "application/json",

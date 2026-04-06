@@ -5,7 +5,7 @@
       "args": ["mcp-server-unipile"],
       "env": {
         "UNIPILE_BASE_URL": "https://api19.unipile.com:14926/api/v1",
-        "UNIPILE_API_KEY": "1Nu/4EBQ.5Y9JdP18vvKh3+s+BtDwv1u4junNsV/55WMXnQCBVBw="
+        "UNIPILE_API_KEY": "vqxVUUYs.gJux2OaPKhqMhCsB2PdPqa3QbFn4Rp+uXb8zgQWhTRw="
       }
     }
   }
