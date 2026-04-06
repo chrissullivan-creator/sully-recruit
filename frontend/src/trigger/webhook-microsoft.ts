@@ -84,6 +84,71 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
     return { action: "skipped", reason: "no_sender_email" };
   }
 
+  // ── Bounce / NDR detection ──────────────────────────────────────
+  const subject = (message.subject || "").toLowerCase();
+  const isBounce =
+    subject.startsWith("undeliverable") ||
+    subject.startsWith("delivery status notification") ||
+    subject.startsWith("mail delivery failed") ||
+    subject.startsWith("returned mail") ||
+    senderEmail.includes("postmaster") ||
+    senderEmail.includes("mailer-daemon");
+
+  if (isBounce) {
+    // Extract the bounced email from the body
+    const bodyText = (message.body?.content || message.bodyPreview || "");
+    const emailPattern = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+    const foundEmails = bodyText.match(emailPattern) || [];
+    // Filter out our own domain and system addresses
+    const bouncedEmail = foundEmails.find(
+      (e: string) =>
+        !e.toLowerCase().includes("emeraldrecruit") &&
+        !e.toLowerCase().includes("postmaster") &&
+        !e.toLowerCase().includes("mailer-daemon"),
+    )?.toLowerCase();
+
+    if (bouncedEmail) {
+      // Find the contact/candidate with this email
+      const match = await matchByEmail(supabase, bouncedEmail);
+      if (match) {
+        // Stop any active sequence enrollments for this entity
+        const { data: enrollments } = await supabase
+          .from("sequence_enrollments")
+          .select("id")
+          .eq(match.entityColumn, match.entityId)
+          .eq("status", "active");
+
+        for (const enrollment of enrollments || []) {
+          await supabase
+            .from("sequence_enrollments")
+            .update({
+              status: "stopped",
+              stopped_reason: "email_bounced",
+              completed_at: receivedAt,
+            } as any)
+            .eq("id", enrollment.id);
+
+          // Mark executions as bounced
+          await supabase
+            .from("sequence_step_executions")
+            .update({ status: "bounced" } as any)
+            .eq("enrollment_id", enrollment.id)
+            .in("status", ["sent", "delivered", "scheduled"]);
+        }
+
+        logger.info("Bounce detected — enrollment stopped", {
+          bouncedEmail,
+          entityId: match.entityId,
+          stoppedCount: (enrollments || []).length,
+        });
+        return { action: "bounce_handled", bouncedEmail, entityId: match.entityId };
+      }
+    }
+
+    logger.info("Bounce notification — no matching entity", { subject: message.subject });
+    return { action: "skipped", reason: "bounce_no_match" };
+  }
+
   // Match sender to candidate or contact
   const match = await matchByEmail(supabase, senderEmail);
 
