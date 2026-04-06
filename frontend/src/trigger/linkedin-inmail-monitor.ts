@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 /**
  * Scheduled task: monitor InMail credit balance.
@@ -17,12 +17,14 @@ export const monitorInmailCredits = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token, unipile_account_id, owner_user_id, account_label")
-      .or("account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
-      .eq("is_active", true);
+      .select("id, unipile_account_id, owner_user_id, account_label")
+      .or("account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .eq("is_active", true)
+      .not("unipile_account_id", "is", null);
 
     if (!accounts?.length) {
       logger.info("No Recruiter/Sales Nav accounts to check");
@@ -32,13 +34,12 @@ export const monitorInmailCredits = schedules.task({
     const results: Array<{ account: string; credits: number | null; alert: boolean }> = [];
 
     for (const account of accounts) {
-      if (!account.access_token) continue;
 
       try {
         const resp = await fetch(
           `${baseUrl}/inmail/credits?account_id=${account.unipile_account_id}`,
           {
-            headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+            headers: { "X-API-KEY": apiKey, Accept: "application/json" },
             signal: AbortSignal.timeout(5_000),
           },
         );

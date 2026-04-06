@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 const BATCH_SIZE = 50;
 const DELAY_MS = 400;
@@ -59,15 +59,17 @@ export const backfillAvatars = schedules.task({
 
     // ── 2. Fetch from Unipile API for candidates without profile data ──
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token, unipile_account_id")
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .select("id, unipile_account_id")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
       .eq("is_active", true)
+      .not("unipile_account_id", "is", null)
       .limit(1);
 
     const account = accounts?.[0];
-    if (account?.access_token) {
+    if (account) {
       const { data: needsAvatar } = await supabase
         .from("candidates")
         .select("id, linkedin_url, unipile_provider_id")
@@ -86,7 +88,7 @@ export const backfillAvatars = schedules.task({
           const resp = await fetch(
             `${baseUrl}/users/${encodeURIComponent(slug)}`,
             {
-              headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+              headers: { "X-API-KEY": apiKey, Accept: "application/json" },
               signal: AbortSignal.timeout(5_000),
             },
           );
@@ -131,7 +133,7 @@ export const backfillAvatars = schedules.task({
           const resp = await fetch(
             `${baseUrl}/users/${encodeURIComponent(slug)}`,
             {
-              headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+              headers: { "X-API-KEY": apiKey, Accept: "application/json" },
               signal: AbortSignal.timeout(5_000),
             },
           );
@@ -173,7 +175,7 @@ export const backfillAvatars = schedules.task({
             const resp = await fetch(
               `${baseUrl}/companies/${encodeURIComponent(slug)}`,
               {
-                headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+                headers: { "X-API-KEY": apiKey, Accept: "application/json" },
                 signal: AbortSignal.timeout(5_000),
               },
             );
@@ -189,7 +191,7 @@ export const backfillAvatars = schedules.task({
             const searchResp = await fetch(
               `${baseUrl}/companies/search?keywords=${encodeURIComponent(company.name)}&limit=1`,
               {
-                headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+                headers: { "X-API-KEY": apiKey, Accept: "application/json" },
                 signal: AbortSignal.timeout(5_000),
               },
             );

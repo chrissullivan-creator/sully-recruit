@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;
@@ -21,6 +21,7 @@ export const checkConnections = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
     // Find enrollments stuck waiting for connection acceptance
     const { data: enrollments, error } = await supabase
@@ -61,14 +62,15 @@ export const checkConnections = schedules.task({
           continue;
         }
 
-        // Get the API key for the account that sent the request
+        // Get the unipile_account_id for the account that sent the request
         const { data: account } = await supabase
           .from("integration_accounts")
-          .select("access_token, unipile_account_id")
+          .select("unipile_account_id")
           .eq("id", channel.account_id)
+          .not("unipile_account_id", "is", null)
           .single();
 
-        if (!account?.access_token) {
+        if (!account?.unipile_account_id) {
           failed++;
           continue;
         }
@@ -78,7 +80,7 @@ export const checkConnections = schedules.task({
         const resp = await fetch(
           `${baseUrl}/users/${encodeURIComponent(channel.provider_id)}?account_id=${account.unipile_account_id}`,
           {
-            headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+            headers: { "X-API-KEY": apiKey, Accept: "application/json" },
             signal: AbortSignal.timeout(5_000),
           },
         );

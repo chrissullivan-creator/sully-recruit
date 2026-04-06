@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 const DELAY_MS = 2000; // 2s between engagement actions to appear natural
 
@@ -24,6 +24,7 @@ export const warmupCandidate = task({
   }) => {
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
     const maxEngagements = payload.max_engagements || 2;
 
     // Get candidate's LinkedIn provider_id
@@ -54,44 +55,6 @@ export const warmupCandidate = task({
 
     if (!providerId) {
       return { engaged: 0, reason: "no_provider_id" };
-    }
-
-    // Get API key
-    const accountId = payload.account_id || channel?.account_id;
-    let apiKey: string | null = null;
-
-    if (accountId) {
-      const { data: account } = await supabase
-        .from("integration_accounts")
-        .select("access_token")
-        .eq("id", accountId)
-        .single();
-      apiKey = account?.access_token;
-    }
-
-    if (!apiKey && payload.user_id) {
-      const { data: accounts } = await supabase
-        .from("integration_accounts")
-        .select("access_token")
-        .eq("owner_user_id", payload.user_id)
-        .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
-        .eq("is_active", true)
-        .limit(1);
-      apiKey = accounts?.[0]?.access_token;
-    }
-
-    if (!apiKey) {
-      const { data: accounts } = await supabase
-        .from("integration_accounts")
-        .select("access_token")
-        .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
-        .eq("is_active", true)
-        .limit(1);
-      apiKey = accounts?.[0]?.access_token;
-    }
-
-    if (!apiKey) {
-      return { engaged: 0, reason: "no_api_key" };
     }
 
     // Fetch candidate's recent posts

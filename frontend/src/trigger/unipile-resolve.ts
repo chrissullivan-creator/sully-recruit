@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 const BATCH_SIZE = 25;
 const DELAY_MS = 350;
 const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per API call
@@ -21,25 +21,21 @@ export const resolveUnipileIds = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
 
-    // 1. Get the active LinkedIn integration account (for API key)
+    // 1. Get Unipile API key from app_settings and account ID from integration_accounts
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
+    const UNIPILE_BASE_URL = await getUnipileBaseUrl();
+
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token, unipile_account_id")
+      .select("id, unipile_account_id")
       .or(
-        "account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator"
+        "account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_classic"
       )
       .eq("is_active", true)
+      .not("unipile_account_id", "is", null)
       .limit(1);
 
-    const account = accounts?.[0];
-    if (!account?.access_token) {
-      logger.warn("No active LinkedIn/Unipile account found — skipping");
-      return { resolved: 0, failed: 0, skipped: 0 };
-    }
-
-    const apiKey = account.access_token as string;
-    const unipileAccountId = account.unipile_account_id as string | null;
-    const UNIPILE_BASE_URL = await getUnipileBaseUrl();
+    const unipileAccountId = accounts?.[0]?.unipile_account_id as string | null;
 
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry
     //    Order by created_at DESC (newest first) as user requested

@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 const BATCH_SIZE = 20;
 const DELAY_MS = 400;
@@ -20,13 +20,15 @@ export const syncConversations = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
     // Get active LinkedIn accounts
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token, unipile_account_id, owner_user_id")
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
-      .eq("is_active", true);
+      .select("id, unipile_account_id, owner_user_id")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .eq("is_active", true)
+      .not("unipile_account_id", "is", null);
 
     if (!accounts?.length) {
       logger.info("No active LinkedIn accounts — skipping sync");
@@ -37,9 +39,6 @@ export const syncConversations = schedules.task({
     let totalMessages = 0;
 
     for (const account of accounts) {
-      const apiKey = account.access_token;
-      if (!apiKey) continue;
-
       try {
         // Fetch recent conversations from Unipile
         const resp = await fetch(

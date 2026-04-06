@@ -1,5 +1,5 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getMicrosoftGraphCredentials, getUnipileBaseUrl } from "./supabase";
+import { getMicrosoftGraphCredentials, getUnipileBaseUrl, getAppSetting } from "./supabase";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -200,52 +200,55 @@ export async function sendSms(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Find the Unipile API key for a specific user.
- * Checks integration_accounts by owner_user_id first, then falls back to
- * explicit accountId, then auto-discovers any active account.
+ * Find the Unipile API key and account ID for a specific user.
+ * API key comes from app_settings (global), account ID from integration_accounts (per-user).
  */
 async function getUnipileApiKey(
   supabase: any,
   userId?: string,
   accountId?: string,
 ): Promise<{ apiKey: string; accountId: string }> {
+  const apiKey = await getAppSetting("UNIPILE_API_KEY");
+
   // 1. Try explicit accountId
   if (accountId) {
     const { data: account } = await supabase
       .from("integration_accounts")
-      .select("id, access_token")
+      .select("id, unipile_account_id")
       .eq("id", accountId)
       .single();
-    if (account?.access_token) {
-      return { apiKey: account.access_token, accountId: account.id };
+    if (account) {
+      return { apiKey, accountId: account.unipile_account_id || account.id };
     }
   }
 
-  // 2. Try by owner_user_id (Chris/Nancy/Ashley's specific LinkedIn account)
+  // 2. Try by owner_user_id
   if (userId) {
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token")
+      .select("id, unipile_account_id")
       .eq("owner_user_id", userId)
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
       .eq("is_active", true)
+      .not("unipile_account_id", "is", null)
       .limit(1);
 
-    if (accounts?.[0]?.access_token) {
-      return { apiKey: accounts[0].access_token, accountId: accounts[0].id };
+    if (accounts?.[0]) {
+      return { apiKey, accountId: accounts[0].unipile_account_id || accounts[0].id };
     }
   }
 
   // 3. Auto-discover any active LinkedIn account
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, access_token")
-    .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+    .select("id, unipile_account_id")
+    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
     .eq("is_active", true)
+    .not("unipile_account_id", "is", null)
     .limit(1);
 
-  if (accounts?.[0]?.access_token) {
-    return { apiKey: accounts[0].access_token, accountId: accounts[0].id };
+  if (accounts?.[0]) {
+    return { apiKey, accountId: accounts[0].unipile_account_id || accounts[0].id };
   }
 
   throw new Error("No active LinkedIn/Unipile account found");

@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl } from "./lib/supabase";
+import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
 
 /**
  * Scheduled task: track LinkedIn profile viewers.
@@ -19,13 +19,15 @@ export const trackProfileViewers = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
+    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
     // Get all active LinkedIn accounts
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, access_token, unipile_account_id, owner_user_id")
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
-      .eq("is_active", true);
+      .select("id, unipile_account_id, owner_user_id")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .eq("is_active", true)
+      .not("unipile_account_id", "is", null);
 
     if (!accounts?.length) {
       logger.info("No active LinkedIn accounts");
@@ -36,14 +38,13 @@ export const trackProfileViewers = schedules.task({
     let newLeads = 0;
 
     for (const account of accounts) {
-      if (!account.access_token) continue;
 
       try {
         // Use Unipile search with "viewed_your_profile_recently" filter
         const resp = await fetch(
           `${baseUrl}/users/search?viewed_your_profile_recently=true&account_id=${account.unipile_account_id}&limit=50`,
           {
-            headers: { "X-API-KEY": account.access_token, Accept: "application/json" },
+            headers: { "X-API-KEY": apiKey, Accept: "application/json" },
             signal: AbortSignal.timeout(10_000),
           },
         );
