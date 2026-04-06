@@ -1,6 +1,7 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
+import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 
 interface RingCentralWebhookPayload {
   body: any;
@@ -58,6 +59,29 @@ export const processRingcentralEvent = task({
         provider: "ringcentral",
         external_message_id: eventBody.id?.toString(),
       } as any);
+
+      // Extract intelligence from inbound SMS
+      if (direction === "inbound") {
+        const smsBody = eventBody.subject || eventBody.text || "";
+        if (smsBody.length > 10) {
+          const intel = await extractMessageIntel(smsBody);
+          if (intel) {
+            const { data: enrollment } = await supabase
+              .from("sequence_enrollments")
+              .select("id")
+              .eq(match.entityColumn, match.entityId)
+              .eq("status", "active")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            await applyExtractedIntel(
+              supabase, match.entityId, match.entityType as "candidate" | "contact",
+              intel, "sms", enrollment?.id,
+            );
+          }
+        }
+      }
 
       logger.info("SMS logged", { entityId: match.entityId, direction });
     } else {

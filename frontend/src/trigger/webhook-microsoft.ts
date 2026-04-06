@@ -1,6 +1,7 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
+import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -223,10 +224,26 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
     } as any)
     .eq("id", match.entityId);
 
-  // Run sentiment analysis on inbound email replies
+  // Extract intelligence from inbound email (sentiment + comp, motivation, location, etc.)
   const emailBody = message.body?.content || message.bodyPreview || "";
   if (emailBody.length > 10) {
-    await analyzeEmailSentiment(supabase, match.entityId, match.entityColumn, emailBody, receivedAt);
+    const intel = await extractMessageIntel(emailBody, message.subject);
+    if (intel) {
+      // Find active enrollment for this entity (if any)
+      const { data: enrollment } = await supabase
+        .from("sequence_enrollments")
+        .select("id")
+        .eq(match.entityColumn, match.entityId)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      await applyExtractedIntel(
+        supabase, match.entityId, match.entityType as "candidate" | "contact",
+        intel, "email", enrollment?.id,
+      );
+    }
   }
 
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
@@ -314,136 +331,6 @@ async function getMicrosoftAccessToken(): Promise<string | null> {
   } catch (err: any) {
     logger.error("Failed to get Microsoft credentials from app_settings", { error: err.message });
     return null;
-  }
-}
-
-async function analyzeEmailSentiment(
-  supabase: any,
-  entityId: string,
-  entityColumn: string,
-  messageBody: string,
-  receivedAt: string,
-) {
-  try {
-    const apiKey = await getAnthropicKey();
-    // Strip HTML tags for analysis
-    const plainText = messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    if (plainText.length < 10) return;
-
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 200,
-        system: `Analyze the sentiment of this recruiting email reply. Return ONLY valid JSON:
-{
-  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact",
-  "summary": "one sentence summary"
-}`,
-        messages: [{ role: "user", content: plainText.slice(0, 2000) }],
-        temperature: 0,
-      }),
-    });
-
-    if (!resp.ok) return;
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return;
-
-    const analysis = JSON.parse(jsonMatch[0]);
-
-    // Find active enrollment
-    const { data: enrollment } = await supabase
-      .from("sequence_enrollments")
-      .select("id")
-      .eq(entityColumn, entityId)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    // Store sentiment
-    await supabase.from("reply_sentiment").insert({
-      [entityColumn]: entityId,
-      enrollment_id: enrollment?.id || null,
-      channel: "email",
-      sentiment: analysis.sentiment,
-      summary: analysis.summary,
-      raw_message: plainText.slice(0, 1000),
-      analyzed_at: receivedAt,
-    } as any);
-
-    if (enrollment) {
-      await supabase
-        .from("sequence_enrollments")
-        .update({
-          reply_sentiment: analysis.sentiment,
-          reply_sentiment_note: analysis.summary,
-          last_sequence_sentiment: analysis.sentiment,
-        } as any)
-        .eq("id", enrollment.id);
-    }
-
-    // Update candidate/contact sentiment
-    const table = entityColumn === "candidate_id" ? "candidates" : "contacts";
-    await supabase
-      .from(table)
-      .update({
-        last_sequence_sentiment: analysis.sentiment,
-        last_sequence_sentiment_note: analysis.summary,
-      } as any)
-      .eq("id", entityId);
-
-    // Pipeline automation based on sentiment
-    if (entityColumn === "candidate_id") {
-      const negativeSentiments = ["negative", "not_interested", "do_not_contact"];
-      const positiveSentiments = ["interested", "positive"];
-
-      if (negativeSentiments.includes(analysis.sentiment)) {
-        const { data: rejected } = await supabase
-          .from("send_outs")
-          .update({
-            stage: "rejected",
-            rejected_by: "candidate",
-            rejection_reason: analysis.sentiment.replace(/_/g, " "),
-            feedback: analysis.summary || plainText.slice(0, 500),
-            updated_at: new Date().toISOString(),
-          } as any)
-          .eq("candidate_id", entityId)
-          .not("stage", "in", '("rejected","placed")')
-          .select("id");
-
-        if (rejected && rejected.length > 0) {
-          logger.info("Pipeline auto-rejected by candidate email sentiment", {
-            entityId, sentiment: analysis.sentiment, sendOutIds: rejected.map((s: any) => s.id),
-          });
-        }
-      } else if (positiveSentiments.includes(analysis.sentiment)) {
-        const { data: advanced } = await supabase
-          .from("send_outs")
-          .update({ stage: "pitch", updated_at: new Date().toISOString() } as any)
-          .eq("candidate_id", entityId)
-          .in("stage", ["new", "reached_out"])
-          .select("id");
-
-        if (advanced && advanced.length > 0) {
-          logger.info("Pipeline auto-advanced to pitch on positive email", {
-            entityId, sentiment: analysis.sentiment, sendOutIds: advanced.map((s: any) => s.id),
-          });
-        }
-      }
-    }
-
-    logger.info("Email sentiment analyzed", { entityId, sentiment: analysis.sentiment });
-  } catch (err) {
-    logger.error("Email sentiment analysis error", { error: err });
   }
 }
 
