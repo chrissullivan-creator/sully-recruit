@@ -187,6 +187,21 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         try { result = await resp.json(); } catch { throw new Error(`HTTP ${resp.status}`); }
         if (!resp.ok || !result.success) throw new Error(result.error || 'Parse failed');
 
+        // Link the uploaded resume file to the candidate
+        if (result.candidate_id && file_path) {
+          const mimeType = file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+            : file_name.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : file_name.toLowerCase().endsWith('.doc') ? 'application/msword'
+            : 'application/octet-stream';
+          await supabase.from('resumes').insert({
+            candidate_id: result.candidate_id,
+            file_path,
+            file_name,
+            mime_type: mimeType,
+            parsing_status: 'completed',
+          } as any);
+        }
+
         results.push({
           file_name,
           file_path,
@@ -246,6 +261,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     }
     setSaving(true);
     try {
+      let candidateId = parsed.candidate_id;
+
       if (parsed.candidate_id) {
         const { error } = await supabase
           .from('candidates')
@@ -265,7 +282,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         if (error) throw error;
       } else {
         const userId = (await supabase.auth.getUser()).data.user?.id;
-        const { error } = await supabase.from('candidates').insert({
+        const { data: inserted, error } = await supabase.from('candidates').insert({
           owner_user_id:   userId,
           first_name:      parsed.first_name.trim() || null,
           last_name:       parsed.last_name.trim() || null,
@@ -277,8 +294,24 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           location_text:   parsed.location.trim() || null,
           linkedin_url:    parsed.linkedin_url.trim() || null,
           status: 'new',
-        } as any);
+        } as any).select('id').single();
         if (error) throw error;
+        candidateId = inserted?.id ?? null;
+      }
+
+      // Link the uploaded resume file to the candidate
+      if (candidateId && parsed.file_path) {
+        const mimeType = parsed.file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+          : parsed.file_name.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : parsed.file_name.toLowerCase().endsWith('.doc') ? 'application/msword'
+          : 'application/octet-stream';
+        await supabase.from('resumes').insert({
+          candidate_id: candidateId,
+          file_path:    parsed.file_path,
+          file_name:    parsed.file_name,
+          mime_type:    mimeType,
+          parsing_status: 'completed',
+        } as any);
       }
 
       qc.invalidateQueries({ queryKey: ['candidates'] });
