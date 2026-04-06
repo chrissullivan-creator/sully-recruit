@@ -12,7 +12,7 @@
       "command": "npx",
       "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref", "xlobevmhzimxjtpiontf"],
       "env": {
-        "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhsb2Jldm1oemlteGp0cGlvbnRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjQ4NzYxNywiZXhwIjoyMDg4MDYzNjE3fQ.a-q6Jhr3DgFHAmD8plwnaxkYcLwrUfWSnB1ZgCh0D3w"
+        "SUPABASE_ACCESS_TOKEN": "sbp_ba8fe3c9d185a6a43c576a23885029b6a46f68f2"
       }
     },
     "trigger": {
