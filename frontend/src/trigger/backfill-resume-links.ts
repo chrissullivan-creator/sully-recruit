@@ -5,13 +5,123 @@ const MATCH_PROMPT = `You are a resume parser. Extract ONLY the person's full na
 {"first_name": "First", "last_name": "Last", "current_company": "Company Name"}
 If a field is not found, use an empty string.`;
 
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 25; // smaller batches to avoid rate limits
 
 interface BackfillPayload {
   offset?: number;
   limit?: number;
 }
 
+// ── Claude API call with retry on 429 ───────────────────────────────────────
+async function callClaude(
+  contentBlocks: any[],
+  anthropicKey: string,
+  maxRetries = 3,
+): Promise<any | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 256,
+        system: MATCH_PROMPT,
+        messages: [{ role: "user", content: contentBlocks }],
+        temperature: 0,
+      }),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || "";
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      return JSON.parse(jsonMatch[0]);
+    }
+
+    if (resp.status === 429) {
+      const retryAfter = parseInt(resp.headers.get("retry-after") || "30", 10);
+      const waitMs = Math.max(retryAfter, 10) * 1000;
+      logger.warn(`Rate limited (attempt ${attempt + 1}/${maxRetries + 1}), waiting ${waitMs / 1000}s`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    // Non-retryable error
+    logger.warn("Claude API error", { status: resp.status });
+    return null;
+  }
+
+  logger.warn("Claude API: max retries exhausted");
+  return null;
+}
+
+// ── Match parsed name+company to a candidate and link resume ────────────────
+async function matchAndLink(
+  supabase: any,
+  fullName: string,
+  company: string,
+  filePath: string,
+  fileName: string,
+): Promise<boolean> {
+  const mimeType = fileName.toLowerCase().endsWith(".pdf")
+    ? "application/pdf"
+    : fileName.toLowerCase().endsWith(".docx")
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/octet-stream";
+
+  // Try name + company first for tighter match
+  if (company) {
+    const { data: exactMatch } = await supabase
+      .from("candidates")
+      .select("id, full_name, current_company")
+      .ilike("full_name", fullName)
+      .ilike("current_company", `%${company}%`)
+      .limit(1)
+      .maybeSingle();
+
+    if (exactMatch) {
+      await supabase.from("resumes").insert({
+        candidate_id: exactMatch.id,
+        file_path: filePath,
+        file_name: fileName,
+        mime_type: mimeType,
+        parsing_status: "completed",
+      } as any);
+      logger.info("Linked (name+company)", { candidateId: exactMatch.id, fullName, company });
+      return true;
+    }
+  }
+
+  // Fallback: match by name only
+  const { data: nameMatch } = await supabase
+    .from("candidates")
+    .select("id, full_name")
+    .ilike("full_name", fullName)
+    .limit(1)
+    .maybeSingle();
+
+  if (nameMatch) {
+    await supabase.from("resumes").insert({
+      candidate_id: nameMatch.id,
+      file_path: filePath,
+      file_name: fileName,
+      mime_type: mimeType,
+      parsing_status: "completed",
+    } as any);
+    logger.info("Linked (name only)", { candidateId: nameMatch.id, fullName });
+    return true;
+  }
+
+  logger.info("No candidate match", { fullName, company });
+  return false;
+}
+
+// ── Main task ───────────────────────────────────────────────────────────────
 export const backfillResumeLinks = task({
   id: "backfill-resume-links",
   retry: { maxAttempts: 1 },
@@ -21,35 +131,21 @@ export const backfillResumeLinks = task({
     const supabase = getSupabaseAdmin();
     const anthropicKey = await getAnthropicKey();
 
-    // Find unlinked storage files
+    // Find unlinked storage files via DB function
     const { data: files, error: filesErr } = await supabase.rpc("get_unlinked_resume_files", {
       p_offset: offset,
       p_limit: limit,
     });
 
-    // Fallback: query storage.objects directly
-    let unlinkedFiles: { file_path: string; file_name: string; mime_type: string }[] = [];
-
     if (filesErr || !files?.length) {
-      // Use raw SQL approach via a simpler query
-      const { data: storageFiles } = await supabase
-        .from("storage_objects_unlinked_resumes" as any)
-        .select("*")
-        .range(offset, offset + limit - 1);
-
-      if (!storageFiles?.length) {
-        logger.info("No more unlinked files to process", { offset });
-        return { processed: 0, linked: 0, done: true };
-      }
-      unlinkedFiles = storageFiles;
-    } else {
-      unlinkedFiles = files;
+      logger.info("No more unlinked files to process", { offset, error: filesErr?.message });
+      return { processed: 0, linked: 0, done: true };
     }
 
     let linked = 0;
     let processed = 0;
 
-    for (const file of unlinkedFiles) {
+    for (const file of files) {
       processed++;
       const filePath = file.file_path;
       const fileName = file.file_name || filePath.split("/").pop() || "unknown";
@@ -71,7 +167,7 @@ export const backfillResumeLinks = task({
           continue;
         }
 
-        // Parse with Claude Haiku — just extract name + company
+        // Build content blocks for Claude
         const lowerName = fileName.toLowerCase();
         const contentBlocks: any[] = [];
 
@@ -83,45 +179,17 @@ export const backfillResumeLinks = task({
           });
           contentBlocks.push({ type: "text", text: "Extract the person's name and current company." });
         } else {
-          // For doc/docx/txt, try to get raw text
           const text = new TextDecoder().decode(fileBytes);
-          const snippet = text.slice(0, 4000);
           contentBlocks.push({
             type: "text",
-            text: `Extract the person's name and current company from this resume:\n\n${snippet}`,
+            text: `Extract the person's name and current company from this resume:\n\n${text.slice(0, 4000)}`,
           });
         }
 
-        const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": anthropicKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 256,
-            system: MATCH_PROMPT,
-            messages: [{ role: "user", content: contentBlocks }],
-            temperature: 0,
-          }),
-        });
+        // Call Claude with retry
+        const parsed = await callClaude(contentBlocks, anthropicKey);
+        if (!parsed) continue;
 
-        if (!aiResp.ok) {
-          logger.warn("Claude API error", { status: aiResp.status, filePath });
-          continue;
-        }
-
-        const aiData = await aiResp.json();
-        const text = aiData.content?.[0]?.text || "";
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          logger.warn("No JSON in Claude response", { filePath, text: text.slice(0, 200) });
-          continue;
-        }
-
-        const parsed = JSON.parse(jsonMatch[0]);
         const firstName = (parsed.first_name || "").trim();
         const lastName = (parsed.last_name || "").trim();
         const company = (parsed.current_company || "").trim();
@@ -131,71 +199,12 @@ export const backfillResumeLinks = task({
           continue;
         }
 
-        // Match against candidates by name + company
         const fullName = `${firstName} ${lastName}`.trim();
-        let query = supabase
-          .from("candidates")
-          .select("id, full_name, current_company")
-          .ilike("full_name", fullName);
+        const wasLinked = await matchAndLink(supabase, fullName, company, filePath, fileName);
+        if (wasLinked) linked++;
 
-        if (company) {
-          // Try name + company first for tighter match
-          const { data: exactMatch } = await supabase
-            .from("candidates")
-            .select("id, full_name, current_company")
-            .ilike("full_name", fullName)
-            .ilike("current_company", `%${company}%`)
-            .limit(1)
-            .maybeSingle();
-
-          if (exactMatch) {
-            // Link it
-            await supabase.from("resumes").insert({
-              candidate_id: exactMatch.id,
-              file_path: filePath,
-              file_name: fileName,
-              mime_type: lowerName.endsWith(".pdf") ? "application/pdf" : "application/octet-stream",
-              parsing_status: "completed",
-            } as any);
-            linked++;
-            logger.info("Linked resume (name+company)", {
-              filePath,
-              candidateId: exactMatch.id,
-              fullName,
-              company,
-            });
-            continue;
-          }
-        }
-
-        // Fallback: match by name only
-        const { data: nameMatch } = await supabase
-          .from("candidates")
-          .select("id, full_name")
-          .ilike("full_name", fullName)
-          .limit(1)
-          .maybeSingle();
-
-        if (nameMatch) {
-          await supabase.from("resumes").insert({
-            candidate_id: nameMatch.id,
-            file_path: filePath,
-            file_name: fileName,
-            mime_type: lowerName.endsWith(".pdf") ? "application/pdf" : "application/octet-stream",
-            parsing_status: "completed",
-          } as any);
-          linked++;
-          logger.info("Linked resume (name only)", {
-            filePath,
-            candidateId: nameMatch.id,
-            fullName,
-          });
-        } else {
-          logger.info("No candidate match found", { filePath, fullName, company });
-        }
-
-        // Rate limit: small delay between API calls
-        await new Promise((r) => setTimeout(r, 500));
+        // Rate limit: 2s between API calls to stay well under limits
+        await new Promise((r) => setTimeout(r, 2000));
       } catch (err: any) {
         logger.error("Error processing file", { filePath, error: err.message });
       }
