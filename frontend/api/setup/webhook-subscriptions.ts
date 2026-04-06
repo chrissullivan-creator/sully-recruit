@@ -321,6 +321,15 @@ async function createRingCentralSubscriptions(supabase: any): Promise<Subscripti
       }
 
       // Create new subscription
+      const rcWebhookToken = process.env.RINGCENTRAL_WEBHOOK_TOKEN;
+      const deliveryMode: Record<string, string> = {
+        transportType: "WebHook",
+        address: `${WEBHOOK_BASE_URL}/api/webhooks/ringcentral`,
+      };
+      if (rcWebhookToken) {
+        deliveryMode.verificationToken = rcWebhookToken;
+      }
+
       const createResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
         method: "POST",
         headers: {
@@ -333,10 +342,7 @@ async function createRingCentralSubscriptions(supabase: any): Promise<Subscripti
             "/restapi/v1.0/account/~/extension/~/message-store",
             "/restapi/v1.0/account/~/extension/~/voicemail",
           ],
-          deliveryMode: {
-            transportType: "WebHook",
-            address: `${WEBHOOK_BASE_URL}/api/webhooks/ringcentral`,
-          },
+          deliveryMode,
           expiresIn: 604800, // 7 days (max for RC)
         }),
       });
