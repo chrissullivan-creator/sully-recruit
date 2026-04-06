@@ -65,7 +65,7 @@ ${campaignDescription ? `Description: ${campaignDescription}` : ""}`;
     } else if (Deno.env.get("OPENAI_API_KEY")) {
       apiUrl = "https://api.openai.com/v1/chat/completions";
       apiKey = Deno.env.get("OPENAI_API_KEY")!;
-      model = "gpt-4.1";
+      model = "gpt-4o";
     } else {
       const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
       if (!LOVABLE_API_KEY) throw new Error("No AI API key configured.");

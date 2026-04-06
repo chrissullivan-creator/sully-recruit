@@ -47,102 +47,53 @@ serve(async (req) => {
       // Continue anyway - parsing is more important
     }
 
-    // Try Eden AI first for structured parsing
-    const edenApiKey = Deno.env.get("Eden_AI");
-    let edenResult: any = null;
+    // Parse resume with Claude (Anthropic)
+    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+    let parsedResult: any = null;
     let source = "none";
 
-    if (edenApiKey) {
+    if (anthropicKey) {
       try {
-        const edenForm = new FormData();
-        edenForm.append("providers", "affinda");
-        edenForm.append("file", file);
+        const fileBytes = new Uint8Array(arrayBuffer);
+        const lowerName = file.name.toLowerCase();
+        const contentBlocks: any[] = [];
 
-        const edenResp = await fetch("https://api.edenai.run/v2/ocr/resume_parser", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${edenApiKey}` },
-          body: edenForm,
-        });
-
-        if (edenResp.ok) {
-          const edenData = await edenResp.json();
-          const affinda = edenData?.affinda?.extracted_data;
-          if (affinda) {
-            const name = affinda.personal_infos?.name || {};
-            const address = affinda.personal_infos?.address || {};
-            const phones = affinda.personal_infos?.phones || [];
-            const mails = affinda.personal_infos?.mails || [];
-            const urls = affinda.personal_infos?.urls || [];
-            const experiences = affinda.work_experience?.entries || [];
-            const latestJob = experiences[0] || {};
-
-            const linkedinUrl = urls.find((u: string) =>
-              typeof u === "string" && u.toLowerCase().includes("linkedin")
-            ) || "";
-
-            edenResult = {
-              first_name: name.first_name || "",
-              last_name: name.last_name || "",
-              email: mails[0] || "",
-              phone: phones[0] || "",
-              current_company: latestJob.company || "",
-              current_title: latestJob.title || "",
-              location: [address.city, address.region, address.country]
-                .filter(Boolean)
-                .join(", "),
-              linkedin_url: linkedinUrl,
-              raw_text: affinda.raw_text || "",
-            };
-            source = "eden_ai";
-          }
+        if (lowerName.endsWith(".pdf")) {
+          // Use Claude's native PDF support
+          const base64Data = btoa(String.fromCharCode(...fileBytes));
+          contentBlocks.push({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: base64Data },
+          });
+          contentBlocks.push({ type: "text", text: "Parse this resume and extract the structured data." });
+        } else {
+          const fileText = await file.text();
+          contentBlocks.push({ type: "text", text: `Parse this resume:\n\n${fileText.slice(0, 8000)}` });
         }
-      } catch (e) {
-        console.error("Eden AI error:", e);
-      }
-    }
 
-    // If Eden AI failed or not configured, fall back to Ask Joe (OpenAI) for text files only
-    if (!edenResult && file.type.includes('text')) {
-      const fileText = await file.text();
-      const openaiKey = Deno.env.get("OPENAI_API_KEY");
-      const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-
-      const apiKey = openaiKey || lovableKey;
-      if (apiKey) {
-        const apiUrl = openaiKey
-          ? "https://api.openai.com/v1/chat/completions"
-          : "https://ai.gateway.lovable.dev/v1/chat/completions";
-        const model = openaiKey ? "gpt-4.1" : "google/gemini-3-flash-preview";
-
-        const aiResp = await fetch(apiUrl, {
+        const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
           },
           body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: "You are Joe, a resume parsing assistant. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
-              },
-              {
-                role: "user",
-                content: `Parse this resume:\n\n${fileText.slice(0, 6000)}`,
-              },
-            ],
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 1024,
+            system: "You are a professional resume parser. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
+            messages: [{ role: "user", content: contentBlocks }],
             temperature: 0,
           }),
         });
 
         if (aiResp.ok) {
           const aiData = await aiResp.json();
-          const content = aiData.choices?.[0]?.message?.content || "";
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const text = aiData.content?.[0]?.text || "";
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             const data = JSON.parse(jsonMatch[0]);
-            edenResult = {
+            parsedResult = {
               first_name: data.first_name || "",
               last_name: data.last_name || "",
               email: data.email || "",
@@ -151,27 +102,26 @@ serve(async (req) => {
               current_title: data.current_title || "",
               location: data.location || "",
               linkedin_url: data.linkedin_url || "",
-              raw_text: fileText.slice(0, 50000),
             };
-            source = "ask_joe";
+            source = "claude";
           }
         }
+      } catch (e) {
+        console.error("Claude parse error:", e);
       }
     }
 
-    // Fallback if everything failed
-    if (!edenResult) {
-      const fileText = await file.text();
-      edenResult = {
+    // Fallback if Claude failed or not configured
+    if (!parsedResult) {
+      parsedResult = {
         first_name: "", last_name: "", email: "", phone: "",
         current_company: "", current_title: "", location: "", linkedin_url: "",
-        raw_text: fileText.slice(0, 50000),
       };
     }
 
     return new Response(
       JSON.stringify({
-        parsed: edenResult,
+        parsed: parsedResult,
         file_path: filePath,
         file_name: file.name,
         source,
