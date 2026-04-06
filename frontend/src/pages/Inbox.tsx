@@ -44,6 +44,8 @@ interface InboxThread {
   contact_name: string | null;
   send_out_id: string | null;
   account_id: string | null;
+  external_conversation_id: string | null;
+  integration_account_id: string | null;
 }
 
 interface Message {
@@ -161,6 +163,8 @@ function CreatePersonDialog({
   defaultType,
   prefill,
   channel,
+  externalConversationId,
+  integrationAccountId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -168,6 +172,8 @@ function CreatePersonDialog({
   defaultType: 'candidate' | 'contact';
   prefill: { name: string; address: string };
   channel: string;
+  externalConversationId?: string | null;
+  integrationAccountId?: string | null;
 }) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<'candidate' | 'contact'>(defaultType);
@@ -299,10 +305,93 @@ function CreatePersonDialog({
     }
   };
 
-  // For LinkedIn channels: instantly trigger Unipile search when dialog opens
+  // For LinkedIn channels: resolve profile when dialog opens
+  // If prefill.address exists (sender_address), use it directly.
+  // Otherwise, fetch chat attendees from Unipile to find the other participant.
   useEffect(() => {
-    if (!open || channel !== 'linkedin' || !prefill.address) return;
-    resolveUnipileProfile(prefill.address);
+    if (!open || channel !== 'linkedin') return;
+
+    if (prefill.address) {
+      resolveUnipileProfile(prefill.address);
+      return;
+    }
+
+    // No sender_address — fetch chat attendees from Unipile
+    if (!externalConversationId) return;
+
+    (async () => {
+      setResolving(true);
+      try {
+        // Get Unipile API config
+        const { data: unipileCfg } = await supabase
+          .from('user_integrations')
+          .select('config')
+          .eq('integration_type', 'unipile')
+          .limit(1)
+          .maybeSingle();
+        const cfg = unipileCfg?.config as any;
+        if (!cfg?.api_key || !cfg?.base_url) return;
+
+        // Get Unipile account ID for this integration
+        let accountId: string | null = null;
+        if (integrationAccountId) {
+          const { data: ia } = await supabase
+            .from('integration_accounts')
+            .select('unipile_account_id')
+            .eq('id', integrationAccountId)
+            .maybeSingle();
+          accountId = ia?.unipile_account_id || null;
+        }
+        if (!accountId) {
+          const { data: accounts } = await supabase
+            .from('integration_accounts')
+            .select('unipile_account_id')
+            .not('unipile_account_id', 'is', null)
+            .eq('is_active', true)
+            .limit(1);
+          accountId = accounts?.[0]?.unipile_account_id || null;
+        }
+        if (!accountId) return;
+
+        // Fetch chat attendees
+        const chatResp = await fetch(
+          `${cfg.base_url.replace(/\/+$/, '')}/chats/${externalConversationId}`,
+          { headers: { 'X-API-KEY': cfg.api_key, Accept: 'application/json' } },
+        );
+        if (!chatResp.ok) return;
+        const chatData = await chatResp.json();
+
+        // Find the OTHER attendee (not our account)
+        const attendees = chatData.attendees || chatData.participants || [];
+        const other = attendees.find((a: any) =>
+          a.provider_id !== accountId && a.id !== accountId
+        ) || attendees[0];
+
+        if (other) {
+          const name = other.display_name || other.name || '';
+          const parts = name.split(' ');
+          setForm(prev => ({
+            ...prev,
+            first_name: parts[0] || prev.first_name,
+            last_name: parts.slice(1).join(' ') || prev.last_name,
+            linkedin_url: other.public_profile_url || other.linkedin_url || (other.provider_id ? `https://linkedin.com/in/${other.provider_id}` : prev.linkedin_url),
+            title: other.headline || other.title || prev.title,
+            company: other.company || prev.company,
+            location: other.location || prev.location,
+          }));
+
+          // Now resolve the full profile for richer data
+          const profileId = other.provider_id || other.id;
+          if (profileId) {
+            resolveUnipileProfile(profileId);
+          }
+        }
+      } catch (err) {
+        console.warn('Chat attendee lookup failed:', err);
+      } finally {
+        if (!resolvedRef.current) setResolving(false);
+      }
+    })();
   }, [open]);
 
   // Auto-search database for existing matches when dialog opens
@@ -1032,6 +1121,8 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
         defaultType={createType}
         prefill={{ name: senderName, address: senderAddress }}
         channel={thread.channel}
+        externalConversationId={thread.external_conversation_id}
+        integrationAccountId={thread.integration_account_id}
       />
     </div>
   );
@@ -1509,6 +1600,8 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           defaultType={createDialogType}
           prefill={{ name: senderName, address: senderAddress }}
           channel={thread.channel}
+          externalConversationId={thread.external_conversation_id}
+          integrationAccountId={thread.integration_account_id}
         />
       )}
     </div>
