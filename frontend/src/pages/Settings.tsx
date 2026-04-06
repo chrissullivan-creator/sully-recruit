@@ -25,6 +25,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   Info,
+  Play,
+  Wrench,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -316,6 +318,12 @@ Senior Recruiter | Your Company
     return textToHtml(signatureConfig.signature_text);
   };
 
+  const ADMIN_EMAILS = [
+    'chris.sullivan@emeraldrecruit.com',
+    'emeraldrecruit@theemeraldrecruitinggroup.com',
+  ];
+  const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
+
   const tabs = [
     { id: 'integrations', label: 'Integrations', icon: Link2 },
     { id: 'templates', label: 'Message Templates', icon: PenLine },
@@ -323,6 +331,7 @@ Senior Recruiter | Your Company
     { id: 'linkedin_safety', label: 'LinkedIn Safety', icon: ShieldCheck },
     { id: 'api', label: 'API Keys', icon: Key },
     { id: 'general', label: 'General', icon: SettingsIcon },
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin Tools', icon: Wrench }] : []),
   ];
 
   const isSaving = (type: string) => saving === type;
@@ -643,7 +652,18 @@ Senior Recruiter | Your Company
                           variant="gold"
                           size="sm"
                           disabled={isSaving('ringcentral')}
-                          onClick={() => saveIntegration('ringcentral', ringcentralConfig, true)}
+                          onClick={() => {
+                            const rc = ringcentralConfig;
+                            if (!rc.client_id?.trim() || !rc.client_secret?.trim() || !rc.jwt_token?.trim()) {
+                              toast.error('Client ID, Client Secret, and JWT Token are required');
+                              return;
+                            }
+                            if (!rc.phone_number?.trim()) {
+                              toast.error('SMS Phone Number is required');
+                              return;
+                            }
+                            saveIntegration('ringcentral', ringcentralConfig, true);
+                          }}
                         >
                           {isSaving('ringcentral') ? (
                             <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
@@ -1083,6 +1103,67 @@ Senior Recruiter | Your Company
                         </code>
                         <Button size="sm" variant="ghost">Copy</Button>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ============ ADMIN TOOLS TAB ============ */}
+                {activeTab === 'admin' && isAdmin && (
+                  <div>
+                    <div className="mb-6">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Admin Tools</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Manually trigger background tasks and scheduled jobs.
+                      </p>
+                    </div>
+                    <div className="space-y-4">
+                      {[
+                        { id: 'scan-duplicate-candidates', label: 'Scan Duplicates', desc: 'Scan all candidates for potential duplicates', endpoint: '/api/dedup/scan' },
+                        { id: 'backfill-avatars', label: 'Backfill Avatars', desc: 'Fetch missing candidate/contact avatars', endpoint: null },
+                        { id: 'cleanup-stale-enrollments', label: 'Cleanup Enrollments', desc: 'Remove stale/abandoned sequence enrollments', endpoint: null },
+                        { id: 'sync-conversations', label: 'Sync Conversations', desc: 'Sync conversations from Unipile', endpoint: null },
+                        { id: 'sync-outlook-events', label: 'Sync Outlook Events', desc: 'Sync calendar events from Outlook', endpoint: '/api/trigger-sync-outlook' },
+                        { id: 'run-nudge-check', label: 'Run Nudge Check', desc: 'Find stagnant candidates and create follow-up tasks', endpoint: '/api/trigger-nudge-check' },
+                        { id: 'backfill-companies', label: 'Backfill Companies', desc: 'Fetch missing company data from LinkedIn', endpoint: '/api/trigger-backfill-companies' },
+                      ].map((task) => (
+                        <div key={task.id} className="rounded-lg border border-border bg-card p-4 flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-medium text-foreground">{task.label}</h3>
+                            <p className="text-xs text-muted-foreground">{task.desc}</p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={saving === task.id}
+                            onClick={async () => {
+                              if (!task.endpoint) {
+                                toast.info(`${task.label} runs on a schedule — trigger it from the Trigger.dev dashboard`);
+                                return;
+                              }
+                              setSaving(task.id);
+                              try {
+                                const resp = await fetch(task.endpoint, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({}),
+                                });
+                                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                                toast.success(`${task.label} triggered`);
+                              } catch (err: any) {
+                                toast.error(err.message || 'Failed to trigger task');
+                              } finally {
+                                setSaving(null);
+                              }
+                            }}
+                          >
+                            {saving === task.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <><Play className="h-3.5 w-3.5 mr-1" /> Run</>
+                            )}
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
