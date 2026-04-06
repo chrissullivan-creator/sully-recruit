@@ -131,14 +131,15 @@ export const backfillResumeLinks = task({
     const supabase = getSupabaseAdmin();
     const anthropicKey = await getAnthropicKey();
 
-    // Find unlinked storage files via DB function
+    // Find unlinked storage files via DB function — always offset 0
+    // since linked/marked files drop out of results each batch
     const { data: files, error: filesErr } = await supabase.rpc("get_unlinked_resume_files", {
-      p_offset: offset,
+      p_offset: 0,
       p_limit: limit,
     });
 
     if (filesErr || !files?.length) {
-      logger.info("No more unlinked files to process", { offset, error: filesErr?.message });
+      logger.info("No more unlinked files to process", { error: filesErr?.message });
       return { processed: 0, linked: 0, done: true };
     }
 
@@ -158,6 +159,11 @@ export const backfillResumeLinks = task({
 
         if (dlErr || !downloadData) {
           logger.warn("Failed to download", { filePath, error: dlErr?.message });
+          // Mark as processed so it doesn't reappear
+          await supabase.from("resumes").insert({
+            candidate_id: null, file_path: filePath, file_name: fileName,
+            parsing_status: "failed",
+          } as any);
           continue;
         }
 
@@ -188,7 +194,13 @@ export const backfillResumeLinks = task({
 
         // Call Claude with retry
         const parsed = await callClaude(contentBlocks, anthropicKey);
-        if (!parsed) continue;
+        if (!parsed) {
+          await supabase.from("resumes").insert({
+            candidate_id: null, file_path: filePath, file_name: fileName,
+            parsing_status: "parse_failed",
+          } as any);
+          continue;
+        }
 
         const firstName = (parsed.first_name || "").trim();
         const lastName = (parsed.last_name || "").trim();
@@ -196,12 +208,25 @@ export const backfillResumeLinks = task({
 
         if (!firstName && !lastName) {
           logger.warn("No name extracted", { filePath });
+          // Mark as processed with no candidate
+          await supabase.from("resumes").insert({
+            candidate_id: null, file_path: filePath, file_name: fileName,
+            parsing_status: "no_match",
+          } as any);
           continue;
         }
 
         const fullName = `${firstName} ${lastName}`.trim();
         const wasLinked = await matchAndLink(supabase, fullName, company, filePath, fileName);
-        if (wasLinked) linked++;
+        if (wasLinked) {
+          linked++;
+        } else {
+          // No candidate match — mark so it doesn't reappear
+          await supabase.from("resumes").insert({
+            candidate_id: null, file_path: filePath, file_name: fileName,
+            parsing_status: "no_match",
+          } as any);
+        }
 
         // Rate limit: 2s between API calls to stay well under limits
         await new Promise((r) => setTimeout(r, 2000));
@@ -210,12 +235,13 @@ export const backfillResumeLinks = task({
       }
     }
 
-    // Auto-chain to next batch if there are more files
+    // Auto-chain to next batch — always offset 0 since processed files
+    // are now marked and won't appear again
     if (processed >= limit) {
-      logger.info("Triggering next batch", { nextOffset: offset + limit });
-      await backfillResumeLinks.trigger({ offset: offset + limit, limit });
+      logger.info("Triggering next batch", { linked, processed });
+      await backfillResumeLinks.trigger({ limit });
     }
 
-    return { processed, linked, offset, done: processed < limit };
+    return { processed, linked, done: processed < limit };
   },
 });
