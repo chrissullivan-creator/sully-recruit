@@ -277,13 +277,30 @@ const resp = await fetch(
 
 ---
 
+## MCP Servers (`.mcp.json`)
+
+Three MCP servers are configured for Claude Code:
+
+| Server | Package | Purpose | Auth |
+|---|---|---|---|
+| **Supabase** | `@supabase/mcp-server-supabase` | Run SQL, manage migrations, inspect schema | `SUPABASE_ACCESS_TOKEN` (personal access token from supabase.com/dashboard/account/tokens) |
+| **Trigger.dev** | `@trigger.dev/mcp-server` | Manage tasks, schedules, view runs | `TRIGGER_SECRET_KEY` (from Trigger.dev Dashboard → Project Settings) |
+| **Unipile** | `mcp-server-unipile` | LinkedIn messaging, profile lookups, connections | `UNIPILE_API_KEY` + `UNIPILE_BASE_URL` (DSN: api19.unipile.com:14926) |
+
+**Project ref:** `xlobevmhzimxjtpiontf`
+
+**⚠️ If an MCP server disconnects, restart the session. Keys are stored in `.mcp.json` at repo root.**
+
+---
+
 ## AI Stack
 
 | Service | Purpose | Model |
 |---|---|---|
-| Anthropic Claude | Resume parsing, Joe assistant, sentiment, step writing | `claude-sonnet-4-20250514` (Sonnet), `claude-haiku-4-5-20251001` (sentiment) |
+| Anthropic Claude | Resume parsing, Joe assistant, sentiment, step writing, campaign suggestions | `claude-sonnet-4-20250514` (Sonnet), `claude-haiku-4-5-20251001` (Haiku for fast tasks) |
 | Voyage Finance-2 | Candidate embeddings for semantic search | `voyage-finance-2` via voyageai.com |
-| OpenAI | NOT USED for AI — embeddings only in legacy `search-resumes` | — |
+
+**⚠️ No OpenAI, Eden AI, or Lovable gateway. All AI goes through Claude/Anthropic.**
 
 **Semantic search RPC:** `match_candidates(query_embedding, match_count, min_similarity, filter_status)`
 
