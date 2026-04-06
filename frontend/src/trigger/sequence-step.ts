@@ -248,16 +248,39 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
       return { action: "rescheduled", reason: "outside_send_window" };
     }
 
-    // ── 4. Rate limiting ────────────────────────────────────────────
+    // ── 4. Rate limiting (per-channel daily caps) ─────────────────
     const stepChannel = step.channel || step.step_type || payload.sequenceChannel || "";
     const isConnection = stepChannel === "linkedin_connection";
+    const isLinkedInMsg =
+      stepChannel === "linkedin_message" || stepChannel === "classic_message";
     const isInMail =
       stepChannel === "linkedin_recruiter" ||
       stepChannel === "sales_nav" ||
       stepChannel === "recruiter_inmail" ||
       stepChannel === "sales_nav_inmail";
+    const isSms = stepChannel === "sms";
+    const isEmail = stepChannel === "email";
 
-    if (!isInMail) {
+    // Per-channel daily caps
+    // LinkedIn connections: 40/day (LinkedIn enforced)
+    // LinkedIn messages: 50/day
+    // InMails: no cap (LinkedIn credits-based, skip rate limiting)
+    // SMS: 50/day
+    // Email: 150/day
+    const channelCaps: Record<string, number> = {
+      linkedin_connection: 40,
+      linkedin_message: 50,
+      sms: 50,
+      email: 150,
+    };
+
+    const capCategory = isConnection ? "linkedin_connection"
+      : isLinkedInMsg ? "linkedin_message"
+      : isSms ? "sms"
+      : isEmail ? "email"
+      : null;
+
+    if (capCategory && !isInMail) {
       const todayStart = new Date(now);
       todayStart.setHours(0, 0, 0, 0);
 
@@ -267,23 +290,31 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
         .gte("executed_at", todayStart.toISOString())
         .in("status", ["sent", "scheduled"]);
 
+      // Count only executions for the same channel category
       let relevantCount = 0;
-      if (isConnection && todayExecs) {
+      if (todayExecs && todayExecs.length > 0) {
         const stepIds = todayExecs.map((e: any) => e.sequence_step_id);
-        if (stepIds.length > 0) {
-          const { data: steps } = await supabase
-            .from("sequence_steps")
-            .select("id, channel, step_type")
-            .in("id", stepIds);
-          relevantCount = (steps ?? []).filter(
-            (s: any) => s.channel === "linkedin_connection" || s.step_type === "linkedin_connection",
-          ).length;
+        const { data: matchedSteps } = await supabase
+          .from("sequence_steps")
+          .select("id, channel, step_type")
+          .in("id", stepIds);
+
+        if (matchedSteps) {
+          relevantCount = matchedSteps.filter((s: any) => {
+            const ch = s.channel || s.step_type || "";
+            if (capCategory === "linkedin_connection")
+              return ch === "linkedin_connection";
+            if (capCategory === "linkedin_message")
+              return ch === "linkedin_message" || ch === "classic_message";
+            if (capCategory === "sms")
+              return ch === "sms";
+            // email — everything that's not linkedin/sms
+            return ch === "email";
+          }).length;
         }
-      } else {
-        relevantCount = (todayExecs ?? []).length;
       }
 
-      const dailyCap = isConnection ? 40 : 150;
+      const dailyCap = channelCaps[capCategory] ?? 150;
       if (relevantCount >= dailyCap) {
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -296,6 +327,7 @@ Use "ooo" sentiment ONLY for auto-replies / out-of-office messages.`,
 
         logger.info("Daily cap reached — rescheduled", {
           enrollmentId: payload.enrollmentId,
+          channel: capCategory,
           cap: dailyCap,
           count: relevantCount,
         });
