@@ -4,12 +4,11 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
-import { EditJobDialog } from '@/components/jobs/EditJobDialog';
-import { useJob, useContacts, useJobSendOuts, useJobCandidates } from '@/hooks/useData';
+import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
+import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -19,12 +18,13 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, ChevronRight,
+  Search, Pencil, Link as LinkIcon,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import DOMPurify from 'dompurify';
 
 const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -38,6 +38,33 @@ const JOB_STATUSES = [
   { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
+
+const STATUS_OPTIONS = [
+  { value: 'open', label: 'Open' },
+  { value: 'interviewing', label: 'Interviewing' },
+  { value: 'offer', label: 'Offer' },
+  { value: 'win', label: 'Win' },
+  { value: 'lost', label: 'Lost' },
+  { value: 'on_hold', label: 'On Hold' },
+];
+
+// ── Clickable field wrapper ─────────────────────────────────────────────────
+const EditableField = ({
+  children, onClick, className,
+}: {
+  children: React.ReactNode; onClick: () => void; className?: string;
+}) => (
+  <div
+    onClick={onClick}
+    className={cn(
+      'group relative cursor-pointer rounded-md px-2 py-1.5 -mx-2 -my-1.5 hover:bg-muted/40 transition-colors',
+      className,
+    )}
+  >
+    {children}
+    <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2" />
+  </div>
+);
 
 // ── Send-out card with inline submittal notes + resume upload ─────────────────
 const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) => {
@@ -90,7 +117,6 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
 
   return (
     <div className="rounded-lg border border-border bg-card/40 overflow-hidden">
-      {/* Header row — always visible */}
       <div
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors select-none"
         onClick={() => setExpanded(v => !v)}
@@ -125,10 +151,8 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
         </div>
       </div>
 
-      {/* Expanded: resume + submittal notes */}
       {expanded && (
         <div className="px-4 pb-4 pt-3 border-t border-border space-y-5">
-          {/* Resume upload */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Submittal Resume
@@ -183,7 +207,6 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
             />
           </div>
 
-          {/* Submittal notes */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Submittal Notes
@@ -218,6 +241,7 @@ const JobDetail = () => {
   const queryClient = useQueryClient();
   const { data: job, isLoading } = useJob(id);
   const { data: contacts = [] } = useContacts();
+  const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
   const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
 
@@ -227,32 +251,78 @@ const JobDetail = () => {
   const [contactSearch, setContactSearch] = useState('');
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [editJobOpen, setEditJobOpen] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
-  const [instructionsLoaded, setInstructionsLoaded] = useState(false);
-  const [savingInstructions, setSavingInstructions] = useState(false);
 
-  // Seed local state from job data once loaded
-  if (job && !instructionsLoaded) {
-    setSubmittalInstructions((job as any).submittal_instructions ?? '');
-    setInstructionsLoaded(true);
-  }
+  // Per-field edit dialogs
+  const [editField, setEditField] = useState<{
+    field: string; title: string; type: 'text' | 'richtext' | 'select';
+    value: string; options?: { value: string; label: string }[]; placeholder?: string;
+  } | null>(null);
 
-  const saveInstructions = async () => {
+  // Company edit dialog (handles both company_id and company_name)
+  const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const [companyEditId, setCompanyEditId] = useState('');
+  const [companyEditName, setCompanyEditName] = useState('');
+  const [savingCompany, setSavingCompany] = useState(false);
+
+  const openCompanyEdit = () => {
+    setCompanyEditId(job?.company_id || '');
+    setCompanyEditName(companyName || '');
+    setCompanyEditOpen(true);
+  };
+
+  const handleCompanySelect = (companyId: string) => {
+    if (companyId === 'none') {
+      setCompanyEditId('');
+      return;
+    }
+    const c = companies.find((co: any) => co.id === companyId);
+    setCompanyEditId(companyId);
+    setCompanyEditName(c?.name ?? '');
+  };
+
+  const saveCompany = async () => {
     if (!id) return;
-    setSavingInstructions(true);
+    setSavingCompany(true);
     try {
-      const { error } = await supabase.from('jobs').update({ submittal_instructions: submittalInstructions }).eq('id', id);
+      const { error } = await supabase.from('jobs').update({
+        company_id: companyEditId || null,
+        company_name: companyEditName.trim() || null,
+      }).eq('id', id);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['job', id] });
-      toast.success('Submittal instructions saved');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Company updated');
+      setCompanyEditOpen(false);
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to update company');
     } finally {
-      setSavingInstructions(false);
+      setSavingCompany(false);
     }
   };
+
+  // Helper to save a single field
+  const saveField = async (field: string, value: string) => {
+    if (!id) return;
+    try {
+      const { error } = await supabase.from('jobs').update({ [field]: value || null }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Updated');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update');
+      throw err;
+    }
+  };
+
+  const openFieldEdit = (
+    field: string, title: string, type: 'text' | 'richtext' | 'select',
+    value: string, options?: { value: string; label: string }[], placeholder?: string,
+  ) => {
+    setEditField({ field, title, type, value, options, placeholder });
+  };
+
   const { data: jobContacts = [], refetch: refetchJobContacts } = useQuery({
     queryKey: ['job_contacts', id],
     enabled: !!id,
@@ -277,7 +347,6 @@ const JobDetail = () => {
     return new Set(contacts.filter((c: any) => c.company_id === job.company_id).map((c: any) => c.id));
   }, [contacts, job?.company_id]);
 
-  // Only show contacts not yet assigned
   const availableSorted = useMemo(() => {
     return contacts
       .filter((c: any) => !assignedContactIds.has(c.id))
@@ -299,7 +368,6 @@ const JobDetail = () => {
         is_primary: isFirst,
       });
       if (error) throw error;
-      // Keep legacy contact_id in sync for the primary
       if (isFirst) {
         await supabase.from('jobs').update({ contact_id: selectedContactId }).eq('id', id);
         queryClient.invalidateQueries({ queryKey: ['job', id] });
@@ -369,6 +437,18 @@ const JobDetail = () => {
   }
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
+  const companyWebsite = (job.companies as any)?.website ?? null;
+
+  // Derive logo from company website domain via Google favicon service
+  const companyLogoUrl = (() => {
+    if (!companyWebsite) return null;
+    try {
+      const domain = new URL(companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <MainLayout>
@@ -380,10 +460,6 @@ const JobDetail = () => {
             <Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditJobOpen(true)}>
-              <Edit className="h-4 w-4 mr-1" />
-              Edit
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
               <ListTodo className="h-4 w-4 mr-1" />
@@ -399,48 +475,94 @@ const JobDetail = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-accent" />
+              {companyLogoUrl ? (
+                <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain" />
+              ) : (
+                <Briefcase className="h-5 w-5 text-accent" />
+              )}
               Job Details
+              <span className="text-xs text-muted-foreground font-normal ml-auto">Click any field to edit</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-              <div>
+              {/* Title */}
+              <EditableField onClick={() => openFieldEdit('title', 'Title', 'text', job.title || '', undefined, 'e.g. Senior Software Engineer')}>
+                <span className="text-muted-foreground">Title</span>
+                <p className="mt-1 font-medium text-foreground">{job.title || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Status */}
+              <EditableField onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'open', STATUS_OPTIONS)}>
                 <span className="text-muted-foreground">Status</span>
                 <div className="mt-1"><Badge variant="secondary" className={cn(
                   job.status === 'win' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
                   job.status === 'lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
-                )}>{job.status === 'win' ? 'Win' : job.status === 'lost' ? 'Lost' : job.status}</Badge></div>
+                )}>{STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}</Badge></div>
+              </EditableField>
+
+              {/* Company */}
+              <EditableField onClick={openCompanyEdit}>
+                <span className="text-muted-foreground">Company</span>
+                <p className="mt-1 font-medium text-foreground">{companyName || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Location */}
+              <EditableField onClick={() => openFieldEdit('location', 'Location', 'text', job.location || '', undefined, 'e.g. New York, NY')}>
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3" /> Location
+                </span>
+                <p className="mt-1 font-medium text-foreground">{job.location || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Compensation */}
+              <EditableField onClick={() => openFieldEdit('compensation', 'Compensation', 'text', job.compensation || '', undefined, 'e.g. $120k - $150k')}>
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <DollarSign className="h-3 w-3" /> Compensation
+                </span>
+                <p className="mt-1 font-medium text-foreground">{job.compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Job URL */}
+              <div className="relative">
+                <EditableField onClick={() => openFieldEdit('job_url', 'Job Posting URL', 'text', (job as any).job_url || '', undefined, 'https://...')}>
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <LinkIcon className="h-3 w-3" /> Job URL
+                  </span>
+                  {(job as any).job_url ? (
+                    <p className="mt-1 font-medium text-accent truncate">{(job as any).job_url}</p>
+                  ) : (
+                    <p className="mt-1 font-medium italic text-muted-foreground">Not set</p>
+                  )}
+                </EditableField>
+                {(job as any).job_url && (
+                  <a
+                    href={(job as any).job_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute top-2 right-8 text-muted-foreground hover:text-accent transition-colors"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
-              {companyName && (
-                <div>
-                  <span className="text-muted-foreground">Company</span>
-                  <p className="mt-1 font-medium text-foreground">{companyName}</p>
-                </div>
-              )}
-              {job.location && (
-                <div>
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> Location
-                  </span>
-                  <p className="mt-1 font-medium text-foreground">{job.location}</p>
-                </div>
-              )}
-              {job.compensation && (
-                <div>
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <DollarSign className="h-3 w-3" /> Compensation
-                  </span>
-                  <p className="mt-1 font-medium text-foreground">{job.compensation}</p>
-                </div>
-              )}
             </div>
-            {job.description && (
-              <div className="mt-4">
+
+            {/* Description — rich text display */}
+            <div className="mt-5">
+              <EditableField onClick={() => openFieldEdit('description', 'Description', 'richtext', job.description || '', undefined, 'Job description, requirements, qualifications...')}>
                 <span className="text-sm text-muted-foreground">Description</span>
-                <p className="mt-1 text-sm text-foreground whitespace-pre-wrap">{job.description}</p>
-              </div>
-            )}
+                {job.description ? (
+                  <div
+                    className="mt-1 text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
+                  />
+                ) : (
+                  <p className="mt-1 text-sm italic text-muted-foreground">No description yet. Click to add.</p>
+                )}
+              </EditableField>
+            </div>
           </CardContent>
         </Card>
 
@@ -452,28 +574,40 @@ const JobDetail = () => {
               Submittal Instructions
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
               Instructions for submitting candidates to this role — format requirements, what to include, client preferences, etc.
             </p>
-            <Textarea
-              value={submittalInstructions}
-              onChange={e => setSubmittalInstructions(e.target.value)}
-              placeholder="e.g. Send blind resume only. Include comp expectations and reason for looking. Client requires GPA 3.5+. Submit to hiring manager directly, not HR..."
-              className="min-h-[130px] text-sm resize-none"
-            />
-            <Button
-              variant="gold"
-              size="sm"
-              className="h-8"
-              onClick={saveInstructions}
-              disabled={savingInstructions || submittalInstructions === ((job as any).submittal_instructions ?? '')}
-            >
-              {savingInstructions && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              Save Instructions
-            </Button>
+            <EditableField onClick={() => openFieldEdit(
+              'submittal_instructions', 'Submittal Instructions', 'richtext',
+              (job as any).submittal_instructions || '',
+              undefined,
+              'e.g. Send blind resume only. Include comp expectations and reason for looking...',
+            )}>
+              {(job as any).submittal_instructions ? (
+                <div
+                  className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+                />
+              ) : (
+                <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
+              )}
+            </EditableField>
           </CardContent>
         </Card>
+
+        {/* ── Submittal Instructions (read-only callout under contacts) ────── */}
+        {(job as any).submittal_instructions && (
+          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
+            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
+              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
+            </p>
+            <div
+              className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+            />
+          </div>
+        )}
 
         {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
         <Card>
@@ -487,7 +621,6 @@ const JobDetail = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Assigned list */}
             {(jobContacts as any[]).length === 0 ? (
               <p className="text-sm text-muted-foreground">No contacts assigned yet.</p>
             ) : (
@@ -548,7 +681,6 @@ const JobDetail = () => {
               <Label className="text-sm font-medium">Add Contact</Label>
               <div className="flex items-center gap-3">
                 <div className="flex-1 relative">
-                  {/* Selected display */}
                   {selectedContactId ? (
                     <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
                       <span className="flex-1 truncate">
@@ -566,7 +698,7 @@ const JobDetail = () => {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                       <Input
                         className="pl-8 h-9 text-sm"
-                        placeholder="Search contacts…"
+                        placeholder="Search contacts..."
                         value={contactSearch}
                         onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
                         onFocus={() => setContactSearchOpen(true)}
@@ -650,18 +782,6 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* ── Submittal Instructions (read-only display under contacts) ────── */}
-        {(job as any).submittal_instructions && (
-          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
-            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
-              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
-            </p>
-            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-              {(job as any).submittal_instructions}
-            </p>
-          </div>
-        )}
-
         {/* ── Candidates Kanban Board ───────────────────────────────────────── */}
         <Card>
           <CardHeader>
@@ -696,7 +816,6 @@ const JobDetail = () => {
                           isLast && 'border-r-0'
                         )}
                       >
-                        {/* Column header */}
                         <div className={cn(
                           'px-3 py-2.5 border-b border-border flex items-center justify-between gap-1',
                         )}>
@@ -709,7 +828,6 @@ const JobDetail = () => {
                             </span>
                           )}
                         </div>
-                        {/* Cards */}
                         <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
                           {stageCandidates.map((c: any) => (
                             <div
@@ -771,7 +889,58 @@ const JobDetail = () => {
           entityName={job.title}
         />
       )}
-      <EditJobDialog open={editJobOpen} onOpenChange={setEditJobOpen} job={job} />
+
+      {/* Company edit dialog */}
+      <Dialog open={companyEditOpen} onOpenChange={setCompanyEditOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Company</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Select Company</Label>
+              <Select value={companyEditId || 'none'} onValueChange={handleCompanySelect}>
+                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No company</SelectItem>
+                  {companies.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input
+                value={companyEditName}
+                onChange={(e) => setCompanyEditName(e.target.value)}
+                placeholder="Or type company name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCompanyEditOpen(false)}>Cancel</Button>
+            <Button variant="gold" onClick={saveCompany} disabled={savingCompany}>
+              {savingCompany && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Per-field edit dialog */}
+      {editField && (
+        <FieldEditDialog
+          open={!!editField}
+          onOpenChange={(open) => { if (!open) setEditField(null); }}
+          title={editField.title}
+          fieldType={editField.type}
+          value={editField.value}
+          onSave={(val) => saveField(editField.field, val)}
+          selectOptions={editField.options}
+          placeholder={editField.placeholder}
+        />
+      )}
     </MainLayout>
   );
 };
