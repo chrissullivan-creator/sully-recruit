@@ -127,41 +127,55 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
   };
 
   // ── Parse from file (multi-job) ─────────────────────────────────
-  const parseFromFile = async (file: File) => {
+  // Parse a single file and return parsed jobs
+  const parseSingleFile = async (file: File, session: any): Promise<JobForm[]> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-job`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: fd,
+      }
+    );
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `Failed to parse ${file.name}`);
+
+    const jobs: any[] = data.jobs || [data.parsed || {}];
+    return jobs.map((p: any) => {
+      const co = matchCompany(p.company_name);
+      return {
+        title: p.title || '',
+        company_id: co?.id || '',
+        company_name: p.company_name || '',
+        location: p.location || '',
+        description: p.description || '',
+        compensation: p.compensation || '',
+        status: 'open',
+        job_url: '',
+      };
+    });
+  };
+
+  // ── Parse from file(s) (multi-job) ──────────────────────────────
+  const parseFromFiles = async (files: File[]) => {
     setParsing(true);
     setParseError('');
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const fd = new FormData();
-      fd.append('file', file);
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-job`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: fd,
-        }
-      );
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'Failed to parse document');
+      const allJobs: JobForm[] = [];
 
-      const jobs: any[] = data.jobs || [data.parsed || {}];
-      const mapped: JobForm[] = jobs.slice(0, 10).map((p: any) => {
-        const co = matchCompany(p.company_name);
-        return {
-          title: p.title || '',
-          company_id: co?.id || '',
-          company_name: p.company_name || '',
-          location: p.location || '',
-          description: p.description || '',
-          compensation: p.compensation || '',
-          status: 'open',
-          job_url: '',
-        };
-      });
+      for (const file of files) {
+        const jobs = await parseSingleFile(file, session);
+        allJobs.push(...jobs);
+        if (allJobs.length >= 10) break;
+      }
+
+      const mapped = allJobs.slice(0, 10);
 
       if (mapped.length > 1) {
         setParsedJobs(mapped);
@@ -330,18 +344,19 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
                     <FileUp className="h-4 w-4 text-accent" />
                     Upload Job Description
                   </div>
-                  <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT — can contain up to 10 jobs</p>
+                  <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT — select multiple files or one file with up to 10 jobs</p>
                   <Button variant="outline" onClick={() => fileRef.current?.click()}>
-                    Choose File
+                    Choose File(s)
                   </Button>
                   <input
                     ref={fileRef}
                     type="file"
                     accept=".pdf,.doc,.docx,.txt"
+                    multiple
                     className="hidden"
                     onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) parseFromFile(file);
+                      const files = Array.from(e.target.files || []).slice(0, 10);
+                      if (files.length > 0) parseFromFiles(files);
                       e.target.value = '';
                     }}
                   />
