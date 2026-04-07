@@ -280,13 +280,10 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
         const jitterMin = 1 + Math.floor(Math.random() * 22);
         let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
 
-        // Ensure next_step_at falls within LinkedIn send window (10-22 UTC / 6AM-6PM EST)
+        // Ensure next_step_at falls within LinkedIn send window (10-01:30 UTC / 6AM-9:30PM EST)
         const nextHour = nextStepAt.getUTCHours();
-        if (nextHour >= 22 || nextHour < 10) {
-          // Outside window — push to next morning 10 UTC + 0-45 min jitter
-          if (nextHour >= 22) {
-            nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
-          }
+        const outsideWindow = nextHour >= 1.5 && nextHour < 10; // 1:30 AM - 10 AM UTC is outside
+        if (outsideWindow) {
           nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
         }
 
@@ -335,8 +332,8 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
           let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
 
           const nextHour = nextStepAt.getUTCHours();
-          if (nextHour >= 22 || nextHour < 10) {
-            if (nextHour >= 22) nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
+          const outsideWindow = nextHour >= 1.5 && nextHour < 10;
+          if (outsideWindow) {
             nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
           }
 
