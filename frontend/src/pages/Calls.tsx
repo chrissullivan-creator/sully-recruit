@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -17,8 +17,9 @@ import { format } from 'date-fns';
 import {
   Phone, PhoneIncoming, PhoneOutgoing, Search, Clock,
   FileText, Plus, UserCheck, User, Users, Loader2,
-  CheckCircle2, AlertCircle, UserPlus, ListChecks, Sparkles,
+  CheckCircle2, AlertCircle, UserPlus, ListChecks,
 } from 'lucide-react';
+import { CallDetailModal } from '@/components/shared/CallDetailModal';
 
 interface CallLog {
   id: string;
@@ -372,7 +373,7 @@ const Calls = () => {
   const [logOpen, setLogOpen] = useState(false);
   const [linkCall, setLinkCall] = useState<CallLog | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'calls' | 'screened'>('calls');
+  const [detailCall, setDetailCall] = useState<{ call: CallLog; aiNotes?: any } | null>(null);
   const queryClient = useQueryClient();
 
   const { data: calls = [], isLoading } = useQuery({
@@ -388,32 +389,57 @@ const Calls = () => {
     },
   });
 
-  const { data: screenedCalls = [], isLoading: screenedLoading } = useQuery({
-    queryKey: ['ai_call_notes_all'],
+  const { data: aiNotesList = [] } = useQuery({
+    queryKey: ['ai_call_notes_by_call_log'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('ai_call_notes')
         .select('*, candidates(id, first_name, last_name, full_name, current_title, current_company)')
-        .order('call_started_at', { ascending: false, nullsFirst: false })
-        .limit(200);
+        .not('call_log_id', 'is', null)
+        .limit(500);
       if (error) throw error;
       return (data ?? []) as any[];
     },
   });
 
-  const filtered = calls.filter(c =>
-    !searchQuery ||
-    c.phone_number?.includes(searchQuery) ||
-    c.linked_entity_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.summary?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.notes?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const aiNotesMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const note of aiNotesList) {
+      if (note.call_log_id) map.set(note.call_log_id, note);
+    }
+    return map;
+  }, [aiNotesList]);
 
-  const filteredScreened = screenedCalls.filter((n: any) => {
+  const getAiNotes = (callId: string) => aiNotesMap.get(callId);
+
+  const getCandidateName = (call: CallLog) => {
+    const ai = aiNotesMap.get(call.id);
+    if (call.linked_entity_name) return call.linked_entity_name;
+    if (ai?.candidates) {
+      const c = ai.candidates;
+      return c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || null;
+    }
+    return null;
+  };
+
+  const getCandidateId = (call: CallLog) => {
+    const ai = aiNotesMap.get(call.id);
+    if (call.linked_entity_type === 'candidate' && call.linked_entity_id) return call.linked_entity_id;
+    return ai?.candidates?.id ?? null;
+  };
+
+  const filtered = calls.filter(c => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
-    const name = n.candidates?.full_name || `${n.candidates?.first_name ?? ''} ${n.candidates?.last_name ?? ''}`;
-    return name.toLowerCase().includes(q) || n.ai_summary?.toLowerCase().includes(q) || n.phone_number?.includes(searchQuery);
+    const name = getCandidateName(c);
+    const ai = getAiNotes(c.id);
+    return (
+      c.phone_number?.includes(searchQuery) ||
+      name?.toLowerCase().includes(q) ||
+      c.summary?.toLowerCase().includes(q) ||
+      c.notes?.toLowerCase().includes(q) ||
+      ai?.ai_summary?.toLowerCase().includes(q)
+    );
   });
 
   const formatDuration = (seconds?: number | null) => {
@@ -461,28 +487,9 @@ const Calls = () => {
           />
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 mb-6">
-          {([
-            ['calls', `Logged Calls (${filtered.length})`],
-            ['screened', `Screened Candidates (${filteredScreened.length})`],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={cn(
-                'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors',
-                activeTab === key
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-muted-foreground mb-4">{filtered.length} calls</p>
 
-        {activeTab === 'calls' && (isLoading ? (
+        {isLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
             <Loader2 className="h-5 w-5 animate-spin" /> Loading calls...
           </div>
@@ -499,10 +506,18 @@ const Calls = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((call) => (
+            {filtered.map((call) => {
+              const ai = getAiNotes(call.id);
+              const personName = getCandidateName(call);
+              const candidateId = getCandidateId(call);
+              const summary = ai?.ai_summary || call.summary;
+              const audioUrl = ai?.recording_url || call.audio_url;
+
+              return (
               <div
                 key={call.id}
-                className="rounded-lg border border-border bg-card p-5 hover:border-accent/40 transition-all"
+                className="rounded-lg border border-border bg-card p-5 hover:border-accent/40 transition-all cursor-pointer"
+                onClick={() => setDetailCall({ call, aiNotes: ai })}
               >
                 <div className="flex items-start gap-4">
                   {/* Icon */}
@@ -524,26 +539,28 @@ const Calls = () => {
                             {call.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call
                           </h3>
                           <span className="text-xs text-muted-foreground">{call.phone_number}</span>
-                          {call.linked_entity_name && (
+                          {personName && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (call.linked_entity_id) {
-                                  const path = call.linked_entity_type === 'candidate'
-                                    ? `/candidates/${call.linked_entity_id}`
-                                    : call.linked_entity_type === 'contact'
-                                      ? `/contacts/${call.linked_entity_id}`
+                                const navId = call.linked_entity_id || candidateId;
+                                const navType = call.linked_entity_type || (candidateId ? 'candidate' : null);
+                                if (navId && navType) {
+                                  const path = navType === 'candidate'
+                                    ? `/candidates/${navId}`
+                                    : navType === 'contact'
+                                      ? `/contacts/${navId}`
                                       : null;
                                   if (path) navigate(path);
                                 }
                               }}
                               className={cn(
                                 'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity',
-                                entityColor(call.linked_entity_type)
+                                entityColor(call.linked_entity_type || (candidateId ? 'candidate' : null))
                               )}
                             >
-                              {entityIcon(call.linked_entity_type)}
-                              {call.linked_entity_name}
+                              {entityIcon(call.linked_entity_type || (candidateId ? 'candidate' : null))}
+                              {personName}
                             </button>
                           )}
                         </div>
@@ -569,16 +586,16 @@ const Calls = () => {
                       </div>
                     </div>
 
-                    {/* Summary / Notes — prefer summary, truncate raw notes */}
-                    {(call.summary || call.notes) && (() => {
-                      if (call.summary) {
+                    {/* Summary / Notes — prefer AI summary, then call summary, then raw notes */}
+                    {(summary || call.notes) && (() => {
+                      if (summary) {
                         return (
                           <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
                             <div className="flex items-center gap-2 mb-1">
                               <FileText className="h-3.5 w-3.5 text-accent" />
                               <span className="text-xs font-medium text-accent">Summary</span>
                             </div>
-                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{call.summary}</p>
+                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{summary}</p>
                           </div>
                         );
                       }
@@ -591,11 +608,14 @@ const Calls = () => {
                           </p>
                           {needsTruncation && (
                             <button
-                              onClick={() => setExpandedNotes(prev => {
-                                const next = new Set(prev);
-                                isExpanded ? next.delete(call.id) : next.add(call.id);
-                                return next;
-                              })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedNotes(prev => {
+                                  const next = new Set(prev);
+                                  isExpanded ? next.delete(call.id) : next.add(call.id);
+                                  return next;
+                                });
+                              }}
                               className="text-xs text-accent hover:underline mt-1"
                             >
                               {isExpanded ? 'Show less' : 'Show more'}
@@ -605,27 +625,38 @@ const Calls = () => {
                       );
                     })()}
 
+                    {/* Action Items from AI */}
+                    {ai?.ai_action_items && (
+                      <div className="mt-2 p-3 rounded-lg bg-muted/50">
+                        <div className="flex items-center gap-2 mb-1">
+                          <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium text-muted-foreground">Action Items</span>
+                        </div>
+                        <p className="text-sm text-foreground whitespace-pre-wrap">{ai.ai_action_items}</p>
+                      </div>
+                    )}
+
                     {/* Audio Recording */}
-                    {call.audio_url && (
+                    {audioUrl && (
                       <div className="mt-2 p-3 rounded-lg bg-muted/30 border border-border">
                         <div className="flex items-center gap-2 mb-2">
                           <Phone className="h-3.5 w-3.5 text-muted-foreground" />
                           <span className="text-xs font-medium text-muted-foreground">Recording</span>
                         </div>
-                        <audio controls className="w-full h-8" preload="none">
-                          <source src={call.audio_url} />
+                        <audio controls className="w-full h-8" preload="none" onClick={(e) => e.stopPropagation()}>
+                          <source src={audioUrl} />
                         </audio>
                       </div>
                     )}
 
                     {/* Tag to record if not linked */}
-                    {!call.linked_entity_id && (
+                    {!call.linked_entity_id && !candidateId && (
                       <div className="mt-2">
                         <Button
                           variant="outline"
                           size="sm"
                           className="text-xs gap-1"
-                          onClick={() => setLinkCall(call)}
+                          onClick={(e) => { e.stopPropagation(); setLinkCall(call); }}
                         >
                           <UserPlus className="h-3 w-3" />
                           Tag to Record
@@ -635,108 +666,20 @@ const Calls = () => {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-        ))}
-
-        {/* Screened Candidates tab */}
-        {activeTab === 'screened' && (screenedLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading screened calls...
-          </div>
-        ) : filteredScreened.length === 0 ? (
-          <div className="text-center py-16">
-            <Sparkles className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-1">No screened candidates yet</h3>
-            <p className="text-sm text-muted-foreground">AI-processed call notes will appear here.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredScreened.map((note: any) => {
-              const cand = note.candidates;
-              const candName = cand?.full_name || `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim() || 'Unknown';
-              const subtitle = [cand?.current_title, cand?.current_company].filter(Boolean).join(' · ');
-              return (
-                <div key={note.id} className="rounded-lg border border-border bg-card p-5 hover:border-accent/40 transition-all">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
-                      <Sparkles className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-4 flex-wrap">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {cand?.id ? (
-                              <button
-                                onClick={() => navigate(`/candidates/${cand.id}`)}
-                                className="text-sm font-medium text-foreground hover:text-accent transition-colors cursor-pointer"
-                              >
-                                {candName}
-                              </button>
-                            ) : (
-                              <span className="text-sm font-medium text-foreground">{candName}</span>
-                            )}
-                            {note.call_direction && (
-                              <Badge variant="outline" className="text-[10px] capitalize">{note.call_direction}</Badge>
-                            )}
-                            {note.call_duration_formatted && (
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Clock className="h-3 w-3" /> {note.call_duration_formatted}
-                              </span>
-                            )}
-                          </div>
-                          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
-                        </div>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, yyyy · h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d, yyyy') : '—'}
-                        </span>
-                      </div>
-
-                      {/* AI Summary */}
-                      {note.ai_summary && (
-                        <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
-                          <div className="flex items-center gap-2 mb-1">
-                            <FileText className="h-3.5 w-3.5 text-accent" />
-                            <span className="text-xs font-medium text-accent">Summary</span>
-                          </div>
-                          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{note.ai_summary}</p>
-                        </div>
-                      )}
-
-                      {/* Action Items */}
-                      {note.ai_action_items && (
-                        <div className="mt-2 p-3 rounded-lg bg-muted/50">
-                          <div className="flex items-center gap-2 mb-1">
-                            <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs font-medium text-muted-foreground">Action Items</span>
-                          </div>
-                          <p className="text-sm text-foreground whitespace-pre-wrap">{note.ai_action_items}</p>
-                        </div>
-                      )}
-
-                      {/* Audio */}
-                      {note.recording_url && (
-                        <div className="mt-2 p-3 rounded-lg bg-muted/30 border border-border">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs font-medium text-muted-foreground">Recording</span>
-                          </div>
-                          <audio controls className="w-full h-8" preload="none">
-                            <source src={note.recording_url} />
-                          </audio>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
               );
             })}
           </div>
-        ))}
+        )}
       </div>
 
       <LogCallDialog open={logOpen} onOpenChange={setLogOpen} />
       <LinkCallDialog open={!!linkCall} onOpenChange={(v) => !v && setLinkCall(null)} call={linkCall} />
+      <CallDetailModal
+        open={!!detailCall}
+        onOpenChange={(v) => !v && setDetailCall(null)}
+        call={detailCall?.call}
+        aiNotes={detailCall?.aiNotes}
+      />
     </MainLayout>
   );
 };
