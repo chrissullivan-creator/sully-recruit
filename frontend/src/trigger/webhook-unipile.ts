@@ -276,14 +276,27 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
 
     if (waitingEnrollments && waitingEnrollments.length > 0) {
       for (const enrollment of waitingEnrollments) {
+        // 4 hours + 1-22 min random jitter after acceptance
+        const jitterMin = 1 + Math.floor(Math.random() * 22);
+        let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
+
+        // Ensure next_step_at falls within LinkedIn send window (10-22 UTC / 6AM-6PM EST)
+        const nextHour = nextStepAt.getUTCHours();
+        if (nextHour >= 22 || nextHour < 10) {
+          // Outside window — push to next morning 10 UTC + 0-45 min jitter
+          if (nextHour >= 22) {
+            nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
+          }
+          nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
+        }
+
         await supabase
           .from("sequence_enrollments")
           .update({
             waiting_for_connection_acceptance: false,
             linkedin_connection_status: "accepted",
             linkedin_connection_accepted_at: receivedAt,
-            // Set next_step_at to now + 4 hours (per architecture rules)
-            next_step_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+            next_step_at: nextStepAt.toISOString(),
           } as any)
           .eq("id", enrollment.id);
       }
@@ -292,6 +305,57 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
         candidateId,
         count: waitingEnrollments.length,
       });
+    }
+
+    // Also check contact_channels for contact enrollments
+    const { data: contactChannel } = await supabase
+      .from("contact_channels")
+      .select("contact_id")
+      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
+      .eq("channel", "linkedin")
+      .maybeSingle();
+
+    if (contactChannel?.contact_id) {
+      await supabase
+        .from("contact_channels")
+        .update({ is_connected: true } as any)
+        .eq("contact_id", contactChannel.contact_id)
+        .eq("channel", "linkedin");
+
+      const { data: contactEnrollments } = await supabase
+        .from("sequence_enrollments")
+        .select("id")
+        .eq("contact_id", contactChannel.contact_id)
+        .eq("status", "active")
+        .eq("waiting_for_connection_acceptance", true);
+
+      if (contactEnrollments && contactEnrollments.length > 0) {
+        for (const enrollment of contactEnrollments) {
+          const jitterMin = 1 + Math.floor(Math.random() * 22);
+          let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
+
+          const nextHour = nextStepAt.getUTCHours();
+          if (nextHour >= 22 || nextHour < 10) {
+            if (nextHour >= 22) nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
+            nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
+          }
+
+          await supabase
+            .from("sequence_enrollments")
+            .update({
+              waiting_for_connection_acceptance: false,
+              linkedin_connection_status: "accepted",
+              linkedin_connection_accepted_at: receivedAt,
+              next_step_at: nextStepAt.toISOString(),
+            } as any)
+            .eq("id", enrollment.id);
+        }
+
+        logger.info("Advanced waiting contact enrollments", {
+          contactId: contactChannel.contact_id,
+          count: contactEnrollments.length,
+        });
+      }
     }
 
     // Log connection_accepted as a special message type

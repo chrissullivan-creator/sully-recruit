@@ -396,7 +396,20 @@ export const processSequenceStep = task({
         .eq("id", conversationId);
 
       // Advance enrollment (AFTER successful send)
-      await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime);
+      if (stepChannel === "linkedin_connection") {
+        // Park enrollment — wait for connection acceptance webhook to advance
+        await supabase
+          .from("sequence_enrollments")
+          .update({
+            current_step_order: step.step_order,
+            waiting_for_connection_acceptance: true,
+            next_step_at: null, // null = parked, not paused
+          } as any)
+          .eq("id", payload.enrollmentId);
+        logger.info("Connection sent — parked until acceptance", { enrollmentId: payload.enrollmentId });
+      } else {
+        await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime);
+      }
 
       // Pipeline automation: first step → advance send_outs
       if (payload.candidateId && nextStepOrder === 1) {
