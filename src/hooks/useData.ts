@@ -285,40 +285,73 @@ export function useMessages(channel?: string) {
   });
 }
 
-// Dashboard metrics (aggregated counts)
+// Helper: get Monday 00:00 of current week (Mon–Sun)
+function getWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun,1=Mon,...6=Sat
+  const diff = day === 0 ? 6 : day - 1; // days since Monday
+  const mon = new Date(now);
+  mon.setDate(now.getDate() - diff);
+  mon.setHours(0, 0, 0, 0);
+  return mon.toISOString();
+}
+
+// Helper: get 1st of current month 00:00
+function getMonthStart(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+}
+
+// Dashboard metrics — this week (Mon–Sun) + this month
 export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
+      const weekStart = getWeekStart();
+      const monthStart = getMonthStart();
+
+      const [jobsRes, candidatesWeekRes, candidatesMonthRes, sendOutsRes] = await Promise.all([
         supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, job_status, owner_id'),
-        supabase.from('send_outs').select('id, stage'),
+        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', weekStart),
+        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', monthStart),
+        supabase.from('send_outs').select('id, stage, created_at'),
       ]);
 
-      const candidates = candidatesRes.data ?? [];
+      const weekCandidates = candidatesWeekRes.data ?? [];
+      const monthCandidates = candidatesMonthRes.data ?? [];
       const sendOuts = sendOutsRes.data ?? [];
 
-      const countByJobStatus = (status: string) => candidates.filter(c => c.job_status === status).length;
+      const countWeek = (status: string) => weekCandidates.filter(c => c.job_status === status).length;
+      const countMonth = (status: string) => monthCandidates.filter(c => c.job_status === status).length;
 
       return {
         activeJobs: jobsRes.count ?? 0,
-        totalCandidates: candidates.length,
-        myCandidates: user ? candidates.filter(c => c.owner_id === user.id).length : 0,
-        newCandidates: countByJobStatus('new'),
-        contactedCandidates: countByJobStatus('reached_out'),
-        pitchedCandidates: countByJobStatus('pitched'),
-        sendOutCandidates: countByJobStatus('send_out'),
-        submittedCandidates: countByJobStatus('submitted'),
-        interviewingCandidates: countByJobStatus('interviewing'),
-        offerCandidates: countByJobStatus('offer'),
-        placedCandidates: countByJobStatus('placed'),
+        // This week (Mon–Sun)
+        weekCandidates: weekCandidates.length,
+        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
+        weekNew: countWeek('new'),
+        weekContacted: countWeek('reached_out'),
+        weekPitched: countWeek('pitched'),
+        weekSendOut: countWeek('send_out'),
+        weekSubmitted: countWeek('submitted'),
+        weekInterviewing: countWeek('interviewing'),
+        weekOffer: countWeek('offer'),
+        weekPlaced: countWeek('placed'),
+        // This month
+        monthCandidates: monthCandidates.length,
+        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
+        monthNew: countMonth('new'),
+        monthContacted: countMonth('reached_out'),
+        monthPitched: countMonth('pitched'),
+        monthSendOut: countMonth('send_out'),
+        monthSubmitted: countMonth('submitted'),
+        monthInterviewing: countMonth('interviewing'),
+        monthOffer: countMonth('offer'),
+        monthPlaced: countMonth('placed'),
+        // Send outs (all-time, stage-based)
         interviewsThisWeek: sendOuts.filter((s) => s.stage === 'interview').length,
         offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
-        callsToday: 0,
-        emailsSent: 0,
-        responseRate: 0,
       };
     },
   });

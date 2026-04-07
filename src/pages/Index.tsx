@@ -1,9 +1,8 @@
+import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
-// CandidatePipeline removed from dashboard per user request
-import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
 import { useDashboardMetrics } from '@/hooks/useData';
@@ -14,13 +13,13 @@ import {
   Calendar,
   FileText,
   Target,
-  Phone,
   Mail,
   TrendingUp,
   Plus,
   Sparkles,
   User,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const getGreeting = () => {
   const hour = new Date().getHours();
@@ -32,13 +31,26 @@ const getGreeting = () => {
 const Dashboard = () => {
   const { data: metrics, isLoading } = useDashboardMetrics();
   const { user } = useAuth();
+  const [period, setPeriod] = useState<'week' | 'month'>('week');
 
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
 
+  // Pick the right numbers based on selected period
+  const m = metrics;
+  const candidates   = period === 'week' ? m?.weekCandidates   : m?.monthCandidates;
+  const myCandidates = period === 'week' ? m?.myWeekCandidates : m?.myMonthCandidates;
+  const newCount     = period === 'week' ? m?.weekNew          : m?.monthNew;
+  const contacted    = period === 'week' ? m?.weekContacted    : m?.monthContacted;
+  const pitched      = period === 'week' ? m?.weekPitched      : m?.monthPitched;
+  const sendOut      = period === 'week' ? m?.weekSendOut      : m?.monthSendOut;
+  const submitted    = period === 'week' ? m?.weekSubmitted    : m?.monthSubmitted;
+  const interviewing = period === 'week' ? m?.weekInterviewing : m?.monthInterviewing;
+  const offer        = period === 'week' ? m?.weekOffer        : m?.monthOffer;
+
   return (
     <MainLayout>
-      <PageHeader 
-        title="Dashboard" 
+      <PageHeader
+        title="Dashboard"
         description="Welcome back. Here's what's happening today."
         actions={
           <Button variant="gold">
@@ -47,7 +59,7 @@ const Dashboard = () => {
           </Button>
         }
       />
-      
+
       <div className="p-8 space-y-8">
         {/* Welcome Banner */}
         <div className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-sidebar via-card to-card p-6">
@@ -57,13 +69,13 @@ const Dashboard = () => {
             </div>
             <div>
               <h2 className="text-xl font-bold text-foreground">
-                {getGreeting()}, {displayName} 👋
+                {getGreeting()}, {displayName}
               </h2>
               <p className="text-sm text-muted-foreground mt-0.5">
                 {isLoading ? 'Loading your stats...' : (
                   <>
-                    You have <span className="font-semibold text-foreground">{metrics?.activeJobs ?? 0} active jobs</span> and{' '}
-                    <span className="font-semibold text-foreground">{metrics?.totalCandidates ?? 0} candidates</span> in pipeline.
+                    You have <span className="font-semibold text-foreground">{m?.activeJobs ?? 0} active jobs</span> and{' '}
+                    <span className="font-semibold text-foreground">{candidates ?? 0} new candidates</span> {period === 'week' ? 'this week' : 'this month'}.
                   </>
                 )}
               </p>
@@ -73,31 +85,53 @@ const Dashboard = () => {
           <div className="absolute -right-2 -bottom-8 h-24 w-24 rounded-full bg-accent/5 blur-xl" />
         </div>
 
+        {/* Period Toggle */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPeriod('week')}
+            className={cn(
+              'px-4 py-1.5 rounded-full text-sm font-medium transition-colors',
+              period === 'week'
+                ? 'bg-accent text-white'
+                : 'bg-muted text-muted-foreground hover:text-foreground',
+            )}
+          >
+            This Week
+          </button>
+          <button
+            onClick={() => setPeriod('month')}
+            className={cn(
+              'px-4 py-1.5 rounded-full text-sm font-medium transition-colors',
+              period === 'month'
+                ? 'bg-accent text-white'
+                : 'bg-muted text-muted-foreground hover:text-foreground',
+            )}
+          >
+            This Month
+          </button>
+        </div>
+
         {/* Primary Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <MetricCard label="Active Jobs" value={isLoading ? '...' : (metrics?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
-          <MetricCard label="My Candidates" value={isLoading ? '...' : (metrics?.myCandidates ?? 0)} icon={<User className="h-5 w-5" />} />
-          <MetricCard label="New" value={isLoading ? '...' : (metrics?.newCandidates ?? 0)} icon={<Users className="h-5 w-5" />} />
-          <MetricCard label="Contacted" value={isLoading ? '...' : (metrics?.contactedCandidates ?? 0)} icon={<Mail className="h-5 w-5" />} />
-          <MetricCard label="Pitched" value={isLoading ? '...' : (metrics?.pitchedCandidates ?? 0)} icon={<Target className="h-5 w-5" />} />
+          <MetricCard label="Active Jobs" value={isLoading ? '...' : (m?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="My Candidates" value={isLoading ? '...' : (myCandidates ?? 0)} icon={<User className="h-5 w-5" />} />
+          <MetricCard label="New" value={isLoading ? '...' : (newCount ?? 0)} icon={<Users className="h-5 w-5" />} />
+          <MetricCard label="Contacted" value={isLoading ? '...' : (contacted ?? 0)} icon={<Mail className="h-5 w-5" />} />
+          <MetricCard label="Pitched" value={isLoading ? '...' : (pitched ?? 0)} icon={<Target className="h-5 w-5" />} />
         </div>
 
         {/* Pipeline Stage Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard label="Send Out" value={isLoading ? '...' : (metrics?.sendOutCandidates ?? 0)} icon={<FileText className="h-5 w-5" />} />
-          <MetricCard label="Submitted" value={isLoading ? '...' : (metrics?.submittedCandidates ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
-          <MetricCard label="Interviewing" value={isLoading ? '...' : (metrics?.interviewingCandidates ?? 0)} icon={<Calendar className="h-5 w-5" />} />
-          <MetricCard label="Offers Out" value={isLoading ? '...' : (metrics?.offerCandidates ?? 0)} icon={<Phone className="h-5 w-5" />} />
+          <MetricCard label="Send Out" value={isLoading ? '...' : (sendOut ?? 0)} icon={<FileText className="h-5 w-5" />} />
+          <MetricCard label="Submitted" value={isLoading ? '...' : (submitted ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
+          <MetricCard label="Interviewing" value={isLoading ? '...' : (interviewing ?? 0)} icon={<Calendar className="h-5 w-5" />} />
+          <MetricCard label="Offers Out" value={isLoading ? '...' : (offer ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
         </div>
 
-        {/* Tasks + Activity Feed */}
+        {/* Tasks + Quick Actions */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-8">
+          <div className="lg:col-span-2">
             <DashboardTasks />
-            <div className="rounded-lg border border-border bg-card p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Recent Activity</h2>
-              <ActivityFeed />
-            </div>
           </div>
           <div>
             <div className="rounded-lg border border-border bg-card p-6">
