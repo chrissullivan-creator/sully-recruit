@@ -4,16 +4,11 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { RichTextEditor } from '@/components/shared/RichTextEditor';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { SendOutPipeline } from '@/components/pipeline/SendOutPipeline';
-import { EditJobDialog } from '@/components/jobs/EditJobDialog';
-import { useJob, useContacts, useJobSendOuts, useJobCandidates } from '@/hooks/useData';
+import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
+import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -23,18 +18,18 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2, Edit,
+  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, ChevronRight, Sparkles, MessageSquare, CheckSquare, Calendar, Play,
+  Search, Pencil, Link as LinkIcon,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import DOMPurify from 'dompurify';
 
 const JOB_STATUSES = [
-  { value: 'lead',         label: 'Lead',         color: 'bg-gray-500/15 text-gray-400' },
+  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
   { value: 'reached_out',  label: 'Reached Out',  color: 'bg-sky-500/15 text-sky-400' },
-  { value: 'pitch',        label: 'Pitch',        color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
   { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
   { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
@@ -43,6 +38,33 @@ const JOB_STATUSES = [
   { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
+
+const STATUS_OPTIONS = [
+  { value: 'open', label: 'Open' },
+  { value: 'interviewing', label: 'Interviewing' },
+  { value: 'offer', label: 'Offer' },
+  { value: 'win', label: 'Win' },
+  { value: 'lost', label: 'Lost' },
+  { value: 'on_hold', label: 'On Hold' },
+];
+
+// ── Clickable field wrapper ─────────────────────────────────────────────────
+const EditableField = ({
+  children, onClick, className,
+}: {
+  children: React.ReactNode; onClick: () => void; className?: string;
+}) => (
+  <div
+    onClick={onClick}
+    className={cn(
+      'group relative cursor-pointer rounded-md px-2 py-1.5 -mx-2 -my-1.5 hover:bg-muted/40 transition-colors',
+      className,
+    )}
+  >
+    {children}
+    <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2" />
+  </div>
+);
 
 // ── Send-out card with inline submittal notes + resume upload ─────────────────
 const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) => {
@@ -95,7 +117,6 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
 
   return (
     <div className="rounded-lg border border-border bg-card/40 overflow-hidden">
-      {/* Header row — always visible */}
       <div
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors select-none"
         onClick={() => setExpanded(v => !v)}
@@ -130,10 +151,8 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
         </div>
       </div>
 
-      {/* Expanded: resume + submittal notes */}
       {expanded && (
         <div className="px-4 pb-4 pt-3 border-t border-border space-y-5">
-          {/* Resume upload */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Submittal Resume
@@ -188,7 +207,6 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
             />
           </div>
 
-          {/* Submittal notes */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Submittal Notes
@@ -216,61 +234,6 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
   );
 };
 
-// ── Match result card ───────────────────────────────────────────────────────
-const MatchCard = ({ match, navigate }: { match: any; navigate: any }) => {
-  const [expanded, setExpanded] = useState(false);
-  const c = match.candidates;
-  const name = c?.full_name ?? `${c?.first_name ?? ''} ${c?.last_name ?? ''}`;
-  const scoreColor = match.overall_score >= 80 ? 'text-green-400 bg-green-500/15' : match.overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' : 'text-muted-foreground bg-muted';
-
-  return (
-    <div className="rounded-lg border border-border bg-secondary/30 p-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0 cursor-pointer" onClick={() => navigate(`/candidates/${c?.id}`)}>
-          <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums', scoreColor)}>
-            {match.overall_score}%
-          </span>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground hover:text-accent transition-colors truncate">{name}</p>
-            <p className="text-xs text-muted-foreground truncate">
-              {c?.current_title}{c?.current_title && c?.current_company ? ' at ' : ''}{c?.current_company}
-              {c?.location_text ? ` · ${c.location_text}` : ''}
-            </p>
-          </div>
-        </div>
-        <button onClick={() => setExpanded(!expanded)} className="shrink-0 text-muted-foreground hover:text-foreground">
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </button>
-      </div>
-      {!expanded && (
-        <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2 ml-12">{match.reasoning}</p>
-      )}
-      {expanded && (
-        <div className="mt-3 ml-12 space-y-2">
-          <p className="text-xs text-foreground">{match.reasoning}</p>
-          {match.strengths?.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {match.strengths.map((s: string, i: number) => (
-                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">{s}</span>
-              ))}
-            </div>
-          )}
-          {match.concerns?.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {match.concerns.map((c: string, i: number) => (
-                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">{c}</span>
-              ))}
-            </div>
-          )}
-          {match.vector_similarity != null && (
-            <p className="text-[10px] text-muted-foreground">Resume similarity: {(match.vector_similarity * 100).toFixed(0)}%</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
 // ── Main page ────────────────────────────────────────────────────────────────
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -278,6 +241,7 @@ const JobDetail = () => {
   const queryClient = useQueryClient();
   const { data: job, isLoading } = useJob(id);
   const { data: contacts = [] } = useContacts();
+  const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
   const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
 
@@ -287,156 +251,76 @@ const JobDetail = () => {
   const [contactSearch, setContactSearch] = useState('');
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [editJobOpen, setEditJobOpen] = useState(false);
-  const [matchOpen, setMatchOpen] = useState(false);
-  const [matching, setMatching] = useState(false);
-  const [matchDialogResults, setMatchDialogResults] = useState<string>('');
   const [removingId, setRemovingId] = useState<string | null>(null);
 
-  // Best Matches queries
-  const { data: latestRun } = useQuery({
-    queryKey: ['job_match_run', id],
-    enabled: !!id,
-    refetchInterval: (query) => (query.state.data as any)?.status === 'running' ? 3000 : false,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('job_match_runs')
-        .select('*')
-        .eq('job_id', id!)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data;
-    },
-  });
+  // Per-field edit dialogs
+  const [editField, setEditField] = useState<{
+    field: string; title: string; type: 'text' | 'richtext' | 'select';
+    value: string; options?: { value: string; label: string }[]; placeholder?: string;
+  } | null>(null);
 
-  const { data: bestMatches = [] } = useQuery({
-    queryKey: ['job_matches', id, (latestRun as any)?.id],
-    enabled: !!id && (latestRun as any)?.status === 'completed',
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('job_candidate_matches')
-        .select('*, candidates(id, full_name, first_name, last_name, current_title, current_company, location_text, email)')
-        .eq('run_id', (latestRun as any)!.id)
-        .order('overall_score', { ascending: false });
-      return data ?? [];
-    },
-  });
-  const [submittalInstructions, setSubmittalInstructions] = useState<string>('');
-  const [instructionsLoaded, setInstructionsLoaded] = useState(false);
-  const [savingInstructions, setSavingInstructions] = useState(false);
-  const [additionalNotes, setAdditionalNotes] = useState<string>('');
-  const [additionalNotesLoaded, setAdditionalNotesLoaded] = useState(false);
-  const [savingAdditionalNotes, setSavingAdditionalNotes] = useState(false);
-  const [activityTab, setActivityTab] = useState<'notes' | 'tasks' | 'meetings'>('notes');
-  const [jobNoteText, setJobNoteText] = useState('');
-  const [savingJobNote, setSavingJobNote] = useState(false);
+  // Company edit dialog (handles both company_id and company_name)
+  const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const [companyEditId, setCompanyEditId] = useState('');
+  const [companyEditName, setCompanyEditName] = useState('');
+  const [savingCompany, setSavingCompany] = useState(false);
 
-  // ── Activity sidebar queries ─────────────────────────────────────────
-  const { data: jobNotes = [] } = useQuery({
-    queryKey: ['notes', 'job', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('notes')
-        .select('*')
-        .eq('entity_id', id!)
-        .eq('entity_type', 'job')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as any[];
-    },
-  });
-
-  const { data: jobTaskLinks = [] } = useQuery({
-    queryKey: ['task_links', 'job', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('task_links')
-        .select('*, tasks(*)')
-        .eq('entity_type', 'job')
-        .eq('entity_id', id!);
-      if (error) throw error;
-      return data as any[];
-    },
-  });
-
-  const { data: jobMeetings = [] } = useQuery({
-    queryKey: ['task_links', 'job_meetings', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('task_links')
-        .select('*, tasks(*)')
-        .eq('entity_type', 'job')
-        .eq('entity_id', id!);
-      if (error) throw error;
-      return ((data ?? []) as any[]).filter((tl: any) => tl.tasks?.task_type === 'meeting');
-    },
-  });
-
-  const { data: jobSequences = [] } = useQuery({
-    queryKey: ['sequences', 'job', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('sequences')
-        .select('*')
-        .eq('job_id', id!)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as any[];
-    },
-  });
-
-  const handleSaveJobNote = async () => {
-    if (!jobNoteText.trim() || !id) return;
-    setSavingJobNote(true);
-    const { error } = await supabase.from('notes').insert({ entity_id: id, entity_type: 'job', note: jobNoteText.trim() });
-    if (error) toast.error('Failed to save note');
-    else { toast.success('Note saved'); setJobNoteText(''); queryClient.invalidateQueries({ queryKey: ['notes', 'job', id] }); }
-    setSavingJobNote(false);
+  const openCompanyEdit = () => {
+    setCompanyEditId(job?.company_id || '');
+    setCompanyEditName(companyName || '');
+    setCompanyEditOpen(true);
   };
 
-  // Seed local state from job data once loaded
-  if (job && !instructionsLoaded) {
-    setSubmittalInstructions((job as any).submittal_instructions ?? '');
-    setInstructionsLoaded(true);
-  }
-  if (job && !additionalNotesLoaded) {
-    setAdditionalNotes((job as any).additional_notes ?? '');
-    setAdditionalNotesLoaded(true);
-  }
+  const handleCompanySelect = (companyId: string) => {
+    if (companyId === 'none') {
+      setCompanyEditId('');
+      return;
+    }
+    const c = companies.find((co: any) => co.id === companyId);
+    setCompanyEditId(companyId);
+    setCompanyEditName(c?.name ?? '');
+  };
 
-  const saveInstructions = async () => {
+  const saveCompany = async () => {
     if (!id) return;
-    setSavingInstructions(true);
+    setSavingCompany(true);
     try {
-      const { error } = await supabase.from('jobs').update({ submittal_instructions: submittalInstructions }).eq('id', id);
+      const { error } = await supabase.from('jobs').update({
+        company_id: companyEditId || null,
+        company_name: companyEditName.trim() || null,
+      }).eq('id', id);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['job', id] });
-      toast.success('Submittal instructions saved');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Company updated');
+      setCompanyEditOpen(false);
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to update company');
     } finally {
-      setSavingInstructions(false);
+      setSavingCompany(false);
     }
   };
 
-  const saveAdditionalNotes = async () => {
+  // Helper to save a single field
+  const saveField = async (field: string, value: string) => {
     if (!id) return;
-    setSavingAdditionalNotes(true);
     try {
-      const { error } = await supabase.from('jobs').update({ additional_notes: additionalNotes }).eq('id', id);
+      const { error } = await supabase.from('jobs').update({ [field]: value || null }).eq('id', id);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['job', id] });
-      toast.success('Additional notes saved');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Updated');
     } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setSavingAdditionalNotes(false);
+      toast.error(err.message || 'Failed to update');
+      throw err;
     }
+  };
+
+  const openFieldEdit = (
+    field: string, title: string, type: 'text' | 'richtext' | 'select',
+    value: string, options?: { value: string; label: string }[], placeholder?: string,
+  ) => {
+    setEditField({ field, title, type, value, options, placeholder });
   };
 
   const { data: jobContacts = [], refetch: refetchJobContacts } = useQuery({
@@ -463,7 +347,6 @@ const JobDetail = () => {
     return new Set(contacts.filter((c: any) => c.company_id === job.company_id).map((c: any) => c.id));
   }, [contacts, job?.company_id]);
 
-  // Only show contacts not yet assigned
   const availableSorted = useMemo(() => {
     return contacts
       .filter((c: any) => !assignedContactIds.has(c.id))
@@ -485,7 +368,6 @@ const JobDetail = () => {
         is_primary: isFirst,
       });
       if (error) throw error;
-      // Keep legacy contact_id in sync for the primary
       if (isFirst) {
         await supabase.from('jobs').update({ contact_id: selectedContactId }).eq('id', id);
         queryClient.invalidateQueries({ queryKey: ['job', id] });
@@ -555,6 +437,18 @@ const JobDetail = () => {
   }
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
+  const companyWebsite = (job.companies as any)?.website ?? null;
+
+  // Derive logo from company website domain via Google favicon service
+  const companyLogoUrl = (() => {
+    if (!companyWebsite) return null;
+    try {
+      const domain = new URL(companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <MainLayout>
@@ -567,76 +461,108 @@ const JobDetail = () => {
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditJobOpen(true)}>
-              <Edit className="h-4 w-4 mr-1" />
-              Edit
-            </Button>
             <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
               <ListTodo className="h-4 w-4 mr-1" />
               Tasks
-            </Button>
-            <Button variant="gold" size="sm" onClick={() => setMatchOpen(true)}>
-              <Sparkles className="h-4 w-4 mr-1" />
-              Match Candidates
             </Button>
           </div>
         }
       />
 
-      <div className="flex flex-1 overflow-hidden">
-      {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto p-8 space-y-6">
+      <div className="p-8 space-y-6 max-w-4xl">
 
         {/* ── Job Info ──────────────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-accent" />
+              {companyLogoUrl ? (
+                <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain" />
+              ) : (
+                <Briefcase className="h-5 w-5 text-accent" />
+              )}
               Job Details
+              <span className="text-xs text-muted-foreground font-normal ml-auto">Click any field to edit</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-              <div>
+              {/* Title */}
+              <EditableField onClick={() => openFieldEdit('title', 'Title', 'text', job.title || '', undefined, 'e.g. Senior Software Engineer')}>
+                <span className="text-muted-foreground">Title</span>
+                <p className="mt-1 font-medium text-foreground">{job.title || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Status */}
+              <EditableField onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'open', STATUS_OPTIONS)}>
                 <span className="text-muted-foreground">Status</span>
                 <div className="mt-1"><Badge variant="secondary" className={cn(
-                  job.status === 'closed_won' && 'bg-[#1C3D2E] text-white',
-                  job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626]',
-                  job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
-                  job.status === 'offer_made' && 'bg-[#2A5C42]/10 text-[#2A5C42]',
-                )}>
-                  {job.status === 'lead' ? 'Lead' : job.status === 'hot' ? 'Hot' : job.status === 'offer_made' ? 'Offer Made' : job.status === 'closed_won' ? 'Closed Won' : job.status === 'closed_lost' ? 'Closed Lost' : job.status}
-                </Badge></div>
+                  job.status === 'win' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
+                  job.status === 'lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
+                )}>{STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}</Badge></div>
+              </EditableField>
+
+              {/* Company */}
+              <EditableField onClick={openCompanyEdit}>
+                <span className="text-muted-foreground">Company</span>
+                <p className="mt-1 font-medium text-foreground">{companyName || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Location */}
+              <EditableField onClick={() => openFieldEdit('location', 'Location', 'text', job.location || '', undefined, 'e.g. New York, NY')}>
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3" /> Location
+                </span>
+                <p className="mt-1 font-medium text-foreground">{job.location || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Compensation */}
+              <EditableField onClick={() => openFieldEdit('compensation', 'Compensation', 'text', job.compensation || '', undefined, 'e.g. $120k - $150k')}>
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <DollarSign className="h-3 w-3" /> Compensation
+                </span>
+                <p className="mt-1 font-medium text-foreground">{job.compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
+              </EditableField>
+
+              {/* Job URL */}
+              <div className="relative">
+                <EditableField onClick={() => openFieldEdit('job_url', 'Job Posting URL', 'text', (job as any).job_url || '', undefined, 'https://...')}>
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <LinkIcon className="h-3 w-3" /> Job URL
+                  </span>
+                  {(job as any).job_url ? (
+                    <p className="mt-1 font-medium text-accent truncate">{(job as any).job_url}</p>
+                  ) : (
+                    <p className="mt-1 font-medium italic text-muted-foreground">Not set</p>
+                  )}
+                </EditableField>
+                {(job as any).job_url && (
+                  <a
+                    href={(job as any).job_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute top-2 right-8 text-muted-foreground hover:text-accent transition-colors"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
-              {companyName && (
-                <div>
-                  <span className="text-muted-foreground">Company</span>
-                  <p className="mt-1 font-medium text-foreground">{companyName}</p>
-                </div>
-              )}
-              {job.location && (
-                <div>
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> Location
-                  </span>
-                  <p className="mt-1 font-medium text-foreground">{job.location}</p>
-                </div>
-              )}
-              {job.compensation && (
-                <div>
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <DollarSign className="h-3 w-3" /> Compensation
-                  </span>
-                  <p className="mt-1 font-medium text-foreground">{job.compensation}</p>
-                </div>
-              )}
             </div>
-            {job.description && (
-              <div className="mt-4">
+
+            {/* Description — rich text display */}
+            <div className="mt-5">
+              <EditableField onClick={() => openFieldEdit('description', 'Description', 'richtext', job.description || '', undefined, 'Job description, requirements, qualifications...')}>
                 <span className="text-sm text-muted-foreground">Description</span>
-                <p className="mt-1 text-sm text-foreground whitespace-pre-wrap">{job.description}</p>
-              </div>
-            )}
+                {job.description ? (
+                  <div
+                    className="mt-1 text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
+                  />
+                ) : (
+                  <p className="mt-1 text-sm italic text-muted-foreground">No description yet. Click to add.</p>
+                )}
+              </EditableField>
+            </div>
           </CardContent>
         </Card>
 
@@ -648,59 +574,40 @@ const JobDetail = () => {
               Submittal Instructions
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
               Instructions for submitting candidates to this role — format requirements, what to include, client preferences, etc.
             </p>
-            <RichTextEditor
-              value={submittalInstructions}
-              onChange={setSubmittalInstructions}
-              placeholder="e.g. Send blind resume only. Include comp expectations and reason for looking. Client requires GPA 3.5+. Submit to hiring manager directly, not HR..."
-              minHeight="130px"
-            />
-            <Button
-              variant="gold"
-              size="sm"
-              className="h-8"
-              onClick={saveInstructions}
-              disabled={savingInstructions || submittalInstructions === ((job as any).submittal_instructions ?? '')}
-            >
-              {savingInstructions && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              Save Instructions
-            </Button>
+            <EditableField onClick={() => openFieldEdit(
+              'submittal_instructions', 'Submittal Instructions', 'richtext',
+              (job as any).submittal_instructions || '',
+              undefined,
+              'e.g. Send blind resume only. Include comp expectations and reason for looking...',
+            )}>
+              {(job as any).submittal_instructions ? (
+                <div
+                  className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+                />
+              ) : (
+                <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
+              )}
+            </EditableField>
           </CardContent>
         </Card>
 
-        {/* ── Additional Notes ─────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FileText className="h-5 w-5 text-accent" />
-              Additional Notes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Internal notes about this job — client intel, search nuances, comp details, exclusives, anything the team needs to know.
+        {/* ── Submittal Instructions (read-only callout under contacts) ────── */}
+        {(job as any).submittal_instructions && (
+          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
+            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
+              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
             </p>
-            <RichTextEditor
-              value={additionalNotes}
-              onChange={setAdditionalNotes}
-              placeholder="e.g. Client is picky on pedigree, prefers Tier 1 banks. Comp is negotiable above 200K for the right person. Search is exclusive through EOQ..."
-              minHeight="130px"
+            <div
+              className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
             />
-            <Button
-              variant="gold"
-              size="sm"
-              className="h-8"
-              onClick={saveAdditionalNotes}
-              disabled={savingAdditionalNotes || additionalNotes === ((job as any).additional_notes ?? '')}
-            >
-              {savingAdditionalNotes && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              Save Notes
-            </Button>
-          </CardContent>
-        </Card>
+          </div>
+        )}
 
         {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
         <Card>
@@ -714,7 +621,6 @@ const JobDetail = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Assigned list */}
             {(jobContacts as any[]).length === 0 ? (
               <p className="text-sm text-muted-foreground">No contacts assigned yet.</p>
             ) : (
@@ -775,7 +681,6 @@ const JobDetail = () => {
               <Label className="text-sm font-medium">Add Contact</Label>
               <div className="flex items-center gap-3">
                 <div className="flex-1 relative">
-                  {/* Selected display */}
                   {selectedContactId ? (
                     <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
                       <span className="flex-1 truncate">
@@ -793,7 +698,7 @@ const JobDetail = () => {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                       <Input
                         className="pl-8 h-9 text-sm"
-                        placeholder="Search contacts…"
+                        placeholder="Search contacts..."
                         value={contactSearch}
                         onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
                         onFocus={() => setContactSearchOpen(true)}
@@ -877,124 +782,6 @@ const JobDetail = () => {
           </CardContent>
         </Card>
 
-        {/* ── Submittal Instructions (read-only display under contacts) ────── */}
-        {(job as any).submittal_instructions && (
-          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
-            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
-              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
-            </p>
-            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-              {(job as any).submittal_instructions}
-            </p>
-          </div>
-        )}
-
-        {/* ── Best Matches (AI-ranked) ────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-accent" />
-                Best Matches
-                {bestMatches.length > 0 && (
-                  <Badge variant="secondary" className="ml-1">{bestMatches.length}</Badge>
-                )}
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                {latestRun?.completed_at && (
-                  <span className="text-[10px] text-muted-foreground">
-                    Last run: {format(new Date(latestRun.completed_at), 'MMM d, h:mm a')}
-                  </span>
-                )}
-                <Button
-                  variant="gold"
-                  size="sm"
-                  className="h-8"
-                  disabled={latestRun?.status === 'running'}
-                  onClick={async () => {
-                    try {
-                      const resp = await fetch('/api/trigger-best-match', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ jobId: id }),
-                      });
-                      const data = await resp.json();
-                      if (data.error) throw new Error(data.error);
-                      toast.success('Best match analysis started — results will appear shortly');
-                      queryClient.invalidateQueries({ queryKey: ['job_match_run', id] });
-                    } catch (err: any) {
-                      toast.error(err.message || 'Failed to start matching');
-                    }
-                  }}
-                >
-                  {latestRun?.status === 'running' ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Analyzing...</>
-                  ) : (
-                    <><Sparkles className="h-3.5 w-3.5 mr-1" /> {latestRun ? 'Re-run' : 'Find Matches'}</>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {latestRun?.status === 'running' ? (
-              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">
-                  Joe is analyzing {latestRun.candidates_scanned || '...'} candidates using resume embeddings and AI scoring...
-                </span>
-              </div>
-            ) : latestRun?.status === 'failed' ? (
-              <div className="text-sm text-red-400 py-4">
-                Matching failed: {latestRun.error_message ?? 'Unknown error'}. Try re-running.
-              </div>
-            ) : bestMatches.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
-                <Sparkles className="h-8 w-8 opacity-30" />
-                <p className="text-sm text-center max-w-md">
-                  {latestRun ? 'No strong matches found. Try updating the job description and re-running.' : 'Click "Find Matches" to search your candidate database using AI-powered resume analysis.'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Strong Matches */}
-                {bestMatches.filter((m: any) => m.tier === 'strong').length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2">Strong Matches</h4>
-                    <div className="space-y-2">
-                      {bestMatches.filter((m: any) => m.tier === 'strong').map((m: any) => (
-                        <MatchCard key={m.id} match={m} navigate={navigate} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* Good Matches */}
-                {bestMatches.filter((m: any) => m.tier === 'good').length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-2">Good Matches</h4>
-                    <div className="space-y-2">
-                      {bestMatches.filter((m: any) => m.tier === 'good').map((m: any) => (
-                        <MatchCard key={m.id} match={m} navigate={navigate} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* Worth Considering */}
-                {bestMatches.filter((m: any) => m.tier === 'worth_considering').length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Worth Considering</h4>
-                    <div className="space-y-2">
-                      {bestMatches.filter((m: any) => m.tier === 'worth_considering').map((m: any) => (
-                        <MatchCard key={m.id} match={m} navigate={navigate} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* ── Candidates Kanban Board ───────────────────────────────────────── */}
         <Card>
           <CardHeader>
@@ -1029,7 +816,6 @@ const JobDetail = () => {
                           isLast && 'border-r-0'
                         )}
                       >
-                        {/* Column header */}
                         <div className={cn(
                           'px-3 py-2.5 border-b border-border flex items-center justify-between gap-1',
                         )}>
@@ -1042,7 +828,6 @@ const JobDetail = () => {
                             </span>
                           )}
                         </div>
-                        {/* Cards */}
                         <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
                           {stageCandidates.map((c: any) => (
                             <div
@@ -1092,196 +877,6 @@ const JobDetail = () => {
             </CardContent>
           </Card>
         )}
-
-        {/* ── Campaigns Tab ────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Play className="h-5 w-5 text-accent" />
-              Campaigns
-              {jobSequences.length > 0 && (
-                <Badge variant="secondary" className="ml-1">{jobSequences.length}</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {jobSequences.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No campaigns linked to this job yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {jobSequences.map((seq: any) => (
-                  <div key={seq.id} className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">{seq.name}</p>
-                        {seq.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{seq.description}</p>}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {seq.enrolled_count != null && (
-                          <span className="text-xs text-muted-foreground">{seq.enrolled_count} enrolled</span>
-                        )}
-                        <Badge variant="secondary" className={cn(
-                          'text-xs',
-                          seq.status === 'active' && 'bg-green-500/15 text-green-400',
-                          seq.status === 'paused' && 'bg-yellow-500/15 text-yellow-400',
-                          seq.status === 'draft' && 'bg-gray-500/15 text-gray-400',
-                        )}>
-                          {seq.status ? seq.status.charAt(0).toUpperCase() + seq.status.slice(1) : 'Unknown'}
-                        </Badge>
-                        {seq.created_at && (
-                          <span className="text-xs text-muted-foreground">{format(new Date(seq.created_at), 'MMM d, yyyy')}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── Activity Sidebar ──────────────────────────────────────────────── */}
-      <aside className="w-[28%] min-w-[300px] shrink-0 border-l border-border flex flex-col overflow-hidden bg-card/30">
-        <div className="px-4 pt-4 pb-2 border-b border-border">
-          <div className="flex gap-1">
-            <button
-              onClick={() => setActivityTab('notes')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                activityTab === 'notes' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              )}
-            >
-              <MessageSquare className="h-3.5 w-3.5" /> Notes
-            </button>
-            <button
-              onClick={() => setActivityTab('tasks')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                activityTab === 'tasks' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              )}
-            >
-              <CheckSquare className="h-3.5 w-3.5" /> Tasks
-            </button>
-            <button
-              onClick={() => setActivityTab('meetings')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                activityTab === 'meetings' ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              )}
-            >
-              <Calendar className="h-3.5 w-3.5" /> Meetings
-            </button>
-          </div>
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="p-4 space-y-3">
-            {/* Notes sub-tab */}
-            {activityTab === 'notes' && (
-              <>
-                <div className="space-y-2">
-                  <RichTextEditor
-                    value={jobNoteText}
-                    onChange={setJobNoteText}
-                    placeholder="Add a note..."
-                    minHeight="70px"
-                  />
-                  <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleSaveJobNote} disabled={savingJobNote || !jobNoteText.trim()}>
-                    {savingJobNote && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save Note
-                  </Button>
-                </div>
-                {(jobNotes as any[]).length > 0 ? (
-                  <div className="space-y-2">
-                    {(jobNotes as any[]).map((n: any) => (
-                      <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
-                        <div className="text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
-                        <p className="text-[10px] text-muted-foreground mt-1.5">{n.created_at ? format(new Date(n.created_at), 'MMM d, yyyy h:mm a') : ''}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No notes yet.</p>
-                )}
-              </>
-            )}
-
-            {/* Tasks sub-tab */}
-            {activityTab === 'tasks' && (
-              <>
-                {(jobTaskLinks as any[]).length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No tasks linked to this job.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {(jobTaskLinks as any[]).map((tl: any) => {
-                      const t = tl.tasks;
-                      if (!t) return null;
-                      return (
-                        <div key={tl.id} className="rounded-md border border-border bg-secondary/50 p-3 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
-                            <Badge variant="secondary" className={cn(
-                              'text-[9px]',
-                              t.status === 'completed' && 'bg-green-500/15 text-green-400',
-                              t.status === 'in_progress' && 'bg-blue-500/15 text-blue-400',
-                              t.status === 'pending' && 'bg-gray-500/15 text-gray-400',
-                            )}>
-                              {t.status ?? 'pending'}
-                            </Badge>
-                          </div>
-                          {t.description && <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>}
-                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                            {t.due_date && <span>Due: {format(new Date(t.due_date), 'MMM d, yyyy')}</span>}
-                            {t.task_type && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{t.task_type}</Badge>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Meetings sub-tab */}
-            {activityTab === 'meetings' && (
-              <>
-                {(jobMeetings as any[]).length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No meetings linked to this job.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {(jobMeetings as any[]).map((tl: any) => {
-                      const t = tl.tasks;
-                      if (!t) return null;
-                      return (
-                        <div key={tl.id} className="rounded-md border border-border bg-secondary/50 p-3 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
-                            <Badge variant="secondary" className={cn(
-                              'text-[9px]',
-                              t.status === 'completed' && 'bg-green-500/15 text-green-400',
-                              t.status === 'scheduled' && 'bg-blue-500/15 text-blue-400',
-                            )}>
-                              {t.status ?? 'scheduled'}
-                            </Badge>
-                          </div>
-                          {t.description && <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>}
-                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                            {t.due_date && (
-                              <span className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3" />
-                                {format(new Date(t.due_date), 'MMM d, yyyy h:mm a')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </ScrollArea>
-      </aside>
       </div>
 
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
@@ -1294,104 +889,58 @@ const JobDetail = () => {
           entityName={job.title}
         />
       )}
-      <EditJobDialog open={editJobOpen} onOpenChange={setEditJobOpen} job={job} />
 
-      {/* Match Candidates Dialog */}
-      <Dialog open={matchOpen} onOpenChange={(v) => { setMatchOpen(v); if (!v) setMatchDialogResults(''); }}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+      {/* Company edit dialog */}
+      <Dialog open={companyEditOpen} onOpenChange={setCompanyEditOpen}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-accent" />
-              Match Candidates — {job.title}
-            </DialogTitle>
+            <DialogTitle>Edit Company</DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 min-h-[200px]">
-            {matching && !matchDialogResults ? (
-              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Joe is analyzing your candidate database and resumes...</span>
-              </div>
-            ) : matchDialogResults ? (
-              <div className="prose prose-sm max-w-none text-foreground whitespace-pre-wrap px-1">
-                {matchDialogResults}
-                {matching && (
-                  <span className="inline-flex items-center gap-1 text-muted-foreground ml-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
-                <Sparkles className="h-10 w-10 opacity-30" />
-                <p className="text-sm text-center max-w-md">
-                  Joe will search your candidate database (including resumes) and rank the best matches for this role based on skills, experience, and background.
-                </p>
-                <Button
-                  variant="gold"
-                  onClick={async () => {
-                    setMatching(true);
-                    setMatchDialogResults('');
-                    try {
-                      const backendUrl = import.meta.env.REACT_APP_BACKEND_URL || '';
-                      const resp = await fetch(`${backendUrl}/api/match-candidates-to-job`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          job_title: job.title,
-                          job_company: companyName || (job as any).company_name,
-                          job_location: job.location,
-                          job_description: (job as any).description || (job as any).notes,
-                          job_salary: (job as any).salary_range || (job as any).salary || (job as any).compensation,
-                        }),
-                      });
-
-                      // Stream the response
-                      const reader = resp.body?.getReader();
-                      if (!reader) throw new Error('No response body');
-                      const decoder = new TextDecoder();
-                      let textBuffer = '';
-                      let resultSoFar = '';
-
-                      while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        textBuffer += decoder.decode(value, { stream: true });
-                        const lines = textBuffer.split('\n');
-                        textBuffer = lines.pop() || '';
-                        for (const line of lines) {
-                          if (line.startsWith('data: ')) {
-                            try {
-                              const data = JSON.parse(line.slice(6));
-                              if (data.error) throw new Error(data.error);
-                              if (data.content) {
-                                resultSoFar += data.content;
-                                setMatchDialogResults(resultSoFar);
-                              }
-                            } catch (e: any) {
-                              if (e.message && !e.message.includes('JSON')) throw e;
-                            }
-                          }
-                        }
-                      }
-
-                      if (!resultSoFar) setMatchDialogResults('No matches found.');
-                    } catch (err: any) {
-                      toast.error(err.message || 'Failed to match');
-                      setMatchDialogResults('');
-                    } finally {
-                      setMatching(false);
-                    }
-                  }}
-                  className="gap-1.5"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Find Matching Candidates
-                </Button>
-              </div>
-            )}
-          </ScrollArea>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Select Company</Label>
+              <Select value={companyEditId || 'none'} onValueChange={handleCompanySelect}>
+                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No company</SelectItem>
+                  {companies.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input
+                value={companyEditName}
+                onChange={(e) => setCompanyEditName(e.target.value)}
+                placeholder="Or type company name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCompanyEditOpen(false)}>Cancel</Button>
+            <Button variant="gold" onClick={saveCompany} disabled={savingCompany}>
+              {savingCompany && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Per-field edit dialog */}
+      {editField && (
+        <FieldEditDialog
+          open={!!editField}
+          onOpenChange={(open) => { if (!open) setEditField(null); }}
+          title={editField.title}
+          fieldType={editField.type}
+          value={editField.value}
+          onSave={(val) => saveField(editField.field, val)}
+          selectOptions={editField.options}
+          placeholder={editField.placeholder}
+        />
+      )}
     </MainLayout>
   );
 };
