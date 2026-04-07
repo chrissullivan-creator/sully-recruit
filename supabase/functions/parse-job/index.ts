@@ -13,6 +13,17 @@ The description should be formatted as clean HTML with <ul>/<li> for bullet poin
 Preserve the structure and details of the original job description including responsibilities, requirements, qualifications, and benefits.
 If a field is not found, use an empty string. No markdown, no explanation — only the JSON object.`;
 
+const MULTI_JOB_SYSTEM_PROMPT = `You are a professional job posting parser for a recruiting firm. A document may contain one or more job postings (up to 10).
+Extract structured data for EACH job found in the document.
+Return ONLY a valid JSON ARRAY of objects. Each object must have these exact keys: title, company_name, location, compensation, description.
+- title: the job title
+- company_name: the hiring company name
+- location: city/state/remote info
+- compensation: salary or pay range if mentioned
+- description: the full job description formatted as clean HTML with <ul>/<li> for bullet points, <strong> for emphasis, and <p> for paragraphs. Preserve the structure and details.
+If a field is not found, use an empty string. If there is only one job, return an array with one object.
+No markdown, no explanation — only the JSON array.`;
+
 function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -29,7 +40,7 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-async function callClaude(contentBlocks: any[]): Promise<any> {
+async function callClaude(contentBlocks: any[], systemPrompt: string = SYSTEM_PROMPT): Promise<any> {
   const anthropicKey =
     Deno.env.get("ANTHROPIC_API_KEY") ??
     Deno.env.get("anthropic_api_key") ??
@@ -49,7 +60,7 @@ async function callClaude(contentBlocks: any[]): Promise<any> {
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: "user", content: contentBlocks }],
       temperature: 0,
     }),
@@ -63,12 +74,16 @@ async function callClaude(contentBlocks: any[]): Promise<any> {
 
   const aiData = await aiResp.json();
   const text = aiData.content?.[0]?.text || "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  // Try array first (multi-job), then single object
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try { return JSON.parse(arrayMatch[0]); } catch { /* fall through */ }
+  }
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (!objMatch) {
     throw new Error("Could not parse JSON from Claude response");
   }
-
-  return JSON.parse(jsonMatch[0]);
+  return JSON.parse(objMatch[0]);
 }
 
 serve(async (req) => {
@@ -206,17 +221,22 @@ serve(async (req) => {
         });
       }
 
-      const parsed = await callClaude(contentBlocks);
+      const raw = await callClaude(contentBlocks, MULTI_JOB_SYSTEM_PROMPT);
+
+      // Normalize: Claude returns an array (multi-job) or single object
+      const jobsArray: any[] = Array.isArray(raw) ? raw.slice(0, 10) : [raw];
+      const parsedJobs = jobsArray.map((p: any) => ({
+        title: p.title || "",
+        company_name: p.company_name || "",
+        location: p.location || "",
+        compensation: p.compensation || "",
+        description: p.description || "",
+      }));
 
       return new Response(
         JSON.stringify({
-          parsed: {
-            title: parsed.title || "",
-            company_name: parsed.company_name || "",
-            location: parsed.location || "",
-            compensation: parsed.compensation || "",
-            description: parsed.description || "",
-          },
+          parsed: parsedJobs.length === 1 ? parsedJobs[0] : parsedJobs[0],
+          jobs: parsedJobs,
           file_path: filePath,
           file_name: file.name,
           source: "claude",

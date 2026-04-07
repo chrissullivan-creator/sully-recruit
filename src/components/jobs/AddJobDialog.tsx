@@ -9,14 +9,26 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
 import { toast } from 'sonner';
-import { Loader2, Globe, FileUp, PenLine, ArrowLeft, ExternalLink } from 'lucide-react';
+import { Loader2, Globe, FileUp, PenLine, ArrowLeft, ExternalLink, Check, Briefcase } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-const emptyForm = {
+type JobForm = {
+  title: string;
+  company_id: string;
+  company_name: string;
+  location: string;
+  description: string;
+  compensation: string;
+  status: string;
+  job_url: string;
+};
+
+const emptyForm: JobForm = {
   title: '',
   company_id: '',
   company_name: '',
@@ -27,17 +39,24 @@ const emptyForm = {
   job_url: '',
 };
 
+type Step = 'source' | 'pick' | 'form';
+
 export function AddJobDialog({ open, onOpenChange }: Props) {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useCompanies();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [step, setStep] = useState<'source' | 'form'>('source');
+  const [step, setStep] = useState<Step>('source');
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState('');
   const [saving, setSaving] = useState(false);
   const [url, setUrl] = useState('');
-  const [form, setForm] = useState({ ...emptyForm });
+  const [form, setForm] = useState<JobForm>({ ...emptyForm });
+
+  // Multi-job state
+  const [parsedJobs, setParsedJobs] = useState<JobForm[]>([]);
+  const [selectedJobIndexes, setSelectedJobIndexes] = useState<Set<number>>(new Set());
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
@@ -48,14 +67,23 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     setSaving(false);
     setUrl('');
     setForm({ ...emptyForm });
+    setParsedJobs([]);
+    setSelectedJobIndexes(new Set());
+    setEditingIndex(null);
   };
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) resetDialog();
-    onOpenChange(open);
+  const handleOpenChange = (val: boolean) => {
+    if (!val) resetDialog();
+    onOpenChange(val);
   };
 
-  // ── Parse from URL ────────────────────────────────────────────────
+  const matchCompany = (name: string): { id: string; name: string } | null => {
+    if (!name) return null;
+    const match = companies.find((c: any) => c.name.toLowerCase() === name.toLowerCase());
+    return match ? { id: match.id, name: match.name } : null;
+  };
+
+  // ── Parse from URL (single job) ─────────────────────────────────
   const parseFromUrl = async () => {
     if (!url.trim()) { toast.error('Please enter a URL'); return; }
     setParsing(true);
@@ -78,9 +106,10 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       if (!resp.ok) throw new Error(data.error || 'Failed to parse URL');
 
       const p = data.parsed || {};
+      const co = matchCompany(p.company_name);
       setForm({
         title: p.title || '',
-        company_id: '',
+        company_id: co?.id || '',
         company_name: p.company_name || '',
         location: p.location || '',
         description: p.description || '',
@@ -97,7 +126,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     }
   };
 
-  // ── Parse from file ───────────────────────────────────────────────
+  // ── Parse from file (multi-job) ─────────────────────────────────
   const parseFromFile = async (file: File) => {
     setParsing(true);
     setParseError('');
@@ -119,18 +148,30 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Failed to parse document');
 
-      const p = data.parsed || {};
-      setForm({
-        title: p.title || '',
-        company_id: '',
-        company_name: p.company_name || '',
-        location: p.location || '',
-        description: p.description || '',
-        compensation: p.compensation || '',
-        status: 'open',
-        job_url: '',
+      const jobs: any[] = data.jobs || [data.parsed || {}];
+      const mapped: JobForm[] = jobs.slice(0, 10).map((p: any) => {
+        const co = matchCompany(p.company_name);
+        return {
+          title: p.title || '',
+          company_id: co?.id || '',
+          company_name: p.company_name || '',
+          location: p.location || '',
+          description: p.description || '',
+          compensation: p.compensation || '',
+          status: 'open',
+          job_url: '',
+        };
       });
-      setStep('form');
+
+      if (mapped.length > 1) {
+        setParsedJobs(mapped);
+        setSelectedJobIndexes(new Set(mapped.map((_, i) => i)));
+        setStep('pick');
+      } else {
+        setForm(mapped[0] || { ...emptyForm });
+        setStep('form');
+      }
+      toast.success(`Found ${mapped.length} job${mapped.length > 1 ? 's' : ''}`);
     } catch (err: any) {
       setParseError(err.message || 'Failed to parse document');
       toast.error(err.message || 'Failed to parse document');
@@ -153,7 +194,24 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     }));
   };
 
-  // ── Save job ──────────────────────────────────────────────────────
+  // Toggle job selection in pick step
+  const toggleJobSelection = (index: number) => {
+    setSelectedJobIndexes(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  // Open a specific job for editing from the pick list
+  const editJob = (index: number) => {
+    setEditingIndex(index);
+    setForm({ ...parsedJobs[index] });
+    setStep('form');
+  };
+
+  // ── Save single job ──────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     setSaving(true);
@@ -171,10 +229,54 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       const { error } = await supabase.from('jobs').insert(insert);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      toast.success('Job created');
-      handleOpenChange(false);
+
+      // If editing one from multi-job list, go back to pick step
+      if (editingIndex !== null) {
+        // Update the parsedJobs list with edits
+        setParsedJobs(prev => prev.map((j, i) => i === editingIndex ? { ...form } : j));
+        toast.success(`"${form.title}" created`);
+        // Remove from selection since it's created
+        setSelectedJobIndexes(prev => {
+          const next = new Set(prev);
+          next.delete(editingIndex);
+          return next;
+        });
+        setEditingIndex(null);
+        setStep('pick');
+      } else {
+        toast.success('Job created');
+        handleOpenChange(false);
+      }
     } catch (err: any) {
       toast.error(err.message || 'Failed to create job');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Save all selected jobs at once ───────────────────────────────
+  const handleSaveAll = async () => {
+    const selected = parsedJobs.filter((_, i) => selectedJobIndexes.has(i));
+    if (selected.length === 0) { toast.error('No jobs selected'); return; }
+    setSaving(true);
+    try {
+      const inserts = selected.map(j => ({
+        title: j.title.trim(),
+        company_name: j.company_name.trim() || null,
+        company_id: j.company_id || null,
+        location: j.location.trim() || null,
+        description: j.description || null,
+        compensation: j.compensation.trim() || null,
+        status: j.status,
+        job_url: j.job_url.trim() || null,
+      }));
+      const { error } = await supabase.from('jobs').insert(inserts);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success(`${selected.length} job${selected.length > 1 ? 's' : ''} created`);
+      handleOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create jobs');
     } finally {
       setSaving(false);
     }
@@ -185,7 +287,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {step === 'source' ? 'Add New Job' : 'Review & Create Job'}
+            {step === 'source' ? 'Add New Job' : step === 'pick' ? `${parsedJobs.length} Jobs Found` : 'Review & Create Job'}
           </DialogTitle>
         </DialogHeader>
 
@@ -228,7 +330,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
                     <FileUp className="h-4 w-4 text-accent" />
                     Upload Job Description
                   </div>
-                  <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT</p>
+                  <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT — can contain up to 10 jobs</p>
                   <Button variant="outline" onClick={() => fileRef.current?.click()}>
                     Choose File
                   </Button>
@@ -260,6 +362,50 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* ── Step 1.5: Pick from multiple jobs ──────────────────── */}
+        {step === 'pick' && (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Select the jobs you want to create. Click a job to review/edit before saving.
+            </p>
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {parsedJobs.map((job, i) => {
+                const isSelected = selectedJobIndexes.has(i);
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      'rounded-lg border p-3 flex items-start gap-3 transition-colors',
+                      isSelected ? 'border-accent/50 bg-accent/5' : 'border-border bg-card/40 opacity-60',
+                    )}
+                  >
+                    <button
+                      onClick={() => toggleJobSelection(i)}
+                      className={cn(
+                        'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors',
+                        isSelected ? 'bg-accent border-accent text-white' : 'border-border',
+                      )}
+                    >
+                      {isSelected && <Check className="h-3 w-3" />}
+                    </button>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => editJob(i)}>
+                      <p className="text-sm font-medium text-foreground truncate">{job.title || 'Untitled'}</p>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                        {job.company_name && <span>{job.company_name}</span>}
+                        {job.location && <span>{job.location}</span>}
+                        {job.compensation && <span>{job.compensation}</span>}
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => editJob(i)}>
+                      Review
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -342,9 +488,19 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
           </div>
         )}
 
+        {/* ── Footers ──────────────────────────────────────────────── */}
         {step === 'form' && (
           <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="ghost" onClick={() => setStep('source')}>
+            <Button variant="ghost" onClick={() => {
+              if (editingIndex !== null) {
+                // Save edits back to parsedJobs and go to pick
+                setParsedJobs(prev => prev.map((j, i) => i === editingIndex ? { ...form } : j));
+                setEditingIndex(null);
+                setStep('pick');
+              } else {
+                setStep('source');
+              }
+            }}>
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
             </Button>
@@ -352,7 +508,23 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
               <Button variant="ghost" onClick={() => handleOpenChange(false)}>Cancel</Button>
               <Button variant="gold" onClick={handleSave} disabled={saving || !form.title.trim()}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                Create Job
+                {editingIndex !== null ? 'Create This Job' : 'Create Job'}
+              </Button>
+            </div>
+          </DialogFooter>
+        )}
+
+        {step === 'pick' && (
+          <DialogFooter className="flex justify-between sm:justify-between">
+            <Button variant="ghost" onClick={() => { setParsedJobs([]); setStep('source'); }}>
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Back
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => handleOpenChange(false)}>Cancel</Button>
+              <Button variant="gold" onClick={handleSaveAll} disabled={saving || selectedJobIndexes.size === 0}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Briefcase className="h-4 w-4 mr-1" />}
+                Create {selectedJobIndexes.size} Job{selectedJobIndexes.size !== 1 ? 's' : ''}
               </Button>
             </div>
           </DialogFooter>
