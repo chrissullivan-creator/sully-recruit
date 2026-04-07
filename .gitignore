@@ -161,3 +161,4 @@ memory/test_credentials.md
 # Environment files
 *.env
 *.env.*
+supabase/.temp/
