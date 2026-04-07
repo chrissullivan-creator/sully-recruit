@@ -54,13 +54,19 @@ export async function resolveMergeTags(
 /**
  * Replace {{key}} placeholders with values from the merge-tag dictionary.
  * Unmatched tags are replaced with empty string.
+ * first_name gets a fallback to "there" to avoid "Hi ," which looks robotic.
  */
 export function applyMergeTags(
   text: string | null,
   vars: Record<string, string>,
 ): string {
   if (!text) return "";
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const val = vars[key] ?? "";
+    // "Hi {{first_name}}" with null name → "Hi there" instead of "Hi ,"
+    if (key === "first_name" && !val) return "there";
+    return val;
+  });
 }
 
 /**

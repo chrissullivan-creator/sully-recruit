@@ -79,12 +79,13 @@ export async function checkRateLimit(
   todayStart.setUTCHours(0, 0, 0, 0);
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-  // Fetch today's executions for this user
+  // Fetch today's executions scoped to this user via enrollment join
   const { data: todayExecs } = await supabase
     .from("sequence_step_executions")
-    .select("id, sequence_step_id, executed_at")
+    .select("id, sequence_step_id, executed_at, sequence_enrollments!inner(enrolled_by)")
+    .eq("sequence_enrollments.enrolled_by", userId)
     .gte("executed_at", todayStart.toISOString())
-    .in("status", ["sent", "scheduled"]);
+    .in("status", ["sent"]);
 
   if (!todayExecs || todayExecs.length === 0) {
     return { allowed: true, dailyCount: 0, hourlyCount: 0 };

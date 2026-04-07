@@ -144,7 +144,7 @@ export const processSequenceStep = task({
     if (!step.body?.trim()) {
       logger.warn("Step has empty body, skipping", { stepId: step.id });
       // Advance past this step
-      await advanceEnrollment(supabase, payload.enrollmentId, step, now);
+      await advanceEnrollment(supabase, payload.enrollmentId, step, now, entityType);
       return { action: "skipped", reason: "empty_body" };
     }
 
@@ -157,7 +157,7 @@ export const processSequenceStep = task({
       .select("id")
       .eq("enrollment_id", payload.enrollmentId)
       .eq("sequence_step_id", step.id)
-      .in("status", ["sent", "scheduled", "delivered"])
+      .in("status", ["sent", "delivered"])
       .maybeSingle();
 
     if (existingExec) {
@@ -231,7 +231,7 @@ export const processSequenceStep = task({
 
       if (linkedInChannel?.is_connected) {
         logger.info("Already connected — skipping connection request, advancing to next step", { entityId });
-        await advanceEnrollment(supabase, payload.enrollmentId, step, now);
+        await advanceEnrollment(supabase, payload.enrollmentId, step, now, entityType);
         return { action: "skipped", reason: "already_connected" };
       }
     }
@@ -408,7 +408,7 @@ export const processSequenceStep = task({
           .eq("id", payload.enrollmentId);
         logger.info("Connection sent — parked until acceptance", { enrollmentId: payload.enrollmentId });
       } else {
-        await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime);
+        await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime, entityType);
       }
 
       // Pipeline automation: first step → advance send_outs
@@ -672,6 +672,7 @@ async function advanceEnrollment(
   enrollmentId: string,
   step: any,
   sendTime: Date,
+  entityType?: "candidate" | "contact",
 ) {
   const delayMs =
     ((step.delay_days ?? 0) * 24 * 60 + (step.delay_hours ?? 0) * 60) * 60 * 1000;
@@ -679,14 +680,21 @@ async function advanceEnrollment(
   const jitterMs = (2 + Math.floor(Math.random() * 33)) * 60 * 1000;
   const nextStepAt = new Date(sendTime.getTime() + delayMs + jitterMs);
 
-  // If next_step_at falls outside send window, bump to next window start
-  // Use conservative 10-22 UTC window for rescheduling
-  const nextHour = nextStepAt.getUTCHours();
-  if (nextHour < 10 || nextHour >= 22) {
-    if (nextHour >= 22) {
+  // Use entity-appropriate window: contacts 10-22 UTC, candidates 10-01:30 UTC
+  const sendEnd = entityType === "candidate" ? 25.5 : 22;
+  const nextHour = nextStepAt.getUTCHours() + nextStepAt.getUTCMinutes() / 60;
+  // Check if outside window (handle midnight crossing for candidates)
+  const outsideWindow = sendEnd > 24
+    ? (nextHour >= (sendEnd - 24) && nextHour < 10) // candidate: 1:30 AM - 10 AM UTC is outside
+    : (nextHour < 10 || nextHour >= sendEnd);        // contact: before 10 or after 22 is outside
+
+  if (outsideWindow) {
+    nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
+    // If we're past midnight but before 10 AM, it's the same calendar day
+    // If we're past sendEnd (22 for contacts), bump to next day
+    if (nextHour >= sendEnd || (sendEnd <= 24 && nextHour >= sendEnd)) {
       nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
     }
-    nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
   }
 
   await supabase
