@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.parse-resume]
 verify_jwt = false
+
+[functions.parse-job]
+verify_jwt = false
