@@ -219,6 +219,23 @@ export const processSequenceStep = task({
       }
     }
 
+    // LinkedIn connection: if already connected, skip to next step immediately
+    if (stepChannel === "linkedin_connection" && entityId) {
+      const channelTable = entityType === "candidate" ? "candidate_channels" : "contact_channels";
+      const { data: linkedInChannel } = await supabase
+        .from(channelTable)
+        .select("is_connected")
+        .eq(entityType === "candidate" ? "candidate_id" : "contact_id", entityId)
+        .eq("channel", "linkedin")
+        .maybeSingle();
+
+      if (linkedInChannel?.is_connected) {
+        logger.info("Already connected — skipping connection request, advancing to next step", { entityId });
+        await advanceEnrollment(supabase, payload.enrollmentId, step, now);
+        return { action: "skipped", reason: "already_connected" };
+      }
+    }
+
     // ── 8. MERGE TAGS + FORMAT BODY ─────────────────────────────────
     const mergeVars = await resolveMergeTags(supabase, entityId, entityType);
     const rawBody = applyMergeTags(step.body, mergeVars);
