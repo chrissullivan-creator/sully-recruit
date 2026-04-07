@@ -3,13 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ExternalLink } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -28,7 +28,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
     location: '',
     description: '',
     compensation: '',
-    status: 'lead',
+    status: 'open',
+    job_url: '',
   });
 
   useEffect(() => {
@@ -40,7 +41,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
         location: job.location || '',
         description: job.description || '',
         compensation: job.compensation || '',
-        status: job.status || 'lead',
+        status: job.status || 'open',
+        job_url: job.job_url || '',
       });
     }
   }, [job, open]);
@@ -74,6 +76,7 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
           description: form.description,
           compensation: form.compensation,
           status: form.status,
+          job_url: form.job_url.trim() || null,
         })
         .eq('id', job.id);
       if (error) throw error;
@@ -154,22 +157,41 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="lead">Lead</SelectItem>
-                <SelectItem value="hot">Hot</SelectItem>
-                <SelectItem value="offer_made">Offer Made</SelectItem>
-                <SelectItem value="closed_won">Closed Won</SelectItem>
-                <SelectItem value="closed_lost">Closed Lost</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="interviewing">Interviewing</SelectItem>
+                <SelectItem value="offer">Offer</SelectItem>
+                <SelectItem value="win">Win</SelectItem>
+                <SelectItem value="lost">Lost</SelectItem>
+                <SelectItem value="on_hold">On Hold</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
+            <Label htmlFor="job_url">Job Posting URL</Label>
+            <div className="flex gap-2">
+              <Input
+                id="job_url"
+                value={form.job_url}
+                onChange={(e) => update('job_url', e.target.value)}
+                placeholder="https://..."
+                className="flex-1"
+              />
+              {form.job_url && (
+                <a href={form.job_url} target="_blank" rel="noopener noreferrer">
+                  <Button variant="ghost" size="icon" type="button" className="h-9 w-9">
+                    <ExternalLink className="h-4 w-4" />
+                  </Button>
+                </a>
+              )}
+            </div>
+          </div>
+          <div>
             <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
+            <RichTextEditor
               value={form.description}
-              onChange={(e) => update('description', e.target.value)}
+              onChange={(val) => update('description', val)}
               placeholder="Job description and requirements..."
-              rows={4}
+              minHeight="180px"
             />
           </div>
         </div>
@@ -177,7 +199,7 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
+          <Button variant="gold" onClick={handleSave} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Save Changes
           </Button>

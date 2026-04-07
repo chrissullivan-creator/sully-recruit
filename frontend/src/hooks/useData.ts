@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 // Candidates
@@ -9,60 +9,46 @@ export function useCandidates() {
   const query = useQuery({
     queryKey: ['candidates'],
     queryFn: async () => {
-      // Supabase defaults to 1000 rows — fetch up to 5000 in batches
-      const pageSize = 1000;
+      // Supabase defaults to 1000 rows — paginate to fetch all candidates
+      const PAGE_SIZE = 1000;
       let allData: any[] = [];
-      let page = 0;
-      let hasMore = true;
-
-      while (hasMore) {
+      let from = 0;
+      while (true) {
         const { data, error } = await supabase
           .from('candidates')
           .select('*')
           .order('created_at', { ascending: false })
-          .range(page * pageSize, (page + 1) * pageSize - 1);
+          .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
-        allData = allData.concat(data || []);
-        hasMore = (data?.length ?? 0) === pageSize;
-        page++;
-        if (page > 4) break; // Safety: max 5000 records
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
       return allData;
     },
   });
 
-  const candidatesChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
-    // Clean up any previous channel ref
-    if (candidatesChannelRef.current) {
-      try { supabase.removeChannel(candidatesChannelRef.current); } catch {}
-      candidatesChannelRef.current = null;
-    }
-    // Also remove by name in case of orphaned channels
-    try {
-      const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:candidates-changes');
-      if (existing) supabase.removeChannel(existing);
-    } catch {}
+    const channel = supabase
+      .channel('candidates-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'candidates',
+        },
+        (payload) => {
+          console.log('Candidates change detected:', payload);
+          queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        }
+      )
+      .subscribe();
 
-    try {
-      const channel = supabase
-        .channel('candidates-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'candidates' },
-          () => { queryClient.invalidateQueries({ queryKey: ['candidates'] }); }
-        )
-        .subscribe();
-      candidatesChannelRef.current = channel;
-
-      return () => {
-        try { supabase.removeChannel(channel); } catch {}
-        candidatesChannelRef.current = null;
-      };
-    } catch (err) {
-      console.warn('Failed to set up candidates realtime channel:', err);
-      return () => {};
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [queryClient]);
 
   return query;
@@ -137,14 +123,18 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
 }
 
 // Jobs with company info
-export function useJobs() {
+export function useJobs(includesClosed = false) {
   return useQuery({
-    queryKey: ['jobs'],
+    queryKey: ['jobs', includesClosed],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('jobs')
         .select('*, companies(name)')
         .order('created_at', { ascending: false });
+      if (!includesClosed) {
+        query = query.not('status', 'in', '("lost","closed")');
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
@@ -159,7 +149,7 @@ export function useJob(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
-        .select('*, companies(name)')
+        .select('*, companies(name, website)')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;
@@ -195,43 +185,33 @@ export function useContacts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('contacts')
-        .select('*, companies(name)')
+        .select('*, companies!left(name)')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
   });
 
-  const contactsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
-    if (contactsChannelRef.current) {
-      try { supabase.removeChannel(contactsChannelRef.current); } catch {}
-      contactsChannelRef.current = null;
-    }
-    try {
-      const existing = supabase.getChannels().find(ch => ch.topic === 'realtime:contacts-changes');
-      if (existing) supabase.removeChannel(existing);
-    } catch {}
+    const channel = supabase
+      .channel('contacts-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'contacts',
+        },
+        (payload) => {
+          console.log('Contacts change detected:', payload);
+          queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        }
+      )
+      .subscribe();
 
-    try {
-      const channel = supabase
-        .channel('contacts-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'contacts' },
-          () => { queryClient.invalidateQueries({ queryKey: ['contacts'] }); }
-        )
-        .subscribe();
-      contactsChannelRef.current = channel;
-
-      return () => {
-        try { supabase.removeChannel(channel); } catch {}
-        contactsChannelRef.current = null;
-      };
-    } catch (err) {
-      console.warn('Failed to set up contacts realtime channel:', err);
-      return () => {};
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [queryClient]);
 
   return query;
@@ -248,35 +228,6 @@ export function useSequences() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
-    },
-  });
-}
-
-// Sequence list metrics — aggregated execution stats per sequence
-export function useSequenceListMetrics() {
-  return useQuery({
-    queryKey: ['sequence_list_metrics'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('sequence_step_executions')
-        .select('status, sequence_enrollments!inner(sequence_id)');
-      if (error) throw error;
-
-      // Aggregate per sequence
-      const metrics: Record<string, { sent: number; delivered: number; opened: number; replied: number; bounced: number }> = {};
-      for (const row of data || []) {
-        const seqId = (row as any).sequence_enrollments?.sequence_id;
-        if (!seqId) continue;
-        if (!metrics[seqId]) metrics[seqId] = { sent: 0, delivered: 0, opened: 0, replied: 0, bounced: 0 };
-        const m = metrics[seqId];
-        const s = row.status;
-        if (s === 'sent' || s === 'delivered' || s === 'opened' || s === 'clicked' || s === 'replied') m.sent++;
-        if (s === 'delivered' || s === 'opened' || s === 'clicked' || s === 'replied') m.delivered++;
-        if (s === 'opened' || s === 'clicked' || s === 'replied') m.opened++;
-        if (s === 'replied') m.replied++;
-        if (s === 'bounced') m.bounced++;
-      }
-      return metrics;
     },
   });
 }
@@ -334,38 +285,73 @@ export function useMessages(channel?: string) {
   });
 }
 
-// Dashboard metrics (aggregated counts)
+// Helper: get Monday 00:00 of current week (Mon–Sun)
+function getWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun,1=Mon,...6=Sat
+  const diff = day === 0 ? 6 : day - 1; // days since Monday
+  const mon = new Date(now);
+  mon.setDate(now.getDate() - diff);
+  mon.setHours(0, 0, 0, 0);
+  return mon.toISOString();
+}
+
+// Helper: get 1st of current month 00:00
+function getMonthStart(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+}
+
+// Dashboard metrics — this week (Mon–Sun) + this month
 export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
-      const [jobsRes, candidatesRes, sendOutsRes] = await Promise.all([
-        supabase.from('jobs').select('id, status', { count: 'exact' }).in('status', ['lead', 'hot', 'offer_made']),
-        supabase.from('candidates').select('id, job_status'),
-        supabase.from('send_outs').select('id, stage'),
+      const { data: { user } } = await supabase.auth.getUser();
+      const weekStart = getWeekStart();
+      const monthStart = getMonthStart();
+
+      const [jobsRes, candidatesWeekRes, candidatesMonthRes, sendOutsRes] = await Promise.all([
+        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
+        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', weekStart),
+        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', monthStart),
+        supabase.from('send_outs').select('id, stage, created_at'),
       ]);
 
-      const candidates = candidatesRes.data ?? [];
+      const weekCandidates = candidatesWeekRes.data ?? [];
+      const monthCandidates = candidatesMonthRes.data ?? [];
       const sendOuts = sendOutsRes.data ?? [];
 
-      const countByJobStatus = (status: string) => candidates.filter(c => c.job_status === status).length;
+      const countWeek = (status: string) => weekCandidates.filter(c => c.job_status === status).length;
+      const countMonth = (status: string) => monthCandidates.filter(c => c.job_status === status).length;
 
       return {
         activeJobs: jobsRes.count ?? 0,
-        totalCandidates: candidates.length,
-        newCandidates: countByJobStatus('new'),
-        contactedCandidates: countByJobStatus('reached_out'),
-        pitchedCandidates: countByJobStatus('pitched'),
-        sendOutCandidates: countByJobStatus('send_out'),
-        submittedCandidates: countByJobStatus('submitted'),
-        interviewingCandidates: countByJobStatus('interviewing'),
-        offerCandidates: countByJobStatus('offer'),
-        placedCandidates: countByJobStatus('placed'),
+        // This week (Mon–Sun)
+        weekCandidates: weekCandidates.length,
+        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
+        weekNew: countWeek('new'),
+        weekContacted: countWeek('reached_out'),
+        weekPitched: countWeek('pitched'),
+        weekSendOut: countWeek('send_out'),
+        weekSubmitted: countWeek('submitted'),
+        weekInterviewing: countWeek('interviewing'),
+        weekOffer: countWeek('offer'),
+        weekPlaced: countWeek('placed'),
+        // This month
+        monthCandidates: monthCandidates.length,
+        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
+        monthNew: countMonth('new'),
+        monthContacted: countMonth('reached_out'),
+        monthPitched: countMonth('pitched'),
+        monthSendOut: countMonth('send_out'),
+        monthSubmitted: countMonth('submitted'),
+        monthInterviewing: countMonth('interviewing'),
+        monthOffer: countMonth('offer'),
+        monthPlaced: countMonth('placed'),
+        // Send outs (all-time, stage-based)
         interviewsThisWeek: sendOuts.filter((s) => s.stage === 'interview').length,
         offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
-        callsToday: 0,
-        emailsSent: 0,
-        responseRate: 0,
       };
     },
   });
