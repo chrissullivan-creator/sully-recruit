@@ -233,7 +233,7 @@ export const processSequenceStep = task({
     let references: string | undefined;
 
     if (step.is_reply && stepChannel === "email") {
-      // Find the previous step's execution to get the original message ID and subject
+      // Find the previous step's execution to get the original message ID for threading
       const { data: prevExec } = await supabase
         .from("sequence_step_executions")
         .select("external_message_id, sequence_step_id")
@@ -248,18 +248,17 @@ export const processSequenceStep = task({
         references = prevExec.external_message_id;
       }
 
-      // Get the original step's subject for "Re: ..." prefix
-      if (prevExec?.sequence_step_id) {
-        const { data: prevStep } = await supabase
-          .from("sequence_steps")
-          .select("subject")
-          .eq("id", prevExec.sequence_step_id)
-          .single();
+      // Always get the first step's subject for "Re: ..." — look up by sequence + step_order 1
+      const { data: firstStep } = await supabase
+        .from("sequence_steps")
+        .select("subject")
+        .eq("sequence_id", payload.sequenceId)
+        .eq("step_order", 1)
+        .maybeSingle();
 
-        const origSubject = applyMergeTags(prevStep?.subject, mergeVars);
-        if (origSubject) {
-          subject = origSubject.startsWith("Re: ") ? origSubject : `Re: ${origSubject}`;
-        }
+      const origSubject = applyMergeTags(firstStep?.subject, mergeVars);
+      if (origSubject) {
+        subject = origSubject.startsWith("Re: ") ? origSubject : `Re: ${origSubject}`;
       }
 
       // Fallback: never send with empty subject
