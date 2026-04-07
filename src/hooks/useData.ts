@@ -149,7 +149,7 @@ export function useJob(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
-        .select('*, companies(name)')
+        .select('*, companies(name, website)')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;

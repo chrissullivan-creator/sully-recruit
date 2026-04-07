@@ -161,22 +161,45 @@ serve(async (req) => {
         .upload(filePath, fileBytes, { contentType: file.type })
         .catch((e: any) => console.error("Storage upload error:", e));
 
+      // Chunked base64 encoding (safe for large files — avoids max argument limit)
+      function toBase64(bytes: Uint8Array): string {
+        const chunks: string[] = [];
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          chunks.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
+        }
+        return btoa(chunks.join(""));
+      }
+
       // Build content blocks for Claude
       const lowerName = file.name.toLowerCase();
       const contentBlocks: any[] = [];
 
       if (lowerName.endsWith(".pdf")) {
-        const base64Data = btoa(String.fromCharCode(...fileBytes));
         contentBlocks.push({
           type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: base64Data },
+          source: { type: "base64", media_type: "application/pdf", data: toBase64(fileBytes) },
+        });
+        contentBlocks.push({
+          type: "text",
+          text: "Parse this job posting document and extract the structured data.",
+        });
+      } else if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
+        // DOCX/DOC: send as base64 document — Claude can handle Office formats
+        const mediaType = lowerName.endsWith(".docx")
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/msword";
+        contentBlocks.push({
+          type: "document",
+          source: { type: "base64", media_type: mediaType, data: toBase64(fileBytes) },
         });
         contentBlocks.push({
           type: "text",
           text: "Parse this job posting document and extract the structured data.",
         });
       } else {
-        const fileText = await file.text();
+        // .txt and other plain text files
+        const fileText = new TextDecoder().decode(fileBytes);
         contentBlocks.push({
           type: "text",
           text: `Parse this job posting document:\n\n${fileText.slice(0, 12000)}`,

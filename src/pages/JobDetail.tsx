@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import DOMPurify from 'dompurify';
 
 const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -258,6 +259,48 @@ const JobDetail = () => {
     value: string; options?: { value: string; label: string }[]; placeholder?: string;
   } | null>(null);
 
+  // Company edit dialog (handles both company_id and company_name)
+  const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const [companyEditId, setCompanyEditId] = useState('');
+  const [companyEditName, setCompanyEditName] = useState('');
+  const [savingCompany, setSavingCompany] = useState(false);
+
+  const openCompanyEdit = () => {
+    setCompanyEditId(job?.company_id || '');
+    setCompanyEditName(companyName || '');
+    setCompanyEditOpen(true);
+  };
+
+  const handleCompanySelect = (companyId: string) => {
+    if (companyId === 'none') {
+      setCompanyEditId('');
+      return;
+    }
+    const c = companies.find((co: any) => co.id === companyId);
+    setCompanyEditId(companyId);
+    setCompanyEditName(c?.name ?? '');
+  };
+
+  const saveCompany = async () => {
+    if (!id) return;
+    setSavingCompany(true);
+    try {
+      const { error } = await supabase.from('jobs').update({
+        company_id: companyEditId || null,
+        company_name: companyEditName.trim() || null,
+      }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Company updated');
+      setCompanyEditOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update company');
+    } finally {
+      setSavingCompany(false);
+    }
+  };
+
   // Helper to save a single field
   const saveField = async (field: string, value: string) => {
     if (!id) return;
@@ -394,6 +437,18 @@ const JobDetail = () => {
   }
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
+  const companyWebsite = (job.companies as any)?.website ?? null;
+
+  // Derive logo from company website domain via Google favicon service
+  const companyLogoUrl = (() => {
+    if (!companyWebsite) return null;
+    try {
+      const domain = new URL(companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <MainLayout>
@@ -420,7 +475,11 @@ const JobDetail = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-accent" />
+              {companyLogoUrl ? (
+                <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain" />
+              ) : (
+                <Briefcase className="h-5 w-5 text-accent" />
+              )}
               Job Details
               <span className="text-xs text-muted-foreground font-normal ml-auto">Click any field to edit</span>
             </CardTitle>
@@ -443,7 +502,7 @@ const JobDetail = () => {
               </EditableField>
 
               {/* Company */}
-              <EditableField onClick={() => openFieldEdit('company_name', 'Company', 'text', companyName || '', undefined, 'Company name')}>
+              <EditableField onClick={openCompanyEdit}>
                 <span className="text-muted-foreground">Company</span>
                 <p className="mt-1 font-medium text-foreground">{companyName || <span className="italic text-muted-foreground">Not set</span>}</p>
               </EditableField>
@@ -497,7 +556,7 @@ const JobDetail = () => {
                 {job.description ? (
                   <div
                     className="mt-1 text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
-                    dangerouslySetInnerHTML={{ __html: job.description }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
                   />
                 ) : (
                   <p className="mt-1 text-sm italic text-muted-foreground">No description yet. Click to add.</p>
@@ -528,7 +587,7 @@ const JobDetail = () => {
               {(job as any).submittal_instructions ? (
                 <div
                   className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
-                  dangerouslySetInnerHTML={{ __html: (job as any).submittal_instructions }}
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
                 />
               ) : (
                 <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
@@ -545,7 +604,7 @@ const JobDetail = () => {
             </p>
             <div
               className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-              dangerouslySetInnerHTML={{ __html: (job as any).submittal_instructions }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
             />
           </div>
         )}
@@ -830,6 +889,44 @@ const JobDetail = () => {
           entityName={job.title}
         />
       )}
+
+      {/* Company edit dialog */}
+      <Dialog open={companyEditOpen} onOpenChange={setCompanyEditOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Company</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Select Company</Label>
+              <Select value={companyEditId || 'none'} onValueChange={handleCompanySelect}>
+                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No company</SelectItem>
+                  {companies.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input
+                value={companyEditName}
+                onChange={(e) => setCompanyEditName(e.target.value)}
+                placeholder="Or type company name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCompanyEditOpen(false)}>Cancel</Button>
+            <Button variant="gold" onClick={saveCompany} disabled={savingCompany}>
+              {savingCompany && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Per-field edit dialog */}
       {editField && (
