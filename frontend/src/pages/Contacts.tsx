@@ -24,7 +24,7 @@ import {
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
   positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
-  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A84C]/15', text: 'text-[#C9A84C]' },
+  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A86A]/15', text: 'text-[#C9A86A]' },
   neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
   negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
   not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },

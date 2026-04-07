@@ -183,8 +183,8 @@ export default {
   			shimmer: 'shimmer 2s infinite linear'
   		},
   		boxShadow: {
-  			glow: '0 0 20px hsl(43 55% 55% / 0.15)',
-  			'glow-lg': '0 0 40px hsl(43 55% 55% / 0.2)'
+  			glow: '0 0 20px hsl(38 41% 60% / 0.15)',
+  			'glow-lg': '0 0 40px hsl(38 41% 60% / 0.2)'
   		}
   	}
   },

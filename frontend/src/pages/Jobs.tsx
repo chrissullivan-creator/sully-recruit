@@ -143,7 +143,7 @@ const Jobs = () => {
                       <span className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                         job.status === 'lead' && 'bg-gray-100 text-gray-600',
-                        job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
+                        job.status === 'hot' && 'bg-[#C9A86A]/10 text-[#C9A86A]',
                         job.status === 'offer_made' && 'bg-[#2A5C42]/10 text-[#2A5C42]',
                         job.status === 'closed_won' && 'bg-[#1C3D2E] text-white',
                         job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626]',

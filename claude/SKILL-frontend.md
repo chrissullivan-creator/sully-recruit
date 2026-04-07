@@ -32,7 +32,7 @@ import.meta.env.REACT_APP_BACKEND_URL  // ❌ never use
 ### Colors (Emerald Brand)
 ```css
 --accent: #2A5C42       /* Emerald green — primary actions, headers */
---gold: #C9A84C         /* Gold — secondary actions, highlights */
+--gold: #C9A86A         /* Gold — secondary actions, highlights (light: #E3C991, dark: #9A7B3F) */
 ```
 
 ### Component Variants (Button)
