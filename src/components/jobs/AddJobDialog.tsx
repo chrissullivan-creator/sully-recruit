@@ -169,26 +169,44 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       const { data: { session } } = await supabase.auth.getSession();
       const allJobs: JobForm[] = [];
 
+      let failCount = 0;
       for (const file of files) {
-        const jobs = await parseSingleFile(file, session);
-        allJobs.push(...jobs);
-        if (allJobs.length >= 10) break;
+        try {
+          const jobs = await parseSingleFile(file, session);
+          // Filter out empty results (failed parses return empty title)
+          const valid = jobs.filter(j => j.title.trim());
+          allJobs.push(...valid);
+          if (allJobs.length >= 10) break;
+        } catch (fileErr: any) {
+          console.error(`Failed to parse ${file.name}:`, fileErr);
+          failCount++;
+          // Continue with remaining files
+        }
       }
 
       const mapped = allJobs.slice(0, 10);
 
-      if (mapped.length > 1) {
+      if (mapped.length === 0) {
+        const msg = failCount > 0
+          ? `Failed to parse ${failCount} file${failCount > 1 ? 's' : ''}. No jobs found.`
+          : 'No jobs found in the uploaded file(s).';
+        setParseError(msg);
+        toast.error(msg);
+      } else if (mapped.length > 1) {
         setParsedJobs(mapped);
         setSelectedJobIndexes(new Set(mapped.map((_, i) => i)));
         setStep('pick');
+        if (failCount > 0) toast.warning(`${failCount} file${failCount > 1 ? 's' : ''} failed to parse`);
+        toast.success(`Found ${mapped.length} job${mapped.length > 1 ? 's' : ''}`);
       } else {
-        setForm(mapped[0] || { ...emptyForm });
+        setForm(mapped[0]);
         setStep('form');
+        if (failCount > 0) toast.warning(`${failCount} file${failCount > 1 ? 's' : ''} failed to parse`);
+        toast.success('Found 1 job');
       }
-      toast.success(`Found ${mapped.length} job${mapped.length > 1 ? 's' : ''}`);
     } catch (err: any) {
-      setParseError(err.message || 'Failed to parse document');
-      toast.error(err.message || 'Failed to parse document');
+      setParseError(err.message || 'Failed to parse documents');
+      toast.error(err.message || 'Failed to parse documents');
     } finally {
       setParsing(false);
     }

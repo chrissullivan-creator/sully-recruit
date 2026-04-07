@@ -200,7 +200,6 @@ serve(async (req) => {
           text: "Parse this job posting document and extract the structured data.",
         });
       } else if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
-        // DOCX/DOC: send as base64 document — Claude can handle Office formats
         const mediaType = lowerName.endsWith(".docx")
           ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           : "application/msword";
@@ -213,7 +212,6 @@ serve(async (req) => {
           text: "Parse this job posting document and extract the structured data.",
         });
       } else {
-        // .txt and other plain text files
         const fileText = new TextDecoder().decode(fileBytes);
         contentBlocks.push({
           type: "text",
@@ -221,25 +219,39 @@ serve(async (req) => {
         });
       }
 
-      const raw = await callClaude(contentBlocks, MULTI_JOB_SYSTEM_PROMPT);
+      // Graceful parsing — return empty fallback if Claude fails (like parse-resume)
+      let parsedJobs: any[] = [];
+      let source = "none";
 
-      // Normalize: Claude returns an array (multi-job) or single object
-      const jobsArray: any[] = Array.isArray(raw) ? raw.slice(0, 10) : [raw];
-      const parsedJobs = jobsArray.map((p: any) => ({
-        title: p.title || "",
-        company_name: p.company_name || "",
-        location: p.location || "",
-        compensation: p.compensation || "",
-        description: p.description || "",
-      }));
+      try {
+        const raw = await callClaude(contentBlocks, MULTI_JOB_SYSTEM_PROMPT);
+        const jobsArray: any[] = Array.isArray(raw) ? raw.slice(0, 10) : [raw];
+        parsedJobs = jobsArray.map((p: any) => ({
+          title: p.title || "",
+          company_name: p.company_name || "",
+          location: p.location || "",
+          compensation: p.compensation || "",
+          description: p.description || "",
+        }));
+        source = "claude";
+      } catch (parseErr) {
+        console.error("Claude parse error for file:", file.name, parseErr);
+        parsedJobs = [{
+          title: "",
+          company_name: "",
+          location: "",
+          compensation: "",
+          description: "",
+        }];
+      }
 
       return new Response(
         JSON.stringify({
-          parsed: parsedJobs.length === 1 ? parsedJobs[0] : parsedJobs[0],
+          parsed: parsedJobs[0] || {},
           jobs: parsedJobs,
           file_path: filePath,
           file_name: file.name,
-          source: "claude",
+          source,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
