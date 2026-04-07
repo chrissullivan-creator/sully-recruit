@@ -668,7 +668,7 @@ const SequenceDetail = () => {
                   <p className="text-xs text-muted-foreground mb-4">
                     {enrollments.length} enrolled
                     {replied > 0 && <> · <span className="text-[#2A5C42] font-medium">{replied} replied</span></>}
-                    {opened > 0 && <> · <span className="text-[#C9A84C] font-medium">{opened} opened</span></>}
+                    {opened > 0 && <> · <span className="text-[#C9A86A] font-medium">{opened} opened</span></>}
                     {bounced > 0 && <> · <span className="text-[#DC2626] font-medium">{bounced} bounced</span></>}
                     {noResponse > 0 && <> · {noResponse} no response</>}
                   </p>
@@ -775,12 +775,12 @@ const SequenceDetail = () => {
                             <td className="px-4 py-2.5">
                               {enrollment.status === 'active' && <span className="text-xs text-[#2A5C42] font-medium">● Active</span>}
                               {(enrollment.status === 'completed' || enrollment.status === 'finished') && <span className="text-xs text-muted-foreground font-medium">✓ Finished</span>}
-                              {enrollment.status === 'paused' && <span className="text-xs text-[#C9A84C] font-medium">⏸ Paused</span>}
+                              {enrollment.status === 'paused' && <span className="text-xs text-[#C9A86A] font-medium">⏸ Paused</span>}
                               {enrollment.status === 'stopped' && <span className="text-xs text-[#DC2626] font-medium">✕ Stopped</span>}
                             </td>
                             <td className="px-4 py-2.5">
                               {lastResult === 'replied' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#2A5C42', background: '#EAF2EC' }}>Replied ✓</span>}
-                              {lastResult === 'opened' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#C9A84C', background: '#FBF4E3' }}>Opened</span>}
+                              {lastResult === 'opened' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#C9A86A', background: '#F5EDD8' }}>Opened</span>}
                               {lastResult === 'bounced' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#DC2626', background: '#FEF2F2' }}>Bounced</span>}
                               {lastResult === 'sent' && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#6B7280', background: '#F3F4F6' }}>Sent</span>}
                               {!lastResult && <span className="text-xs text-muted-foreground">—</span>}
@@ -792,7 +792,7 @@ const SequenceDetail = () => {
                                 const cfgMap: Record<string, { label: string; color: string; bg: string }> = {
                                   interested:     { label: 'Interested',     color: '#2A5C42', bg: '#EAF2EC' },
                                   positive:       { label: 'Positive',       color: '#16a34a', bg: '#f0fdf4' },
-                                  maybe:          { label: 'Maybe',          color: '#C9A84C', bg: '#FBF4E3' },
+                                  maybe:          { label: 'Maybe',          color: '#C9A86A', bg: '#F5EDD8' },
                                   neutral:        { label: 'Neutral',        color: '#6B7280', bg: '#F3F4F6' },
                                   negative:       { label: 'Negative',       color: '#ea580c', bg: '#fff7ed' },
                                   not_interested: { label: 'Not Interested', color: '#DC2626', bg: '#FEF2F2' },
