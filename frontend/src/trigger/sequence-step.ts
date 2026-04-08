@@ -181,7 +181,7 @@ export const processSequenceStep = task({
     }
 
     // ── 6. RATE LIMIT CHECK ─────────────────────────────────────────
-    const sendStart = step.send_window_start ?? (entityType === "contact" ? 10 : 10);
+    const sendStart = step.send_window_start ?? 10;
     const rateResult = await checkRateLimit(
       supabase, stepChannel, payload.enrolledBy, now, sendStart,
     );
@@ -640,7 +640,7 @@ function checkSendWindow(
 
   // Defaults: Contacts 6 AM–6 PM EST (10–22 UTC), Candidates 6 AM–9:30 PM EST (10–25.5 UTC)
   const sendStart = step.send_window_start ?? 10;
-  const sendEnd = step.send_window_end ?? (entityType === "contact" ? 22 : 25);
+  const sendEnd = step.send_window_end ?? (entityType === "contact" ? 22 : 25.5);
 
   let inWindow: boolean;
   if (sendEnd > 24) {
