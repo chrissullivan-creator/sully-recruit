@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { AskJoeButton } from '@/components/AskJoeButton';
+import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -12,7 +13,9 @@ export function MainLayout({ children }: MainLayoutProps) {
       <Sidebar />
       <main className="pl-64">
         <div className="min-h-screen">
-          {children}
+          <RouteErrorBoundary>
+            {children}
+          </RouteErrorBoundary>
         </div>
       </main>
       <AskJoeButton />
