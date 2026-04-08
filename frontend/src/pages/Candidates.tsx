@@ -95,7 +95,7 @@ const Candidates = () => {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const { data: candidates = [], isLoading } = useCandidates();
+  const { data: candidates = [], isLoading, isError, error, refetch } = useCandidates();
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
@@ -517,7 +517,27 @@ const Candidates = () => {
         )}
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading candidates...</p>
+          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading candidates...
+          </div>
+        ) : isError ? (
+          <div className="text-center py-16">
+            <AlertTriangle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">Failed to load candidates</h3>
+            <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message || 'An error occurred while fetching candidates.'}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-1" /> Retry
+            </Button>
+          </div>
+        ) : filteredCandidates.length === 0 && !searchQuery && filters.status === 'all' && filters.jobTag === 'all' && filters.owner === 'all' ? (
+          <div className="text-center py-16">
+            <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">No candidates yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">Add your first candidate or import a CSV to get started.</p>
+            <Button variant="gold" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Add Candidate
+            </Button>
+          </div>
         ) : view === 'pipeline' ? (
           <CandidatePipeline />
         ) : (
