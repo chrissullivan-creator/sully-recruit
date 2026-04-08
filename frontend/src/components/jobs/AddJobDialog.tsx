@@ -35,7 +35,7 @@ const emptyForm: JobForm = {
   location: '',
   description: '',
   compensation: '',
-  status: 'open',
+  status: 'lead',
   job_url: '',
 };
 
@@ -114,7 +114,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         location: p.location || '',
         description: p.description || '',
         compensation: p.compensation || '',
-        status: 'open',
+        status: 'lead',
         job_url: url.trim(),
       });
       setStep('form');
@@ -155,7 +155,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         location: p.location || '',
         description: p.description || '',
         compensation: p.compensation || '',
-        status: 'open',
+        status: 'lead',
         job_url: '',
       };
     });

@@ -40,12 +40,10 @@ const JOB_STATUSES = [
 ];
 
 const STATUS_OPTIONS = [
-  { value: 'open', label: 'Open' },
-  { value: 'interviewing', label: 'Interviewing' },
-  { value: 'offer', label: 'Offer' },
-  { value: 'win', label: 'Win' },
-  { value: 'lost', label: 'Lost' },
-  { value: 'on_hold', label: 'On Hold' },
+  { value: 'lead', label: 'Lead' },
+  { value: 'hot', label: 'Hot' },
+  { value: 'closed_won', label: 'Closed Won' },
+  { value: 'closed_lost', label: 'Closed Lost' },
 ];
 
 // ── Clickable field wrapper ─────────────────────────────────────────────────
@@ -493,11 +491,13 @@ const JobDetail = () => {
               </EditableField>
 
               {/* Status */}
-              <EditableField onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'open', STATUS_OPTIONS)}>
+              <EditableField onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}>
                 <span className="text-muted-foreground">Status</span>
                 <div className="mt-1"><Badge variant="secondary" className={cn(
-                  job.status === 'win' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
-                  job.status === 'lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
+                  job.status === 'lead' && 'bg-gray-100 text-gray-600',
+                  job.status === 'hot' && 'bg-[#C9A86A]/10 text-[#C9A86A]',
+                  job.status === 'closed_won' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
+                  job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
                 )}>{STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}</Badge></div>
               </EditableField>
 

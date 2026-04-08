@@ -28,7 +28,7 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
     location: '',
     description: '',
     compensation: '',
-    status: 'open',
+    status: 'lead',
     job_url: '',
   });
 
@@ -157,12 +157,10 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="interviewing">Interviewing</SelectItem>
-                <SelectItem value="offer">Offer</SelectItem>
-                <SelectItem value="win">Win</SelectItem>
-                <SelectItem value="lost">Lost</SelectItem>
-                <SelectItem value="on_hold">On Hold</SelectItem>
+                <SelectItem value="lead">Lead</SelectItem>
+                <SelectItem value="hot">Hot</SelectItem>
+                <SelectItem value="closed_won">Closed Won</SelectItem>
+                <SelectItem value="closed_lost">Closed Lost</SelectItem>
               </SelectContent>
             </Select>
           </div>
