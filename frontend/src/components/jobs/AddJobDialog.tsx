@@ -469,25 +469,9 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Location</Label>
-                <Input value={form.location} onChange={e => update('location', e.target.value)} placeholder="e.g. New York, NY" />
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={form.status} onValueChange={v => update('status', v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="open">Open</SelectItem>
-                    <SelectItem value="interviewing">Interviewing</SelectItem>
-                    <SelectItem value="offer">Offer</SelectItem>
-                    <SelectItem value="win">Win</SelectItem>
-                    <SelectItem value="lost">Lost</SelectItem>
-                    <SelectItem value="on_hold">On Hold</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>Location</Label>
+              <Input value={form.location} onChange={e => update('location', e.target.value)} placeholder="e.g. New York, NY" />
             </div>
 
             <div className="space-y-2">
