@@ -17,7 +17,7 @@ import { format } from 'date-fns';
 import {
   Phone, PhoneIncoming, PhoneOutgoing, Search, Clock,
   FileText, Plus, UserCheck, User, Users, Loader2,
-  CheckCircle2, AlertCircle, UserPlus, ListChecks,
+  CheckCircle2, AlertCircle, UserPlus, ListChecks, RefreshCw,
 } from 'lucide-react';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 
@@ -376,44 +376,52 @@ const Calls = () => {
   const [detailCall, setDetailCall] = useState<{ call: CallLog; aiNotes?: any } | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: calls = [], isLoading } = useQuery({
+  const { data: calls = [], isLoading, isError, error: callsError, refetch } = useQuery({
     queryKey: ['call_logs'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('call_logs' as any)
         .select('*')
         .order('started_at', { ascending: false })
-        .limit(200);
+        .limit(1000);
       if (error) throw error;
       return (data ?? []) as unknown as CallLog[];
     },
   });
 
+  // Fetch ALL ai_call_notes (not just those with call_log_id, since most aren't linked yet)
   const { data: aiNotesList = [] } = useQuery({
-    queryKey: ['ai_call_notes_by_call_log'],
+    queryKey: ['ai_call_notes_all'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('ai_call_notes')
+        .from('ai_call_notes' as any)
         .select('*, candidates(id, first_name, last_name, full_name, current_title, current_company)')
-        .not('call_log_id', 'is', null)
-        .limit(500);
+        .order('created_at', { ascending: false })
+        .limit(1000);
       if (error) throw error;
       return (data ?? []) as any[];
     },
   });
 
-  const aiNotesMap = useMemo(() => {
-    const map = new Map<string, any>();
+  // Build lookup maps: by call_log_id AND by phone_number for fallback matching
+  const { aiByCallLogId, aiByPhone } = useMemo(() => {
+    const byId = new Map<string, any>();
+    const byPhone = new Map<string, any>();
     for (const note of aiNotesList) {
-      if (note.call_log_id) map.set(note.call_log_id, note);
+      if (note.call_log_id) byId.set(note.call_log_id, note);
+      if (note.phone_number) {
+        // Keep the most recent note per phone number
+        if (!byPhone.has(note.phone_number)) byPhone.set(note.phone_number, note);
+      }
     }
-    return map;
+    return { aiByCallLogId: byId, aiByPhone: byPhone };
   }, [aiNotesList]);
 
-  const getAiNotes = (callId: string) => aiNotesMap.get(callId);
+  const getAiNotes = (call: CallLog) =>
+    aiByCallLogId.get(call.id) || aiByPhone.get(call.phone_number) || null;
 
   const getCandidateName = (call: CallLog) => {
-    const ai = aiNotesMap.get(call.id);
+    const ai = getAiNotes(call);
     if (call.linked_entity_name) return call.linked_entity_name;
     if (ai?.candidates) {
       const c = ai.candidates;
@@ -423,7 +431,7 @@ const Calls = () => {
   };
 
   const getCandidateId = (call: CallLog) => {
-    const ai = aiNotesMap.get(call.id);
+    const ai = getAiNotes(call);
     if (call.linked_entity_type === 'candidate' && call.linked_entity_id) return call.linked_entity_id;
     return ai?.candidates?.id ?? null;
   };
@@ -432,7 +440,7 @@ const Calls = () => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     const name = getCandidateName(c);
-    const ai = getAiNotes(c.id);
+    const ai = getAiNotes(c);
     return (
       c.phone_number?.includes(searchQuery) ||
       name?.toLowerCase().includes(q) ||
@@ -493,6 +501,15 @@ const Calls = () => {
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
             <Loader2 className="h-5 w-5 animate-spin" /> Loading calls...
           </div>
+        ) : isError ? (
+          <div className="text-center py-16">
+            <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">Failed to load calls</h3>
+            <p className="text-sm text-muted-foreground mb-4">{(callsError as any)?.message || 'An error occurred while fetching call logs.'}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-1" /> Retry
+            </Button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
             <Phone className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
@@ -507,7 +524,7 @@ const Calls = () => {
         ) : (
           <div className="space-y-4">
             {filtered.map((call) => {
-              const ai = getAiNotes(call.id);
+              const ai = getAiNotes(call);
               const personName = getCandidateName(call);
               const candidateId = getCandidateId(call);
               const summary = ai?.ai_summary || call.summary;

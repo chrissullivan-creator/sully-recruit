@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -11,7 +11,7 @@ import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSear
 import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -61,7 +61,7 @@ const Contacts = () => {
   const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 100;
-  const { data: contacts = [], isLoading } = useContacts();
+  const { data: contacts = [], isLoading, isError, error, refetch } = useContacts();
   const { data: jobs = [] } = useJobs();
 
   const filteredContacts = useMemo(() => {
@@ -120,7 +120,7 @@ const Contacts = () => {
   const paginatedContacts = filteredContacts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset to page 1 when search or filter changes
-  useMemo(() => { setPage(1); }, [searchQuery, filter]);
+  useEffect(() => { setPage(1); }, [searchQuery, filter]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -250,7 +250,27 @@ const Contacts = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading contacts...</p>
+          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading contacts...
+          </div>
+        ) : isError ? (
+          <div className="text-center py-16">
+            <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">Failed to load contacts</h3>
+            <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message || 'An error occurred while fetching contacts.'}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-1" /> Retry
+            </Button>
+          </div>
+        ) : filteredContacts.length === 0 && !searchQuery && filter === 'all' ? (
+          <div className="text-center py-16">
+            <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-1">No contacts yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">Add your first contact or import a CSV to get started.</p>
+            <Button variant="gold" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Add Contact
+            </Button>
+          </div>
         ) : (
           <div className="rounded-lg border border-border overflow-hidden">
             <table className="w-full">
