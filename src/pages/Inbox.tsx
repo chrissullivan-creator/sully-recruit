@@ -149,6 +149,13 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
   const [linkResults, setLinkResults] = useState<any[]>([]);
   const [linkSearching, setLinkSearching] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [createMode, setCreateMode] = useState<'candidate' | 'contact' | null>(null);
+  const [createForm, setCreateForm] = useState({
+    first_name: '', last_name: '', email: '', phone: '',
+    current_title: '', current_company: '', linkedin_url: '', location_text: '',
+  });
+  const [creating, setCreating] = useState(false);
+  const [enriching, setEnriching] = useState(false);
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -214,6 +221,84 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
       setLinkResults([]);
     }
     setLinking(false);
+  };
+
+  const handleStartCreate = async (mode: 'candidate' | 'contact') => {
+    setCreateMode(mode);
+    setCreateForm({ first_name: '', last_name: '', email: '', phone: '', current_title: '', current_company: '', linkedin_url: '', location_text: '' });
+    setEnriching(true);
+    try {
+      const { data } = await supabase.functions.invoke('enrich-sender-from-inbox', {
+        body: { conversation_id: thread!.id },
+      });
+      if (data && !data.error) {
+        setCreateForm(prev => ({
+          first_name: data.first_name || prev.first_name,
+          last_name: data.last_name || prev.last_name,
+          email: data.email || prev.email,
+          phone: data.phone || prev.phone,
+          current_title: data.current_title || prev.current_title,
+          current_company: data.current_company || prev.current_company,
+          linkedin_url: data.linkedin_url || prev.linkedin_url,
+          location_text: data.location_text || prev.location_text,
+        }));
+      }
+    } catch (err) {
+      console.error('Enrichment failed:', err);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!thread || !createMode) return;
+    if (!createForm.first_name.trim() && !createForm.last_name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    setCreating(true);
+    try {
+      if (createMode === 'candidate') {
+        const { data: newRecord, error } = await supabase.from('candidates').insert({
+          first_name: createForm.first_name.trim() || null,
+          last_name: createForm.last_name.trim() || null,
+          email: createForm.email.trim() || null,
+          phone: createForm.phone.trim() || null,
+          current_title: createForm.current_title.trim() || null,
+          current_company: createForm.current_company.trim() || null,
+          linkedin_url: createForm.linkedin_url.trim() || null,
+          location_text: createForm.location_text.trim() || null,
+          status: 'new' as const,
+        }).select('id').single();
+        if (error) throw error;
+        await supabase.from('conversations').update({ candidate_id: newRecord.id }).eq('id', thread.id);
+        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        toast.success('Candidate created & linked');
+      } else {
+        const userId = (await supabase.auth.getUser()).data.user?.id;
+        const { data: newRecord, error } = await supabase.from('contacts').insert({
+          first_name: createForm.first_name.trim() || null,
+          last_name: createForm.last_name.trim() || null,
+          email: createForm.email.trim() || null,
+          phone: createForm.phone.trim() || null,
+          title: createForm.current_title.trim() || null,
+          linkedin_url: createForm.linkedin_url.trim() || null,
+          status: 'active',
+          owner_id: userId,
+        } as any).select('id').single();
+        if (error) throw error;
+        await supabase.from('conversations').update({ contact_id: newRecord.id }).eq('id', thread.id);
+        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        toast.success('Contact created & linked');
+      }
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
+      setCreateMode(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create record');
+    } finally {
+      setCreating(false);
+    }
   };
 
   if (!thread) return null;
@@ -310,46 +395,137 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-              <p className="text-xs text-warning leading-relaxed">
-                This conversation is not linked to any record. Search to link it manually.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search name..."
-                value={linkSearch}
-                onChange={(e) => setLinkSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="h-8 text-xs"
-              />
-              <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
-                {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
-            {linkResults.length > 0 && (
-              <div className="rounded-lg border border-border overflow-hidden">
-                {linkResults.map((r) => (
-                  <button
-                    key={r.id + r.entity_type}
-                    onClick={() => handleLink(r.entity_type, r.id, r.full_name)}
-                    disabled={linking}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-b-0 text-left"
-                  >
-                    {r.entity_type === 'candidate'
-                      ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
-                      : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
-                      <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {r.entity_type} · {r.current_title || r.title || ''}
-                      </p>
-                    </div>
-                    <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+            {createMode ? (
+              /* ── Inline create form ── */
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCreateMode(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                    <ArrowLeft className="h-3.5 w-3.5" />
                   </button>
-                ))}
+                  <p className="text-xs font-semibold text-foreground">
+                    New {createMode === 'candidate' ? 'Candidate' : 'Contact'}
+                  </p>
+                  {enriching && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="First name *"
+                    value={createForm.first_name}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, first_name: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                  <Input
+                    placeholder="Last name"
+                    value={createForm.last_name}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, last_name: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <Input
+                  placeholder="Email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+                <Input
+                  placeholder="Phone"
+                  value={createForm.phone}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, phone: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+                <Input
+                  placeholder="Title"
+                  value={createForm.current_title}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, current_title: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+                <Input
+                  placeholder="Company"
+                  value={createForm.current_company}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, current_company: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+                {createMode === 'candidate' && (
+                  <>
+                    <Input
+                      placeholder="LinkedIn URL"
+                      value={createForm.linkedin_url}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, linkedin_url: e.target.value }))}
+                      className="h-8 text-xs"
+                    />
+                    <Input
+                      placeholder="Location"
+                      value={createForm.location_text}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, location_text: e.target.value }))}
+                      className="h-8 text-xs"
+                    />
+                  </>
+                )}
+                <Button
+                  variant="gold"
+                  size="sm"
+                  className="w-full gap-1.5"
+                  onClick={handleCreate}
+                  disabled={creating || (!createForm.first_name.trim() && !createForm.last_name.trim())}
+                >
+                  {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  Create & Link
+                </Button>
               </div>
+            ) : (
+              /* ── Search + create buttons ── */
+              <>
+                <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+                  <p className="text-xs text-warning leading-relaxed">
+                    This conversation is not linked to any record. Search to link or create new.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Search name..."
+                    value={linkSearch}
+                    onChange={(e) => setLinkSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    className="h-8 text-xs"
+                  />
+                  <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
+                    {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+                {linkResults.length > 0 && (
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    {linkResults.map((r) => (
+                      <button
+                        key={r.id + r.entity_type}
+                        onClick={() => handleLink(r.entity_type, r.id, r.full_name)}
+                        disabled={linking}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-b-0 text-left"
+                      >
+                        {r.entity_type === 'candidate'
+                          ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                          : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate capitalize">
+                            {r.entity_type} · {r.current_title || r.title || ''}
+                          </p>
+                        </div>
+                        <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5 text-xs" onClick={() => handleStartCreate('candidate')}>
+                    <UserPlus className="h-3.5 w-3.5" /> New Candidate
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5 text-xs" onClick={() => handleStartCreate('contact')}>
+                    <Users className="h-3.5 w-3.5" /> New Contact
+                  </Button>
+                </div>
+              </>
             )}
           </div>
         )}
