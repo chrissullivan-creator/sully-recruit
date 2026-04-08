@@ -79,12 +79,12 @@ export const sequenceSweep = schedules.task({
     const result = await processSequenceStep.batchTrigger(batchItems);
 
     logger.info("Sweep complete", {
-      triggered: result.runs.length,
+      triggered: result?.runs?.length ?? 0,
       total: enrollments.length,
     });
 
     return {
-      triggered: result.runs.length,
+      triggered: result?.runs?.length ?? 0,
       total: enrollments.length,
       timestamp: now.toISOString(),
     };
