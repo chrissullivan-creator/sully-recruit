@@ -226,6 +226,43 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     }));
   };
 
+  // Resolve company: if name matches existing (case-insensitive) use that ID,
+  // otherwise create a new company record. Returns { company_id, company_name }.
+  const resolveCompany = async (companyId: string, companyName: string): Promise<{ company_id: string | null; company_name: string | null }> => {
+    const name = companyName.trim();
+    if (!name) return { company_id: companyId || null, company_name: null };
+
+    // If already selected from dropdown, just use it
+    if (companyId) {
+      return { company_id: companyId, company_name: name };
+    }
+
+    // Check if this company name already exists (case-insensitive)
+    const existing = companies.find((c: any) =>
+      c.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (existing) {
+      return { company_id: existing.id, company_name: existing.name };
+    }
+
+    // Create new company
+    const { data, error } = await supabase
+      .from('companies')
+      .insert({ name })
+      .select('id, name')
+      .single();
+
+    if (error) {
+      console.error('Failed to create company:', error);
+      return { company_id: null, company_name: name };
+    }
+
+    // Refresh companies list for future lookups in this session
+    queryClient.invalidateQueries({ queryKey: ['companies'] });
+    return { company_id: data.id, company_name: data.name };
+  };
+
   // Toggle job selection in pick step
   const toggleJobSelection = (index: number) => {
     setSelectedJobIndexes(prev => {
@@ -248,10 +285,11 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     setSaving(true);
     try {
+      const co = await resolveCompany(form.company_id, form.company_name);
       const insert: any = {
         title: form.title.trim(),
-        company_name: form.company_name.trim() || null,
-        company_id: form.company_id || null,
+        company_name: co.company_name,
+        company_id: co.company_id,
         location: form.location.trim() || null,
         description: form.description || null,
         compensation: form.compensation.trim() || null,
@@ -292,16 +330,27 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     if (selected.length === 0) { toast.error('No jobs selected'); return; }
     setSaving(true);
     try {
-      const inserts = selected.map(j => ({
-        title: j.title.trim(),
-        company_name: j.company_name.trim() || null,
-        company_id: j.company_id || null,
-        location: j.location.trim() || null,
-        description: j.description || null,
-        compensation: j.compensation.trim() || null,
-        status: j.status,
-        job_url: j.job_url.trim() || null,
-      }));
+      // Resolve companies for all selected jobs (dedup by name)
+      const companyCache = new Map<string, { company_id: string | null; company_name: string | null }>();
+      const inserts = [];
+      for (const j of selected) {
+        const nameKey = j.company_name.trim().toLowerCase();
+        let co = companyCache.get(nameKey);
+        if (!co) {
+          co = await resolveCompany(j.company_id, j.company_name);
+          if (nameKey) companyCache.set(nameKey, co);
+        }
+        inserts.push({
+          title: j.title.trim(),
+          company_name: co.company_name,
+          company_id: co.company_id,
+          location: j.location.trim() || null,
+          description: j.description || null,
+          compensation: j.compensation.trim() || null,
+          status: j.status,
+          job_url: j.job_url.trim() || null,
+        });
+      }
       const { error } = await supabase.from('jobs').insert(inserts);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
