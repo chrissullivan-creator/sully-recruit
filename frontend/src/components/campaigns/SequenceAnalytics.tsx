@@ -328,7 +328,7 @@ export const SequenceAnalytics = ({ steps, enrollments, executions }: SequenceAn
       {/* Per-Step Table */}
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-secondary">
+          <thead className="table-header-green">
             <tr>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Step</th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>

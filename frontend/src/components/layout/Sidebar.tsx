@@ -36,16 +36,11 @@ export function Sidebar() {
 
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
-      {/* Logo */}
-      <div className="flex h-16 items-center justify-between px-6 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain" />
-          <div>
-            <h1 className="text-base font-bold tracking-wide text-sidebar-foreground uppercase">Emerald Recruit</h1>
-            <p className="text-[9px] tracking-widest text-gold uppercase -mt-0.5">Sully Recruit</p>
-          </div>
-        </div>
-        <NotificationBell />
+      {/* Logo — centered */}
+      <div className="flex flex-col items-center py-5 border-b border-sidebar-border">
+        <img src={logo} alt="Sully Recruit" className="h-12 w-12 object-contain" />
+        <h1 className="text-sm font-bold tracking-wide text-sidebar-foreground uppercase mt-2">Emerald Recruit</h1>
+        <p className="text-[9px] tracking-widest text-sidebar-foreground/60 uppercase -mt-0.5">Sully Recruit</p>
       </div>
 
       {/* Navigation */}
@@ -84,9 +79,10 @@ export function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.user_metadata?.display_name || 'User'}</p>
-            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+            <p className="text-xs text-sidebar-foreground/60 truncate">{user?.email}</p>
           </div>
-          <button onClick={handleSignOut} className="text-muted-foreground hover:text-foreground transition-colors" title="Sign out">
+          <NotificationBell />
+          <button onClick={handleSignOut} className="text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors" title="Sign out">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

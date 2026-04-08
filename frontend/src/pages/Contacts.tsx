@@ -274,7 +274,7 @@ const Contacts = () => {
         ) : (
           <div className="rounded-lg border border-border overflow-hidden">
             <table className="w-full">
-              <thead className="bg-secondary">
+              <thead className="table-header-green">
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <Checkbox

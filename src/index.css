@@ -45,14 +45,14 @@
 
     --radius: 0.375rem;
 
-    /* Sidebar - white with green text and gold highlights */
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 124 55% 24%;
+    /* Sidebar - dark green with gold text */
+    --sidebar-background: 148 76% 18%;
+    --sidebar-foreground: 38 41% 60%;
     --sidebar-primary: 38 41% 60%;
-    --sidebar-primary-foreground: 124 55% 24%;
+    --sidebar-primary-foreground: 148 76% 18%;
     --sidebar-accent: 38 41% 60% / 0.15;
-    --sidebar-accent-foreground: 124 55% 24%;
-    --sidebar-border: 124 20% 90%;
+    --sidebar-accent-foreground: 38 58% 73%;
+    --sidebar-border: 148 50% 12%;
     --sidebar-ring: 38 41% 60%;
 
     /* Extended palette for status and pipelines */
@@ -178,6 +178,14 @@
   /* Gold accent text */
   .text-gold {
     @apply text-accent;
+  }
+
+  /* Table header - dark green with gold text */
+  thead.table-header-green {
+    background: hsl(148 76% 18%);
+  }
+  thead.table-header-green th {
+    color: hsl(38 41% 60%);
   }
 
   /* Card with subtle gradient */

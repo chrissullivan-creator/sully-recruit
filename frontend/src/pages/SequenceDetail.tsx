@@ -684,7 +684,7 @@ const SequenceDetail = () => {
               ) : (
                 <div className="rounded-lg border border-border overflow-hidden">
                   <table className="w-full">
-                    <thead className="bg-secondary">
+                    <thead className="table-header-green">
                       <tr>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
@@ -861,9 +861,9 @@ const SequenceDetail = () => {
               ) : (
                 <div className="rounded-lg border border-border overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-secondary">
+                    <thead className="table-header-green">
                       <tr>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky left-0 bg-secondary">Enrollee</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky left-0 bg-[#0B4F2F]">Enrollee</th>
                         {steps.sort((a, b) => a.order - b.order).map((step) => (
                           <th key={step.id} className="text-center px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
                             Step {step.order} ({step.channel.replace('linkedin_', 'LI ').replace('_', ' ')})

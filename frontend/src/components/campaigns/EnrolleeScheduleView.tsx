@@ -176,9 +176,9 @@ export function EnrolleeScheduleView({
   return (
     <div className="rounded-lg border border-border overflow-x-auto">
       <table className="w-full text-sm min-w-[600px]">
-        <thead className="bg-secondary">
+        <thead className="table-header-green">
           <tr>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky left-0 bg-secondary z-10">
+            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky left-0 bg-[#0B4F2F] z-10">
               Enrollee
             </th>
             <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
