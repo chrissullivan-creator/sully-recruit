@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 // Candidates
@@ -29,9 +29,11 @@ export function useCandidates() {
     },
   });
 
+  const candidatesChannelName = useRef(`candidates-changes-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
   useEffect(() => {
     const channel = supabase
-      .channel('candidates-changes')
+      .channel(candidatesChannelName.current)
       .on(
         'postgres_changes',
         {
@@ -192,9 +194,11 @@ export function useContacts() {
     },
   });
 
+  const contactsChannelName = useRef(`contacts-changes-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
   useEffect(() => {
     const channel = supabase
-      .channel('contacts-changes')
+      .channel(contactsChannelName.current)
       .on(
         'postgres_changes',
         {
