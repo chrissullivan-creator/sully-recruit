@@ -5,7 +5,7 @@ import { processSequenceStep } from "./sequence-step";
 /**
  * Sequence sweep — runs every 5 minutes.
  *
- * Picks up the 3 oldest due enrollments from active sequences,
+ * Picks up the 2 oldest due enrollments from active sequences,
  * then fans out to per-enrollment step tasks. The small batch size
  * combined with per-send jitter keeps throughput human-paced
  * (~1 send every 2-5 min).
@@ -79,12 +79,13 @@ export const sequenceSweep = schedules.task({
     const result = await processSequenceStep.batchTrigger(batchItems);
 
     logger.info("Sweep complete", {
-      triggered: result.runs.length,
+      triggered: batchItems.length,
       total: enrollments.length,
+      batchId: result.batchId,
     });
 
     return {
-      triggered: result.runs.length,
+      triggered: batchItems.length,
       total: enrollments.length,
       timestamp: now.toISOString(),
     };
