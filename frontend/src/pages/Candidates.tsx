@@ -44,14 +44,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const JOB_STATUS_COLORS: Record<string, string> = {
-  pitched:      'bg-blue-500/10 text-blue-400',
-  send_out:     'bg-yellow-500/10 text-yellow-400',
-  submitted:    'bg-purple-500/10 text-purple-400',
-  interviewing: 'bg-orange-500/10 text-orange-400',
-  offer:        'bg-emerald-500/10 text-emerald-400',
-  placed:       'bg-green-500/10 text-green-400',
-  rejected:     'bg-red-500/10 text-red-400',
-  withdrew:     'bg-muted text-muted-foreground',
+  lead:            'bg-slate-500/10 text-slate-400',
+  back_of_resume:  'bg-gray-500/10 text-gray-400',
+  reached_out:     'bg-blue-500/10 text-blue-400',
+  pitch:           'bg-indigo-500/10 text-indigo-400',
+  sent:            'bg-purple-500/10 text-purple-400',
+  interview:       'bg-orange-500/10 text-orange-400',
+  offer:           'bg-emerald-500/10 text-emerald-400',
+  placed:          'bg-green-500/10 text-green-400',
+  rejected:        'bg-red-500/10 text-red-400',
 };
 
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created' | 'updated';

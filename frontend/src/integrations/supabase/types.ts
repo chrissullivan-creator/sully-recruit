@@ -832,6 +832,7 @@ export type Database = {
           candidate_id: string
           contact_id: string | null
           created_at: string
+          feedback: string | null
           id: string
           interview_at: string | null
           job_id: string
@@ -839,6 +840,8 @@ export type Database = {
           outcome: string | null
           placed_at: string | null
           recruiter_id: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
           sent_to_client_at: string | null
           stage: string
           updated_at: string
@@ -847,6 +850,7 @@ export type Database = {
           candidate_id: string
           contact_id?: string | null
           created_at?: string
+          feedback?: string | null
           id?: string
           interview_at?: string | null
           job_id: string
@@ -854,6 +858,8 @@ export type Database = {
           outcome?: string | null
           placed_at?: string | null
           recruiter_id?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
           sent_to_client_at?: string | null
           stage?: string
           updated_at?: string
@@ -862,6 +868,7 @@ export type Database = {
           candidate_id?: string
           contact_id?: string | null
           created_at?: string
+          feedback?: string | null
           id?: string
           interview_at?: string | null
           job_id?: string
@@ -869,6 +876,8 @@ export type Database = {
           outcome?: string | null
           placed_at?: string | null
           recruiter_id?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
           sent_to_client_at?: string | null
           stage?: string
           updated_at?: string

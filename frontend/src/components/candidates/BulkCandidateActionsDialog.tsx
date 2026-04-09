@@ -20,8 +20,11 @@ interface BulkCandidateActionsDialogProps {
 }
 
 const stageBadgeColor: Record<string, string> = {
-  new: 'bg-muted text-muted-foreground',
-  submitted: 'bg-blue-500/15 text-blue-600',
+  lead: 'bg-slate-500/15 text-slate-600',
+  back_of_resume: 'bg-muted text-muted-foreground',
+  reached_out: 'bg-blue-500/15 text-blue-600',
+  pitch: 'bg-indigo-500/15 text-indigo-600',
+  sent: 'bg-purple-500/15 text-purple-600',
   interview: 'bg-amber-500/15 text-amber-600',
   offer: 'bg-emerald-500/15 text-emerald-600',
   placed: 'bg-green-600/15 text-green-700',
@@ -30,18 +33,27 @@ const stageBadgeColor: Record<string, string> = {
 
 const sendOutStages = [
   { value: 'lead', label: 'Lead' },
-  { value: 'pitch', label: 'Pitch' },
+  { value: 'back_of_resume', label: 'Back of Resume' },
+  { value: 'reached_out', label: 'Reached Out' },
+  { value: 'pitch', label: 'Pitch / Send Out' },
   { value: 'sent', label: 'Sent' },
   { value: 'interview', label: 'Interview' },
   { value: 'offer', label: 'Offer' },
-  { value: 'placed', label: 'Placed' },
+  { value: 'placed', label: 'Placement' },
   { value: 'rejected', label: 'Rejected' },
-  { value: 'withdrawn', label: 'Withdrawn' },
+];
+
+const rejectedByOptions = [
+  { value: 'recruiter', label: 'By Recruiter' },
+  { value: 'client', label: 'By Client' },
+  { value: 'sales_person', label: 'By Sales Person' },
+  { value: 'candidate', label: 'By Candidate' },
 ];
 
 type SendOutInsert = TablesInsert<'send_outs'>;
 type CandidateUpdate = TablesUpdate<'candidates'> & {
-  tagged_job_id?: string | null;
+  job_id?: string | null;
+  job_status?: string | null;
 };
 
 export const BulkCandidateActionsDialog = ({
@@ -55,6 +67,8 @@ export const BulkCandidateActionsDialog = ({
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
   const [enrollInSequence, setEnrollInSequence] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [rejectedBy, setRejectedBy] = useState<string>('');
+  const [rejectionDetails, setRejectionDetails] = useState<string>('');
 
   const { data: jobs = [] } = useJobs();
   const { data: sequences = [] } = useSequences();
@@ -66,6 +80,8 @@ export const BulkCandidateActionsDialog = ({
       setSelectedStage('lead');
       setSelectedSequenceId('');
       setEnrollInSequence(false);
+      setRejectedBy('');
+      setRejectionDetails('');
     }
   }, [open]);
 
@@ -76,21 +92,36 @@ export const BulkCandidateActionsDialog = ({
 
   const handleSubmit = async () => {
     if (!selectedJobId || candidateIds.length === 0) return;
+    if (selectedStage === 'rejected' && !rejectedBy) {
+      toast.error('Please select who rejected the candidate');
+      return;
+    }
 
     setProcessing(true);
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
 
-      const sendOuts: SendOutInsert[] = candidateIds.map((candidateId) => ({
-        job_id: selectedJobId,
-        candidate_id: candidateId,
-        stage: selectedStage,
-        recruiter_id: userId,
-      }));
+      const sendOuts: (SendOutInsert & { rejected_by?: string; rejection_reason?: string; feedback?: string })[] = candidateIds.map((candidateId) => {
+        const record: any = {
+          job_id: selectedJobId,
+          candidate_id: candidateId,
+          stage: selectedStage,
+          recruiter_id: userId,
+        };
+        if (selectedStage === 'rejected') {
+          record.rejected_by = rejectedBy;
+          record.rejection_reason = rejectionDetails || null;
+        }
+        if (selectedStage === 'sent') record.sent_to_client_at = new Date().toISOString();
+        if (selectedStage === 'interview') record.interview_at = new Date().toISOString();
+        if (selectedStage === 'offer') record.offer_at = new Date().toISOString();
+        if (selectedStage === 'placed') record.placed_at = new Date().toISOString();
+        return record;
+      });
 
       const { error: sendOutError } = await supabase
         .from('send_outs')
-        .insert(sendOuts);
+        .insert(sendOuts as any);
 
       if (sendOutError) throw sendOutError;
 
@@ -111,9 +142,10 @@ export const BulkCandidateActionsDialog = ({
         if (enrollmentError) throw enrollmentError;
       }
 
+      // Update job_id and job_status on candidates (fix: was using tagged_job_id)
       const { error: updateError } = await supabase
         .from('candidates')
-        .update({ tagged_job_id: selectedJobId } as CandidateUpdate)
+        .update({ job_id: selectedJobId, job_status: selectedStage } as CandidateUpdate)
         .in('id', candidateIds);
 
       if (updateError) throw updateError;
@@ -142,7 +174,9 @@ export const BulkCandidateActionsDialog = ({
     }
   };
 
-  const canSubmit = selectedJobId && candidateIds.length > 0 && (!enrollInSequence || selectedSequenceId);
+  const canSubmit = selectedJobId && candidateIds.length > 0
+    && (!enrollInSequence || selectedSequenceId)
+    && (selectedStage !== 'rejected' || rejectedBy);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -188,7 +222,7 @@ export const BulkCandidateActionsDialog = ({
 
           <div className="space-y-2">
             <Label>Set Status</Label>
-            <Select value={selectedStage} onValueChange={setSelectedStage}>
+            <Select value={selectedStage} onValueChange={(val) => { setSelectedStage(val); if (val !== 'rejected') { setRejectedBy(''); setRejectionDetails(''); } }}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -203,6 +237,36 @@ export const BulkCandidateActionsDialog = ({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Rejection details sub-form */}
+          {selectedStage === 'rejected' && (
+            <div className="space-y-3 rounded-md border border-red-500/30 bg-red-500/5 p-4">
+              <h5 className="text-xs font-semibold text-red-400">Rejection Details</h5>
+              <div className="space-y-1">
+                <Label className="text-xs">Rejected By *</Label>
+                <Select value={rejectedBy} onValueChange={setRejectedBy}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Who rejected?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {rejectedByOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Details</Label>
+                <textarea
+                  value={rejectionDetails}
+                  onChange={(e) => setRejectionDetails(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background text-foreground p-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                  rows={2}
+                  placeholder="Reason for rejection..."
+                />
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             <div className="flex items-center space-x-2">
@@ -256,4 +320,3 @@ export const BulkCandidateActionsDialog = ({
     </Dialog>
   );
 };
-
