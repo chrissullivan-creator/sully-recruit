@@ -13,9 +13,8 @@ interface ChannelCap {
 
 const CHANNEL_CAPS: Record<string, ChannelCap> = {
   email: { daily: 150, hourly: 15 },
-  linkedin_connection: { daily: 40, hourly: 8 },
-  linkedin_message: { daily: 50, hourly: 10 },
-  classic_message: { daily: 50, hourly: 10 },
+  linkedin_connection: { daily: 35, hourly: 7 },
+  linkedin_message: { daily: 40, hourly: 8 },
   sms: { daily: 50, hourly: 10 },
 };
 
@@ -31,7 +30,7 @@ const EXEMPT_CHANNELS = new Set([
 function channelCategory(channel: string): string | null {
   if (EXEMPT_CHANNELS.has(channel)) return null;
   if (channel === "linkedin_connection") return "linkedin_connection";
-  if (channel === "linkedin_message" || channel === "classic_message") return "linkedin_message";
+  if (channel === "linkedin_message") return "linkedin_message";
   if (channel === "sms") return "sms";
   if (channel === "email") return "email";
   // Unknown → treat as email for safety
@@ -42,7 +41,7 @@ function channelCategory(channel: string): string | null {
 function matchesCategory(stepChannel: string, category: string): boolean {
   if (category === "linkedin_connection") return stepChannel === "linkedin_connection";
   if (category === "linkedin_message")
-    return stepChannel === "linkedin_message" || stepChannel === "classic_message";
+    return stepChannel === "linkedin_message";
   if (category === "sms") return stepChannel === "sms";
   return stepChannel === "email";
 }

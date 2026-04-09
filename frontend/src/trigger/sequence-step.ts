@@ -28,6 +28,18 @@ interface SequenceStepPayload {
 // Connection requests are exempt from send windows (fire 24/7)
 const EXEMPT_FROM_WINDOW = new Set(["linkedin_connection"]);
 
+// Channel-based send windows (UTC hours). EST = UTC-4.
+// Values > 24 mean the window crosses midnight UTC (e.g. 27 = 03:00 next day).
+const CHANNEL_SEND_WINDOWS: Record<string, { start: number; end: number }> = {
+  email:              { start: 10, end: 22 },   // 6 AM – 6 PM EST
+  sms:                { start: 11, end: 24 },   // 7 AM – 8 PM EST
+  linkedin_message:   { start: 10, end: 25.5 }, // 6 AM – 9:30 PM EST
+  linkedin_recruiter: { start: 10, end: 27 },   // 6 AM – 11 PM EST
+  recruiter_inmail:   { start: 10, end: 27 },   // 6 AM – 11 PM EST
+  sales_nav:          { start: 10, end: 27 },   // legacy fallback
+  sales_nav_inmail:   { start: 10, end: 27 },   // legacy fallback
+};
+
 // OOO keyword patterns (checked before Claude for speed)
 const OOO_PATTERNS = [
   /out of (?:the )?office/i,
@@ -141,14 +153,14 @@ export const processSequenceStep = task({
       return { action: "completed" };
     }
 
+    const stepChannel = step.channel || step.step_type || payload.sequenceChannel || "email";
+
     if (!step.body?.trim()) {
       logger.warn("Step has empty body, skipping", { stepId: step.id });
       // Advance past this step
-      await advanceEnrollment(supabase, payload.enrollmentId, step, now, entityType);
+      await advanceEnrollment(supabase, payload.enrollmentId, step, now, stepChannel);
       return { action: "skipped", reason: "empty_body" };
     }
-
-    const stepChannel = step.channel || step.step_type || payload.sequenceChannel || "email";
 
     // ── 4. IDEMPOTENCY CHECK ────────────────────────────────────────
     // Prevent duplicate sends if task retries after partial success
@@ -167,7 +179,7 @@ export const processSequenceStep = task({
 
     // ── 5. SEND WINDOW CHECK ────────────────────────────────────────
     if (!EXEMPT_FROM_WINDOW.has(stepChannel)) {
-      const windowResult = checkSendWindow(step, entityType, now);
+      const windowResult = checkSendWindow(step, stepChannel, now);
       if (!windowResult.inWindow) {
         await supabase
           .from("sequence_enrollments")
@@ -231,7 +243,7 @@ export const processSequenceStep = task({
 
       if (linkedInChannel?.is_connected) {
         logger.info("Already connected — skipping connection request, advancing to next step", { entityId });
-        await advanceEnrollment(supabase, payload.enrollmentId, step, now, entityType);
+        await advanceEnrollment(supabase, payload.enrollmentId, step, now, stepChannel);
         return { action: "skipped", reason: "already_connected" };
       }
     }
@@ -289,15 +301,12 @@ export const processSequenceStep = task({
       subject = "Following up";
     }
 
-    // ── 10. JITTER WAIT ─────────────────────────────────────────────
-    const isConnection = stepChannel === "linkedin_connection";
-    const isInMail = ["linkedin_recruiter", "recruiter_inmail", "sales_nav", "sales_nav_inmail"].includes(stepChannel);
-
-    if (!isInMail && !isConnection) {
-      const jitterMs = (1 + Math.floor(Math.random() * 15)) * 60 * 1000;
-      const jitterMin = Math.round(jitterMs / 60000);
-      logger.info("Jitter wait", { minutes: jitterMin });
-      await wait.for({ seconds: Math.round(jitterMs / 1000) });
+    // ── 10. CHANNEL-SPECIFIC PACING ────────────────────────────────
+    const pacingMs = getChannelPacing(stepChannel);
+    if (pacingMs > 0) {
+      const pacingMin = Math.round(pacingMs / 60000);
+      logger.info("Pacing wait", { channel: stepChannel, minutes: pacingMin });
+      await wait.for({ seconds: Math.round(pacingMs / 1000) });
     }
 
     // ── 11. SEND ────────────────────────────────────────────────────
@@ -331,6 +340,7 @@ export const processSequenceStep = task({
           const result = await sendEmail(
             supabase, to, subject, body, payload.enrolledBy,
             inReplyTo ? { inReplyTo, references } : undefined,
+            step.use_signature,
           );
           externalMessageId = result.messageId;
           internetMessageId = result.internetMessageId;
@@ -408,7 +418,7 @@ export const processSequenceStep = task({
           .eq("id", payload.enrollmentId);
         logger.info("Connection sent — parked until acceptance", { enrollmentId: payload.enrollmentId });
       } else {
-        await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime, entityType);
+        await advanceEnrollment(supabase, payload.enrollmentId, step, sendTime, stepChannel);
       }
 
       // Pipeline automation: first step → advance send_outs
@@ -614,12 +624,20 @@ Use "do_not_contact" if they explicitly ask to be removed from all outreach.`,
     return { action: "stopped", reason: "do_not_contact", sentiment };
   }
 
-  // ── All other replies → stop this enrollment ───────────────────
+  // ── All other replies → stop ALL active enrollments for this entity ──
   const reason = sentiment === "ooo" ? "ooo_no_return_date" : "contact_replied";
-  await stopEnrollment(supabase, payload.enrollmentId, reason, now);
+  await supabase
+    .from("sequence_enrollments")
+    .update({
+      status: "stopped",
+      stopped_reason: reason,
+      completed_at: now.toISOString(),
+    } as any)
+    .eq(entityColumn, entityId)
+    .eq("status", "active");
 
-  logger.info("Reply detected — enrollment stopped", {
-    enrollmentId: payload.enrollmentId,
+  logger.info("Reply detected — all enrollments stopped", {
+    entityId,
     sentiment,
     summary,
   });
@@ -627,24 +645,24 @@ Use "do_not_contact" if they explicitly ask to be removed from all outreach.`,
 }
 
 /**
- * Check whether the current time is within the send window.
+ * Check whether the current time is within the channel's send window.
  */
 function checkSendWindow(
   step: any,
-  entityType: "candidate" | "contact",
+  stepChannel: string,
   now: Date,
 ): { inWindow: boolean; nextWindowAt?: Date } {
   const currentHour = now.getUTCHours();
   const currentMinute = now.getUTCMinutes();
   const currentTime = currentHour + currentMinute / 60;
 
-  // Defaults: Contacts 6 AM–6 PM EST (10–22 UTC), Candidates 6 AM–9:30 PM EST (10–25.5 UTC)
-  const sendStart = step.send_window_start ?? 10;
-  const sendEnd = step.send_window_end ?? (entityType === "contact" ? 22 : 25);
+  const channelWindow = CHANNEL_SEND_WINDOWS[stepChannel] ?? { start: 10, end: 22 };
+  const sendStart = step.send_window_start ?? channelWindow.start;
+  const sendEnd = step.send_window_end ?? channelWindow.end;
 
   let inWindow: boolean;
   if (sendEnd > 24) {
-    // Window crosses midnight (candidate window: 10 UTC to 01:30 UTC next day)
+    // Window crosses midnight UTC
     inWindow = currentTime >= sendStart || currentTime < (sendEnd - 24);
   } else {
     inWindow = currentTime >= sendStart && currentTime < sendEnd;
@@ -665,14 +683,15 @@ function checkSendWindow(
 
 /**
  * Advance enrollment after a successful send.
- * Calculates next_step_at based on the step's delay + jitter.
+ * Calculates next_step_at based on the step's delay + jitter,
+ * clipped to the channel's send window.
  */
 async function advanceEnrollment(
   supabase: any,
   enrollmentId: string,
   step: any,
   sendTime: Date,
-  entityType?: "candidate" | "contact",
+  stepChannel?: string,
 ) {
   const delayMs =
     ((step.delay_days ?? 0) * 24 * 60 + (step.delay_hours ?? 0) * 60) * 60 * 1000;
@@ -680,19 +699,21 @@ async function advanceEnrollment(
   const jitterMs = (2 + Math.floor(Math.random() * 33)) * 60 * 1000;
   const nextStepAt = new Date(sendTime.getTime() + delayMs + jitterMs);
 
-  // Use entity-appropriate window: contacts 10-22 UTC, candidates 10-01:30 UTC
-  const sendEnd = entityType === "candidate" ? 25.5 : 22;
+  // Use the channel's send window to clip (fallback to email window)
+  const channelWindow = CHANNEL_SEND_WINDOWS[stepChannel || "email"] ?? { start: 10, end: 22 };
+  const sendStart = channelWindow.start;
+  const sendEnd = channelWindow.end;
   const nextHour = nextStepAt.getUTCHours() + nextStepAt.getUTCMinutes() / 60;
-  // Check if outside window (handle midnight crossing for candidates)
+
+  // Check if outside window (handle midnight crossing for windows > 24)
   const outsideWindow = sendEnd > 24
-    ? (nextHour >= (sendEnd - 24) && nextHour < 10) // candidate: 1:30 AM - 10 AM UTC is outside
-    : (nextHour < 10 || nextHour >= sendEnd);        // contact: before 10 or after 22 is outside
+    ? (nextHour >= (sendEnd - 24) && nextHour < sendStart)
+    : (nextHour < sendStart || nextHour >= sendEnd);
 
   if (outsideWindow) {
-    nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
-    // If we're past midnight but before 10 AM, it's the same calendar day
-    // If we're past sendEnd (22 for contacts), bump to next day
-    if (nextHour >= sendEnd || (sendEnd <= 24 && nextHour >= sendEnd)) {
+    nextStepAt.setUTCHours(sendStart, Math.floor(Math.random() * 45), 0, 0);
+    // If we're past the end of the window, bump to next day
+    if (nextHour >= (sendEnd > 24 ? sendEnd - 24 : sendEnd)) {
       nextStepAt.setUTCDate(nextStepAt.getUTCDate() + 1);
     }
   }
@@ -704,6 +725,27 @@ async function advanceEnrollment(
       next_step_at: nextStepAt.toISOString(),
     } as any)
     .eq("id", enrollmentId);
+}
+
+/**
+ * Per-channel pacing: how long to wait before sending.
+ * InMails: 1 min. Connections: 6-11 min. Email: 1-8 min. SMS: 0 (batch via sweep).
+ */
+function getChannelPacing(channel: string): number {
+  if (["linkedin_recruiter", "recruiter_inmail", "sales_nav", "sales_nav_inmail"].includes(channel)) {
+    return 60 * 1000; // 1 minute for InMails
+  }
+  if (channel === "linkedin_connection") {
+    return (5 + 1 + Math.floor(Math.random() * 6)) * 60 * 1000; // 6-11 min
+  }
+  if (channel === "email") {
+    return (1 + Math.floor(Math.random() * 8)) * 60 * 1000; // 1-8 min
+  }
+  if (channel === "sms") {
+    return 0; // batch pacing at sweep level
+  }
+  // linkedin_message or unknown
+  return (1 + Math.floor(Math.random() * 8)) * 60 * 1000; // 1-8 min
 }
 
 /** Stop an enrollment with a reason. */

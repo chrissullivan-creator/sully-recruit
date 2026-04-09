@@ -11,7 +11,7 @@ import { useSequences, useCandidates, useContacts, useIntegrationAccounts } from
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Mail, Linkedin, Users, Loader2, Search } from 'lucide-react';
+import { Mail, Linkedin, MessageSquare, Phone, Users, Loader2, Search, Clock } from 'lucide-react';
 
 interface EnrollInSequenceDialogProps {
   open: boolean;
@@ -296,27 +296,98 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             </div>
           )}
 
-          {!isPeoplePicker && selectedSequence && (
-            <div className="rounded-lg border border-border bg-secondary/50 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground">{selectedSequence.name}</span>
-                <Badge variant="secondary" className="text-xs capitalize">{selectedSequence.channel}</Badge>
+          {!isPeoplePicker && selectedSequence && (() => {
+            // Compute projected timeline for each step
+            const SEND_WINDOWS: Record<string, { start: number; end: number }> = {
+              email: { start: 10, end: 22 },
+              sms: { start: 11, end: 24 },
+              linkedin_message: { start: 10, end: 25.5 },
+              linkedin_recruiter: { start: 10, end: 27 },
+              recruiter_inmail: { start: 10, end: 27 },
+            };
+
+            const snapToWindow = (date: Date, channel: string): Date => {
+              const w = SEND_WINDOWS[channel] ?? { start: 10, end: 22 };
+              const h = date.getUTCHours() + date.getUTCMinutes() / 60;
+              const outside = w.end > 24
+                ? (h >= (w.end - 24) && h < w.start)
+                : (h < w.start || h >= w.end);
+              if (!outside) return date;
+              const snapped = new Date(date);
+              snapped.setUTCHours(w.start, Math.floor(Math.random() * 30), 0, 0);
+              if (h >= (w.end > 24 ? w.end - 24 : w.end)) {
+                snapped.setUTCDate(snapped.getUTCDate() + 1);
+              }
+              return snapped;
+            };
+
+            const sortedSteps = [...steps].sort((a: any, b: any) => a.step_order - b.step_order);
+            let cursor = new Date();
+            const timeline = sortedSteps.map((step: any) => {
+              const ch = step.channel ?? selectedSequence.channel;
+              const delayMs = ((step.delay_days ?? 0) * 24 * 60 + (step.delay_hours ?? 0) * 60) * 60 * 1000;
+              let projected = new Date(cursor.getTime() + delayMs);
+              const isConnection = ch === 'linkedin_connection';
+              if (!isConnection) projected = snapToWindow(projected, ch);
+              cursor = projected;
+              return { step, channel: ch, projected, isConnection };
+            });
+
+            const fmtDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+            const fmtTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+
+            const stepIcon = (ch: string) => {
+              if (ch === 'email') return <Mail className="h-3 w-3" />;
+              if (ch.includes('linkedin') || ch.includes('recruiter') || ch.includes('sales_nav')) return <Linkedin className="h-3 w-3" />;
+              if (ch === 'sms') return <MessageSquare className="h-3 w-3" />;
+              if (ch === 'phone') return <Phone className="h-3 w-3" />;
+              return <Mail className="h-3 w-3" />;
+            };
+
+            const channelLabel = (ch: string) => {
+              if (ch === 'linkedin_connection') return 'Connection Request';
+              if (ch === 'linkedin_message') return 'LinkedIn Message';
+              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail') return 'Recruiter InMail';
+              if (ch === 'sales_nav' || ch === 'sales_nav_inmail') return 'Sales Nav InMail';
+              if (ch === 'sms') return 'SMS';
+              if (ch === 'phone') return 'Phone';
+              return 'Email';
+            };
+
+            return (
+              <div className="rounded-lg border border-border bg-secondary/50 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-foreground">{selectedSequence.name}</span>
+                  <Badge variant="secondary" className="text-xs capitalize">{selectedSequence.channel}</Badge>
+                </div>
+                {selectedSequence.description && (
+                  <p className="text-xs text-muted-foreground">{selectedSequence.description}</p>
+                )}
+                <div className="space-y-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{sortedSteps.length} Steps — Projected Schedule</span>
+                  {timeline.map(({ step, channel, projected, isConnection }) => (
+                    <div key={step.id} className="flex items-start gap-2 text-xs">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] mt-0.5">{step.step_order}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 text-foreground">
+                          {stepIcon(channel)}
+                          <span>{channelLabel(channel)}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground/70 mt-0.5">
+                          <Clock className="h-2.5 w-2.5" />
+                          <span>~{fmtDate(projected)} {fmtTime(projected)} EST</span>
+                        </div>
+                        {isConnection && (
+                          <span className="text-muted-foreground/50 italic">+ wait for acceptance (~4hr delay)</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-muted-foreground/50 pt-1">Times are approximate. Actual send times shift based on rate limits, send windows, and replies.</p>
+                </div>
               </div>
-              {selectedSequence.description && (
-                <p className="text-xs text-muted-foreground">{selectedSequence.description}</p>
-              )}
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{steps.length} Steps</span>
-                {steps.sort((a: any, b: any) => a.step_order - b.step_order).map((step: any) => (
-                  <div key={step.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px]">{step.step_order}</span>
-                    <span className="capitalize">{step.channel ?? selectedSequence.channel}</span>
-                    {step.delay_days > 0 && <span className="text-muted-foreground/60">• wait {step.delay_days}d</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
         <DialogFooter>
