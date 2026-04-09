@@ -25,16 +25,15 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
 const JOB_STATUSES = [
-  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
-  { value: 'reached_out',  label: 'Reached Out',  color: 'bg-blue-500/15 text-blue-400' },
-  { value: 'pitched',      label: 'Pitched',      color: 'bg-indigo-500/15 text-indigo-400' },
-  { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
-  { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
-  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
-  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
-  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
-  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+  { value: 'lead',            label: 'Lead',             color: 'bg-slate-500/15 text-slate-400' },
+  { value: 'back_of_resume',  label: 'Back of Resume',   color: 'bg-gray-500/15 text-gray-400' },
+  { value: 'reached_out',     label: 'Reached Out',      color: 'bg-blue-500/15 text-blue-400' },
+  { value: 'pitch',           label: 'Pitch / Send Out', color: 'bg-indigo-500/15 text-indigo-400' },
+  { value: 'sent',            label: 'Sent',             color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'interview',       label: 'Interview',        color: 'bg-orange-500/15 text-orange-400' },
+  { value: 'offer',           label: 'Offer',            color: 'bg-emerald-500/15 text-emerald-400' },
+  { value: 'placed',          label: 'Placed',           color: 'bg-green-500/15 text-green-400' },
+  { value: 'rejected',        label: 'Rejected',         color: 'bg-red-500/15 text-red-400' },
 ];
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
