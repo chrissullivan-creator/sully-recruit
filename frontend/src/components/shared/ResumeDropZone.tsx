@@ -21,8 +21,8 @@ interface ParsedData {
   last_name: string;
   email: string;
   phone: string;
-  current_company: string;
-  current_title: string;
+  company: string;
+  title: string;
   location: string;
   linkedin_url: string;
   file_name: string;
@@ -66,8 +66,8 @@ async function parseFile(file_path: string, file_name: string, session: any): Pr
     last_name:       p.last_name || '',
     email:           p.email || '',
     phone:           p.phone || '',
-    current_company: p.current_company || '',
-    current_title:   p.current_title || '',
+    company: p.company || '',
+    title:   p.title || '',
     location:        p.location || '',
     linkedin_url:    p.linkedin_url || '',
     _candidate_id:   null, // No DB writes during parse — candidate created on save
@@ -141,8 +141,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           last_name:       data?.last_name || '',
           email:           data?.email || '',
           phone:           data?.phone || '',
-          current_company: data?.current_company || '',
-          current_title:   data?.current_title || '',
+          company: data?.company || '',
+          title:   data?.title || '',
           location:        data?.location || '',
           linkedin_url:    data?.linkedin_url || '',
           file_name,
@@ -155,7 +155,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       } catch (err: any) {
         parsed.push({
           first_name: '', last_name: '', email: '', phone: '',
-          current_company: '', current_title: '', location: '', linkedin_url: '',
+          company: '', title: '', location: '', linkedin_url: '',
           file_name: file.name, file_path: '',
           candidate_id: null, match_label: null,
           error: err.message,
@@ -288,8 +288,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
           email:           entry.email.trim() || undefined,
           phone:           entry.phone.trim() || undefined,
-          current_company: entry.current_company.trim() || undefined,
-          current_title:   entry.current_title.trim() || undefined,
+          company: entry.company.trim() || undefined,
+          title:   entry.title.trim() || undefined,
           location_text:   entry.location.trim() || undefined,
           linkedin_url:    entry.linkedin_url.trim() || undefined,
           updated_at:      new Date().toISOString(),
@@ -315,8 +315,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           last_name:       entry.last_name.trim() || undefined,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
           phone:           entry.phone.trim() || undefined,
-          current_company: entry.current_company.trim() || undefined,
-          current_title:   entry.current_title.trim() || undefined,
+          company: entry.company.trim() || undefined,
+          title:   entry.title.trim() || undefined,
           location_text:   entry.location.trim() || undefined,
           linkedin_url:    entry.linkedin_url.trim() || undefined,
           updated_at:      new Date().toISOString(),
@@ -331,8 +331,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
           email:           entry.email.trim() || null,
           phone:           entry.phone.trim() || null,
-          current_company: entry.current_company.trim() || null,
-          current_title:   entry.current_title.trim() || null,
+          company: entry.company.trim() || null,
+          title:   entry.title.trim() || null,
           location_text:   entry.location.trim() || null,
           linkedin_url:    entry.linkedin_url.trim() || null,
           status:          'new',
@@ -567,11 +567,11 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Company</Label>
-                <Input value={current.current_company} onChange={(e) => updateField('current_company', e.target.value)} disabled={current.saved} />
+                <Input value={current.company} onChange={(e) => updateField('company', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Title</Label>
-                <Input value={current.current_title} onChange={(e) => updateField('current_title', e.target.value)} disabled={current.saved} />
+                <Input value={current.title} onChange={(e) => updateField('title', e.target.value)} disabled={current.saved} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Location</Label>
@@ -646,9 +646,9 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
                     <p className="font-medium text-foreground truncate">
                       {`${entry.first_name} ${entry.last_name}`.trim() || entry.file_name}
                     </p>
-                    {entry.current_title && (
+                    {entry.title && (
                       <p className="text-xs text-muted-foreground truncate">
-                        {entry.current_title}{entry.current_company ? ` at ${entry.current_company}` : ''}
+                        {entry.title}{entry.company ? ` at ${entry.company}` : ''}
                       </p>
                     )}
                   </div>

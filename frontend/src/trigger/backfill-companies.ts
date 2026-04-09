@@ -58,8 +58,8 @@ export const backfillCompanies = schedules.task({
 // ─── Local mode: parse company from linkedin_profile_data already in DB ──────
 
 async function backfillFromLocal(supabase: any, table: string, limit: number) {
-  const companyCol = table === "candidates" ? "current_company" : "company_name";
-  const titleCol = table === "candidates" ? "current_title" : "title";
+  const companyCol = table === "candidates" ? "company" : "company_name";
+  const titleCol = table === "candidates" ? "title" : "title";
 
   const { data: records, error } = await supabase
     .from(table)
@@ -114,8 +114,8 @@ async function backfillFromApi(
   accountId: string,
   apiKey: string,
 ) {
-  const companyCol = table === "candidates" ? "current_company" : "company_name";
-  const titleCol = table === "candidates" ? "current_title" : "title";
+  const companyCol = table === "candidates" ? "company" : "company_name";
+  const titleCol = table === "candidates" ? "title" : "title";
   const baseUrl = await getUnipileBaseUrl();
 
   const { data: records, error } = await supabase

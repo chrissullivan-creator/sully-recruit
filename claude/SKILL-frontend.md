@@ -139,7 +139,7 @@ import { supabase } from '@/integrations/supabase/client';
 // Direct DB operation
 const { error } = await supabase
   .from('candidates')
-  .update({ current_title: value })
+  .update({ title: value })
   .eq('id', id);
 
 // Edge function call
@@ -164,7 +164,7 @@ const resp = await fetch(
 
 1. User drops file → `uploadFile()` → Supabase Storage `resumes` bucket
 2. Call `process-resume` with `{ file_path, file_name }`
-3. Response: `{ success: true, candidate_id, parsed: { first_name, last_name, email, phone, current_title, current_company, location, linkedin_url } }`
+3. Response: `{ success: true, candidate_id, parsed: { first_name, last_name, email, phone, title, company, location, linkedin_url } }`
 4. Map `location` → show in "Location" field (saves to `location_text` in DB)
 5. Show review form pre-filled
 6. On save → UPDATE only (process-resume already created the record)

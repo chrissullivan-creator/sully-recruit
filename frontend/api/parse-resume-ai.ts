@@ -46,8 +46,8 @@ Extract:
   "email": "email@example.com or null",
   "phone": "phone number or null",
   "linkedin_url": "linkedin URL or null",
-  "current_title": "most recent job title",
-  "current_company": "most recent company",
+  "title": "most recent job title",
+  "company": "most recent company",
   "location": "city, state or null",
   "summary": "2-3 sentence professional summary",
   "experience": [

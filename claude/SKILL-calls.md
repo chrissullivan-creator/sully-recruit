@@ -11,7 +11,7 @@ RingCentral calls flow through this pipeline:
    - Transcribes via Deepgram/Whisper → stores `transcript` in `ai_call_notes`
    - Claude analyzes transcript → extracts summary, action items, comp intel, reason for leaving
    - Upserts `ai_call_notes` row (keyed on `external_call_id`)
-   - Updates candidate fields: `current_title`, `current_company`, comp fields
+   - Updates candidate fields: `title`, `company`, comp fields
    - Sets candidate `status = 'back_of_resume'` (phone screen = qualified)
    - Logs to `messages` table with `channel = 'call'` for unified inbox
 

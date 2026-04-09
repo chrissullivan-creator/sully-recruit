@@ -162,10 +162,10 @@ export const resolveUnipileIds = schedules.task({
           if (positions.length > 0) {
             const current = positions.find((p: any) => p.is_current || !p.end_date) ?? positions[0];
             if (current?.company?.name || current?.company_name) {
-              enrichment.current_company = current.company?.name ?? current.company_name;
+              enrichment.company = current.company?.name ?? current.company_name;
             }
             if (current?.title || current?.role) {
-              enrichment.current_title = current.title ?? current.role;
+              enrichment.title = current.title ?? current.role;
             }
           }
 

@@ -236,7 +236,7 @@ function LinkCallDialog({
     setSearching(true);
     const q = search.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, current_title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, phone, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, phone, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
     ]);
     setResults([
@@ -252,7 +252,7 @@ function LinkCallDialog({
     setSearching(true);
     const normalized = call.phone_number.replace(/[^0-9+]/g, '');
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, current_title').not('phone', 'is', null),
+      supabase.from('candidates').select('id, full_name, email, phone, title').not('phone', 'is', null),
       supabase.from('contacts').select('id, full_name, email, phone, title').not('phone', 'is', null),
     ]);
     const norm = (p: string) => p.replace(/[^0-9+]/g, '');
@@ -349,7 +349,7 @@ function LinkCallDialog({
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                     <p className="text-[10px] text-muted-foreground truncate capitalize">
-                      {r.entity_type} · {r.current_title || r.title || r.email || r.phone || ''}
+                      {r.entity_type} · {r.title || r.title || r.email || r.phone || ''}
                     </p>
                   </div>
                 </button>
@@ -395,7 +395,7 @@ const Calls = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('ai_call_notes' as any)
-        .select('*, candidates(id, first_name, last_name, full_name, current_title, current_company)')
+        .select('*, candidates(id, first_name, last_name, full_name, title, company)')
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;

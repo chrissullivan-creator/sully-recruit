@@ -79,14 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const topIds = Array.from(seen.keys()).slice(0, 20);
               const { data: candidates } = await supabase
                 .from("candidates")
-                .select("id, full_name, current_title, current_company, location, email, phone, status")
+                .select("id, full_name, title, company, location, email, phone, status")
                 .in("id", topIds);
 
               if (candidates?.length) {
                 resumeContext = candidates
                   .map((c) => {
                     const excerpts = seen.get(c.id);
-                    return `### ${c.full_name}\n- Title: ${c.current_title || "?"} at ${c.current_company || "?"}\n- Location: ${c.location || "?"}\n- Status: ${c.status}\n- Resume excerpts:\n${excerpts?.map((e) => `  > ${e}`).join("\n") || "  N/A"}`;
+                    return `### ${c.full_name}\n- Title: ${c.title || "?"} at ${c.company || "?"}\n- Location: ${c.location || "?"}\n- Status: ${c.status}\n- Resume excerpts:\n${excerpts?.map((e) => `  > ${e}`).join("\n") || "  N/A"}`;
                   })
                   .join("\n\n");
               }
@@ -102,18 +102,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!resumeContext) {
       const keywords = query.split(/\s+/).slice(0, 3);
       const orFilter = keywords
-        .map((k: string) => `full_name.ilike.%${k}%,current_title.ilike.%${k}%,current_company.ilike.%${k}%`)
+        .map((k: string) => `full_name.ilike.%${k}%,title.ilike.%${k}%,company.ilike.%${k}%`)
         .join(",");
 
       const { data: candidates } = await supabase
         .from("candidates")
-        .select("id, full_name, current_title, current_company, location, status, joe_says")
+        .select("id, full_name, title, company, location, status, joe_says")
         .or(orFilter)
         .limit(20);
 
       if (candidates?.length) {
         resumeContext = candidates
-          .map((c) => `### ${c.full_name}\n- ${c.current_title || "?"} at ${c.current_company || "?"}\n- Location: ${c.location || "?"}\n- Status: ${c.status}${c.joe_says ? `\n- Summary: ${(c.joe_says as string).slice(0, 300)}` : ""}`)
+          .map((c) => `### ${c.full_name}\n- ${c.title || "?"} at ${c.company || "?"}\n- Location: ${c.location || "?"}\n- Status: ${c.status}${c.joe_says ? `\n- Summary: ${(c.joe_says as string).slice(0, 300)}` : ""}`)
           .join("\n\n");
       }
     }

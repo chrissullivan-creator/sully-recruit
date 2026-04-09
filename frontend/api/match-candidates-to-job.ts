@@ -89,14 +89,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const topIds = Array.from(seen.keys()).slice(0, 30);
               const { data: candidates } = await supabase
                 .from("candidates")
-                .select("id, full_name, current_title, current_company, location, email, status, joe_says")
+                .select("id, full_name, title, company, location, email, status, joe_says")
                 .in("id", topIds);
 
               if (candidates?.length) {
                 candidateContext = candidates
                   .map((c) => {
                     const chunk = seen.get(c.id);
-                    return `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}\n  Resume excerpt: ${chunk?.content?.slice(0, 300) || "N/A"}`;
+                    return `- ${c.full_name} | ${c.title || "?"} at ${c.company || "?"} | ${c.location || "?"} | Status: ${c.status}\n  Resume excerpt: ${chunk?.content?.slice(0, 300) || "N/A"}`;
                   })
                   .join("\n");
 
@@ -114,13 +114,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!candidateContext) {
       const { data: candidates } = await supabase
         .from("candidates")
-        .select("id, full_name, current_title, current_company, location, status, joe_says")
-        .or(`current_title.ilike.%${job_title.split(" ")[0]}%,current_company.ilike.%${(job_company || "").split(" ")[0]}%`)
+        .select("id, full_name, title, company, location, status, joe_says")
+        .or(`title.ilike.%${job_title.split(" ")[0]}%,company.ilike.%${(job_company || "").split(" ")[0]}%`)
         .limit(30);
 
       if (candidates?.length) {
         candidateContext = candidates
-          .map((c) => `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}${c.joe_says ? `\n  Joe Says: ${(c.joe_says as string).slice(0, 200)}` : ""}`)
+          .map((c) => `- ${c.full_name} | ${c.title || "?"} at ${c.company || "?"} | ${c.location || "?"} | Status: ${c.status}${c.joe_says ? `\n  Joe Says: ${(c.joe_says as string).slice(0, 200)}` : ""}`)
           .join("\n");
         write(`Found ${candidates.length} candidates. Analyzing...\n\n`);
       } else {
@@ -153,7 +153,7 @@ ${jobContext}
 ${candidateContext}
 
 Rank the top candidates from best to worst fit. For each candidate provide:
-1. **Name** — Current Title at Company
+1. **Name** — Title at Company
 2. **Fit Score**: X/100
 3. **Why**: 1-2 sentences on strengths and concerns
 4. **Status**: their current pipeline status

@@ -838,14 +838,14 @@ const JobDetail = () => {
                               <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
                                 {c.first_name} {c.last_name}
                               </p>
-                              {c.current_title && (
+                              {c.title && (
                                 <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                  {c.current_title}
+                                  {c.title}
                                 </p>
                               )}
-                              {c.current_company && (
+                              {c.company && (
                                 <p className="text-[10px] text-muted-foreground truncate">
-                                  {c.current_company}
+                                  {c.company}
                                 </p>
                               )}
                             </div>

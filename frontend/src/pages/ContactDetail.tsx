@@ -66,7 +66,7 @@ function useContactSendOuts(contactId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('send_outs')
-        .select('*, candidates(id, full_name, first_name, last_name, current_title, current_company, email, phone, status), jobs(id, title, company_name, location, status)')
+        .select('*, candidates(id, full_name, first_name, last_name, title, company, email, phone, status), jobs(id, title, company_name, location, status)')
         .eq('contact_id', contactId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -656,7 +656,7 @@ const ContactDetail = () => {
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                {cand?.current_title ?? ''}{cand?.current_title && cand?.current_company ? ' at ' : ''}{cand?.current_company ?? ''}
+                                {cand?.title ?? ''}{cand?.title && cand?.company ? ' at ' : ''}{cand?.company ?? ''}
                               </p>
                               {job && (
                                 <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">

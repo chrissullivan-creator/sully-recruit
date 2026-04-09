@@ -40,7 +40,7 @@ const Contacts = () => {
         (contact.title ?? '').toLowerCase().includes(q) ||
         ((contact as any).notes ?? '').toLowerCase().includes(q) ||
         ((contact as any).linkedin_headline ?? '').toLowerCase().includes(q) ||
-        ((contact as any).linkedin_current_company ?? '').toLowerCase().includes(q) ||
+        ((contact as any).linkedin_company ?? '').toLowerCase().includes(q) ||
         ((contact as any).linkedin_location ?? '').toLowerCase().includes(q) ||
         (contact.email ?? '').toLowerCase().includes(q);
       const matchesFilter = filter === 'all' || contact.status === filter;

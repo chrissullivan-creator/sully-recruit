@@ -31,8 +31,8 @@ interface CandidateInfo {
   email: string;
   phone: string | null;
   linkedin_url: string | null;
-  current_title: string;
-  current_company: string;
+  title: string;
+  company: string;
   location_text: string | null;
   status: string;
   created_at: string;
@@ -90,16 +90,16 @@ function CandidateCard({
       </div>
 
       <div className="space-y-1.5 text-sm">
-        {candidate.current_title && (
+        {candidate.title && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Briefcase className="h-3 w-3 shrink-0" />
-            <span className="truncate">{candidate.current_title}</span>
+            <span className="truncate">{candidate.title}</span>
           </div>
         )}
-        {candidate.current_company && (
+        {candidate.company && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Building className="h-3 w-3 shrink-0" />
-            <span className="truncate">{candidate.current_company}</span>
+            <span className="truncate">{candidate.company}</span>
           </div>
         )}
         {candidate.email && (

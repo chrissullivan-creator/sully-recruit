@@ -413,7 +413,7 @@ export function useJobCandidates(jobId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('candidates')
-        .select('id, first_name, last_name, full_name, current_title, current_company, job_status, status, email')
+        .select('id, first_name, last_name, full_name, title, company, job_status, status, email')
         .eq('job_id', jobId!)
         .order('created_at', { ascending: false });
       if (error) throw error;

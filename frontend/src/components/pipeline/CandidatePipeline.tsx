@@ -127,12 +127,12 @@ export function CandidatePipeline() {
                         {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
                       </h4>
                       {visibleFields.has('title') && (
-                        <p className="text-xs text-muted-foreground truncate">{candidate.current_title ?? '-'}</p>
+                        <p className="text-xs text-muted-foreground truncate">{candidate.title ?? '-'}</p>
                       )}
-                      {visibleFields.has('company') && candidate.current_company && (
+                      {visibleFields.has('company') && candidate.company && (
                         <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                           <Building className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{candidate.current_company}</span>
+                          <span className="truncate">{candidate.company}</span>
                         </p>
                       )}
                       {visibleFields.has('location') && (candidate as any).location_text && (

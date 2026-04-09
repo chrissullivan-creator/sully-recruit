@@ -229,7 +229,7 @@ const CandidateDetail = () => {
         <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
         <div className="flex-1">
           <h1 className="text-lg font-semibold text-foreground">{fullName}</h1>
-          <p className="text-sm text-muted-foreground">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
+          <p className="text-sm text-muted-foreground">{candidate.title ?? ''}{candidate.title && candidate.company ? ' at ' : ''}{candidate.company ?? ''}</p>
         </div>
         <div className="flex items-center gap-2">
           {resumeUrl && (
@@ -278,8 +278,8 @@ const CandidateDetail = () => {
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Current Role</h3>
               <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} />
               <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" />
+              <EditableField label="Title" value={candidate.title} onSave={v => updateField('title', v)} placeholder="e.g. VP, Risk" />
+              <EditableField label="Company" value={candidate.company} onSave={v => updateField('company', v)} placeholder="Firm name" />
               <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" />
             </div>
 

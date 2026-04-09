@@ -21,8 +21,8 @@ interface ParsedData {
   last_name: string;
   email: string;
   phone: string;
-  current_company: string;
-  current_title: string;
+  company: string;
+  title: string;
   location: string;
   linkedin_url: string;
   file_name: string;
@@ -131,8 +131,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           last_name:       data.last_name || '',
           email:           data.email || '',
           phone:           data.phone || '',
-          current_company: data.current_company || '',
-          current_title:   data.current_title || '',
+          company: data.company || '',
+          title:   data.title || '',
           location:        data.location || '',
           linkedin_url:    data.linkedin_url || '',
           file_name,
@@ -272,8 +272,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || undefined,
             email:           parsed.email.trim() || undefined,
             phone:           parsed.phone.trim() || undefined,
-            current_company: parsed.current_company.trim() || undefined,
-            current_title:   parsed.current_title.trim() || undefined,
+            company: parsed.company.trim() || undefined,
+            title:   parsed.title.trim() || undefined,
             location_text:   parsed.location.trim() || undefined,
             linkedin_url:    parsed.linkedin_url.trim() || undefined,
             updated_at:      new Date().toISOString(),
@@ -289,8 +289,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           full_name:       `${parsed.first_name.trim()} ${parsed.last_name.trim()}`.trim() || null,
           email:           parsed.email.trim() || null,
           phone:           parsed.phone.trim() || null,
-          current_company: parsed.current_company.trim() || null,
-          current_title:   parsed.current_title.trim() || null,
+          company: parsed.company.trim() || null,
+          title:   parsed.title.trim() || null,
           location_text:   parsed.location.trim() || null,
           linkedin_url:    parsed.linkedin_url.trim() || null,
           status: 'new',
@@ -423,9 +423,9 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
                         ? `${r.parsed.first_name ?? ''} ${r.parsed.last_name ?? ''}`.trim() || r.file_name
                         : r.file_name}
                     </p>
-                    {r.success && r.parsed?.current_title && (
+                    {r.success && r.parsed?.title && (
                       <p className="text-xs text-muted-foreground truncate">
-                        {r.parsed.current_title}{r.parsed.current_company ? ` at ${r.parsed.current_company}` : ''}
+                        {r.parsed.title}{r.parsed.company ? ` at ${r.parsed.company}` : ''}
                       </p>
                     )}
                     {!r.success && (
@@ -471,11 +471,11 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Company</Label>
-                <Input value={parsed.current_company} onChange={(e) => update('current_company', e.target.value)} />
+                <Input value={parsed.company} onChange={(e) => update('company', e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Title</Label>
-                <Input value={parsed.current_title} onChange={(e) => update('current_title', e.target.value)} />
+                <Input value={parsed.title} onChange={(e) => update('title', e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Location</Label>

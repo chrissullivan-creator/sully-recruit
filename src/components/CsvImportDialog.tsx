@@ -124,8 +124,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             skills,
           };
           if (c.phone) row.phone = c.phone;
-          if (c.current_title) row.current_title = c.current_title;
-          if (c.current_company) row.current_company = c.current_company;
+          if (c.title) row.title = c.title;
+          if (c.company) row.company = c.company;
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
           if (c.source) row.source = c.source;
           if (c.notes) row.notes = c.notes;
@@ -417,8 +417,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                               {r.mapped.first_name} {r.mapped.last_name}
                             </td>
                             <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.email || '—'}</td>
-                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.current_title || '—'}</td>
-                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.current_company || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.title || '—'}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{r.mapped.company || '—'}</td>
                             <td className="px-4 py-2.5">
                               <span className="stage-badge bg-success/10 text-success border border-success/20">
                                 {r.mapped.stage || 'back_of_resume'}

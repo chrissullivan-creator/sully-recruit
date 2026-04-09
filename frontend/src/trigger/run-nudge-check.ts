@@ -25,7 +25,7 @@ export const runNudgeCheck = schedules.task({
     // Find stagnant candidates
     const { data: stagnant } = await supabase
       .from("candidates")
-      .select("id, full_name, current_title, current_company, status, owner_id, updated_at")
+      .select("id, full_name, title, company, status, owner_id, updated_at")
       .in("status", ["new", "reached_out", "back_of_resume"])
       .lt("updated_at", cutoff.toISOString())
       .limit(50);
@@ -50,8 +50,8 @@ export const runNudgeCheck = schedules.task({
 
     for (const c of stagnant.slice(0, MAX_NUDGE_ITEMS)) {
       const name = c.full_name || "Unknown";
-      const title = c.current_title || "";
-      const company = c.current_company || "";
+      const title = c.title || "";
+      const company = c.company || "";
       nudgeItems.push(`\u2022 ${name} (${title} at ${company}) \u2014 status: ${c.status}`);
 
       if (chrisId) {

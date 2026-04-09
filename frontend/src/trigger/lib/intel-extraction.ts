@@ -16,8 +16,8 @@ interface ExtractedIntel {
   summary: string;
   ooo_return_date: string | null;
   extracted_fields: {
-    current_title?: string;
-    current_company?: string;
+    title?: string;
+    company?: string;
     reason_for_looking?: string;
     current_base_comp?: string;
     current_total_comp?: string;
@@ -42,8 +42,8 @@ Return ONLY valid JSON:
   "summary": "one sentence summary of the message",
   "ooo_return_date": "YYYY-MM-DD or null if not OOO",
   "extracted_fields": {
-    "current_title": "their current job title if mentioned, or null",
-    "current_company": "their current employer if mentioned, or null",
+    "title": "their current job title if mentioned, or null",
+    "company": "their current employer if mentioned, or null",
     "reason_for_looking": "why they're open to new opportunities, or null",
     "current_base_comp": "current base salary if mentioned (e.g. '150k'), or null",
     "current_total_comp": "current total comp if mentioned (e.g. '200k all-in'), or null",
@@ -179,8 +179,8 @@ export async function applyExtractedIntel(
   const updates: Record<string, any> = {};
 
   if (entityType === "candidate") {
-    if (fields.current_title) updates.current_title = fields.current_title;
-    if (fields.current_company) updates.current_company = fields.current_company;
+    if (fields.title) updates.title = fields.title;
+    if (fields.company) updates.company = fields.company;
     if (fields.reason_for_looking) updates.reason_for_leaving = fields.reason_for_looking;
     if (fields.current_base_comp) updates.current_base_comp = fields.current_base_comp;
     if (fields.current_total_comp) updates.current_total_comp = fields.current_total_comp;
@@ -194,8 +194,8 @@ export async function applyExtractedIntel(
     if (fields.work_authorization) updates.work_authorization = fields.work_authorization;
   } else {
     // Contacts have different field names
-    if (fields.current_title) updates.title = fields.current_title;
-    if (fields.current_company) updates.company_name = fields.current_company;
+    if (fields.title) updates.title = fields.title;
+    if (fields.company) updates.company_name = fields.company;
   }
 
   // Apply updates if any fields were extracted

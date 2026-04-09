@@ -71,7 +71,7 @@ describe('mapRow', () => {
     expect(result.first_name).toBe('John');
     expect(result.last_name).toBe('Doe');
     expect(result.email).toBe('john@test.com');
-    expect(result.current_title).toBe('Engineer');
+    expect(result.title).toBe('Engineer');
   });
 
   it('resolves alternative aliases for candidates', () => {
@@ -80,7 +80,7 @@ describe('mapRow', () => {
     expect(result.first_name).toBe('Jane');
     expect(result.last_name).toBe('Smith');
     expect(result.email).toBe('jane@test.com');
-    expect(result.current_company).toBe('Acme');
+    expect(result.company).toBe('Acme');
   });
 
   it('maps job aliases correctly', () => {

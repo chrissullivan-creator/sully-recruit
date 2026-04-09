@@ -291,7 +291,7 @@ async function gatherBulkCandidateProfiles(
     supabase
       .from("candidates")
       .select(
-        "id, first_name, last_name, full_name, current_title, current_company, " +
+        "id, first_name, last_name, full_name, title, company, " +
           "location_text, skills, work_authorization, relocation_preference, " +
           "target_locations, target_roles, reason_for_leaving, " +
           "current_base_comp, current_bonus_comp, current_total_comp, " +
@@ -359,7 +359,7 @@ async function gatherBulkCandidateProfiles(
       candidate_id: c.id,
       profile: [
         `Name: ${c.full_name ?? `${c.first_name ?? ""} ${c.last_name ?? ""}`}`,
-        `Title: ${c.current_title ?? "—"} at ${c.current_company ?? "—"}`,
+        `Title: ${c.title ?? "—"} at ${c.company ?? "—"}`,
         `Location: ${c.location_text ?? "—"}`,
         `Skills: ${c.skills?.join(", ") ?? "—"}`,
         `Work Auth: ${c.work_authorization ?? "—"}`,

@@ -67,8 +67,8 @@ serve(async (req) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function backfillFromLocal(supabase: any, table: string, limit: number) {
-  const companyCol = table === 'candidates' ? 'current_company' : 'company_name';
-  const titleCol = table === 'candidates' ? 'current_title' : 'title';
+  const companyCol = table === 'candidates' ? 'company' : 'company_name';
+  const titleCol = table === 'candidates' ? 'title' : 'title';
 
   // Find records with profile data but no company
   const { data: records, error } = await supabase
@@ -179,8 +179,8 @@ function extractTitleFromProfile(p: any): string | null {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function backfillFromApi(supabase: any, table: string, limit: number, accountId: string) {
-  const companyCol = table === 'candidates' ? 'current_company' : 'company_name';
-  const titleCol = table === 'candidates' ? 'current_title' : 'title';
+  const companyCol = table === 'candidates' ? 'company' : 'company_name';
+  const titleCol = table === 'candidates' ? 'title' : 'title';
 
   const unipileApiKey = Deno.env.get('UNIPILE_API_KEY')!;
   const unipileBaseUrl = Deno.env.get('UNIPILE_BASE_URL')!;

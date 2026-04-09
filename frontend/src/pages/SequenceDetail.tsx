@@ -135,7 +135,7 @@ const SequenceDetail = () => {
     try {
       const [seqRes, enrollRes] = await Promise.all([
         supabase.from('sequences').select('*, sequence_steps(*)').eq('id', id!).single(),
-        supabase.from('sequence_enrollments').select('*, candidates!left(first_name, last_name, full_name, email, current_title, current_company, owner_id), contacts!left(first_name, last_name, full_name, email, title, company_name)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
+        supabase.from('sequence_enrollments').select('*, candidates!left(first_name, last_name, full_name, email, title, company, owner_id), contacts!left(first_name, last_name, full_name, email, title, company_name)').eq('sequence_id', id!).order('enrolled_at', { ascending: false }),
       ]);
 
       // Fetch executions separately — avoid .in() with hundreds of IDs
@@ -559,7 +559,7 @@ const SequenceDetail = () => {
                             }} />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm truncate">{c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`}</p>
-                              <p className="text-[10px] text-muted-foreground truncate">{[c.current_title, c.current_company].filter(Boolean).join(' · ')}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">{[c.title, c.company].filter(Boolean).join(' · ')}</p>
                             </div>
                           </label>
                         ))}
@@ -701,7 +701,7 @@ const SequenceDetail = () => {
                       {enrollments.map((enrollment) => {
                         const person = enrollment.candidates || enrollment.contacts;
                         const personName = person?.full_name || `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim() || 'Unknown';
-                        const company = enrollment.candidates?.current_company || (enrollment.contacts as any)?.company_name || '';
+                        const company = enrollment.candidates?.company || (enrollment.contacts as any)?.company_name || '';
                         const isCand = !!enrollment.candidate_id;
                         const profileUrl = enrollment.candidate_id
                           ? `/candidates/${enrollment.candidate_id}`

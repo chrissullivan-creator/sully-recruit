@@ -167,8 +167,8 @@ const Candidates = () => {
         c.full_name ?? '',
         c.first_name ?? '',
         c.last_name ?? '',
-        c.current_company ?? '',
-        c.current_title ?? '',
+        c.company ?? '',
+        c.title ?? '',
         c.email ?? '',
         `${c.first_name ?? ''} ${c.last_name ?? ''}`,
       ];
@@ -206,10 +206,10 @@ const Candidates = () => {
       }
 
       // Title filter (partial match)
-      const matchesTitle = !filters.title || (c.current_title ?? '').toLowerCase().includes(filters.title.toLowerCase());
+      const matchesTitle = !filters.title || (c.title ?? '').toLowerCase().includes(filters.title.toLowerCase());
 
       // Company filter (partial match)
-      const matchesCompany = !filters.company || (c.current_company ?? '').toLowerCase().includes(filters.company.toLowerCase());
+      const matchesCompany = !filters.company || (c.company ?? '').toLowerCase().includes(filters.company.toLowerCase());
 
       // Skills filter
       const matchesSkills = filters.skills.length === 0 || (() => {
@@ -220,7 +220,7 @@ const Candidates = () => {
           return [];
         })();
         // Also search in title and company for skill keywords
-        const allText = [...candidateSkills, (c.current_title ?? '').toLowerCase(), (c.current_company ?? '').toLowerCase()].join(' ');
+        const allText = [...candidateSkills, (c.title ?? '').toLowerCase(), (c.company ?? '').toLowerCase()].join(' ');
         return filters.skills.every((skill) => allText.includes(skill));
       })();
 
@@ -246,8 +246,8 @@ const Candidates = () => {
       let aVal = '', bVal = '';
       switch (sortField) {
         case 'name': aVal = a.full_name ?? ''; bVal = b.full_name ?? ''; break;
-        case 'title': aVal = a.current_title ?? ''; bVal = b.current_title ?? ''; break;
-        case 'company': aVal = a.current_company ?? ''; bVal = b.current_company ?? ''; break;
+        case 'title': aVal = a.title ?? ''; bVal = b.title ?? ''; break;
+        case 'company': aVal = a.company ?? ''; bVal = b.company ?? ''; break;
         case 'status': aVal = a.status; bVal = b.status; break;
         case 'created': aVal = a.created_at; bVal = b.created_at; break;
         case 'updated': aVal = (a as any).updated_at ?? a.created_at; bVal = (b as any).updated_at ?? b.created_at; break;
@@ -598,11 +598,11 @@ const Candidates = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.current_title ?? '-'}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.title ?? '-'}</td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <span className="text-sm text-muted-foreground flex items-center gap-1">
                         <Building className="h-3 w-3" />
-                        {candidate.current_company ?? '-'}
+                        {candidate.company ?? '-'}
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>

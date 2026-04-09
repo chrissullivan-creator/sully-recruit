@@ -42,11 +42,11 @@ export function CandidatePipeline() {
                     <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
                       {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
                     </h4>
-                    <p className="text-xs text-muted-foreground truncate">{candidate.current_title ?? '-'}</p>
-                    {candidate.current_company && (
+                    <p className="text-xs text-muted-foreground truncate">{candidate.title ?? '-'}</p>
+                    {candidate.company && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Building className="h-3 w-3" />
-                        {candidate.current_company}
+                        {candidate.company}
                       </p>
                     )}
                   </div>

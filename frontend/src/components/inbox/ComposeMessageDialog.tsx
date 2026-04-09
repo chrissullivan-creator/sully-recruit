@@ -25,9 +25,8 @@ interface RecipientResult {
   phone: string | null;
   linkedin_url: string | null;
   entity_type: 'candidate' | 'contact';
-  current_title?: string | null;
-  current_company?: string | null;
   title?: string | null;
+  company?: string | null;
 }
 
 const CHANNELS: { key: Channel; label: string; Icon: React.ElementType; description: string }[] = [
@@ -68,7 +67,7 @@ export function ComposeMessageDialog({
     setSearching(true);
     const q = searchQuery.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, linkedin_url, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, phone, linkedin_url, title, company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, phone, linkedin_url, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     setSearchResults([
@@ -253,7 +252,7 @@ export function ComposeMessageDialog({
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                             <p className="text-[10px] text-muted-foreground truncate capitalize">
-                              {r.entity_type} · {r.current_title || r.title || r.email || ''}
+                              {r.entity_type} · {r.title || r.email || ''}
                             </p>
                           </div>
                         </button>

@@ -26,7 +26,7 @@ export async function resolveMergeTags(
   const table = entityType === "candidate" ? "candidates" : "contacts";
   const fields =
     entityType === "candidate"
-      ? "first_name, last_name, full_name, email, current_title, current_company"
+      ? "first_name, last_name, full_name, email, title, company"
       : "first_name, last_name, full_name, email, title, company_name";
 
   const { data: entity } = await supabase
@@ -45,9 +45,9 @@ export async function resolveMergeTags(
         `${entity.first_name ?? ""} ${entity.last_name ?? ""}`.trim(),
     ),
     email: escapeHtml(entity.email ?? ""),
-    title: escapeHtml(entity.current_title ?? entity.title ?? ""),
-    company: escapeHtml(entity.current_company ?? entity.company_name ?? ""),
-    company_name: escapeHtml(entity.current_company ?? entity.company_name ?? ""),
+    title: escapeHtml(entity.title ?? entity.title ?? ""),
+    company: escapeHtml(entity.company ?? entity.company_name ?? ""),
+    company_name: escapeHtml(entity.company ?? entity.company_name ?? ""),
   };
 }
 

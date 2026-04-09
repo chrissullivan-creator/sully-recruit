@@ -12,16 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 type Step = 'upload' | 'preview' | 'done';
 interface MappedRow {
   first_name?: string; last_name?: string; email?: string; phone?: string;
-  current_title?: string; current_company?: string; linkedin_url?: string;
+  title?: string; company?: string; linkedin_url?: string;
   location_text?: string; stage?: string; source?: string; notes?: string; skills?: string;
-  title?: string; company_name?: string;
-  company?: string; location?: string; salary?: string; priority?: string; hiring_manager?: string;
+  company_name?: string;
+  location?: string; salary?: string; priority?: string; hiring_manager?: string;
 }
 interface ParsedResult { mapped: MappedRow; errors: string[]; raw: Record<string, string>; idx: number; }
 
 const CANDIDATE_FIELDS: Record<string, string> = {
   first_name: 'First Name', last_name: 'Last Name', email: 'Email', phone: 'Phone',
-  current_title: 'Current Title', current_company: 'Current Company',
+  title: 'Title', company: 'Company',
   linkedin_url: 'LinkedIn URL', location_text: 'Location',
   stage: 'Stage', source: 'Source', notes: 'Notes', skills: 'Skills',
 };
@@ -38,8 +38,8 @@ const CANDIDATE_ALIASES: Record<string, string[]> = {
   last_name: ['last_name','last','lastname','lname','surname','family_name','family name','last name'],
   email: ['email','email_address','e-mail','e_mail','email address','personal email','work email'],
   phone: ['phone','phone_number','mobile','cell','telephone','phone number','mobile_number','mobile phone','direct','direct phone'],
-  current_title: ['current_title','title','job_title','position','role','current title','current position','job title'],
-  current_company: ['current_company','company','employer','organization','firm','current company','current employer'],
+  title: ['current_title','title','job_title','position','role','current title','current position','job title'],
+  company: ['current_company','company','employer','organization','firm','current company','current employer'],
   linkedin_url: ['linkedin_url','linkedin','linkedin_profile','linkedin url','linkedin profile','profile url','profile_url'],
   location_text: ['location','location_text','city','city state','work location','office location','geography'],
   stage: ['stage','pipeline_stage','candidate_stage'],
@@ -182,8 +182,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             status: 'new', skills,
           };
           if (c.phone) row.phone = c.phone;
-          if (c.current_title) row.current_title = c.current_title;
-          if (c.current_company) row.current_company = c.current_company;
+          if (c.title) row.title = c.title;
+          if (c.company) row.company = c.company;
           if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
           if (c.location_text) row.location_text = c.location_text;
           if (c.source) row.source = c.source;
@@ -386,7 +386,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
                   <div className="flex flex-col items-center justify-center py-16 text-muted-foreground"><AlertCircle className="h-8 w-8 mb-3 opacity-40" /><p className="text-sm">No valid rows yet — check the Column Map tab</p></div>
                 ) : entityType === 'candidates' ? (
                   <table className="w-full text-xs"><thead className="bg-secondary sticky top-0"><tr>{['#','Name','Email','Phone','Title','Company','Location'].map(h => <th key={h} className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">{h}</th>)}</tr></thead>
-                  <tbody className="divide-y divide-border">{valid.map((r,i) => <tr key={i} className="hover:bg-muted/40"><td className="px-4 py-2.5 text-muted-foreground">{i+1}</td><td className="px-4 py-2.5 font-medium text-foreground">{(r.mapped as any).first_name} {(r.mapped as any).last_name}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).email||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).phone||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).current_title||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).current_company||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).location_text||'—'}</td></tr>)}</tbody></table>
+                  <tbody className="divide-y divide-border">{valid.map((r,i) => <tr key={i} className="hover:bg-muted/40"><td className="px-4 py-2.5 text-muted-foreground">{i+1}</td><td className="px-4 py-2.5 font-medium text-foreground">{(r.mapped as any).first_name} {(r.mapped as any).last_name}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).email||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).phone||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).title||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).company||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).location_text||'—'}</td></tr>)}</tbody></table>
                 ) : entityType === 'contacts' ? (
                   <table className="w-full text-xs"><thead className="bg-secondary sticky top-0"><tr>{['#','Name','Title','Company','Email','Phone'].map(h => <th key={h} className="text-left px-4 py-2.5 text-muted-foreground font-medium uppercase tracking-wide">{h}</th>)}</tr></thead>
                   <tbody className="divide-y divide-border">{valid.map((r,i) => <tr key={i} className="hover:bg-muted/40"><td className="px-4 py-2.5 text-muted-foreground">{i+1}</td><td className="px-4 py-2.5 font-medium text-foreground">{(r.mapped as any).first_name} {(r.mapped as any).last_name}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).title||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).company_name||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).email||'—'}</td><td className="px-4 py-2.5 text-muted-foreground">{(r.mapped as any).phone||'—'}</td></tr>)}</tbody></table>

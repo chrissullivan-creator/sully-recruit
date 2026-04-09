@@ -187,8 +187,8 @@ async function gatherCandidateContext(supabase: any, candidateId: string): Promi
 Name: ${candidate.first_name ?? ""} ${candidate.last_name ?? ""}
 Email: ${candidate.email ?? "—"}
 Phone: ${candidate.phone ?? "—"}
-Title: ${candidate.current_title ?? "—"}
-Company: ${candidate.current_company ?? "—"}
+Title: ${candidate.title ?? "—"}
+Company: ${candidate.company ?? "—"}
 Location: ${candidate.location_text ?? "—"}
 LinkedIn: ${candidate.linkedin_url ?? "—"}
 Status: ${candidate.status ?? "—"}

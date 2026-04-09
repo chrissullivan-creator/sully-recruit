@@ -212,8 +212,8 @@ export type Database = {
       candidates: {
         Row: {
           created_at: string
-          current_company: string | null
-          current_title: string | null
+          company: string | null
+          title: string | null
           email: string | null
           first_name: string | null
           full_name: string | null
@@ -228,8 +228,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          current_company?: string | null
-          current_title?: string | null
+          company?: string | null
+          title?: string | null
           email?: string | null
           first_name?: string | null
           full_name?: string | null
@@ -244,8 +244,8 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          current_company?: string | null
-          current_title?: string | null
+          company?: string | null
+          title?: string | null
           email?: string | null
           first_name?: string | null
           full_name?: string | null
@@ -1365,8 +1365,8 @@ export type Database = {
     Views: {
       candidate_summary: {
         Row: {
-          current_company: string | null
-          current_title: string | null
+          company: string | null
+          title: string | null
           email: string | null
           first_name: string | null
           full_name: string | null
@@ -1499,8 +1499,8 @@ export type Database = {
         Args: { p_prospect_id: string }
         Returns: {
           created_at: string
-          current_company: string | null
-          current_title: string | null
+          company: string | null
+          title: string | null
           email: string | null
           first_name: string | null
           full_name: string | null

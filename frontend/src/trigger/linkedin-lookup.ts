@@ -22,7 +22,7 @@ export const linkedinLookup = schedules.task({
     // ── 1. Candidates without linkedin_url ──
     const { data: candidates } = await supabase
       .from("candidates")
-      .select("id, first_name, last_name, current_company, current_title, email")
+      .select("id, first_name, last_name, company, title, email")
       .is("linkedin_url", null)
       .not("first_name", "is", null)
       .not("last_name", "is", null)
@@ -52,8 +52,8 @@ export const linkedinLookup = schedules.task({
       // Map contact fields to match candidate shape
       const mapped = contacts.map((c: any) => ({
         ...c,
-        current_company: c.company,
-        current_title: c.title,
+        company: c.company,
+        title: c.title,
       }));
       const result = await lookupBatch(supabase, baseUrl, apiKey, mapped, "contacts");
       found += result.found;
@@ -87,8 +87,8 @@ async function lookupBatch(
 
     try {
       let keywords = name;
-      if (record.current_company) {
-        keywords += ` ${record.current_company}`;
+      if (record.company) {
+        keywords += ` ${record.company}`;
       }
 
       const searchUrl = `${baseUrl}/users/search?keywords=${encodeURIComponent(keywords)}&limit=3`;
@@ -121,11 +121,11 @@ async function lookupBatch(
         if (table === "candidates") {
           if (match.provider_id) update.unipile_provider_id = match.provider_id;
           if (match.headline) update.linkedin_headline = match.headline;
-          if (match.current_company && !record.current_company) update.current_company = match.current_company;
-          if (match.current_title && !record.current_title) update.current_title = match.current_title;
+          if (match.company && !record.company) update.company = match.company;
+          if (match.title && !record.title) update.title = match.title;
         } else {
-          if (match.current_company && !record.current_company) update.company = match.current_company;
-          if (match.current_title && !record.current_title) update.title = match.current_title;
+          if (match.company && !record.company) update.company = match.company;
+          if (match.title && !record.title) update.title = match.title;
         }
 
         if (Object.keys(update).length > 0) {
@@ -149,7 +149,7 @@ async function lookupBatch(
 
 function findBestMatch(
   results: any[],
-  candidate: { first_name: string; last_name: string; current_company?: string; email?: string },
+  candidate: { first_name: string; last_name: string; company?: string; email?: string },
 ): any | null {
   if (!results?.length) return null;
 

@@ -172,8 +172,8 @@ const EXTRACT_PROMPT = `You are an expert recruiting assistant. You just receive
   "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact",
   "sentiment_summary": "One sentence about the candidate's interest level and attitude toward the opportunity",
   "extracted_fields": {
-    "current_title": "",
-    "current_company": "",
+    "title": "",
+    "company": "",
     "reason_for_leaving": "",
     "current_base_comp": "",
     "current_bonus_comp": "",
@@ -290,11 +290,11 @@ async function transcribeAndExtract(
     const updates: any = {};
 
     // Basic fields — apply to both candidates and contacts
-    if (fields.current_title) updates.current_title = entityType === "contact" ? undefined : fields.current_title;
-    if (fields.current_title && entityType === "contact") updates.title = fields.current_title;
-    if (fields.current_company) {
-      if (entityType === "candidate") updates.current_company = fields.current_company;
-      else updates.company_name = fields.current_company;
+    if (fields.title) updates.title = entityType === "contact" ? undefined : fields.title;
+    if (fields.title && entityType === "contact") updates.title = fields.title;
+    if (fields.company) {
+      if (entityType === "candidate") updates.company = fields.company;
+      else updates.company_name = fields.company;
     }
 
     // Candidate-only fields

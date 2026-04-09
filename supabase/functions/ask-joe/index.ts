@@ -21,8 +21,8 @@ You have access to a candidates database. When a user asks you to search, find, 
 Candidate schema you can filter on:
 - first_name, last_name (text)
 - email (text)
-- current_title (text) 
-- current_company (text)
+- title (text) 
+- company (text)
 - status: 'new' | 'reached_out' | 'back_of_resume' | 'placed'
 - no_answer: boolean (true = no response after 10 days of outreach)
 - stage: 'back_of_resume' | 'pitch' | 'send_out' | 'submitted' | 'interview' | 'first_round' | 'second_round' | 'third_plus_round' | 'offer' | 'accepted' | 'declined' | 'counter_offer' | 'disqualified'
@@ -57,11 +57,11 @@ const TOOLS = [
           type: 'boolean',
           description: 'Filter candidates who have not responded (no_answer = true)',
         },
-        current_company_contains: {
+        company_contains: {
           type: 'string',
           description: 'Filter by partial company name match',
         },
-        current_title_contains: {
+        title_contains: {
           type: 'string',
           description: 'Filter by partial title match',
         },
@@ -82,19 +82,19 @@ const TOOLS = [
 async function searchCandidates(supabase: any, filters: any) {
   let query = supabase
     .from('candidates')
-    .select('id, first_name, last_name, current_title, current_company, status, stage, no_answer, email, skills, created_at')
+    .select('id, first_name, last_name, title, company, status, stage, no_answer, email, skills, created_at')
     .order('created_at', { ascending: false })
     .limit(filters.limit ?? 25);
 
   if (filters.status) query = query.eq('status', filters.status);
   if (filters.stage) query = query.eq('stage', filters.stage);
   if (filters.no_answer !== undefined) query = query.eq('no_answer', filters.no_answer);
-  if (filters.current_company_contains) query = query.ilike('current_company', `%${filters.current_company_contains}%`);
-  if (filters.current_title_contains) query = query.ilike('current_title', `%${filters.current_title_contains}%`);
+  if (filters.company_contains) query = query.ilike('company', `%${filters.company_contains}%`);
+  if (filters.title_contains) query = query.ilike('title', `%${filters.title_contains}%`);
   if (filters.skills_include) query = query.contains('skills', [filters.skills_include]);
   if (filters.search_text) {
     query = query.or(
-      `first_name.ilike.%${filters.search_text}%,last_name.ilike.%${filters.search_text}%,current_title.ilike.%${filters.search_text}%,current_company.ilike.%${filters.search_text}%,notes.ilike.%${filters.search_text}%`
+      `first_name.ilike.%${filters.search_text}%,last_name.ilike.%${filters.search_text}%,title.ilike.%${filters.search_text}%,company.ilike.%${filters.search_text}%,notes.ilike.%${filters.search_text}%`
     );
   }
 
@@ -174,8 +174,8 @@ serve(async (req) => {
                       count: candidates.length,
                       candidates: candidates.map((c: any) => ({
                         name: `${c.first_name} ${c.last_name}`,
-                        title: c.current_title || '—',
-                        company: c.current_company || '—',
+                        title: c.title || '—',
+                        company: c.company || '—',
                         status: c.status,
                         stage: c.stage,
                         no_answer: c.no_answer,

@@ -430,7 +430,7 @@ export function CandidateFilterSidebar({
           </FilterSection>
 
           {/* ── Title ──────────────────────────────────────────────────── */}
-          <FilterSection title="Current Title">
+          <FilterSection title="Title">
             <Input
               className="h-8 text-xs"
               placeholder="e.g. Senior Engineer"
@@ -440,7 +440,7 @@ export function CandidateFilterSidebar({
           </FilterSection>
 
           {/* ── Company ────────────────────────────────────────────────── */}
-          <FilterSection title="Current Company">
+          <FilterSection title="Company">
             <Input
               className="h-8 text-xs"
               placeholder="e.g. Google"

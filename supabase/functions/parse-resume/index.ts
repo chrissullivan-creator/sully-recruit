@@ -81,7 +81,7 @@ serve(async (req) => {
           body: JSON.stringify({
             model: "claude-haiku-4-5-20251001",
             max_tokens: 1024,
-            system: "You are a professional resume parser. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, current_company, current_title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
+            system: "You are a professional resume parser. Extract structured data from resumes. Return ONLY valid JSON with these exact keys: first_name, last_name, email, phone, company, title, location, linkedin_url. If a field is not found, use an empty string. No markdown, no explanation - only the JSON object.",
             messages: [{ role: "user", content: contentBlocks }],
             temperature: 0,
           }),
@@ -98,8 +98,8 @@ serve(async (req) => {
               last_name: data.last_name || "",
               email: data.email || "",
               phone: data.phone || "",
-              current_company: data.current_company || "",
-              current_title: data.current_title || "",
+              company: data.company || "",
+              title: data.title || "",
               location: data.location || "",
               linkedin_url: data.linkedin_url || "",
             };
@@ -115,7 +115,7 @@ serve(async (req) => {
     if (!parsedResult) {
       parsedResult = {
         first_name: "", last_name: "", email: "", phone: "",
-        current_company: "", current_title: "", location: "", linkedin_url: "",
+        company: "", title: "", location: "", linkedin_url: "",
       };
     }
 

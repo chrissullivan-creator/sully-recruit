@@ -37,7 +37,7 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 ```
 id, first_name, last_name, full_name, email, phone
 linkedin_url, unipile_id
-current_title, current_company
+title, company
 location_text          ← NOT "location" (that column doesn't exist)
 status                 ← ENUM: new | reached_out | back_of_resume | placed
 owner_id, owner_user_id
@@ -163,7 +163,7 @@ const ANTHROPIC_API_KEY =
   "candidate_id": "uuid",
   "parsed": {
     "first_name": "", "last_name": "", "email": "", "phone": "",
-    "current_title": "", "current_company": "",
+    "title": "", "company": "",
     "location": "",       ← maps to location_text in DB
     "linkedin_url": "", "skills": []
   }

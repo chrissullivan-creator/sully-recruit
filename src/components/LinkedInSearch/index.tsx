@@ -37,8 +37,8 @@ interface SearchResult {
   first_name: string;
   last_name: string;
   headline?: string;
-  current_title?: string;
-  current_company?: string;
+  title?: string;
+  company?: string;
   location?: string;
   linkedin_url?: string;
   profile_picture_url?: string;
@@ -204,8 +204,8 @@ export default function LinkedInSearch() {
         first_name: item.first_name ?? item.firstName ?? '',
         last_name: item.last_name ?? item.lastName ?? '',
         headline: item.headline ?? '',
-        current_title: item.title ?? item.current_title ?? item.headline ?? '',
-        current_company: item.company ?? item.current_company ?? item.company_name ?? '',
+        title: item.title ?? item.headline ?? '',
+        company: item.company ?? item.company_name ?? '',
         location: item.location ?? item.region ?? '',
         linkedin_url: item.linkedin_url ?? item.public_profile_url ?? item.url ?? '',
         profile_picture_url: item.profile_picture_url ?? item.picture_url ?? '',
@@ -231,8 +231,8 @@ export default function LinkedInSearch() {
       const { error } = await supabase.from('candidates').insert({
         first_name: r.first_name,
         last_name: r.last_name,
-        current_title: r.current_title || null,
-        current_company: r.current_company || null,
+        title: r.title || null,
+        company: r.company || null,
         location: r.location || null,
         linkedin_url: r.linkedin_url || null,
         source: 'linkedin_search',
@@ -259,7 +259,7 @@ export default function LinkedInSearch() {
       const { error } = await supabase.from('contacts').insert({
         first_name: r.first_name,
         last_name: r.last_name,
-        title: r.current_title || null,
+        title: r.title || null,
         linkedin_url: r.linkedin_url || null,
         status: 'active',
         owner_id: userId,
@@ -302,8 +302,8 @@ export default function LinkedInSearch() {
           .insert({
             first_name: r.first_name,
             last_name: r.last_name,
-            current_title: r.current_title || null,
-            current_company: r.current_company || null,
+            title: r.title || null,
+            company: r.company || null,
             location: r.location || null,
             linkedin_url: r.linkedin_url || null,
             source: 'linkedin_search',
@@ -465,16 +465,16 @@ export default function LinkedInSearch() {
                       {r.first_name} {r.last_name}
                     </p>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      {r.current_title && (
+                      {r.title && (
                         <span className="flex items-center gap-1 truncate">
                           <Briefcase className="h-3 w-3" />
-                          {r.current_title}
+                          {r.title}
                         </span>
                       )}
-                      {r.current_company && (
+                      {r.company && (
                         <span className="flex items-center gap-1 truncate">
                           <Building className="h-3 w-3" />
-                          {r.current_company}
+                          {r.company}
                         </span>
                       )}
                       {r.location && (

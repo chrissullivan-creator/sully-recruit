@@ -45,7 +45,7 @@ export const scanDuplicateCandidates = task({
     // Fetch all candidates
     const { data: candidates, error: fetchErr } = await supabase
       .from("candidates")
-      .select("id, email, phone, linkedin_url, first_name, last_name, current_company");
+      .select("id, email, phone, linkedin_url, first_name, last_name, company");
 
     if (fetchErr || !candidates) {
       logger.error("Failed to fetch candidates", { error: fetchErr?.message });
@@ -193,7 +193,7 @@ export const checkNewCandidateDedup = task({
     // Fetch the new candidate
     const { data: candidate, error: fetchErr } = await supabase
       .from("candidates")
-      .select("id, email, phone, linkedin_url, first_name, last_name, current_company")
+      .select("id, email, phone, linkedin_url, first_name, last_name, company")
       .eq("id", candidateId)
       .single();
 
@@ -375,8 +375,8 @@ export const mergeCandidates = task({
       "email",
       "phone",
       "linkedin_url",
-      "current_title",
-      "current_company",
+      "title",
+      "company",
       "location_text",
       "source",
     ];

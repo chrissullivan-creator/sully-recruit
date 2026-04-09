@@ -2,7 +2,7 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 
 const MATCH_PROMPT = `You are a resume parser. Extract ONLY the person's full name and most recent company from this resume. Return ONLY valid JSON, no markdown:
-{"first_name": "First", "last_name": "Last", "current_company": "Company Name"}
+{"first_name": "First", "last_name": "Last", "company": "Company Name"}
 If a field is not found, use an empty string.`;
 
 const BATCH_SIZE = 25; // smaller batches to avoid rate limits
@@ -78,9 +78,9 @@ async function matchAndLink(
   if (company) {
     const { data: exactMatch } = await supabase
       .from("candidates")
-      .select("id, full_name, current_company")
+      .select("id, full_name, company")
       .ilike("full_name", fullName)
-      .ilike("current_company", `%${company}%`)
+      .ilike("company", `%${company}%`)
       .limit(1)
       .maybeSingle();
 
@@ -204,7 +204,7 @@ export const backfillResumeLinks = task({
 
         const firstName = (parsed.first_name || "").trim();
         const lastName = (parsed.last_name || "").trim();
-        const company = (parsed.current_company || "").trim();
+        const company = (parsed.company || "").trim();
 
         if (!firstName && !lastName) {
           logger.warn("No name extracted", { filePath });

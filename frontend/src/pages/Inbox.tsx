@@ -290,8 +290,8 @@ function CreatePersonDialog({
           ...prev,
           first_name: fullProfile?.first_name || profile.name?.split(' ')[0] || prev.first_name,
           last_name: fullProfile?.last_name || profile.name?.split(' ').slice(1).join(' ') || prev.last_name,
-          title: fullProfile?.headline || fullProfile?.title || fullProfile?.current_title || prev.title,
-          company: fullProfile?.company || fullProfile?.current_company || fullProfile?.company_name || prev.company,
+          title: fullProfile?.headline || fullProfile?.title || fullProfile?.title || prev.title,
+          company: fullProfile?.company || fullProfile?.company || fullProfile?.company_name || prev.company,
           location: fullProfile?.location || fullProfile?.region || prev.location,
           linkedin_url: fullProfile?.public_profile_url || fullProfile?.linkedin_url || (identifier.startsWith('http') ? identifier : `https://linkedin.com/in/${identifier}`),
           email: fullProfile?.email || prev.email,
@@ -415,7 +415,7 @@ function CreatePersonDialog({
         }
 
         const [cRes, ctRes] = await Promise.all([
-          supabase.from('candidates').select('id, full_name, email, current_title, current_company, phone, linkedin_url, location').or(orFilter).limit(3),
+          supabase.from('candidates').select('id, full_name, email, title, company, phone, linkedin_url, location').or(orFilter).limit(3),
           supabase.from('contacts').select('id, full_name, email, title, phone, linkedin_url').or(orFilter).limit(3),
         ]);
 
@@ -435,8 +435,8 @@ function CreatePersonDialog({
             email: best.email || prev.email,
             phone: best.phone || prev.phone,
             linkedin_url: best.linkedin_url || prev.linkedin_url,
-            title: (best as any).current_title || (best as any).title || prev.title,
-            company: (best as any).current_company || prev.company,
+            title: (best as any).title || (best as any).title || prev.title,
+            company: (best as any).company || prev.company,
             location: (best as any).location || prev.location,
           }));
 
@@ -522,8 +522,8 @@ function CreatePersonDialog({
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
           linkedin_url: form.linkedin_url.trim() || null,
-          current_title: form.title.trim() || null,
-          current_company: form.company.trim() || null,
+          title: form.title.trim() || null,
+          company: form.company.trim() || null,
           location: form.location.trim() || null,
           status: 'new',
           owner_id: userId,
@@ -647,7 +647,7 @@ function CreatePersonDialog({
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{match.full_name}</p>
                       <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {match.entity_type} · {match.current_title || match.title || match.email || ''}
+                        {match.entity_type} · {match.title || match.title || match.email || ''}
                       </p>
                     </div>
                     <Button
@@ -738,7 +738,7 @@ function CreatePersonDialog({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
+                <Label className="text-xs">{type === 'candidate' ? 'Title' : 'Job Title'}</Label>
                 <Input
                   value={form.title}
                   onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
@@ -749,7 +749,7 @@ function CreatePersonDialog({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
+                  <Label className="text-xs">{type === 'candidate' ? 'Company' : 'Company'}</Label>
                   <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
                     <PopoverTrigger asChild>
                       <Button
@@ -906,7 +906,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, title, company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     const results = [
@@ -963,7 +963,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
                   <p className="text-sm font-semibold text-foreground truncate">{entity.full_name}</p>
                   <Badge variant="outline" className="text-[9px] capitalize">{entityType}</Badge>
                 </div>
-                {(entity as any).current_title && <p className="text-xs text-muted-foreground truncate">{(entity as any).current_title}</p>}
+                {(entity as any).title && <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>}
                 {(entity as any).title && <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>}
               </div>
             </div>
@@ -986,10 +986,10 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
                   <a href={entity.linkedin_url} target="_blank" rel="noreferrer" className="text-accent hover:underline truncate">LinkedIn Profile</a>
                 </div>
               )}
-              {(entity as any).current_company && (
+              {(entity as any).company && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{(entity as any).current_company}</span>
+                  <span className="truncate">{(entity as any).company}</span>
                 </div>
               )}
               {(entity as any).companies?.name && (
@@ -1058,7 +1058,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                       <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {r.entity_type} · {r.current_title || r.title || r.email || ''}
+                        {r.entity_type} · {r.title || r.title || r.email || ''}
                       </p>
                     </div>
                     <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />

@@ -80,8 +80,8 @@ const Candidates = () => {
     let list = candidates.filter((c) => {
       const matchesSearch =
         (c.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.current_company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.current_title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
+        (c.company ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
       const matchesJobTag = jobTagFilter === 'all' || (c as any).job_id === jobTagFilter;
       const ownerId = (c as any).owner_user_id ?? c.owner_id;
@@ -93,8 +93,8 @@ const Candidates = () => {
       let aVal = '', bVal = '';
       switch (sortField) {
         case 'name': aVal = a.full_name ?? ''; bVal = b.full_name ?? ''; break;
-        case 'title': aVal = a.current_title ?? ''; bVal = b.current_title ?? ''; break;
-        case 'company': aVal = a.current_company ?? ''; bVal = b.current_company ?? ''; break;
+        case 'title': aVal = a.title ?? ''; bVal = b.title ?? ''; break;
+        case 'company': aVal = a.company ?? ''; bVal = b.company ?? ''; break;
         case 'status': aVal = a.status; bVal = b.status; break;
         case 'created': aVal = a.created_at; bVal = b.created_at; break;
       }
@@ -320,11 +320,11 @@ const Candidates = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.current_title ?? '-'}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.title ?? '-'}</td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <span className="text-sm text-muted-foreground flex items-center gap-1">
                         <Building className="h-3 w-3" />
-                        {candidate.current_company ?? '-'}
+                        {candidate.company ?? '-'}
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>

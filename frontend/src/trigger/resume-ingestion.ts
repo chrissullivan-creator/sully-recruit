@@ -10,8 +10,8 @@ Return this exact JSON structure:
   "last_name": "Last Name",
   "email": "email@example.com",
   "phone": "phone number",
-  "current_company": "Most Recent Company",
-  "current_title": "Most Recent Job Title",
+  "company": "Most Recent Company",
+  "title": "Most Recent Job Title",
   "location": "City, State",
   "linkedin_url": "LinkedIn URL",
   "skills": ["skill1", "skill2"]
@@ -85,8 +85,8 @@ export const resumeIngestion = task({
       }
       if (parsedJson.email) updates.email = parsedJson.email;
       if (parsedJson.phone) updates.phone = parsedJson.phone;
-      if (parsedJson.current_company) updates.current_company = parsedJson.current_company;
-      if (parsedJson.current_title) updates.current_title = parsedJson.current_title;
+      if (parsedJson.company) updates.company = parsedJson.company;
+      if (parsedJson.title) updates.title = parsedJson.title;
       if (parsedJson.location) updates.location_text = parsedJson.location; // location → location_text
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;

@@ -75,7 +75,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     ...candidates.map(c => ({
       id: c.id, type: 'candidate' as const,
       name: c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
-      detail: [c.current_title, c.current_company].filter(Boolean).join(' · ') || c.email || '',
+      detail: [c.title, c.company].filter(Boolean).join(' · ') || c.email || '',
       sortDate: c.created_at,
     })),
     ...contacts.map(c => ({

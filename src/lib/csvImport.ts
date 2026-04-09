@@ -5,16 +5,14 @@ export interface MappedRow {
   last_name?: string;
   email?: string;
   phone?: string;
-  current_title?: string;
-  current_company?: string;
+  title?: string;
+  company?: string;
   linkedin_url?: string;
   stage?: string;
   source?: string;
   notes?: string;
   skills?: string;
   // jobs
-  title?: string;
-  company?: string;
   company_name?: string;
   location?: string;
   salary?: string;
@@ -49,8 +47,8 @@ export const CANDIDATE_ALIASES: Record<string, string[]> = {
   last_name: ['last_name', 'last', 'lastname', 'lname', 'surname', 'family_name', 'family name', 'last name'],
   email: ['email', 'email_address', 'e-mail', 'e_mail', 'email address'],
   phone: ['phone', 'phone_number', 'mobile', 'cell', 'telephone', 'phone number', 'mobile_number'],
-  current_title: ['current_title', 'title', 'job_title', 'position', 'role', 'current title', 'current position', 'job title'],
-  current_company: ['current_company', 'company', 'employer', 'organization', 'firm', 'current company', 'current employer'],
+  title: ['title', 'job_title', 'position', 'role', 'current title', 'current position', 'job title', 'current_title'],
+  company: ['company', 'employer', 'organization', 'firm', 'current company', 'current employer', 'current_company'],
   linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin url', 'linkedin profile', 'profile_url'],
   stage: ['stage', 'pipeline_stage', 'candidate_stage'],
   source: ['source', 'lead_source', 'origin', 'referral', 'sourced_from'],

@@ -142,7 +142,7 @@ async def fetch_resume_data() -> list:
                 f"{SUPABASE_URL}/rest/v1/candidates",
                 headers=headers,
                 params={
-                    "select": "id,full_name,first_name,last_name,current_title,current_company,email,location,status",
+                    "select": "id,full_name,first_name,last_name,title,company,email,location,status",
                     "id": f"in.({ids_filter})",
                 },
             )
@@ -168,8 +168,8 @@ async def fetch_resume_data() -> list:
             result.append({
                 "candidate_id": cid,
                 "name": name,
-                "title": cand.get("current_title", ""),
-                "company": cand.get("current_company", ""),
+                "title": cand.get("title", ""),
+                "company": cand.get("company", ""),
                 "email": cand.get("email", ""),
                 "location": cand.get("location", ""),
                 "status": cand.get("status", ""),
@@ -260,7 +260,7 @@ async def fetch_candidates_for_matching() -> list:
             f"{SUPABASE_URL}/rest/v1/candidates",
             headers=headers,
             params={
-                "select": "id,full_name,first_name,last_name,current_title,current_company,email,location_text,status,skills,current_base_comp,target_roles,work_authorization",
+                "select": "id,full_name,first_name,last_name,title,company,email,location_text,status,skills,current_base_comp,target_roles,work_authorization",
                 "order": "created_at.desc",
                 "limit": "500",
             },
@@ -301,10 +301,10 @@ async def match_candidates_to_job(request: MatchCandidatesRequest):
         if not name:
             continue
         parts = [f"**{name}** (ID: {c.get('id', 'unknown')})"]
-        if c.get("current_title"):
-            parts.append(f"Title: {c['current_title']}")
-        if c.get("current_company"):
-            parts.append(f"Company: {c['current_company']}")
+        if c.get("title"):
+            parts.append(f"Title: {c['title']}")
+        if c.get("company"):
+            parts.append(f"Company: {c['company']}")
         if c.get("location_text"):
             parts.append(f"Location: {c['location_text']}")
         if c.get("skills"):
@@ -635,7 +635,7 @@ async def run_nudge_check():
             f"{SUPABASE_URL}/rest/v1/candidates",
             headers={**headers, "Prefer": ""},
             params={
-                "select": "id,full_name,current_title,current_company,status,owner_id,updated_at",
+                "select": "id,full_name,title,company,status,owner_id,updated_at",
                 "status": "in.(new,reached_out,back_of_resume)",
                 "updated_at": f"lt.{cutoff}",
                 "limit": "50",
@@ -658,8 +658,8 @@ async def run_nudge_check():
         nudge_items = []
         for c in stagnant[:20]:  # Limit to 20 to avoid spam
             name = c.get("full_name", "Unknown")
-            title = c.get("current_title", "")
-            company = c.get("current_company", "")
+            title = c.get("title", "")
+            company = c.get("company", "")
             nudge_items.append(f"• {name} ({title} at {company}) — status: {c['status']}")
 
             if chris_id:
@@ -1065,7 +1065,7 @@ async def fetch_all_searchable_data() -> dict:
             f"{SUPABASE_URL}/rest/v1/candidates",
             headers=headers,
             params={
-                "select": "id,full_name,first_name,last_name,current_title,current_company,email,location_text,status,skills,work_authorization",
+                "select": "id,full_name,first_name,last_name,title,company,email,location_text,status,skills,work_authorization",
                 "order": "created_at.desc",
                 "limit": "300",
             },
@@ -1138,8 +1138,8 @@ async def unified_search(request: UnifiedSearchRequest):
             if not name:
                 continue
             parts = [f"[CANDIDATE] {name}"]
-            if c.get("current_title"): parts.append(f"  Title: {c['current_title']}")
-            if c.get("current_company"): parts.append(f"  Company: {c['current_company']}")
+            if c.get("title"): parts.append(f"  Title: {c['title']}")
+            if c.get("company"): parts.append(f"  Company: {c['company']}")
             if c.get("location_text"): parts.append(f"  Location: {c['location_text']}")
             if c.get("email"): parts.append(f"  Email: {c['email']}")
             if c.get("skills"):

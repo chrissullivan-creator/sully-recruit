@@ -422,8 +422,8 @@ export default function SendOut() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           candidate_name: c.full_name || resumeData.name,
-          candidate_title: c.current_title || resumeData.experience[0]?.title,
-          candidate_company: c.current_company || resumeData.experience[0]?.company,
+          candidate_title: c.title || resumeData.experience[0]?.title,
+          candidate_company: c.company || resumeData.experience[0]?.company,
           candidate_notes: c.back_of_resume_notes || c.notes,
           compensation: c.target_total_comp ? `Target: $${c.target_total_comp}` : c.current_total_comp ? `Current: $${c.current_total_comp}` : undefined,
           job_title: selectedJob?.title,

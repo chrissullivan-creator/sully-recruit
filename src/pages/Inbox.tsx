@@ -185,7 +185,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').ilike('full_name', `%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, title, company').ilike('full_name', `%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, title').ilike('full_name', `%${q}%`).limit(5),
     ]);
     const results = [
@@ -243,8 +243,8 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                     {entityType}
                   </Badge>
                 </div>
-                {(entity as any).current_title && (
-                  <p className="text-xs text-muted-foreground truncate">{(entity as any).current_title}</p>
+                {(entity as any).title && (
+                  <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>
                 )}
                 {(entity as any).title && (
                   <p className="text-xs text-muted-foreground truncate">{(entity as any).title}</p>
@@ -274,10 +274,10 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                   </a>
                 </div>
               )}
-              {(entity as any).current_company && (
+              {(entity as any).company && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{(entity as any).current_company}</span>
+                  <span className="truncate">{(entity as any).company}</span>
                 </div>
               )}
               {(entity as any).companies?.name && (
@@ -343,7 +343,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                       <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {r.entity_type} · {r.current_title || r.title || ''}
+                        {r.entity_type} · {r.title || r.title || ''}
                       </p>
                     </div>
                     <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />

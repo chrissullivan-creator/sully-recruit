@@ -16,8 +16,8 @@ import { toast } from 'sonner';
 interface SearchResult {
   id: string;
   full_name: string;
-  current_title: string;
-  current_company: string;
+  title: string;
+  company: string;
   location: string;
   skills: string[];
   relevance_score: number;
@@ -252,8 +252,8 @@ function KeywordSearch() {
     return results
       .filter((result) => {
         if (location && !result.location?.toLowerCase().includes(location.toLowerCase())) return false;
-        if (title && !result.current_title?.toLowerCase().includes(title.toLowerCase())) return false;
-        if (company && !result.current_company?.toLowerCase().includes(company.toLowerCase())) return false;
+        if (title && !result.title?.toLowerCase().includes(title.toLowerCase())) return false;
+        if (company && !result.company?.toLowerCase().includes(company.toLowerCase())) return false;
         return true;
       })
       .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0));
@@ -397,9 +397,9 @@ function KeywordSearch() {
                             <div>
                               <h3 className="font-semibold text-foreground">{result.full_name}</h3>
                               <p className="text-sm text-muted-foreground">
-                                {result.current_title && result.current_company
-                                  ? `${result.current_title} at ${result.current_company}`
-                                  : result.current_title || result.current_company || 'No title'}
+                                {result.title && result.company
+                                  ? `${result.title} at ${result.company}`
+                                  : result.title || result.company || 'No title'}
                               </p>
                             </div>
                           </div>
@@ -421,11 +421,11 @@ function KeywordSearch() {
                           {result.location && (
                             <div className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{result.location}</div>
                           )}
-                          {result.current_title && (
-                            <div className="flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{result.current_title}</div>
+                          {result.title && (
+                            <div className="flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{result.title}</div>
                           )}
-                          {result.current_company && (
-                            <div className="flex items-center gap-1"><Building className="h-3.5 w-3.5" />{result.current_company}</div>
+                          {result.company && (
+                            <div className="flex items-center gap-1"><Building className="h-3.5 w-3.5" />{result.company}</div>
                           )}
                         </div>
 

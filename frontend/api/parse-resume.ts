@@ -19,8 +19,8 @@ Return this exact JSON structure:
   "last_name": "Last Name",
   "email": "email@example.com",
   "phone": "phone number",
-  "current_company": "Most Recent Company",
-  "current_title": "Most Recent Job Title",
+  "company": "Most Recent Company",
+  "title": "Most Recent Job Title",
   "location": "City, State",
   "linkedin_url": "LinkedIn URL",
   "skills": ["skill1", "skill2"]

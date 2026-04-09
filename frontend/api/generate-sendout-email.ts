@@ -50,8 +50,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             content: `You are a senior Wall Street recruiter at The Emerald Recruiting Group. Write a professional sendout/submission email presenting a candidate to a client for a role.
 
 Candidate: ${candidate_name}
-${candidate_title ? `Current Title: ${candidate_title}` : ""}
-${candidate_company ? `Current Company: ${candidate_company}` : ""}
+${candidate_title ? `Title: ${candidate_title}` : ""}
+${candidate_company ? `Company: ${candidate_company}` : ""}
 ${candidate_notes ? `Notes: ${candidate_notes}` : ""}
 ${compensation ? `Compensation: ${compensation}` : ""}
 

@@ -85,7 +85,7 @@ export const trackProfileViewers = schedules.task({
 
             await supabase.from("tasks").insert({
               title: `${viewer.first_name || ""} ${viewer.last_name || ""} viewed your LinkedIn profile`.trim(),
-              description: `${viewer.headline || ""}\n${viewer.current_company || ""}`.trim() || null,
+              description: `${viewer.headline || ""}\n${viewer.company || ""}`.trim() || null,
               task_type: "follow_up",
               priority: "medium",
               status: "pending",
@@ -113,8 +113,8 @@ export const trackProfileViewers = schedules.task({
               await supabase.from("candidates").insert({
                 full_name: fullName,
                 linkedin_url: linkedinUrl,
-                current_title: viewer.headline || viewer.title || null,
-                current_company: viewer.current_company || null,
+                title: viewer.headline || viewer.title || null,
+                company: viewer.company || null,
                 source: "linkedin_profile_viewer",
                 unipile_provider_id: providerId,
                 unipile_resolve_status: "resolved",

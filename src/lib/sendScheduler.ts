@@ -33,7 +33,7 @@
  *   // Email
  *   const { data: sendAt } = await supabase.rpc('allocate_send_time', {
  *     p_user_id:      userId,
- *     p_company_name: candidate.current_company,
+ *     p_company_name: candidate.company,
  *     p_send_date:    '2025-03-15',
  *     p_window_start: step.sendWindowStart,  // default 6
  *     p_window_end:   step.sendWindowEnd,    // default 21
