@@ -73,9 +73,30 @@ export async function sendEmail(
     inReplyTo?: string;
     references?: string;
   },
+  useSignature?: boolean,
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
+
+  // Append email signature if enabled
+  if (useSignature) {
+    try {
+      const { data: sigRow } = await supabase
+        .from("user_integrations")
+        .select("config")
+        .eq("user_id", userId)
+        .eq("integration_type", "email_signature")
+        .eq("is_active", true)
+        .maybeSingle();
+
+      const sigHtml = sigRow?.config?.signature_html;
+      if (sigHtml) {
+        body = body + "<br><br>" + sigHtml;
+      }
+    } catch (err: any) {
+      logger.warn("Failed to fetch email signature, sending without", { error: err.message });
+    }
+  }
 
   // Build the message payload
   const message: any = {

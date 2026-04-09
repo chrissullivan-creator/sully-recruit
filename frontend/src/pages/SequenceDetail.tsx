@@ -72,7 +72,7 @@ const channelToDbChannel = (channel: ChannelType): string => {
 // Maps DB step_type + channel → UI ChannelType
 const dbChannelToChannel = (stepType: string, channel: string | null): ChannelType => {
   if (stepType === 'recruiter_inmail' || stepType === 'linkedin_inmail' || stepType === 'sales_nav_inmail') return 'linkedin_recruiter';
-  if (stepType === 'linkedin_message' || stepType === 'classic_message') return 'linkedin_message';
+  if (stepType === 'linkedin_message') return 'linkedin_message';
   if (stepType === 'linkedin_connection' || stepType === 'connection_request') return 'linkedin_connection';
   if (channel === 'sms' || stepType === 'sms') return 'sms';
   if (channel === 'phone' || stepType === 'call') return 'phone';

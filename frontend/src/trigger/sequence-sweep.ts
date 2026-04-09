@@ -5,10 +5,9 @@ import { processSequenceStep } from "./sequence-step";
 /**
  * Sequence sweep — runs every 5 minutes.
  *
- * Picks up the 3 oldest due enrollments from active sequences,
- * then fans out to per-enrollment step tasks. The small batch size
- * combined with per-send jitter keeps throughput human-paced
- * (~1 send every 2-5 min).
+ * Picks up to 10 due enrollments from active sequences,
+ * then fans out to per-enrollment step tasks. Per-channel pacing
+ * and rate limits are enforced in the step task, not here.
  *
  * Tracking updates (opened, replied, bounced) are handled by the
  * webhook handlers — NOT in the sweep.
@@ -46,7 +45,7 @@ export const sequenceSweep = schedules.task({
       .eq("sequences.status", "active")
       .lte("next_step_at", now.toISOString())
       .order("next_step_at", { ascending: true })
-      .limit(2);
+      .limit(10);
 
     if (error) {
       logger.error("Error fetching enrollments", { error });
