@@ -1,11 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -13,10 +19,10 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
-  UserCheck, Target, Send, Loader2, MoreVertical,
+  UserCheck, Target, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare,
+  PenSquare, Plus, ChevronsUpDown,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
@@ -36,6 +42,8 @@ interface InboxThread {
   contact_name: string | null;
   send_out_id: string | null;
   account_id: string | null;
+  external_conversation_id: string | null;
+  integration_account_id: string | null;
 }
 
 interface Message {
@@ -142,13 +150,697 @@ function ThreadItem({
   );
 }
 
+// ---------- Create Person Dialog ----------
+function CreatePersonDialog({
+  open,
+  onOpenChange,
+  threadId,
+  defaultType,
+  prefill,
+  channel,
+  externalConversationId,
+  integrationAccountId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  threadId: string;
+  defaultType: 'candidate' | 'contact';
+  prefill: { name: string; address: string };
+  channel: string;
+  externalConversationId?: string | null;
+  integrationAccountId?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [type, setType] = useState<'candidate' | 'contact'>(defaultType);
+  const nameParts = prefill.name.split(' ');
+  const isEmail = prefill.address.includes('@');
+  const [form, setForm] = useState({
+    first_name: nameParts[0] || '',
+    last_name: nameParts.slice(1).join(' ') || '',
+    email: isEmail ? prefill.address : '',
+    phone: '',
+    linkedin_url: channel === 'linkedin' ? prefill.address : '',
+    title: '',
+    company: '',
+    location: '',
+  });
+  const [creating, setCreating] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const resolvedRef = useRef(false);
+  const [dbMatches, setDbMatches] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const dbSearchedRef = useRef(false);
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const [minDelayDone, setMinDelayDone] = useState(false);
+
+  // Show processing phase for at least 800ms so user sees the steps
+  useEffect(() => {
+    if (!open) { setMinDelayDone(false); return; }
+    const timer = setTimeout(() => setMinDelayDone(true), 800);
+    return () => clearTimeout(timer);
+  }, [open]);
+
+  // Fetch companies for autocomplete
+  const { data: companies = [] } = useQuery({
+    queryKey: ['companies_autocomplete'],
+    queryFn: async () => {
+      const { data } = await supabase.from('companies').select('id, name').order('name');
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Helper: run Unipile profile resolution given a LinkedIn slug or provider ID
+  const resolveUnipileProfile = async (slug: string) => {
+    if (!slug || resolvedRef.current) return;
+    resolvedRef.current = true;
+    setResolving(true);
+
+    try {
+      const urlMatch = slug.match(/linkedin\.com\/in\/([^/?#]+)/);
+      const identifier = urlMatch ? urlMatch[1] : slug;
+
+      const { data: accounts } = await supabase
+        .from('integration_accounts')
+        .select('unipile_account_id')
+        .not('unipile_account_id', 'is', null)
+        .eq('is_active', true)
+        .limit(3);
+
+      const accountId = accounts?.[0]?.unipile_account_id;
+      if (!accountId) {
+        console.warn('No active Unipile account found — skipping profile resolution');
+        return;
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+        body: JSON.stringify({ linkedin_slug: identifier, account_id: accountId }),
+      });
+
+      if (resp.ok) {
+        const profile = await resp.json();
+
+        const { data: unipileCfg } = await supabase
+          .from('user_integrations')
+          .select('config')
+          .eq('integration_type', 'unipile')
+          .limit(1)
+          .maybeSingle();
+
+        const cfg = unipileCfg?.config as any;
+        let fullProfile: any = null;
+
+        if (cfg?.api_key && cfg?.base_url && (profile.unipile_id || identifier)) {
+          try {
+            const profileResp = await fetch(
+              `${cfg.base_url.replace(/\/+$/, '')}/api/v1/users/${profile.unipile_id || identifier}` +
+              (accountId ? `?account_id=${accountId}` : ''),
+              {
+                headers: {
+                  'X-API-KEY': cfg.api_key,
+                  'Accept': 'application/json',
+                },
+              }
+            );
+            if (profileResp.ok) {
+              fullProfile = await profileResp.json();
+            }
+          } catch (e) {
+            console.warn('Full profile fetch failed:', e);
+          }
+        }
+
+        setForm(prev => ({
+          ...prev,
+          first_name: fullProfile?.first_name || profile.name?.split(' ')[0] || prev.first_name,
+          last_name: fullProfile?.last_name || profile.name?.split(' ').slice(1).join(' ') || prev.last_name,
+          title: fullProfile?.headline || fullProfile?.title || fullProfile?.current_title || prev.title,
+          company: fullProfile?.company || fullProfile?.current_company || fullProfile?.company_name || prev.company,
+          location: fullProfile?.location || fullProfile?.region || prev.location,
+          linkedin_url: fullProfile?.public_profile_url || fullProfile?.linkedin_url || (identifier.startsWith('http') ? identifier : `https://linkedin.com/in/${identifier}`),
+          email: fullProfile?.email || prev.email,
+          phone: fullProfile?.phone || fullProfile?.phone_number || prev.phone,
+        }));
+      }
+    } catch (err) {
+      console.warn('Unipile profile resolution failed:', err);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  // For LinkedIn channels: resolve profile when dialog opens
+  useEffect(() => {
+    if (!open || channel !== 'linkedin') return;
+
+    if (prefill.address) {
+      resolveUnipileProfile(prefill.address);
+      return;
+    }
+
+    if (!externalConversationId) return;
+
+    (async () => {
+      setResolving(true);
+      try {
+        const { data: unipileCfg } = await supabase
+          .from('user_integrations')
+          .select('config')
+          .eq('integration_type', 'unipile')
+          .limit(1)
+          .maybeSingle();
+        const cfg = unipileCfg?.config as any;
+        if (!cfg?.api_key || !cfg?.base_url) return;
+
+        let accountId: string | null = null;
+        if (integrationAccountId) {
+          const { data: ia } = await supabase
+            .from('integration_accounts')
+            .select('unipile_account_id')
+            .eq('id', integrationAccountId)
+            .maybeSingle();
+          accountId = ia?.unipile_account_id || null;
+        }
+        if (!accountId) {
+          const { data: accounts } = await supabase
+            .from('integration_accounts')
+            .select('unipile_account_id')
+            .not('unipile_account_id', 'is', null)
+            .eq('is_active', true)
+            .limit(1);
+          accountId = accounts?.[0]?.unipile_account_id || null;
+        }
+        if (!accountId) return;
+
+        const chatResp = await fetch(
+          `${cfg.base_url.replace(/\/+$/, '')}/chats/${externalConversationId}`,
+          { headers: { 'X-API-KEY': cfg.api_key, Accept: 'application/json' } },
+        );
+        if (!chatResp.ok) return;
+        const chatData = await chatResp.json();
+
+        const attendees = chatData.attendees || chatData.participants || [];
+        const other = attendees.find((a: any) =>
+          a.provider_id !== accountId && a.id !== accountId
+        ) || attendees[0];
+
+        if (other) {
+          const name = other.display_name || other.name || '';
+          const parts = name.split(' ');
+          setForm(prev => ({
+            ...prev,
+            first_name: parts[0] || prev.first_name,
+            last_name: parts.slice(1).join(' ') || prev.last_name,
+            linkedin_url: other.public_profile_url || other.linkedin_url || (other.provider_id ? `https://linkedin.com/in/${other.provider_id}` : prev.linkedin_url),
+            title: other.headline || other.title || prev.title,
+            company: other.company || prev.company,
+            location: other.location || prev.location,
+          }));
+
+          const profileId = other.provider_id || other.id;
+          if (profileId) {
+            resolveUnipileProfile(profileId);
+          }
+        }
+      } catch (err) {
+        console.warn('Chat attendee lookup failed:', err);
+      } finally {
+        if (!resolvedRef.current) setResolving(false);
+      }
+    })();
+  }, [open]);
+
+  // Auto-search database for existing matches when dialog opens
+  useEffect(() => {
+    if (!open || dbSearchedRef.current) return;
+    const name = prefill.name?.trim();
+    const address = prefill.address?.trim();
+
+    dbSearchedRef.current = true;
+    setSearching(true);
+
+    (async () => {
+      try {
+        const filters: string[] = [];
+        if (name) filters.push(`full_name.ilike.%${name}%`);
+        if (address && address.includes('@')) filters.push(`email.ilike.%${address}%`);
+        const orFilter = filters.join(',');
+        if (!orFilter) {
+          setSearching(false);
+          return;
+        }
+
+        const [cRes, ctRes] = await Promise.all([
+          supabase.from('candidates').select('id, full_name, email, current_title, current_company, phone, linkedin_url, location').or(orFilter).limit(3),
+          supabase.from('contacts').select('id, full_name, email, title, phone, linkedin_url').or(orFilter).limit(3),
+        ]);
+
+        const results = [
+          ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' as const })),
+          ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' as const })),
+        ];
+        setDbMatches(results);
+
+        if (results.length > 0) {
+          const best = results[0];
+          setForm(prev => ({
+            ...prev,
+            first_name: best.full_name?.split(' ')[0] || prev.first_name,
+            last_name: best.full_name?.split(' ').slice(1).join(' ') || prev.last_name,
+            email: best.email || prev.email,
+            phone: best.phone || prev.phone,
+            linkedin_url: best.linkedin_url || prev.linkedin_url,
+            title: (best as any).current_title || (best as any).title || prev.title,
+            company: (best as any).current_company || prev.company,
+            location: (best as any).location || prev.location,
+          }));
+
+          if (channel !== 'linkedin' && best.linkedin_url) {
+            resolveUnipileProfile(best.linkedin_url);
+          }
+        }
+      } catch (err) {
+        console.warn('DB match search failed:', err);
+      } finally {
+        setSearching(false);
+      }
+    })();
+  }, [open, prefill.name, prefill.address]);
+
+  // Reset form when dialog opens with new prefill
+  const resetForm = () => {
+    const parts = prefill.name.split(' ');
+    const emailAddr = prefill.address.includes('@');
+    resolvedRef.current = false;
+    dbSearchedRef.current = false;
+    setDbMatches([]);
+    setForm({
+      first_name: parts[0] || '',
+      last_name: parts.slice(1).join(' ') || '',
+      email: emailAddr ? prefill.address : '',
+      phone: '',
+      linkedin_url: channel === 'linkedin' ? prefill.address : '',
+      title: '',
+      company: '',
+      location: '',
+    });
+    setType(defaultType);
+    setCompanyId(null);
+    setMinDelayDone(false);
+  };
+
+  // Link conversation to an existing record instead of creating new
+  const handleLinkExisting = async (entityType: string, entityId: string, entityName: string) => {
+    setLinking(true);
+    try {
+      const update: any = {};
+      if (entityType === 'candidate') update.candidate_id = entityId;
+      if (entityType === 'contact') update.contact_id = entityId;
+
+      const { error } = await supabase.from('conversations').update(update).eq('id', threadId);
+      if (error) throw error;
+
+      const msgUpdate: any = {};
+      if (entityType === 'candidate') msgUpdate.candidate_id = entityId;
+      if (entityType === 'contact') msgUpdate.contact_id = entityId;
+      await supabase.from('messages').update(msgUpdate).eq('conversation_id', threadId).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
+
+      toast.success(`Linked to ${entityName}`);
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error('Failed to link: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!form.first_name.trim() && !form.last_name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    setCreating(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+
+      if (type === 'candidate') {
+        const { data: newRecord, error } = await supabase.from('candidates').insert({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
+          email: form.email.trim() || null,
+          phone: form.phone.trim() || null,
+          linkedin_url: form.linkedin_url.trim() || null,
+          current_title: form.title.trim() || null,
+          current_company: form.company.trim() || null,
+          location: form.location.trim() || null,
+          status: 'new',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        const { error: linkErr } = await supabase.from('conversations').update({ candidate_id: newRecord.id } as any).eq('id', threadId);
+        if (linkErr) throw linkErr;
+
+        await supabase.from('messages').update({ candidate_id: newRecord.id } as any).eq('conversation_id', threadId).is('candidate_id', null);
+
+        toast.success(`Candidate "${newRecord.full_name || form.first_name}" created & linked`);
+      } else {
+        const { data: newRecord, error } = await supabase.from('contacts').insert({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
+          email: form.email.trim() || null,
+          phone: form.phone.trim() || null,
+          linkedin_url: form.linkedin_url.trim() || null,
+          title: form.title.trim() || null,
+          company_id: companyId || null,
+          company_name: form.company.trim() || null,
+          location: form.location.trim() || null,
+          status: 'active',
+          owner_id: userId,
+        } as any).select('id, full_name').single();
+        if (error) throw error;
+
+        const { error: linkErr } = await supabase.from('conversations').update({ contact_id: newRecord.id } as any).eq('id', threadId);
+        if (linkErr) throw linkErr;
+
+        await supabase.from('messages').update({ contact_id: newRecord.id } as any).eq('conversation_id', threadId).is('contact_id', null);
+
+        toast.success(`Contact "${newRecord.full_name || form.first_name}" created & linked`);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create record');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const isProcessing = searching || resolving || !minDelayDone;
+  const isReady = !isProcessing;
+
+  const processingSteps = [
+    { label: 'Searching database for existing records', done: !searching, active: searching },
+    ...(channel === 'linkedin' ? [{ label: 'Pulling LinkedIn profile via Unipile', done: !resolving && resolvedRef.current, active: resolving }] : []),
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            Add New {type === 'candidate' ? 'Candidate' : 'Contact'}
+          </DialogTitle>
+          <DialogDescription>
+            {isProcessing
+              ? 'Looking up this person — hang tight...'
+              : 'Review the details below and edit anything before saving.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Phase 1: Processing */}
+        {isProcessing && (
+          <div className="py-8 space-y-4">
+            <div className="flex justify-center">
+              <div className="relative">
+                <Loader2 className="h-10 w-10 animate-spin text-accent" />
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              {processingSteps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2.5 px-2">
+                  {step.active ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-accent shrink-0" />
+                  ) : step.done ? (
+                    <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                  ) : (
+                    <div className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                  )}
+                  <span className={cn('text-sm', step.active ? 'text-foreground' : step.done ? 'text-muted-foreground' : 'text-muted-foreground/50')}>
+                    {step.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 2: Review & Edit */}
+        {isReady && (
+          <>
+            {/* Existing match banner */}
+            {dbMatches.length > 0 && (
+              <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-warning shrink-0" />
+                  <p className="text-xs font-medium text-warning">
+                    {dbMatches.length === 1 ? 'Possible match found — link instead?' : `${dbMatches.length} possible matches — link instead?`}
+                  </p>
+                </div>
+                {dbMatches.slice(0, 3).map((match) => (
+                  <div key={match.id + match.entity_type} className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+                    {match.entity_type === 'candidate'
+                      ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                      : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{match.full_name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate capitalize">
+                        {match.entity_type} · {match.current_title || match.title || match.email || ''}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[10px] gap-1 shrink-0"
+                      disabled={linking}
+                      onClick={() => handleLinkExisting(match.entity_type, match.id, match.full_name)}
+                    >
+                      {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <LinkIcon className="h-3 w-3" />}
+                      Link
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-4 py-2">
+              {/* Type toggle */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setType('candidate')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                    type === 'candidate'
+                      ? 'bg-success/10 text-success border-success/30'
+                      : 'border-border text-muted-foreground hover:border-success/30 hover:text-foreground'
+                  )}
+                >
+                  <UserCheck className="h-4 w-4" />
+                  Candidate
+                </button>
+                <button
+                  onClick={() => setType('contact')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+                    type === 'contact'
+                      ? 'bg-info/10 text-info border-info/30'
+                      : 'border-border text-muted-foreground hover:border-info/30 hover:text-foreground'
+                  )}
+                >
+                  <Users className="h-4 w-4" />
+                  Contact
+                </button>
+              </div>
+
+              {/* Form fields */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">First Name</Label>
+                  <Input
+                    value={form.first_name}
+                    onChange={(e) => setForm(f => ({ ...f, first_name: e.target.value }))}
+                    placeholder="First name"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Last Name</Label>
+                  <Input
+                    value={form.last_name}
+                    onChange={(e) => setForm(f => ({ ...f, last_name: e.target.value }))}
+                    placeholder="Last name"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Email</Label>
+                  <Input
+                    value={form.email}
+                    onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="email@example.com"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Phone</Label>
+                  <Input
+                    value={form.phone}
+                    onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="Phone number"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">{type === 'candidate' ? 'Current Title' : 'Job Title'}</Label>
+                <Input
+                  value={form.title}
+                  onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="Job title"
+                  className="h-9"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{type === 'candidate' ? 'Current Company' : 'Company'}</Label>
+                  <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={companyOpen}
+                        className="h-9 w-full justify-between font-normal text-sm"
+                      >
+                        <span className={cn('truncate', !form.company && 'text-muted-foreground')}>
+                          {form.company || 'Search companies...'}
+                        </span>
+                        <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[240px] p-0" align="start">
+                      <Command>
+                        <CommandInput
+                          placeholder="Type to search..."
+                          value={form.company}
+                          onValueChange={(v) => {
+                            setForm(f => ({ ...f, company: v }));
+                            setCompanyId(null);
+                          }}
+                        />
+                        <CommandList>
+                          <CommandEmpty>
+                            {form.company.trim() ? (
+                              <button
+                                className="w-full px-2 py-1.5 text-xs text-left text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  setCompanyId(null);
+                                  setCompanyOpen(false);
+                                }}
+                              >
+                                Use "{form.company}" as new company
+                              </button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No companies found</span>
+                            )}
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {companies
+                              .filter((c: any) => c.name?.toLowerCase().includes((form.company || '').toLowerCase()))
+                              .slice(0, 8)
+                              .map((c: any) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.name}
+                                  onSelect={() => {
+                                    setForm(f => ({ ...f, company: c.name }));
+                                    setCompanyId(c.id);
+                                    setCompanyOpen(false);
+                                  }}
+                                >
+                                  <Building className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                                  {c.name}
+                                  {companyId === c.id && <Check className="ml-auto h-3.5 w-3.5 text-success" />}
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Location</Label>
+                  <Input
+                    value={form.location}
+                    onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))}
+                    placeholder="City, State"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">LinkedIn URL</Label>
+                <Input
+                  value={form.linkedin_url}
+                  onChange={(e) => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+                  placeholder="https://linkedin.com/in/..."
+                  className="h-9"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button
+                variant="gold"
+                onClick={handleCreate}
+                disabled={creating || (!form.first_name.trim() && !form.last_name.trim())}
+                className="gap-1.5"
+              >
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Create & Link
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---------- Entity Info Panel ----------
-function EntityPanel({ thread }: { thread: InboxThread | null }) {
+function EntityPanel({ thread, messages }: { thread: InboxThread | null; messages: Message[] }) {
   const queryClient = useQueryClient();
   const [linkSearch, setLinkSearch] = useState('');
   const [linkResults, setLinkResults] = useState<any[]>([]);
   const [linkSearching, setLinkSearching] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createType, setCreateType] = useState<'candidate' | 'contact'>('candidate');
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -180,13 +872,18 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     },
   });
 
+  // Extract sender info from inbound messages for pre-filling create forms
+  const firstInbound = messages.find(m => m.direction === 'inbound');
+  const senderName = firstInbound?.sender_name || thread?.candidate_name || thread?.contact_name || '';
+  const senderAddress = firstInbound?.sender_address || '';
+
   const handleSearch = async () => {
     if (!linkSearch.trim()) return;
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').ilike('full_name', `%${q}%`).limit(5),
-      supabase.from('contacts').select('id, full_name, email, title').ilike('full_name', `%${q}%`).limit(5),
+      supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     const results = [
       ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
@@ -207,6 +904,8 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     if (error) {
       toast.error('Failed to link: ' + error.message);
     } else {
+      // Backfill messages in this conversation
+      await supabase.from('messages').update(update).eq('conversation_id', thread.id).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
       toast.success(`Linked to ${entityName}`);
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
       queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
@@ -226,7 +925,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="p-5 border-b border-border">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-          Linked Record
+          {isLinked ? 'Linked Record' : 'Link or Add Record'}
         </h3>
 
         {isLinked && entity ? (
@@ -312,22 +1011,31 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
           <div className="space-y-3">
             <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-              <p className="text-xs text-warning leading-relaxed">
-                This conversation is not linked to any record. Search to link it manually.
-              </p>
+              <div>
+                <p className="text-xs font-medium text-warning">Unlinked conversation</p>
+                <p className="text-[10px] text-warning/80 mt-0.5">
+                  {senderName ? `From: ${senderName}` : 'Unknown sender'} via {CHANNEL_LABELS[thread.channel] || thread.channel}
+                </p>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search name..."
-                value={linkSearch}
-                onChange={(e) => setLinkSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="h-8 text-xs"
-              />
-              <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
-                {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              </Button>
+
+            {/* Search existing records */}
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Search existing</p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Search name or email..."
+                  value={linkSearch}
+                  onChange={(e) => setLinkSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" variant="outline" onClick={handleSearch} disabled={linkSearching} className="h-8 px-2">
+                  {linkSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
             </div>
+
             {linkResults.length > 0 && (
               <div className="rounded-lg border border-border overflow-hidden">
                 {linkResults.map((r) => (
@@ -343,7 +1051,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                       <p className="text-[10px] text-muted-foreground truncate capitalize">
-                        {r.entity_type} · {r.current_title || r.title || ''}
+                        {r.entity_type} · {r.current_title || r.title || r.email || ''}
                       </p>
                     </div>
                     <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -351,6 +1059,34 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
                 ))}
               </div>
             )}
+
+            {/* Divider + Create New */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[10px] text-muted-foreground">or create new</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateType('candidate'); setCreateOpen(true); }}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-success" />
+                Add Candidate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateType('contact'); setCreateOpen(true); }}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-info" />
+                Add Contact
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -371,6 +1107,18 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
           </div>
         </div>
       )}
+
+      {/* Create Person Dialog */}
+      <CreatePersonDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        threadId={thread.id}
+        defaultType={createType}
+        prefill={{ name: senderName, address: senderAddress }}
+        channel={thread.channel}
+        externalConversationId={thread.external_conversation_id}
+        integrationAccountId={thread.integration_account_id}
+      />
     </div>
   );
 }
@@ -621,7 +1369,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       {/* Entity side panel */}
       {showEntity && (
         <div className="w-72 border-l border-border overflow-hidden">
-          <EntityPanel thread={thread} />
+          <EntityPanel thread={thread} messages={messages} />
         </div>
       )}
     </div>
