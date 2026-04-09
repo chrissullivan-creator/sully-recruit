@@ -105,3 +105,26 @@ CREATE TRIGGER trg_set_sendout_timestamps
   BEFORE UPDATE ON public.send_outs
   FOR EACH ROW
   EXECUTE FUNCTION public.set_sendout_stage_timestamps();
+
+
+-- Rule 4: Sync candidate.job_status when send_out stage changes
+-- Keeps the denormalized field on candidates in sync with the latest send_out
+CREATE OR REPLACE FUNCTION public.sync_candidate_job_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE public.candidates
+  SET job_status = NEW.stage
+  WHERE id = NEW.candidate_id;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_candidate_job_status ON public.send_outs;
+CREATE TRIGGER trg_sync_candidate_job_status
+  AFTER INSERT OR UPDATE OF stage ON public.send_outs
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_candidate_job_status();
