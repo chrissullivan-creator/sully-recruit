@@ -320,7 +320,7 @@ export const CampaignStepItem = ({ step, index, allSteps, accounts, onUpdate, on
 
           {/* LinkedIn message without prior connection warning */}
           {step.channel === 'linkedin_message' && !allSteps.slice(0, index).some(s => s.channel === 'linkedin_connection') && (
-            <div className="flex items-center gap-2 rounded-md border border-[#C9A86A]/30 bg-[#C9A86A]/10 px-3 py-2 text-xs text-[#9A7B3F]">
+            <div className="flex items-center gap-2 rounded-md border border-[#C9A84C]/30 bg-[#C9A84C]/10 px-3 py-2 text-xs text-[#92722A]">
               <span>⚠️</span>
               <span>No connection request step found before this message. Add one or this step will be skipped for non-connections.</span>
             </div>

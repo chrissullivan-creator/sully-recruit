@@ -17,43 +17,43 @@
     --card-foreground: 124 55% 24%;
 
     --popover: 124 55% 24%;
-    --popover-foreground: 38 41% 60%;
+    --popover-foreground: 46 65% 52%;
 
     /* Deep forest green primary */
-    --primary: 38 41% 60%;
+    --primary: 46 65% 52%;
     --primary-foreground: 124 55% 24%;
 
     /* Slightly lighter green for secondary surfaces */
-    --secondary: 38 41% 60%;
+    --secondary: 46 65% 52%;
     --secondary-foreground: 0 0% 100%;
 
     /* Muted dark green tones */
-    --muted: 38 41% 60%;
+    --muted: 46 65% 52%;
     --muted-foreground: 124 54% 24%;
 
     /* Burnished gold accent */
-    --accent: 38 41% 60%;
+    --accent: 46 65% 52%;
     --accent-foreground: 124 54% 24%;
 
-    --destructive: 38 41% 60%; /* TODO: destructive should be a red hue, not gold — fix separately */
+    --destructive: 46 65% 52%; /* TODO: destructive should be a red hue, not gold — fix separately */
     --destructive-foreground: 0 0% 100%;
 
     /* Subtle green-tinted borders */
     --border: 124 55% 24%;
-    --input: 38 41% 60%;
+    --input: 46 65% 52%;
     --ring: 257 4% 70.4%;
 
     --radius: 0.375rem;
 
     /* Sidebar - dark green with gold text */
     --sidebar-background: 148 76% 18%;
-    --sidebar-foreground: 38 41% 60%;
-    --sidebar-primary: 38 41% 60%;
+    --sidebar-foreground: 46 65% 52%;
+    --sidebar-primary: 46 65% 52%;
     --sidebar-primary-foreground: 148 76% 18%;
-    --sidebar-accent: 38 41% 60% / 0.15;
-    --sidebar-accent-foreground: 38 58% 73%;
+    --sidebar-accent: 46 65% 52% / 0.15;
+    --sidebar-accent-foreground: 43 70% 60%;
     --sidebar-border: 148 50% 12%;
-    --sidebar-ring: 38 41% 60%;
+    --sidebar-ring: 46 65% 52%;
 
     /* Extended palette for status and pipelines */
     --success: 142 71% 45%;
@@ -73,7 +73,7 @@
     --stage-hold: 40 15% 50%;
 
     /* Gold gradient for premium elements */
-    --gradient-gold: linear-gradient(135deg, hsl(38 58% 73%), hsl(38 42% 42%));
+    --gradient-gold: linear-gradient(135deg, hsl(43 55% 55%), hsl(38 60% 45%));
     --gradient-dark: linear-gradient(180deg, hsl(150 25% 12%), hsl(150 28% 7%));
     --chart-1: 41 22.2% 64.6%;
     --chart-2: 185 11.8% 60%;
@@ -104,7 +104,7 @@
     --background: 0 0% 15%;
     --foreground: 248 0.3% 98.4%;
     --card: 266 4% 20.8%;
-    --card-foreground: 38 41% 60%;
+    --card-foreground: 46 65% 52%;
     --popover: 266 4% 20.8%;
     --popover-foreground: 248 0.3% 98.4%;
     --primary: 256 1.3% 92.9%;
@@ -185,7 +185,7 @@
     background: hsl(148 76% 18%);
   }
   thead.table-header-green th {
-    color: hsl(38 41% 60%);
+    color: hsl(43 55% 55%);
   }
 
   /* Card with subtle gradient */
@@ -266,7 +266,7 @@
 @layer utilities {
   /* Gold gradient text */
   .gradient-gold-text {
-    background: linear-gradient(135deg, hsl(38 58% 73%), hsl(38 42% 42%));
+    background: linear-gradient(135deg, hsl(43 55% 55%), hsl(38 70% 50%));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -274,7 +274,7 @@
 
   /* Glow effect for important elements */
   .glow-gold {
-    box-shadow: 0 0 20px hsl(38 41% 60% / 0.15);
+    box-shadow: 0 0 20px hsl(46 65% 52% / 0.15);
   }
 
   /* Glass effect for overlays */

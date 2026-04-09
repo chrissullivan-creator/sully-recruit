@@ -85,7 +85,7 @@ const CHANNEL_COLORS: Record<string, string> = {
   linkedin: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   sms: 'bg-success/10 text-success',
   phone: 'bg-accent/10 text-accent',
-  call: 'bg-[#C9A86A]/10 text-[#C9A86A]',
+  call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
 };
 
 // ---------- Thread Item ----------
@@ -1527,7 +1527,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
                       {isOutbound && (
                         <div className="w-7 shrink-0">
                           {!sameSenderAsPrev ? (
-                            <div className="h-7 w-7 rounded-full bg-[#C9A86A] flex items-center justify-center">
+                            <div className="h-7 w-7 rounded-full bg-[#C9A84C] flex items-center justify-center">
                               <span className="text-[10px] font-bold text-white">{outboundInitials}</span>
                             </div>
                           ) : <div className="h-7" />}

@@ -495,7 +495,7 @@ const JobDetail = () => {
                 <span className="text-muted-foreground">Status</span>
                 <div className="mt-1"><Badge variant="secondary" className={cn(
                   job.status === 'lead' && 'bg-gray-100 text-gray-600',
-                  job.status === 'hot' && 'bg-[#C9A86A]/10 text-[#C9A86A]',
+                  job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
                   job.status === 'closed_won' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
                   job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
                 )}>{STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}</Badge></div>
