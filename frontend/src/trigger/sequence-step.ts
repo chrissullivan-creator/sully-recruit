@@ -193,7 +193,8 @@ export const processSequenceStep = task({
     }
 
     // ── 6. RATE LIMIT CHECK ─────────────────────────────────────────
-    const sendStart = step.send_window_start ?? (entityType === "contact" ? 10 : 10);
+    const channelDefault = CHANNEL_SEND_WINDOWS[stepChannel] ?? { start: 10, end: 22 };
+    const sendStart = step.send_window_start != null ? step.send_window_start + 4 : channelDefault.start;
     const rateResult = await checkRateLimit(
       supabase, stepChannel, payload.enrolledBy, now, sendStart,
     );
@@ -646,6 +647,8 @@ Use "do_not_contact" if they explicitly ask to be removed from all outreach.`,
 
 /**
  * Check whether the current time is within the channel's send window.
+ * Per-step overrides from the DB are stored in EST; convert to UTC (+4) before comparing.
+ * Channel defaults in CHANNEL_SEND_WINDOWS are already in UTC.
  */
 function checkSendWindow(
   step: any,
@@ -657,8 +660,9 @@ function checkSendWindow(
   const currentTime = currentHour + currentMinute / 60;
 
   const channelWindow = CHANNEL_SEND_WINDOWS[stepChannel] ?? { start: 10, end: 22 };
-  const sendStart = step.send_window_start ?? channelWindow.start;
-  const sendEnd = step.send_window_end ?? channelWindow.end;
+  // Per-step values are in EST → add 4 to convert to UTC
+  const sendStart = step.send_window_start != null ? step.send_window_start + 4 : channelWindow.start;
+  const sendEnd = step.send_window_end != null ? step.send_window_end + 4 : channelWindow.end;
 
   let inWindow: boolean;
   if (sendEnd > 24) {
