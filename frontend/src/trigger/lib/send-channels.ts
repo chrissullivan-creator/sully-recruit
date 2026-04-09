@@ -276,7 +276,7 @@ async function getUnipileApiKey(
       .from("integration_accounts")
       .select("id, unipile_account_id")
       .eq("owner_user_id", userId)
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .limit(1);
@@ -290,7 +290,7 @@ async function getUnipileApiKey(
   const { data: accounts } = await supabase
     .from("integration_accounts")
     .select("id, unipile_account_id")
-    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
     .eq("is_active", true)
     .not("unipile_account_id", "is", null)
     .limit(1);
@@ -350,7 +350,7 @@ export async function sendLinkedIn(
     const match = to.match(/linkedin\.com\/in\/([^/?#]+)/);
     if (match) {
       const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
-        headers: { Authorization: `Bearer ${apiKey}`, "X-UNIPILE-CLIENT": "sully-recruit" },
+        headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       });
       if (lookupResp.ok) {
         const userData = await lookupResp.json();
@@ -380,9 +380,9 @@ export async function sendLinkedIn(
     const response = await fetch(`${baseUrl}/users/invite`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "X-API-KEY": apiKey,
         "Content-Type": "application/json",
-        "X-UNIPILE-CLIENT": "sully-recruit",
+        Accept: "application/json",
       },
       body: JSON.stringify(invitePayload),
     });
@@ -403,9 +403,9 @@ export async function sendLinkedIn(
   const response = await fetch(`${baseUrl}/messages`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      "X-API-KEY": apiKey,
       "Content-Type": "application/json",
-      "X-UNIPILE-CLIENT": "sully-recruit",
+      Accept: "application/json",
     },
     body: JSON.stringify(sendPayload),
   });
@@ -476,7 +476,7 @@ export async function resolveRecipient(
   const baseUrl = await getUnipileBaseUrl();
 
   const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
-    headers: { Authorization: `Bearer ${apiKey}`, "X-UNIPILE-CLIENT": "sully-recruit" },
+    headers: { "X-API-KEY": apiKey, Accept: "application/json" },
   });
 
   if (!lookupResp.ok) throw new Error(`Unipile lookup failed for ${match[1]}: ${lookupResp.status}`);
