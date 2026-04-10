@@ -617,6 +617,7 @@ export type Database = {
       }
       messages: {
         Row: {
+          attachments: Json
           body: string | null
           candidate_id: string
           channel: string
@@ -640,6 +641,7 @@ export type Database = {
           subject: string | null
         }
         Insert: {
+          attachments?: Json
           body?: string | null
           candidate_id: string
           channel: string
@@ -663,6 +665,7 @@ export type Database = {
           subject?: string | null
         }
         Update: {
+          attachments?: Json
           body?: string | null
           candidate_id?: string
           channel?: string
@@ -1393,18 +1396,27 @@ export type Database = {
       inbox_threads: {
         Row: {
           account_id: string | null
+          assigned_user_id: string | null
           candidate_id: string | null
           candidate_name: string | null
           channel: string | null
           contact_id: string | null
           contact_name: string | null
+          created_at: string | null
+          external_conversation_id: string | null
           id: string | null
+          integration_account_id: string | null
           is_archived: boolean | null
           is_read: boolean | null
+          last_inbound_at: string | null
+          last_inbound_preview: string | null
           last_message_at: string | null
           last_message_preview: string | null
+          owner_id: string | null
           send_out_id: string | null
+          sort_at: string | null
           subject: string | null
+          updated_at: string | null
         }
         Relationships: [
           {

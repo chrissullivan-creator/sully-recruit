@@ -68,7 +68,7 @@ export const processMicrosoftEvent = task({
 
     // Route based on resource type
     if (notification.resource?.includes("/messages")) {
-      return await processEmailMessage(supabase, resourceData, payload.receivedAt);
+      return await processEmailMessage(supabase, resourceData, payload.receivedAt, resourceUrl, accessToken);
     }
 
     if (notification.resource?.includes("/events")) {
@@ -80,7 +80,86 @@ export const processMicrosoftEvent = task({
   },
 });
 
-async function processEmailMessage(supabase: any, message: any, receivedAt: string) {
+const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB — skip anything larger
+
+/**
+ * Fetch file attachments for a Graph message, upload them to Supabase Storage,
+ * and return the metadata array to be persisted on the message row.
+ */
+async function fetchAndUploadAttachments(
+  supabase: any,
+  resourceUrl: string,
+  accessToken: string,
+  conversationId: string,
+  externalId: string,
+): Promise<Array<{ name: string; storage_path: string; mime_type: string | null; size: number | null }>> {
+  let attachments: any[];
+  try {
+    const resp = await fetch(`${resourceUrl}/attachments`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resp.ok) {
+      logger.warn("Could not fetch Graph attachments", { status: resp.status });
+      return [];
+    }
+    const json = await resp.json();
+    attachments = json.value || [];
+  } catch (err: any) {
+    logger.warn("Error fetching Graph attachments", { error: err.message });
+    return [];
+  }
+
+  const result: Array<{ name: string; storage_path: string; mime_type: string | null; size: number | null }> = [];
+
+  for (const att of attachments) {
+    // Only handle file attachments (not item-attachments / reference-attachments)
+    if (att["@odata.type"] !== "#microsoft.graph.fileAttachment") continue;
+    if (!att.contentBytes || !att.name) continue;
+    if (att.size && att.size > MAX_ATTACHMENT_BYTES) {
+      logger.warn("Skipping oversized inbound attachment", { name: att.name, size: att.size });
+      continue;
+    }
+
+    // Decode base64 → Buffer (Node.js Buffer satisfies Uint8Array so Supabase Storage accepts it)
+    const fileBuffer = Buffer.from(att.contentBytes as string, "base64");
+
+    // Build a deterministic, safe storage path
+    const safeName = (att.name as string).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeExtId = (externalId || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+    const storagePath = `inbound/${conversationId}/${safeExtId}/${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(MESSAGE_ATTACHMENTS_BUCKET)
+      .upload(storagePath, fileBuffer, {
+        contentType: att.contentType || "application/octet-stream",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      logger.warn("Failed to upload inbound attachment", { name: att.name, error: uploadError.message });
+      continue;
+    }
+
+    result.push({
+      name: att.name as string,
+      storage_path: storagePath,
+      mime_type: att.contentType || null,
+      size: att.size || null,
+    });
+  }
+
+  logger.info("Inbound attachments uploaded", { conversationId, count: result.length });
+  return result;
+}
+
+async function processEmailMessage(
+  supabase: any,
+  message: any,
+  receivedAt: string,
+  resourceUrl: string,
+  accessToken: string,
+) {
   const senderEmail = message.from?.emailAddress?.address?.toLowerCase();
   if (!senderEmail) {
     return { action: "skipped", reason: "no_sender_email" };
@@ -189,6 +268,11 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
     } as any);
   }
 
+  // Fetch and upload inbound file attachments (best-effort — never blocks message logging)
+  const attachmentsForDb = message.hasAttachments
+    ? await fetchAndUploadAttachments(supabase, resourceUrl, accessToken, conversationId, externalId || "")
+    : [];
+
   // Insert message
   await supabase.from("messages").insert({
     conversation_id: conversationId,
@@ -203,6 +287,7 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
     provider: "microsoft_graph",
     external_message_id: externalId,
     is_read: message.isRead || false,
+    attachments: attachmentsForDb,
   } as any);
 
   // Update conversation

@@ -16,7 +16,7 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare, Plus,
+  PenSquare, Plus, Paperclip, X as XIcon,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
@@ -26,12 +26,23 @@ import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
 // ---------- Types ----------
+interface MessageAttachment {
+  name: string;
+  url?: string | null;
+  storage_path?: string | null;
+  mime_type?: string | null;
+  size?: number | null;
+}
+
 interface InboxThread {
   id: string;
   channel: string;
   subject: string | null;
   last_message_at: string | null;
   last_message_preview: string | null;
+  last_inbound_at: string | null;
+  last_inbound_preview: string | null;
+  sort_at: string | null;
   is_read: boolean;
   is_archived: boolean;
   candidate_id: string | null;
@@ -59,6 +70,7 @@ interface Message {
   created_at: string;
   candidate_id: string;
   contact_id: string | null;
+  attachments: MessageAttachment[] | null;
 }
 
 // ---------- Constants ----------
@@ -97,6 +109,13 @@ function ThreadItem({
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
   const entityName = thread.candidate_name || thread.contact_name;
   const isLinked = !!(thread.candidate_id || thread.contact_id);
+  // Prefer the latest INBOUND message for the preview — sent messages should
+  // not "push" the conversation in the inbox. Fall back to last_message_* for
+  // conversations that do not yet have any received messages (e.g. outreach
+  // you initiated that has not been replied to).
+  const previewText = thread.last_inbound_preview ?? thread.last_message_preview;
+  const previewTime = thread.last_inbound_at ?? thread.last_message_at;
+  const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
 
   return (
     <button
@@ -124,8 +143,8 @@ function ThreadItem({
               {!thread.is_read && <Circle className="h-1.5 w-1.5 fill-accent text-accent shrink-0" />}
             </div>
             <span className="text-[10px] text-muted-foreground shrink-0">
-              {thread.last_message_at
-                ? formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: true })
+              {previewTime
+                ? formatDistanceToNow(new Date(previewTime), { addSuffix: true })
                 : ''}
             </span>
           </div>
@@ -134,7 +153,13 @@ function ThreadItem({
               {thread.subject}
             </p>
           )}
-          <p className="text-xs text-muted-foreground truncate">{thread.last_message_preview || '—'}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {awaitingReply ? (
+              <span className="italic opacity-70">Awaiting reply…</span>
+            ) : (
+              previewText || '—'
+            )}
+          </p>
           <div className="flex items-center gap-1.5 mt-1.5">
             <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
               {CHANNEL_LABELS[thread.channel] || thread.channel}
@@ -448,6 +473,96 @@ function getInitials(name: string | null | undefined): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+// ---------- Attachments ----------
+const MESSAGE_ATTACHMENTS_BUCKET = 'message-attachments';
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15 MB
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function resolveAttachmentUrl(att: MessageAttachment): Promise<string | null> {
+  if (att.url) return att.url;
+  if (!att.storage_path) return null;
+  const { data } = await supabase.storage
+    .from(MESSAGE_ATTACHMENTS_BUCKET)
+    .createSignedUrl(att.storage_path, 60 * 60); // 1 hour
+  return data?.signedUrl ?? null;
+}
+
+function MessageAttachmentList({
+  attachments,
+  isOutbound,
+}: {
+  attachments: MessageAttachment[] | null;
+  isOutbound: boolean;
+}) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className={cn('mt-2 flex flex-col gap-1.5', isOutbound ? 'items-end' : 'items-start')}>
+      {attachments.map((att, i) => (
+        <button
+          key={`${att.storage_path || att.url || att.name}-${i}`}
+          onClick={async (e) => {
+            e.stopPropagation();
+            const url = await resolveAttachmentUrl(att);
+            if (url) window.open(url, '_blank', 'noopener,noreferrer');
+            else toast.error('Could not resolve attachment URL');
+          }}
+          className={cn(
+            'flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left max-w-full transition-colors',
+            isOutbound
+              ? 'bg-white/10 hover:bg-white/20 text-white'
+              : 'bg-background/70 hover:bg-background text-foreground border border-border/60'
+          )}
+          title={att.name}
+        >
+          <Paperclip className="h-3.5 w-3.5 shrink-0 opacity-80" />
+          <span className="text-xs truncate max-w-[220px]">{att.name}</span>
+          {att.size ? (
+            <span className={cn('text-[10px] shrink-0', isOutbound ? 'text-white/60' : 'text-muted-foreground')}>
+              {formatBytes(att.size)}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+interface PendingAttachment {
+  id: string;
+  file: File;
+  storage_path?: string;
+  uploading: boolean;
+  error?: string;
+}
+
+async function uploadAttachment(
+  conversationId: string,
+  file: File
+): Promise<{ storage_path: string; name: string; size: number; mime_type: string }> {
+  const ext = file.name.split('.').pop() || 'bin';
+  const safeBase = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${conversationId}/${Date.now()}-${crypto.randomUUID()}-${safeBase}`;
+  const { error } = await supabase.storage
+    .from(MESSAGE_ATTACHMENTS_BUCKET)
+    .upload(path, file, {
+      contentType: file.type || `application/${ext}`,
+      upsert: false,
+    });
+  if (error) throw error;
+  return {
+    storage_path: path,
+    name: file.name,
+    size: file.size,
+    mime_type: file.type || 'application/octet-stream',
+  };
+}
+
 // ---------- Message Detail ----------
 function MessagePane({ threadId }: { threadId: string | null }) {
   const queryClient = useQueryClient();
@@ -456,8 +571,10 @@ function MessagePane({ threadId }: { threadId: string | null }) {
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
     enabled: !!threadId,
@@ -477,7 +594,8 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         .from('messages').select('*').eq('conversation_id', threadId!)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      return data as Message[];
+      // attachments is a JSONB column — cast through unknown to our typed shape.
+      return (data ?? []) as unknown as Message[];
     },
   });
 
@@ -495,10 +613,67 @@ function MessagePane({ threadId }: { threadId: string | null }) {
     queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
   };
 
+  const handlePickFiles = () => fileInputRef.current?.click();
+
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // reset so the same file can be picked again
+    if (!threadId || files.length === 0) return;
+
+    const accepted: PendingAttachment[] = [];
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(`${file.name} is too large (max 15 MB)`);
+        continue;
+      }
+      accepted.push({
+        id: crypto.randomUUID(),
+        file,
+        uploading: true,
+      });
+    }
+    if (accepted.length === 0) return;
+    setPendingAttachments((prev) => [...prev, ...accepted]);
+
+    await Promise.all(
+      accepted.map(async (pending) => {
+        try {
+          const uploaded = await uploadAttachment(threadId, pending.file);
+          setPendingAttachments((prev) =>
+            prev.map((p) =>
+              p.id === pending.id ? { ...p, uploading: false, storage_path: uploaded.storage_path } : p
+            )
+          );
+        } catch (err: any) {
+          console.error('Attachment upload error:', err);
+          setPendingAttachments((prev) =>
+            prev.map((p) =>
+              p.id === pending.id ? { ...p, uploading: false, error: err?.message || 'Upload failed' } : p
+            )
+          );
+          toast.error(`Failed to upload ${pending.file.name}`);
+        }
+      })
+    );
+  };
+
+  const removePendingAttachment = async (id: string) => {
+    const target = pendingAttachments.find((p) => p.id === id);
+    setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
+    if (target?.storage_path) {
+      await supabase.storage.from(MESSAGE_ATTACHMENTS_BUCKET).remove([target.storage_path]).catch(() => {});
+    }
+  };
+
   const handleSend = async () => {
     const html = replyHtml || editorRef.current?.innerHTML || '';
     const text = replyText || editorRef.current?.textContent || '';
-    if (!text.trim() || !threadId || !thread) return;
+    const hasAttachments = pendingAttachments.length > 0;
+    if ((!text.trim() && !hasAttachments) || !threadId || !thread) return;
+    if (pendingAttachments.some((p) => p.uploading)) {
+      toast.error('Please wait for attachments to finish uploading');
+      return;
+    }
     setSending(true);
     try {
       // Determine recipient address based on channel
@@ -562,6 +737,15 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         return;
       }
 
+      const attachmentsPayload = pendingAttachments
+        .filter((p) => !!p.storage_path && !p.error)
+        .map((p) => ({
+          name: p.file.name,
+          storage_path: p.storage_path!,
+          size: p.file.size,
+          mime_type: p.file.type || 'application/octet-stream',
+        }));
+
       const { data, error } = await supabase.functions.invoke('send-message', {
         body: {
           channel: thread.channel,
@@ -572,6 +756,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
           subject: thread.subject || undefined,
           body: thread.channel === 'email' ? html : text.trim(),
           account_id: sendAccountId || undefined,
+          attachments: attachmentsPayload.length > 0 ? attachmentsPayload : undefined,
         },
       });
 
@@ -581,6 +766,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       toast.success(`Message sent via ${CHANNEL_LABELS[thread.channel] || thread.channel}`);
       setReplyText('');
       setReplyHtml('');
+      setPendingAttachments([]);
       if (editorRef.current) editorRef.current.innerHTML = '';
       queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
@@ -785,6 +971,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
                               ? <div dangerouslySetInnerHTML={{ __html: displayBody }} className="prose prose-sm max-w-none [&_*]:text-inherit [&_a]:underline" />
                               : displayBody
                             : <span className="italic opacity-50">(No content)</span>}
+                          <MessageAttachmentList attachments={msg.attachments} isOutbound={isOutbound} />
                         </div>
 
                         {/* Sender + timestamp below bubble */}
@@ -827,6 +1014,39 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         {/* Reply — hidden for call channel */}
         {thread.channel !== 'call' && <div className="border-t border-border p-4">
           <div className="max-w-2xl mx-auto">
+            {/* Pending attachments */}
+            {pendingAttachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {pendingAttachments.map((p) => (
+                  <div
+                    key={p.id}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                      p.error
+                        ? 'border-destructive/50 bg-destructive/5 text-destructive'
+                        : 'border-border bg-muted/30 text-foreground'
+                    )}
+                  >
+                    {p.uploading ? (
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    ) : (
+                      <Paperclip className="h-3 w-3 shrink-0 opacity-70" />
+                    )}
+                    <span className="truncate max-w-[180px]" title={p.file.name}>{p.file.name}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatBytes(p.file.size)}
+                    </span>
+                    <button
+                      onClick={() => removePendingAttachment(p.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Remove"
+                    >
+                      <XIcon className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2 items-end">
               <div className="flex-1">
                 <RichTextEditor
@@ -851,10 +1071,31 @@ function MessagePane({ threadId }: { threadId: string | null }) {
                     setReplyText(tmp.textContent || '');
                   }}
                 />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFilesSelected}
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={handlePickFiles}
+                  disabled={sending}
+                  title="Attach files"
+                  className="h-[36px] w-[36px]"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
                 <Button
                   variant="gold"
                   onClick={handleSend}
-                  disabled={sending || !replyText.trim()}
+                  disabled={
+                    sending ||
+                    (!replyText.trim() && pendingAttachments.length === 0) ||
+                    pendingAttachments.some((p) => p.uploading)
+                  }
                   className="h-[40px] px-4"
                 >
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -944,7 +1185,9 @@ export default function Inbox() {
     queryFn: async () => {
       let query = supabase
         .from('inbox_threads').select('*')
-        .order('last_message_at', { ascending: false, nullsFirst: false });
+        // sort_at = COALESCE(last_inbound_at, last_message_at), so threads
+        // bubble up when a new inbound arrives, not when we reply.
+        .order('sort_at', { ascending: false, nullsFirst: false });
 
       // Non-admin: only show threads from this user's integration accounts
       if (!isAdmin && userId) {
@@ -976,6 +1219,7 @@ export default function Inbox() {
       return (
         t.subject?.toLowerCase().includes(q) ||
         t.last_message_preview?.toLowerCase().includes(q) ||
+        t.last_inbound_preview?.toLowerCase().includes(q) ||
         t.candidate_name?.toLowerCase().includes(q) ||
         t.contact_name?.toLowerCase().includes(q)
       );
