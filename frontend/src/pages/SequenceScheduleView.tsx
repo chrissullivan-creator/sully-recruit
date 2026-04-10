@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -149,9 +150,10 @@ export default function SequenceScheduleView() {
     toast.success("Send skipped");
   };
 
-  if (loading) return <div className="container mx-auto py-6">Loading...</div>;
+  if (loading) return <MainLayout><div className="container mx-auto py-6">Loading...</div></MainLayout>;
 
   return (
+    <MainLayout>
     <div className="container mx-auto py-6 space-y-6">
       <div className="flex items-center gap-4">
         <Link to={`/sequences/${id}/edit`}>
@@ -261,5 +263,6 @@ export default function SequenceScheduleView() {
           ))
       )}
     </div>
+    </MainLayout>
   );
 }

@@ -275,7 +275,7 @@ export const sequenceActionExecute = task({
 
 export const sequenceSweep = schedules.task({
   id: "sequence-sweep-v2",
-  cron: "*/3 * * * *", // every 3 minutes
+  cron: "*/3 10-17 * * *", // every 3 minutes, 10-17 UTC (5 AM - 12 PM EST)
   run: async () => {
     const supabase = getSupabaseAdmin();
     const now = new Date().toISOString();

@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
 import { FlowBuilder, type FlowNodeData, type FlowEdgeData } from "@/components/sequences/FlowBuilder";
@@ -158,53 +160,55 @@ export default function SequenceBuilder() {
   }, [saveSequence, navigate]);
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{isEdit ? "Edit Sequence" : "New Sequence"}</h1>
-      </div>
+    <MainLayout>
+      <div className="container mx-auto py-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">{isEdit ? "Edit Sequence" : "New Sequence"}</h1>
+        </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="setup">1. Setup</TabsTrigger>
           <TabsTrigger value="flow">2. Flow Builder</TabsTrigger>
           <TabsTrigger value="review">3. Review</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="setup" className="mt-4">
-          <div className="max-w-2xl">
-            <SequenceSetup data={setup} onChange={setSetup} />
-            <div className="mt-4 flex justify-end">
-              <Button onClick={() => setActiveTab("flow")}>
-                Next: Build Flow
-              </Button>
+          <TabsContent value="setup" className="mt-4">
+            <div className="max-w-2xl">
+              <SequenceSetup data={setup} onChange={setSetup} />
+              <div className="mt-4 flex justify-end">
+                <Button onClick={() => setActiveTab("flow")}>
+                  Next: Build Flow
+                </Button>
+              </div>
             </div>
-          </div>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="flow" className="mt-4">
-          <FlowBuilder onChange={handleFlowChange} />
-          <div className="mt-4 flex justify-between">
-            <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
-            <Button onClick={() => setActiveTab("review")}>Next: Review</Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="review" className="mt-4">
-          <div className="max-w-2xl">
-            <SequenceReview
-              setup={setup}
-              nodes={flowNodes}
-              edges={flowEdges}
-              onSaveDraft={handleSaveDraft}
-              onActivate={handleActivate}
-              saving={saving}
-            />
-            <div className="mt-4">
-              <Button variant="outline" onClick={() => setActiveTab("flow")}>Back</Button>
+          <TabsContent value="flow" className="mt-4">
+            <FlowBuilder onChange={handleFlowChange} />
+            <div className="mt-4 flex justify-between">
+              <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
+              <Button onClick={() => setActiveTab("review")}>Next: Review</Button>
             </div>
-          </div>
-        </TabsContent>
-      </Tabs>
-    </div>
+          </TabsContent>
+
+          <TabsContent value="review" className="mt-4">
+            <div className="max-w-2xl">
+              <SequenceReview
+                setup={setup}
+                nodes={flowNodes}
+                edges={flowEdges}
+                onSaveDraft={handleSaveDraft}
+                onActivate={handleActivate}
+                saving={saving}
+              />
+              <div className="mt-4">
+                <Button variant="outline" onClick={() => setActiveTab("flow")}>Back</Button>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </MainLayout>
   );
 }
