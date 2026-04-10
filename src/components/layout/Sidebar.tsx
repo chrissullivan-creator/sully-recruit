@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
-import logo from '@/assets/emerald_gold.png';
+import logo from '@/assets/emerald-logo.jpeg';
 import {
   LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo,
@@ -44,9 +44,7 @@ export function Sidebar() {
       {/* ── Logo ── */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gold/10 border border-gold/20">
-            <img src={logo} alt="Sully Recruit" className="h-6 w-6 object-contain" />
-          </div>
+          <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain shrink-0" style={{ mixBlendMode: 'lighten' }} />
           <div>
             <h1 className="text-sm font-bold tracking-wider text-sidebar-foreground uppercase leading-none">
               Emerald Recruit
