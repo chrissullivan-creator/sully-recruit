@@ -61,6 +61,87 @@ export default function SequenceBuilder() {
     setFlowEdges(edges);
   }, []);
 
+  // Ask Joe to draft a message for an action
+  const handleAskJoe = useCallback(
+    async (
+      action: any,
+      stepNumber: number,
+      stepLabel: string,
+      previousMessages: Array<{ channel: string; body: string }>,
+    ): Promise<string> => {
+      try {
+        // Load job details if the sequence is tied to a job
+        let jobDetails: any = null;
+        if (setup.jobId) {
+          const { data: job } = await supabase
+            .from("jobs")
+            .select("title, company_name, description")
+            .eq("id", setup.jobId)
+            .maybeSingle() as any;
+          jobDetails = job;
+        }
+
+        // Load sender profile
+        let senderName = "";
+        let senderTitle = "";
+        if (setup.senderUserId) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, first_name, last_name")
+            .eq("id", setup.senderUserId)
+            .maybeSingle() as any;
+          senderName =
+            profile?.full_name ||
+            `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
+            "";
+          // Map sender to title (Emerald convention)
+          if (senderName.toLowerCase().includes("chris")) senderTitle = "President";
+          else if (senderName.toLowerCase().includes("nancy")) senderTitle = "Managing Director";
+          else if (senderName.toLowerCase().includes("ashley")) senderTitle = "Recruiter";
+        }
+
+        const totalSteps = flowNodes.filter((n) => n.type === "action").length;
+
+        toast.info("Joe is drafting...", { duration: 2000 });
+
+        const response = await fetch("/api/draft-sequence-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel: action.channel,
+            step_number: stepNumber,
+            step_label: stepLabel || undefined,
+            total_steps: totalSteps,
+            audience_type: setup.audienceType,
+            sequence_name: setup.name,
+            sequence_objective: setup.objective,
+            sender_name: senderName,
+            sender_title: senderTitle,
+            job_title: jobDetails?.title,
+            job_company: jobDetails?.company_name,
+            job_description: jobDetails?.description,
+            previous_messages: previousMessages,
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: "Unknown error" }));
+          throw new Error(err.error || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (!result.message) throw new Error("Joe returned no message");
+
+        toast.success("Joe drafted a message");
+        return result.message;
+      } catch (err: any) {
+        toast.error(`Joe failed: ${err.message}`);
+        return "";
+      }
+    },
+    [setup, flowNodes],
+  );
+
   const saveSequence = useCallback(async () => {
     if (!setup.name) {
       toast.error("Sequence name is required");
@@ -212,7 +293,7 @@ export default function SequenceBuilder() {
           </TabsContent>
 
           <TabsContent value="flow" className="mt-4">
-            <FlowBuilder onChange={handleFlowChange} />
+            <FlowBuilder onChange={handleFlowChange} onAskJoe={handleAskJoe} />
             <div className="mt-4 flex justify-between items-center">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
               <div className="text-xs text-muted-foreground">

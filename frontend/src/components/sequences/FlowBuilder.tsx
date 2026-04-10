@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Controls,
@@ -47,7 +47,12 @@ interface Props {
   initialNodes?: FlowNodeData[];
   initialEdges?: FlowEdgeData[];
   onChange?: (nodes: FlowNodeData[], edges: FlowEdgeData[]) => void;
-  onAskJoe?: (nodeId: string, actionIndex: number) => void;
+  onAskJoe?: (
+    action: ActionData,
+    stepNumber: number,
+    stepLabel: string,
+    previousMessages: Array<{ channel: string; body: string }>,
+  ) => Promise<string>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,6 +251,13 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
   const [edges, setEdges, onEdgesChange] = useEdgesState(defaultFlow.edges);
   const [nodeCounter, setNodeCounter] = useState(2);
 
+  // Ref so the askJoe callback always uses the latest version without
+  // re-wiring every node
+  const onAskJoeRef = useRef(onAskJoe);
+  useEffect(() => {
+    onAskJoeRef.current = onAskJoe;
+  }, [onAskJoe]);
+
   const nodeTypes = useMemo(
     () => ({
       actionNode: ActionNode,
@@ -255,8 +267,38 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
     [],
   );
 
-  // Wire up onUpdate handlers for any node that doesn't have them
-  // (initial default nodes don't have callbacks wired to state)
+  // Build the Ask Joe bridge that pulls previous messages from the flow state
+  const buildAskJoeHandler = useCallback((nodeId: string) => {
+    return async (
+      _actionIndex: number,
+      action: ActionData,
+      stepNumber: number,
+      stepLabel: string,
+    ): Promise<string> => {
+      const handler = onAskJoeRef.current;
+      if (!handler) return "";
+
+      // Collect all messages from previous action nodes (for voice continuity)
+      const previousMessages: Array<{ channel: string; body: string }> = [];
+      setNodes((nds) => {
+        const actionNodes = nds.filter((n) => n.type === "actionNode");
+        const currentIdx = actionNodes.findIndex((n) => n.id === nodeId);
+        for (let i = 0; i < currentIdx; i++) {
+          const acts = (actionNodes[i].data as any).actions || [];
+          for (const a of acts) {
+            if (a.messageBody) {
+              previousMessages.push({ channel: a.channel, body: a.messageBody });
+            }
+          }
+        }
+        return nds; // no mutation, just reading
+      });
+
+      return handler(action, stepNumber, stepLabel, previousMessages);
+    };
+  }, [setNodes]);
+
+  // Wire up onUpdate + onAskJoe handlers for any node that doesn't have them
   useEffect(() => {
     setNodes((nds) =>
       nds.map((n) => {
@@ -270,7 +312,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
                   nds2.map((nn) => (nn.id === n.id ? { ...nn, data: { ...nn.data, actions } } : nn)),
                 );
               },
-              onAskJoe: onAskJoe ? (actionIndex: number) => onAskJoe(n.id, actionIndex) : undefined,
+              onAskJoe: buildAskJoeHandler(n.id),
             },
           };
         }
@@ -293,6 +335,37 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
       }),
     );
   }, []); // run once on mount
+
+  // Auto-renumber action nodes. Updates the stepNumber shown in each
+  // ActionNode header based on current order among action nodes.
+  // Also strips default "Step N" labels so the new number is always accurate.
+  useEffect(() => {
+    setNodes((nds) => {
+      let stepCounter = 0;
+      let changed = false;
+      const updated = nds.map((n) => {
+        if (n.type !== "actionNode") return n;
+        stepCounter++;
+        const currentStep = (n.data as any).stepNumber;
+        const currentLabel = (n.data as any).label || "";
+        // Strip default "Step N" labels so we don't end up with "Step 2: Step 5"
+        const isDefaultLabel = /^Step \d+$/.test(currentLabel);
+        const newLabel = isDefaultLabel ? "" : currentLabel;
+        if (currentStep !== stepCounter || currentLabel !== newLabel) {
+          changed = true;
+          return {
+            ...n,
+            data: { ...n.data, stepNumber: stepCounter, label: newLabel },
+          };
+        }
+        return n;
+      });
+      return changed ? updated : nds;
+    });
+    // Only react to nodes length and action-node IDs — not internal data —
+    // otherwise this will loop on every action edit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes.length, nodes.map((n) => n.id).join(",")]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -361,7 +434,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
             type: "actionNode",
             position: { x: 250, y: maxY + 220 },
             data: {
-              label: `Step ${nodeCounter + 1}`,
+              label: "",
               actions: [
                 {
                   id: crypto.randomUUID(),
@@ -380,7 +453,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
                   nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, actions } } : n)),
                 );
               },
-              onAskJoe: onAskJoe ? (actionIndex: number) => onAskJoe(id, actionIndex) : undefined,
+              onAskJoe: buildAskJoeHandler(id),
             },
           };
           break;
@@ -415,7 +488,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [nodeCounter, nodes, setNodes, onAskJoe],
+    [nodeCounter, nodes, setNodes, buildAskJoeHandler],
   );
 
   return (

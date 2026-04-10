@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin } from "lucide-react";
+import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2 } from "lucide-react";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -38,13 +38,15 @@ export interface ActionData {
 interface ActionNodeData {
   label: string;
   actions: ActionData[];
+  stepNumber?: number;
   onUpdate: (actions: ActionData[]) => void;
-  onAskJoe?: (actionIndex: number) => void;
+  onAskJoe?: (actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string) => Promise<string>;
   isAfterConnection?: boolean;
 }
 
 function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
-  const { actions, onUpdate, onAskJoe, label } = data;
+  const { actions, onUpdate, onAskJoe, label, stepNumber } = data;
+  const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: any) => {
@@ -53,6 +55,24 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
       onUpdate(updated);
     },
     [actions, onUpdate],
+  );
+
+  const handleAskJoe = useCallback(
+    async (actionIndex: number) => {
+      if (!onAskJoe) return;
+      setLoadingIndex(actionIndex);
+      try {
+        const drafted = await onAskJoe(actionIndex, actions[actionIndex], stepNumber || 1, label || "");
+        if (drafted) {
+          updateAction(actionIndex, "messageBody", drafted);
+        }
+      } catch (err) {
+        console.error("Ask Joe failed:", err);
+      } finally {
+        setLoadingIndex(null);
+      }
+    },
+    [onAskJoe, actions, stepNumber, label, updateAction],
   );
 
   const addAction = useCallback(() => {
@@ -92,7 +112,10 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
 
       <Card className="shadow-md border-slate-200">
         <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
-          <span className="text-sm font-medium">{label || "Action"}</span>
+          <span className="text-sm font-medium">
+            {stepNumber ? `Step ${stepNumber}` : ""}
+            {label && label !== `Step ${stepNumber}` ? (stepNumber ? `: ${label}` : label) : ""}
+          </span>
           <Button variant="ghost" size="sm" onClick={addAction}>
             <Plus className="h-3 w-3 mr-1" /> Add Channel
           </Button>
@@ -125,8 +148,19 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                   </div>
                   <div className="flex gap-1">
                     {onAskJoe && (
-                      <Button variant="ghost" size="sm" onClick={() => onAskJoe(i)} className="h-7 px-2">
-                        <Sparkles className="h-3 w-3" />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleAskJoe(i)}
+                        className="h-7 px-2"
+                        disabled={loadingIndex === i}
+                        title="Ask Joe to draft this message"
+                      >
+                        {loadingIndex === i ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
                       </Button>
                     )}
                     {actions.length > 1 && (
