@@ -1,14 +1,10 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
-/**
- * Poll RingCentral call log as a safety net for missed webhooks.
- * Looks back 10 minutes, dedupes against call_logs table.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: poll-rc-calls
- *   Cron: */5 * * * *
- */
+// Poll RingCentral call log as a safety net for missed webhooks.
+// Looks back 10 minutes, dedupes against call_logs table.
+//
+// Schedule: every 5 minutes
 
 const RC_SERVER = "https://platform.ringcentral.com";
 

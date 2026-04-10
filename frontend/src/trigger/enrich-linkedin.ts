@@ -2,14 +2,12 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getUnipileBaseUrl } from "./lib/supabase";
 import { delay } from "./lib/resume-parsing";
 
-/**
- * Enrich candidates and contacts with LinkedIn profile embeddings.
- *
- * Schedules (create in Trigger.dev Dashboard, same task, different payloads):
- *   1) Candidates: */2 * * * *   payload: { limit: 20, entity: "candidates", fetch_fresh: false }
- *   2) Contacts:  1-59/3 * * * * payload: { limit: 20, entity: "contacts", fetch_fresh: false }
- *   3) Fresh:     */10 * * * *   payload: { limit: 10, entity: "both", fetch_fresh: true }
- */
+// Enrich candidates and contacts with LinkedIn profile embeddings.
+//
+// Schedules (create in Trigger.dev Dashboard, same task, different payloads):
+//   Candidates: every 2 min   payload: { limit: 20, entity: "candidates", fetch_fresh: false }
+//   Contacts:   every 3 min   payload: { limit: 20, entity: "contacts", fetch_fresh: false }
+//   Fresh:      every 10 min  payload: { limit: 10, entity: "both", fetch_fresh: true }
 
 const VOYAGE_MODEL = "voyage-finance-2";
 

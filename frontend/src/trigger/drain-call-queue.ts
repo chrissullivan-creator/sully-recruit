@@ -1,14 +1,10 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
-/**
- * Drain the call processing queue — picks up pending calls and sends them
- * to the process-call-recording edge function for transcription + analysis.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: drain-call-queue
- *   Cron: */3 * * * *
- */
+// Drain the call processing queue — picks up pending calls and sends them
+// to the process-call-recording edge function for transcription + analysis.
+//
+// Schedule: every 3 minutes
 
 export const drainCallQueue = schedules.task({
   id: "drain-call-queue",

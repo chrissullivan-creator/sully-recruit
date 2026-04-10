@@ -2,16 +2,14 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getUnipileBaseUrl } from "./lib/supabase";
 import { normalizeLinkedIn, delay } from "./lib/resume-parsing";
 
-/**
- * Backfill LinkedIn messages from Unipile for a specific account.
- *
- * Schedules (create in Trigger.dev Dashboard):
- *   1) Chris: */5 * * * *  externalId=backfill-linkedin-chris
- *   2) Nancy: 2-57/5 * * * *  externalId=backfill-linkedin-nancy
- *
- * Each schedule should set payload:
- *   { "account_email": "chris.sullivan@...", "max_chats": 50 }
- */
+// Backfill LinkedIn messages from Unipile for a specific account.
+//
+// Schedules (create in Trigger.dev Dashboard):
+//   Chris: every 5 min   externalId=backfill-linkedin-chris
+//   Nancy: every 5 min   externalId=backfill-linkedin-nancy
+//   Ashley: every 5 min  externalId=backfill-linkedin-ashley
+//
+// Each schedule sets payload: { account_email, max_chats }
 
 async function findEntity(
   supabase: any,

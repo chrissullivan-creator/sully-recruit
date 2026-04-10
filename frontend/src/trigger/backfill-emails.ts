@@ -2,17 +2,13 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getMicrosoftGraphCredentials } from "./lib/supabase";
 import { normalizeEmail, delay } from "./lib/resume-parsing";
 
-/**
- * Backfill emails from Microsoft Graph (Inbox + SentItems).
- *
- * CRITICAL FIX vs. old edge function: syncs ALL emails, not just those
- * matching known candidates/contacts. Unmatched emails get candidate_id
- * and contact_id set to null so they still appear in the Inbox UI.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: backfill-emails
- *   Cron: */5 * * * * (every 5 minutes)
- */
+// Backfill emails from Microsoft Graph (Inbox + SentItems).
+//
+// CRITICAL FIX: syncs ALL emails, not just those matching known
+// candidates/contacts. Unmatched emails get candidate_id and contact_id
+// set to null so they still appear in the Inbox UI.
+//
+// Schedule: every 5 minutes (1-56/5 * * * *)
 
 function stripHtml(html: string | null | undefined): string {
   if (!html) return "";
