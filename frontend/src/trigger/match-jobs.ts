@@ -104,16 +104,23 @@ async function matchJob(jobId: string) {
 
   // Embed the job
   const jobEmbedding = await embedText(queryText, voyageKey);
-  const embeddingStr = `[${jobEmbedding.join(",")}]`;
+  if (!jobEmbedding?.length) {
+    logger.error("Failed to embed job", { jobId });
+    return;
+  }
 
   // Vector similarity search against resume_embeddings
   const { data: matches, error } = await supabase.rpc("match_candidates_for_job", {
-    query_embedding: embeddingStr,
+    query_embedding: jobEmbedding,
     match_count: TOP_N,
   });
 
-  if (error || !matches?.length) {
-    logger.error("Vector search error or no matches", { error, jobId });
+  if (error) {
+    logger.error("Vector search error", { error: error.message, jobId });
+    throw new Error(`Vector search failed: ${error.message}`);
+  }
+  if (!matches?.length) {
+    logger.warn("No vector matches", { jobId });
     return;
   }
 
@@ -172,10 +179,11 @@ export const matchAllJobs = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
 
+    // Match active jobs (lead + hot), skip closed_won/closed_lost
     const { data: jobs } = await supabase
       .from("jobs")
       .select("id")
-      .eq("status", "open");
+      .in("status", ["lead", "hot"]);
 
     if (!jobs?.length) {
       logger.info("No open jobs to match");
@@ -183,16 +191,19 @@ export const matchAllJobs = schedules.task({
     }
 
     let matched = 0;
+    const errors: string[] = [];
     for (const job of jobs) {
       try {
         await matchJob(job.id);
         matched++;
       } catch (err: any) {
-        logger.error(`Error matching job ${job.id}`, { error: err.message });
+        const msg = `${job.id}: ${err.message}`;
+        errors.push(msg);
+        logger.error("Error matching job", { jobId: job.id, error: err.message, stack: err.stack });
       }
     }
 
-    return { matched, total: jobs.length };
+    return { matched, total: jobs.length, errors };
   },
 });
 
