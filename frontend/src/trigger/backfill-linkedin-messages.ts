@@ -95,13 +95,20 @@ async function upsertConversation(
   return created.id;
 }
 
+// Map externalId to account config
+const LINKEDIN_ACCOUNTS: Record<string, { email: string; maxChats: number }> = {
+  "backfill-linkedin-chris": { email: "chris.sullivan@emeraldrecruit.com", maxChats: 50 },
+  "backfill-linkedin-nancy": { email: "nancy.eberlein@emeraldrecruit.com", maxChats: 50 },
+  "backfill-linkedin-ashley": { email: "ashley.leichner@emeraldrecruit.com", maxChats: 50 },
+};
+
 export const backfillLinkedinMessages = schedules.task({
   id: "backfill-linkedin-messages",
   maxDuration: 240,
   run: async (payload) => {
-    const accountEmail =
-      (payload as any)?.account_email ?? "chris.sullivan@emeraldrecruit.com";
-    const maxChats = Number((payload as any)?.max_chats ?? 50);
+    const config = LINKEDIN_ACCOUNTS[payload.externalId ?? ""] ?? LINKEDIN_ACCOUNTS["backfill-linkedin-chris"];
+    const accountEmail = config.email;
+    const maxChats = config.maxChats;
 
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();

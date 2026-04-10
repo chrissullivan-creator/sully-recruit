@@ -106,13 +106,21 @@ async function fetchFullProfile(
   return { profileData: null, source: null };
 }
 
+// Map externalId to enrichment config
+const ENRICH_CONFIGS: Record<string, { limit: number; entity: string; fetchFresh: boolean }> = {
+  "enrich-linkedin-candidates": { limit: 20, entity: "candidates", fetchFresh: false },
+  "enrich-linkedin-contacts": { limit: 20, entity: "contacts", fetchFresh: false },
+  "enrich-linkedin-fresh": { limit: 10, entity: "both", fetchFresh: true },
+};
+
 export const enrichLinkedin = schedules.task({
   id: "enrich-linkedin",
   maxDuration: 240,
   run: async (payload) => {
-    const limit = Math.min(Number((payload as any)?.limit ?? 20), 20);
-    const entity = (payload as any)?.entity ?? "candidates";
-    const fetchFresh = (payload as any)?.fetch_fresh ?? false;
+    const config = ENRICH_CONFIGS[payload.externalId ?? ""] ?? ENRICH_CONFIGS["enrich-linkedin-candidates"];
+    const limit = config.limit;
+    const entity = config.entity;
+    const fetchFresh = config.fetchFresh;
 
     const supabase = getSupabaseAdmin();
     const voyageKey = await getAppSetting("VOYAGE_API_KEY");
