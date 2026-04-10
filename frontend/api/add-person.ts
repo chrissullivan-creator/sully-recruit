@@ -46,7 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         current_company: data.company?.trim() || null,
         location_text: data.location?.trim() || null,
         status: "new",
-        owner_id: user.id,
+        owner_user_id: user.id,
+        created_by_user_id: user.id,
       };
       if (data.current_salary?.trim()) payload.current_base_comp = data.current_salary.trim();
       if (data.desired_salary?.trim()) payload.target_base_comp = data.desired_salary.trim();
@@ -71,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         company_name: data.company?.trim() || null,
         location: data.location?.trim() || null,
         status: "active",
-        owner_id: user.id,
+        owner_user_id: user.id,
       };
       if (data.company_id) payload.company_id = data.company_id;
       if (data.notes?.trim()) payload.notes = data.notes.trim();

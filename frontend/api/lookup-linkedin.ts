@@ -78,26 +78,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const uniHeaders = { "X-API-KEY": apiKey, Accept: "application/json" };
+    // UNIPILE_BASE_URL already contains /api/v1 — don't double-prefix it.
     const apiBase = baseUrl.replace(/\/+$/, "");
     let profileData: any = null;
     let attendeeData: any = null;
 
     // Try direct fetch by Unipile ID
     if (unipile_id) {
-      const r = await fetch(`${apiBase}/api/v1/users/${unipile_id}?account_id=${acctId}`, {
-        headers: uniHeaders,
-      });
+      const r = await fetch(
+        `${apiBase}/users/${encodeURIComponent(unipile_id)}?account_id=${acctId}`,
+        { headers: uniHeaders },
+      );
       if (r.ok) profileData = await r.json();
     }
 
     // Try resolving by LinkedIn URL slug
     if (!profileData && linkedin_url) {
-      const match = linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
+      const match = linkedin_url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/);
       const slug = match?.[1];
       if (slug) {
-        const r = await fetch(`${apiBase}/api/v1/users/${slug}?account_id=${acctId}`, {
-          headers: uniHeaders,
-        });
+        const r = await fetch(
+          `${apiBase}/users/${encodeURIComponent(slug)}?account_id=${acctId}`,
+          { headers: uniHeaders },
+        );
         if (r.ok) profileData = await r.json();
       }
     }
@@ -137,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const providerId = other.provider_id ?? other.id;
         if (providerId) {
           const r = await fetch(
-            `${apiBase}/api/v1/users/${providerId}?account_id=${acctId}`,
+            `${apiBase}/users/${encodeURIComponent(providerId)}?account_id=${acctId}`,
             { headers: uniHeaders },
           );
           if (r.ok) profileData = await r.json();
@@ -166,23 +169,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!profileData) return res.status(200).json({});
 
+    // Unipile profiles bundle the current role in experience[0] (the array is
+    // ordered most-recent-first). Pull title + company from there if present,
+    // falling back to flat fields when we only have attendee-synthesized data.
+    const currentExp = Array.isArray(profileData.experience) && profileData.experience.length > 0
+      ? profileData.experience[0]
+      : null;
+    const currentTitle =
+      currentExp?.title ||
+      currentExp?.position ||
+      profileData.current_position ||
+      profileData.current_title ||
+      profileData.title ||
+      profileData.headline ||
+      "";
+    const currentCompany =
+      currentExp?.company ||
+      currentExp?.company_name ||
+      profileData.current_company ||
+      profileData.company ||
+      profileData.company_name ||
+      "";
+
     // Normalize to form-compatible fields
     const result: Record<string, string> = {};
     if (profileData.first_name) result.first_name = profileData.first_name;
     if (profileData.last_name) result.last_name = profileData.last_name;
-    if (profileData.email) result.email = profileData.email;
-    if (profileData.phone || profileData.phone_number)
+    // Unipile returns contact_info.emails as an array for full profiles
+    const emailFromContact = Array.isArray(profileData?.contact_info?.emails)
+      ? profileData.contact_info.emails[0]
+      : null;
+    if (profileData.email || emailFromContact) {
+      result.email = profileData.email || emailFromContact;
+    }
+    if (profileData.phone || profileData.phone_number) {
       result.phone = profileData.phone || profileData.phone_number;
-    if (profileData.headline || profileData.title)
-      result.title = profileData.headline || profileData.title;
-    if (profileData.company || profileData.company_name)
-      result.company_name = profileData.company || profileData.company_name;
-    if (profileData.location || profileData.region)
-      result.location = profileData.location || profileData.region;
-    if (profileData.public_profile_url)
+    }
+    if (currentTitle) result.title = currentTitle;
+    if (currentCompany) result.company_name = currentCompany;
+    if (profileData.location || profileData.region || profileData.location_name) {
+      result.location = profileData.location || profileData.region || profileData.location_name;
+    }
+    // Prefer a real URL over whatever the caller handed us; fall back to
+    // constructing one from public_identifier if needed.
+    if (profileData.public_profile_url) {
       result.linkedin_url = profileData.public_profile_url;
-    else if (linkedin_url)
+    } else if (profileData.public_identifier) {
+      result.linkedin_url = `https://www.linkedin.com/in/${profileData.public_identifier}`;
+    } else if (linkedin_url) {
       result.linkedin_url = linkedin_url;
+    }
 
     return res.status(200).json(result);
   } catch (err) {
