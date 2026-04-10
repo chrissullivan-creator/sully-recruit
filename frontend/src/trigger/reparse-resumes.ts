@@ -20,7 +20,7 @@ import {
 
 export const reparseResumes = schedules.task({
   id: "reparse-resumes",
-  maxDuration: 240,
+  maxDuration: 300,
   run: async () => {
     const supabase = getSupabaseAdmin();
     const limit = 10;

@@ -67,7 +67,7 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
 
 export const reconcileOrphanedResumes = schedules.task({
   id: "reconcile-orphaned-resumes",
-  maxDuration: 240,
+  maxDuration: 300,
   run: async () => {
     const supabase = getSupabaseAdmin();
     const limit = 10;

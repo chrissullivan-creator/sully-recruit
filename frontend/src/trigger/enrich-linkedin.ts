@@ -89,7 +89,7 @@ async function fetchFullProfile(
 
   for (const acct of sorted) {
     try {
-      const url = `${baseUrl}/api/v1/users/${encodeURIComponent(slug)}?account_id=${acct.unipile_account_id}`;
+      const url = `${baseUrl}/users/${encodeURIComponent(slug)}?account_id=${acct.unipile_account_id}`;
       const res = await fetch(url, {
         headers: { "X-API-KEY": apiKey, Accept: "application/json" },
         signal: AbortSignal.timeout(8000),
@@ -115,7 +115,7 @@ const ENRICH_CONFIGS: Record<string, { limit: number; entity: string; fetchFresh
 
 export const enrichLinkedin = schedules.task({
   id: "enrich-linkedin",
-  maxDuration: 240,
+  maxDuration: 300,
   run: async (payload) => {
     const config = ENRICH_CONFIGS[payload.externalId ?? ""] ?? ENRICH_CONFIGS["enrich-linkedin-candidates"];
     const limit = config.limit;

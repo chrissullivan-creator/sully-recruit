@@ -134,9 +134,27 @@ async function processAccount(
       pageCount++;
       if (pageCount >= maxPages && data["@odata.nextLink"]) hit_limit = true;
 
+      // Batch dedup: load all known external_message_ids for this page in one query
+      const pageMessageIds = messages.map((m: any) => m.id).filter(Boolean);
+      const existingIds = new Set<string>();
+      if (pageMessageIds.length > 0) {
+        const { data: existing } = await supabase
+          .from("messages")
+          .select("external_message_id")
+          .in("external_message_id", pageMessageIds);
+        for (const row of existing ?? []) {
+          if (row.external_message_id) existingIds.add(row.external_message_id);
+        }
+      }
+
       for (const msg of messages) {
         try {
           const externalMessageId = msg.id as string;
+          if (existingIds.has(externalMessageId)) {
+            skipped++;
+            continue;
+          }
+
           const externalConversationId = msg.conversationId as string;
           const subject = msg.subject ?? null;
           const senderEmail = normalizeEmail(msg.from?.emailAddress?.address);
@@ -158,17 +176,6 @@ async function processAccount(
 
           // Skip marketing/newsletter emails
           if (isMarketingEmail(isOutbound ? null : senderEmail)) {
-            skipped++;
-            continue;
-          }
-
-          // Dedup by external message ID
-          const { data: existing } = await supabase
-            .from("messages")
-            .select("id")
-            .eq("external_message_id", externalMessageId)
-            .maybeSingle();
-          if (existing) {
             skipped++;
             continue;
           }
@@ -254,15 +261,17 @@ async function processAccount(
 
 export const backfillEmails = schedules.task({
   id: "backfill-emails",
-  maxDuration: 240,
+  maxDuration: 300,
   run: async () => {
     const supabase = getSupabaseAdmin();
     const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
-    const daysBack = 90;
+    // Only look back 1 day since this runs every 5 min.
+    // The first run will catch the last 24h; after that it's incremental.
+    const daysBack = 1;
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = new Date().toISOString();
-    const maxPages = 10; // 10 pages × 50 = 500 emails per folder per account
+    const maxPages = 3; // 3 pages × 50 = 150 emails per folder per account
 
     logger.info("Starting email backfill", { dateFrom, dateTo });
 

@@ -104,11 +104,11 @@ const LINKEDIN_ACCOUNTS: Record<string, { email: string; maxChats: number }> = {
 
 export const backfillLinkedinMessages = schedules.task({
   id: "backfill-linkedin-messages",
-  maxDuration: 240,
+  maxDuration: 300,
   run: async (payload) => {
     const config = LINKEDIN_ACCOUNTS[payload.externalId ?? ""] ?? LINKEDIN_ACCOUNTS["backfill-linkedin-chris"];
     const accountEmail = config.email;
-    const maxChats = config.maxChats;
+    const maxChats = 20; // Keep small since this runs every 5 min
 
     const supabase = getSupabaseAdmin();
     const baseUrl = await getUnipileBaseUrl();
@@ -131,7 +131,7 @@ export const backfillLinkedinMessages = schedules.task({
     const stats = { chats_scanned: 0, messages_scanned: 0, inserted: 0, skipped: 0, errors: 0 };
 
     // Fetch chats from Unipile
-    const chatsUrl = `${baseUrl}/api/v1/chats?account_id=${account.unipile_account_id}&limit=${maxChats}`;
+    const chatsUrl = `${baseUrl}/chats?account_id=${account.unipile_account_id}&limit=${maxChats}`;
     const chatsResp = await fetch(chatsUrl, { headers: uniHeaders });
     if (!chatsResp.ok) {
       const err = await chatsResp.text();
@@ -185,9 +185,9 @@ export const backfillLinkedinMessages = schedules.task({
 
         const conversationId = await upsertConversation(supabase, chatId, entity, channel, account.id);
 
-        // Fetch messages
+        // Fetch messages (only latest 20 since this runs every 5 min)
         const msgsResp = await fetch(
-          `${baseUrl}/api/v1/chats/${chatId}/messages?account_id=${account.unipile_account_id}&limit=100`,
+          `${baseUrl}/chats/${chatId}/messages?account_id=${account.unipile_account_id}&limit=20`,
           { headers: uniHeaders },
         );
         if (!msgsResp.ok) {
@@ -198,18 +198,25 @@ export const backfillLinkedinMessages = schedules.task({
         const msgsData = await msgsResp.json();
         const messages = msgsData.items ?? msgsData.messages ?? msgsData.data ?? [];
 
+        // Batch dedup: load all known unipile_message_ids for this chat in one query
+        const pageMsgIds = messages.map((m: any) => m.id).filter(Boolean);
+        const existingMsgIds = new Set<string>();
+        if (pageMsgIds.length > 0) {
+          const { data: existing } = await supabase
+            .from("messages")
+            .select("unipile_message_id")
+            .in("unipile_message_id", pageMsgIds);
+          for (const row of existing ?? []) {
+            if (row.unipile_message_id) existingMsgIds.add(row.unipile_message_id);
+          }
+        }
+
         for (const msg of messages) {
           stats.messages_scanned++;
           const msgId = msg.id as string;
           if (!msgId) continue;
 
-          // Dedup
-          const { data: existing } = await supabase
-            .from("messages")
-            .select("id")
-            .eq("unipile_message_id", msgId)
-            .maybeSingle();
-          if (existing) {
+          if (existingMsgIds.has(msgId)) {
             stats.skipped++;
             continue;
           }
