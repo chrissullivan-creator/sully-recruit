@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
+import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -608,6 +609,9 @@ const JobDetail = () => {
             />
           </div>
         )}
+
+        {/* ── AI Candidate Matches ──────────────────────────────────────────── */}
+        <JobMatchesList jobId={job.id} />
 
         {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
         <Card>
