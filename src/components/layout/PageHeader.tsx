@@ -8,15 +8,17 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
-    <div className="border-b border-border bg-card/50">
-      <div className="flex items-center justify-between px-8 py-6">
+    <div className="border-b border-border bg-card">
+      <div className="flex items-center justify-between px-8 py-5">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
+          <h1 className="text-xl font-semibold text-foreground tracking-tight">{title}</h1>
           {description && (
-            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
           )}
         </div>
-        {actions && <div className="flex items-center gap-3">{actions}</div>}
+        {actions && (
+          <div className="flex items-center gap-2">{actions}</div>
+        )}
       </div>
     </div>
   );

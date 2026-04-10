@@ -39,6 +39,10 @@ export default {
   				DEFAULT: 'hsl(var(--accent))',
   				foreground: 'hsl(var(--accent-foreground))'
   			},
+  			gold: {
+  				DEFAULT: 'hsl(var(--accent))',
+  				foreground: 'hsl(var(--accent-foreground))'
+  			},
   			popover: {
   				DEFAULT: 'hsl(var(--popover))',
   				foreground: 'hsl(var(--popover-foreground))'
@@ -183,8 +187,9 @@ export default {
   			shimmer: 'shimmer 2s infinite linear'
   		},
   		boxShadow: {
-  			glow: '0 0 20px hsl(43 55% 55% / 0.15)',
-  			'glow-lg': '0 0 40px hsl(43 55% 55% / 0.2)'
+  			glow: '0 0 20px hsl(43 68% 50% / 0.22)',
+  			'glow-lg': '0 0 40px hsl(43 68% 50% / 0.3)',
+  			'glow-green': '0 0 20px hsl(148 60% 22% / 0.15)'
   		}
   	}
   },
