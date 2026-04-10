@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,10 +11,28 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Mail, MessageSquare, Linkedin, Search, Loader2, Send,
-  UserCheck, Users, X,
+  UserCheck, Users, X, Paperclip,
 } from 'lucide-react';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
+
+const MESSAGE_ATTACHMENTS_BUCKET = 'message-attachments';
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15 MB
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface PendingAttachment {
+  id: string;
+  file: File;
+  storage_path?: string;
+  uploading: boolean;
+  error?: string;
+}
 
 type Channel = 'email' | 'sms' | 'linkedin';
 
@@ -52,6 +70,8 @@ export function ComposeMessageDialog({
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const resetForm = () => {
     setChannel('email');
@@ -61,6 +81,61 @@ export function ComposeMessageDialog({
     setSubject('');
     setBody('');
     setSending(false);
+    setPendingAttachments([]);
+  };
+
+  const handlePickFiles = () => fileInputRef.current?.click();
+
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    const accepted: PendingAttachment[] = [];
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(`${file.name} is too large (max 15 MB)`);
+        continue;
+      }
+      accepted.push({ id: crypto.randomUUID(), file, uploading: true });
+    }
+    if (accepted.length === 0) return;
+    setPendingAttachments((prev) => [...prev, ...accepted]);
+
+    await Promise.all(
+      accepted.map(async (pending) => {
+        try {
+          const safeBase = pending.file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          // New conversations don't have an id yet — drop files under a
+          // time-based "new/" prefix; send-message only cares about storage_path.
+          const path = `new/${Date.now()}-${crypto.randomUUID()}-${safeBase}`;
+          const { error } = await supabase.storage
+            .from(MESSAGE_ATTACHMENTS_BUCKET)
+            .upload(path, pending.file, {
+              contentType: pending.file.type || 'application/octet-stream',
+              upsert: false,
+            });
+          if (error) throw error;
+          setPendingAttachments((prev) =>
+            prev.map((p) => (p.id === pending.id ? { ...p, uploading: false, storage_path: path } : p))
+          );
+        } catch (err: any) {
+          console.error('Attachment upload error:', err);
+          setPendingAttachments((prev) =>
+            prev.map((p) => (p.id === pending.id ? { ...p, uploading: false, error: err?.message || 'Upload failed' } : p))
+          );
+          toast.error(`Failed to upload ${pending.file.name}`);
+        }
+      })
+    );
+  };
+
+  const removePendingAttachment = async (id: string) => {
+    const target = pendingAttachments.find((p) => p.id === id);
+    setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
+    if (target?.storage_path) {
+      await supabase.storage.from(MESSAGE_ATTACHMENTS_BUCKET).remove([target.storage_path]).catch(() => {});
+    }
   };
 
   const handleSearch = async () => {
@@ -93,10 +168,19 @@ export function ComposeMessageDialog({
     return addr;
   };
 
-  const canSend = selectedRecipient && body.trim() && getRecipientAddress();
+  const hasUploadingAttachments = pendingAttachments.some((p) => p.uploading);
+  const canSend =
+    selectedRecipient &&
+    getRecipientAddress() &&
+    !hasUploadingAttachments &&
+    (body.trim().length > 0 || pendingAttachments.some((p) => !!p.storage_path && !p.error));
 
   const handleSend = async () => {
     if (!canSend || !selectedRecipient) return;
+    if (hasUploadingAttachments) {
+      toast.error('Please wait for attachments to finish uploading');
+      return;
+    }
     setSending(true);
 
     try {
@@ -144,19 +228,30 @@ export function ComposeMessageDialog({
       }
 
       // Send via edge function
+      const attachmentsPayload = pendingAttachments
+        .filter((p) => !!p.storage_path && !p.error)
+        .map((p) => ({
+          name: p.file.name,
+          storage_path: p.storage_path!,
+          size: p.file.size,
+          mime_type: p.file.type || 'application/octet-stream',
+        }));
+
       const sendPayload: any = {
         channel,
         conversation_id: conv.id,
         to: resolvedTo,
         subject: channel === 'email' ? subject || undefined : undefined,
         body: body.trim(),
+        attachments: attachmentsPayload.length > 0 ? attachmentsPayload : undefined,
       };
       if (selectedRecipient.entity_type === 'candidate') {
         sendPayload.candidate_id = selectedRecipient.id;
       } else {
         sendPayload.contact_id = selectedRecipient.id;
       }
-      const { data, error } = await supabase.functions.invoke('send-message', sendPayload);
+      // supabase.functions.invoke expects { body } as the second arg.
+      const { data, error } = await supabase.functions.invoke('send-message', { body: sendPayload });
 
       if (error) throw error;
       if (!data.success) throw new Error(data.error || 'Send failed');
@@ -296,6 +391,61 @@ export function ComposeMessageDialog({
               placeholder={`Type your ${channel === 'email' ? 'email' : channel === 'sms' ? 'text message' : 'LinkedIn message'}...`}
               minHeight="120px"
             />
+          </div>
+
+          {/* Attachments */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs text-muted-foreground">Attachments</Label>
+              <button
+                type="button"
+                onClick={handlePickFiles}
+                className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                <Paperclip className="h-3 w-3" />
+                Attach files
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFilesSelected}
+              />
+            </div>
+            {pendingAttachments.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground/70 italic">No files attached</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {pendingAttachments.map((p) => (
+                  <div
+                    key={p.id}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                      p.error
+                        ? 'border-destructive/50 bg-destructive/5 text-destructive'
+                        : 'border-border bg-muted/30 text-foreground'
+                    )}
+                  >
+                    {p.uploading ? (
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    ) : (
+                      <Paperclip className="h-3 w-3 shrink-0 opacity-70" />
+                    )}
+                    <span className="truncate max-w-[180px]" title={p.file.name}>{p.file.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{formatBytes(p.file.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => removePendingAttachment(p.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
