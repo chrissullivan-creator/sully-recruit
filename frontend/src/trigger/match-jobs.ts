@@ -172,38 +172,54 @@ async function matchJob(jobId: string) {
   logger.info("Matched job", { jobId, title: job.title, candidatesScored: scored.length });
 }
 
-// ── Scheduled task: runs every 8 hours (set schedule in Trigger.dev dashboard) ──
+// ── Scheduled task: processes ONE job per run, oldest-matched first ──
+// Schedule this every 3-5 minutes in the Trigger.dev dashboard — over ~1-2 hours
+// all active jobs get refreshed. Keeps each run well under the 5-min timeout.
 export const matchAllJobs = schedules.task({
   id: "match-all-jobs",
-  maxDuration: 300,
+  maxDuration: 180,
   run: async () => {
     const supabase = getSupabaseAdmin();
 
-    // Match active jobs (lead + hot), skip closed_won/closed_lost
-    const { data: jobs } = await supabase
+    // Find the active job whose matches are oldest (or never matched)
+    const { data: jobs, error: jobsErr } = await supabase
       .from("jobs")
-      .select("id")
+      .select("id, title, job_candidate_matches(matched_at)")
       .in("status", ["lead", "hot"]);
 
+    if (jobsErr) {
+      logger.error("Failed to list jobs", { error: jobsErr.message });
+      throw jobsErr;
+    }
     if (!jobs?.length) {
-      logger.info("No open jobs to match");
-      return { matched: 0 };
+      logger.info("No active jobs to match");
+      return { matched: 0, skipped: true };
     }
 
-    let matched = 0;
-    const errors: string[] = [];
-    for (const job of jobs) {
-      try {
-        await matchJob(job.id);
-        matched++;
-      } catch (err: any) {
-        const msg = `${job.id}: ${err.message}`;
-        errors.push(msg);
-        logger.error("Error matching job", { jobId: job.id, error: err.message, stack: err.stack });
-      }
-    }
+    // Sort: never-matched first, then oldest matched_at
+    const sorted = jobs
+      .map((j: any) => {
+        const times: string[] = (j.job_candidate_matches ?? []).map((m: any) => m.matched_at);
+        const latest = times.length ? Math.max(...times.map((t) => new Date(t).getTime())) : 0;
+        return { id: j.id, title: j.title, latest };
+      })
+      .sort((a, b) => a.latest - b.latest);
 
-    return { matched, total: jobs.length, errors };
+    const next = sorted[0];
+    logger.info("Matching next job", {
+      jobId: next.id,
+      title: next.title,
+      lastMatchedAt: next.latest ? new Date(next.latest).toISOString() : "never",
+      queueSize: sorted.length,
+    });
+
+    try {
+      await matchJob(next.id);
+      return { matched: 1, jobId: next.id, title: next.title, queueSize: sorted.length };
+    } catch (err: any) {
+      logger.error("Error matching job", { jobId: next.id, error: err.message, stack: err.stack });
+      throw err;
+    }
   },
 });
 
