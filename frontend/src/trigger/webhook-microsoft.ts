@@ -2,6 +2,7 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
+import { stopEnrollment } from "./sequence-scheduler";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -246,6 +247,23 @@ async function processEmailMessage(supabase: any, message: any, receivedAt: stri
     }
   }
 
+  // V2: Universal stop rule — any email reply stops active enrollments
+  const { data: activeEnrollments } = await supabase
+    .from("sequence_enrollments")
+    .select("*, sequences!inner(*)")
+    .eq(match.entityColumn, match.entityId)
+    .eq("status", "active");
+
+  if (activeEnrollments && activeEnrollments.length > 0) {
+    for (const enrollment of activeEnrollments) {
+      await stopEnrollment(supabase, enrollment, "reply_received", emailBody);
+    }
+    logger.info("Stopped enrollments on email reply", {
+      entityId: match.entityId,
+      count: activeEnrollments.length,
+    });
+  }
+
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
 
   // Chain-trigger Joe Says refresh
@@ -299,6 +317,52 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
       created_at: receivedAt,
       external_id: externalEventId || null,
     } as any);
+
+    // V2: Calendar booking stops active enrollments
+    const { data: activeEnrollments } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(match.entityColumn, match.entityId)
+      .eq("status", "active");
+
+    if (activeEnrollments && activeEnrollments.length > 0) {
+      for (const enrollment of activeEnrollments) {
+        // Stop with calendar_booked trigger
+        await supabase
+          .from("sequence_enrollments")
+          .update({
+            status: "stopped",
+            stop_trigger: "calendar_booked",
+            stop_reason: "Calendar event detected via Microsoft Graph",
+            stopped_at: new Date().toISOString(),
+          })
+          .eq("id", enrollment.id);
+
+        // Cancel pending sends
+        await supabase
+          .from("sequence_step_logs")
+          .update({ status: "cancelled" })
+          .eq("enrollment_id", enrollment.id)
+          .eq("status", "scheduled");
+
+        // Log sentiment as booked_meeting
+        await supabase
+          .from("sequence_step_logs")
+          .update({
+            sentiment: "booked_meeting",
+            sentiment_reason: "Calendar event detected via Microsoft Graph",
+          })
+          .eq("enrollment_id", enrollment.id)
+          .eq("status", "sent")
+          .order("sent_at", { ascending: false })
+          .limit(1);
+      }
+
+      logger.info("Stopped enrollments on calendar booking", {
+        entityId: match.entityId,
+        count: activeEnrollments.length,
+      });
+    }
   }
 
   logger.info("Calendar event processed", { matchCount: matches.length });

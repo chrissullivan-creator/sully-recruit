@@ -2,6 +2,8 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
+import { stopEnrollment, scheduleNodeActions } from "./sequence-scheduler";
+import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
 
 interface UnipileWebhookPayload {
   body: {
@@ -212,7 +214,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         .select("id")
         .eq(entityColumn, entityId)
         .eq("status", "active")
-        .order("created_at", { ascending: false })
+        .order("enrolled_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -221,6 +223,20 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         intel, "linkedin", enrollment?.id,
       );
     }
+  }
+
+  // Universal stop rule: any LinkedIn message reply stops active enrollments
+  const { data: activeEnrollments } = await supabase
+    .from("sequence_enrollments")
+    .select("*, sequences!inner(*)")
+    .eq(entityColumn, entityId)
+    .eq("status", "active");
+
+  if (activeEnrollments && activeEnrollments.length > 0) {
+    for (const enrollment of activeEnrollments) {
+      await stopEnrollment(supabase, enrollment, "reply_received", messageBody);
+    }
+    logger.info("Stopped enrollments on LinkedIn reply", { entityId, count: activeEnrollments.length });
   }
 
   logger.info("LinkedIn message logged", { entityId, entityType });
@@ -266,45 +282,10 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
       .eq("candidate_id", candidateId)
       .eq("channel", "linkedin");
 
-    // Advance any enrollments waiting for connection acceptance
-    const { data: waitingEnrollments } = await supabase
-      .from("sequence_enrollments")
-      .select("id")
-      .eq("candidate_id", candidateId)
-      .eq("status", "active")
-      .eq("waiting_for_connection_acceptance", true);
+    // V2: Find active enrollments for this candidate and advance via connection_accepted branch
+    await advanceOnConnectionAccepted(supabase, "candidate_id", candidateId, receivedAt);
 
-    if (waitingEnrollments && waitingEnrollments.length > 0) {
-      for (const enrollment of waitingEnrollments) {
-        // 4 hours + 1-22 min random jitter after acceptance
-        const jitterMin = 1 + Math.floor(Math.random() * 22);
-        let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
-
-        // Ensure next_step_at falls within LinkedIn send window (10-01:30 UTC / 6AM-9:30PM EST)
-        const nextHour = nextStepAt.getUTCHours();
-        const outsideWindow = nextHour >= 1.5 && nextHour < 10; // 1:30 AM - 10 AM UTC is outside
-        if (outsideWindow) {
-          nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
-        }
-
-        await supabase
-          .from("sequence_enrollments")
-          .update({
-            waiting_for_connection_acceptance: false,
-            linkedin_connection_status: "accepted",
-            linkedin_connection_accepted_at: receivedAt,
-            next_step_at: nextStepAt.toISOString(),
-          } as any)
-          .eq("id", enrollment.id);
-      }
-
-      logger.info("Advanced waiting enrollments", {
-        candidateId,
-        count: waitingEnrollments.length,
-      });
-    }
-
-    // Also check contact_channels for contact enrollments
+    // Also check contact_channels
     const { data: contactChannel } = await supabase
       .from("contact_channels")
       .select("contact_id")
@@ -319,40 +300,7 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
         .eq("contact_id", contactChannel.contact_id)
         .eq("channel", "linkedin");
 
-      const { data: contactEnrollments } = await supabase
-        .from("sequence_enrollments")
-        .select("id")
-        .eq("contact_id", contactChannel.contact_id)
-        .eq("status", "active")
-        .eq("waiting_for_connection_acceptance", true);
-
-      if (contactEnrollments && contactEnrollments.length > 0) {
-        for (const enrollment of contactEnrollments) {
-          const jitterMin = 1 + Math.floor(Math.random() * 22);
-          let nextStepAt = new Date(Date.now() + 4 * 60 * 60 * 1000 + jitterMin * 60 * 1000);
-
-          const nextHour = nextStepAt.getUTCHours();
-          const outsideWindow = nextHour >= 1.5 && nextHour < 10;
-          if (outsideWindow) {
-            nextStepAt.setUTCHours(10, Math.floor(Math.random() * 45), 0, 0);
-          }
-
-          await supabase
-            .from("sequence_enrollments")
-            .update({
-              waiting_for_connection_acceptance: false,
-              linkedin_connection_status: "accepted",
-              linkedin_connection_accepted_at: receivedAt,
-              next_step_at: nextStepAt.toISOString(),
-            } as any)
-            .eq("id", enrollment.id);
-        }
-
-        logger.info("Advanced waiting contact enrollments", {
-          contactId: contactChannel.contact_id,
-          count: contactEnrollments.length,
-        });
-      }
+      await advanceOnConnectionAccepted(supabase, "contact_id", contactChannel.contact_id, receivedAt);
     }
 
     // Log connection_accepted as a special message type
@@ -374,4 +322,84 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
   return { action: "connection_update", status, candidateId };
 }
 
-// Old analyzeSentiment() replaced by shared intel-extraction.ts module
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 Sequence: Advance enrollment on connection accepted
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function advanceOnConnectionAccepted(
+  supabase: any,
+  entityColumn: string,
+  entityId: string,
+  receivedAt: string,
+): Promise<void> {
+  // Find active enrollments for this entity
+  const { data: enrollments } = await supabase
+    .from("sequence_enrollments")
+    .select("*, sequences!inner(*)")
+    .eq(entityColumn, entityId)
+    .eq("status", "active");
+
+  if (!enrollments || enrollments.length === 0) return;
+
+  for (const enrollment of enrollments) {
+    const currentNodeId = enrollment.current_node_id;
+    if (!currentNodeId) continue;
+
+    // Find connection_accepted branch from current node
+    const { data: branch } = await supabase
+      .from("sequence_branches")
+      .select("*, sequence_nodes!to_node_id(*)")
+      .eq("from_node_id", currentNodeId)
+      .eq("condition", "connection_accepted")
+      .maybeSingle();
+
+    if (!branch || !branch.to_node_id) continue;
+
+    const nextNode = branch.sequence_nodes;
+    if (!nextNode) continue;
+
+    const sequence = enrollment.sequences;
+
+    // Update enrollment to next node
+    await supabase
+      .from("sequence_enrollments")
+      .update({ current_node_id: nextNode.id })
+      .eq("id", enrollment.id);
+
+    // Get the actions on the next node and schedule them with post-connection timing
+    const { data: actions } = await supabase
+      .from("sequence_actions")
+      .select("*")
+      .eq("node_id", nextNode.id);
+
+    if (actions) {
+      for (const action of actions) {
+        const scheduledAt = await calculatePostConnectionSendTime(supabase, {
+          connectionAcceptedAt: receivedAt,
+          hardcodedHours: Number(action.post_connection_hardcoded_hours) || 4,
+          delayIntervalMinutes: action.delay_interval_minutes || 0,
+          jiggleMinutes: action.jiggle_minutes || 0,
+          channel: action.channel,
+          respectSendWindow: action.respect_send_window,
+          sendWindowStart: sequence.send_window_start || "09:00",
+          sendWindowEnd: sequence.send_window_end || "18:00",
+          accountId: sequence.created_by,
+        });
+
+        await supabase.from("sequence_step_logs").insert({
+          enrollment_id: enrollment.id,
+          action_id: action.id,
+          node_id: nextNode.id,
+          channel: action.channel,
+          scheduled_at: scheduledAt.toISOString(),
+          status: "scheduled",
+        });
+      }
+    }
+
+    logger.info("Advanced enrollment on connection accepted", {
+      enrollmentId: enrollment.id,
+      nextNodeId: nextNode.id,
+    });
+  }
+}

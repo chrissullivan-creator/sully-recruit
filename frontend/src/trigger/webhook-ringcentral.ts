@@ -2,6 +2,7 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
+import { stopEnrollment } from "./sequence-scheduler";
 
 interface RingCentralWebhookPayload {
   body: any;
@@ -80,6 +81,25 @@ export const processRingcentralEvent = task({
               intel, "sms", enrollment?.id,
             );
           }
+        }
+      }
+
+      // V2: Universal stop rule — inbound SMS stops active enrollments
+      if (direction === "inbound" && smsBody) {
+        const { data: activeEnrollments } = await supabase
+          .from("sequence_enrollments")
+          .select("*, sequences!inner(*)")
+          .eq(match.entityColumn, match.entityId)
+          .eq("status", "active");
+
+        if (activeEnrollments && activeEnrollments.length > 0) {
+          for (const enrollment of activeEnrollments) {
+            await stopEnrollment(supabase, enrollment, "reply_received", smsBody);
+          }
+          logger.info("Stopped enrollments on SMS reply", {
+            entityId: match.entityId,
+            count: activeEnrollments.length,
+          });
         }
       }
 

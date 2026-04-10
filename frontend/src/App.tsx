@@ -17,8 +17,10 @@ import Companies from "./pages/Companies";
 import CompanyDetail from "./pages/CompanyDetail";
 import Contacts from "./pages/Contacts";
 import ContactDetail from "./pages/ContactDetail";
-import Campaigns from "./pages/Campaigns";
-import SequenceDetail from "./pages/SequenceDetail";
+import Sequences from "./pages/Sequences";
+import SequenceBuilder from "./pages/SequenceBuilder";
+import SequenceScheduleView from "./pages/SequenceScheduleView";
+import SequenceAnalyticsPage from "./pages/SequenceAnalyticsPage";
 import Calls from "./pages/Calls";
 import Tasks from "./pages/Tasks";
 import Settings from "./pages/Settings";
@@ -52,8 +54,12 @@ const App = () => (
             <Route path="/companies/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/contacts/:id" element={<ProtectedRoute><ContactDetail /></ProtectedRoute>} />
-            <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
-            <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
+            <Route path="/sequences" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
+            <Route path="/sequences/new" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
+            <Route path="/sequences/:id/edit" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
+            <Route path="/sequences/:id/schedule" element={<ProtectedRoute><SequenceScheduleView /></ProtectedRoute>} />
+            <Route path="/sequences/:id/analytics" element={<ProtectedRoute><SequenceAnalyticsPage /></ProtectedRoute>} />
+            <Route path="/campaigns" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
