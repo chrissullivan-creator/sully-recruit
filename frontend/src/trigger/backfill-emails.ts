@@ -1,6 +1,7 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getMicrosoftGraphCredentials } from "./lib/supabase";
 import { normalizeEmail, delay } from "./lib/resume-parsing";
+import { isMarketingEmail } from "./purge-marketing-emails";
 
 // Backfill emails from Microsoft Graph (Inbox + SentItems).
 //
@@ -151,6 +152,12 @@ async function processAccount(
           const matchEmail = isOutbound ? toEmails[0] : senderEmail;
 
           if (!matchEmail) {
+            skipped++;
+            continue;
+          }
+
+          // Skip marketing/newsletter emails
+          if (isMarketingEmail(isOutbound ? null : senderEmail)) {
             skipped++;
             continue;
           }
