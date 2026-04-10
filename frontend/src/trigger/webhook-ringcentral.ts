@@ -31,14 +31,14 @@ export const processRingcentralEvent = task({
     const fromPhone = eventBody.from?.phoneNumber || eventBody.from?.extensionNumber || "";
     const toPhone = eventBody.to?.[0]?.phoneNumber || eventBody.to?.phoneNumber || "";
     const direction = eventBody.direction === "Inbound" ? "inbound" : "outbound";
-    const callerPhone = direction === "inbound" ? fromPhone : toPhone;
+    const otherPhone = direction === "inbound" ? fromPhone : toPhone;
 
-    if (!callerPhone) {
+    if (!otherPhone) {
       logger.info("No phone number in event — skipping");
       return { action: "skipped", reason: "no_phone" };
     }
 
-    const normalizedPhone = callerPhone.replace(/[^0-9+]/g, "");
+    const normalizedPhone = otherPhone.replace(/[^0-9+]/g, "");
     const match = await matchByPhone(supabase, normalizedPhone);
 
     if (!match) {
@@ -61,9 +61,10 @@ export const processRingcentralEvent = task({
         external_message_id: eventBody.id?.toString(),
       } as any);
 
+      const smsBody = eventBody.subject || eventBody.text || "";
+
       // Extract intelligence from inbound SMS
       if (direction === "inbound") {
-        const smsBody = eventBody.subject || eventBody.text || "";
         if (smsBody.length > 10) {
           const intel = await extractMessageIntel(smsBody);
           if (intel) {
@@ -106,22 +107,26 @@ export const processRingcentralEvent = task({
       logger.info("SMS logged", { entityId: match.entityId, direction });
     } else {
       // ── Call event ────────────────────────────────────────────────
-      const { data: callLog } = await supabase
+      const { data: callLog, error: callLogError } = await supabase
         .from("call_logs")
         .insert({
           [match.entityColumn]: match.entityId,
+          linked_entity_type: match.entityType,
+          linked_entity_id: match.entityId,
           direction,
-          caller_number: fromPhone,
-          callee_number: toPhone,
+          phone_number: otherPhone,
           status: eventBody.result || eventBody.status || "completed",
           duration_seconds: eventBody.duration || 0,
           started_at: eventBody.startTime || payload.receivedAt,
           ended_at: eventBody.endTime || null,
-          provider: "ringcentral",
-          external_id: eventBody.id?.toString(),
+          external_call_id: eventBody.id?.toString(),
         } as any)
         .select("id")
         .single();
+
+      if (callLogError) {
+        logger.error("Failed to insert call_log", { error: callLogError.message });
+      }
 
       logger.info("Call logged", { entityId: match.entityId, callLogId: callLog?.id });
 
@@ -139,6 +144,8 @@ export const processRingcentralEvent = task({
           callLog?.id,
           payload.receivedAt,
           match.entityType,
+          direction,
+          otherPhone,
         );
       }
     }
@@ -225,6 +232,8 @@ async function transcribeAndExtract(
   callLogId: string | undefined,
   receivedAt: string,
   entityType: string = "candidate",
+  direction: string,
+  phoneNumber: string,
 ) {
   try {
     const anthropicKey = await getAnthropicKey();
@@ -284,25 +293,41 @@ async function transcribeAndExtract(
     const result = JSON.parse(jsonMatch[0]);
     logger.info("Extracted data from call", { candidateId, fields: Object.keys(result) });
 
-    // ── 3. Store transcript + notes ─────────────────────────────────
-    // Insert as a note linked to the candidate
-    const noteBody = [
-      `## Call Transcript Notes — ${new Date(receivedAt).toLocaleDateString()}`,
-      "",
-      result.call_notes || "",
-      "",
-      "---",
-      "",
-      "### Full Transcript",
+    // ── 3. Write to ai_call_notes (what the Calls page reads) ───────
+    const aiNoteInsert: any = {
+      call_log_id: callLogId ?? null,
+      external_call_id: eventBody.id?.toString() ?? null,
+      phone_number: phoneNumber,
+      call_direction: direction,
+      call_duration_seconds: eventBody.duration || 0,
+      call_started_at: eventBody.startTime || receivedAt,
+      call_ended_at: eventBody.endTime || null,
+      recording_url: recordingUrl ?? null,
       transcript,
-    ].join("\n");
+      ai_summary: result.call_notes || null,
+      ai_action_items: result.back_of_resume_points || null,
+      processing_status: "completed",
+      structured_notes: result,
+    };
 
-    await supabase.from("notes").insert({
-      entity_type: entityType,
-      entity_id: candidateId,
-      content: noteBody,
-      created_at: receivedAt,
-    } as any);
+    if (entityType === "candidate") {
+      aiNoteInsert.candidate_id = candidateId;
+    } else {
+      aiNoteInsert.contact_id = candidateId;
+    }
+
+    const { error: noteErr } = await supabase.from("ai_call_notes").insert(aiNoteInsert);
+    if (noteErr) {
+      logger.error("Failed to insert ai_call_notes", { error: noteErr.message });
+    }
+
+    // Stamp call_logs.summary for quick display without a join
+    if (callLogId && result.call_notes) {
+      await supabase
+        .from("call_logs")
+        .update({ summary: result.call_notes } as any)
+        .eq("id", callLogId);
+    }
 
     // ── 4. Update entity fields ────────────────────────────────────
     const fields = result.extracted_fields || {};
