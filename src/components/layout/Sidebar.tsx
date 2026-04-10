@@ -43,17 +43,7 @@ export function Sidebar() {
 
       {/* ── Logo ── */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="Sully Recruit" className="h-9 w-9 object-contain shrink-0" style={{ mixBlendMode: 'lighten' }} />
-          <div>
-            <h1 className="text-sm font-bold tracking-wider text-sidebar-foreground uppercase leading-none">
-              Emerald Recruit
-            </h1>
-            <p className="text-[9px] font-semibold tracking-[0.18em] text-gold uppercase mt-0.5 opacity-80">
-              Sully Recruit
-            </p>
-          </div>
-        </div>
+        <img src={logo} alt="Sully Recruit" className="h-10 w-10 object-contain shrink-0" style={{ mixBlendMode: 'lighten' }} />
         <NotificationBell />
       </div>
 
