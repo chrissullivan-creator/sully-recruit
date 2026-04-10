@@ -6,7 +6,7 @@ import logo from '@/assets/emerald-logo.jpeg';
 import {
   LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo,
-  FileText, Linkedin,
+  FileText, Linkedin, Send,
 } from 'lucide-react';
 
 const navigation = [
@@ -14,6 +14,7 @@ const navigation = [
   { name: 'Inbox',           href: '/inbox',           icon: Inbox           },
   { name: 'Jobs',            href: '/jobs',            icon: Briefcase       },
   { name: 'Candidates',      href: '/candidates',      icon: UserCheck       },
+  { name: 'Send Outs',       href: '/send-outs',       icon: Send            },
   { name: 'Resume Search',   href: '/resume-search',   icon: FileText        },
   { name: 'LinkedIn Search', href: '/linkedin-search', icon: Linkedin        },
   { name: 'Contacts',        href: '/contacts',        icon: Users           },

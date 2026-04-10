@@ -22,6 +22,7 @@ import Auth from "./pages/Auth";
 import MicrosoftCallback from "./pages/MicrosoftCallback";
 import { ResumeSearch } from "./pages/ResumeSearch";
 import LinkedInSearch from "./components/LinkedInSearch";
+import SendOutBoardPage from "./pages/SendOutBoard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -48,6 +49,7 @@ const App = () => (
             <Route path="/campaigns/:id" element={<ProtectedRoute><SequenceDetail /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="/send-outs" element={<ProtectedRoute><SendOutBoardPage /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

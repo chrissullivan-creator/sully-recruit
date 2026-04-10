@@ -830,6 +830,7 @@ export type Database = {
       send_outs: {
         Row: {
           candidate_id: string
+          candidate_job_id: string | null
           contact_id: string | null
           created_at: string
           feedback: string | null
@@ -842,12 +843,16 @@ export type Database = {
           recruiter_id: string | null
           rejected_by: string | null
           rejection_reason: string | null
+          resume_file_name: string | null
+          resume_url: string | null
           sent_to_client_at: string | null
           stage: string
+          submittal_notes: string | null
           updated_at: string
         }
         Insert: {
           candidate_id: string
+          candidate_job_id?: string | null
           contact_id?: string | null
           created_at?: string
           feedback?: string | null
@@ -860,12 +865,16 @@ export type Database = {
           recruiter_id?: string | null
           rejected_by?: string | null
           rejection_reason?: string | null
+          resume_file_name?: string | null
+          resume_url?: string | null
           sent_to_client_at?: string | null
           stage?: string
+          submittal_notes?: string | null
           updated_at?: string
         }
         Update: {
           candidate_id?: string
+          candidate_job_id?: string | null
           contact_id?: string | null
           created_at?: string
           feedback?: string | null
@@ -878,8 +887,11 @@ export type Database = {
           recruiter_id?: string | null
           rejected_by?: string | null
           rejection_reason?: string | null
+          resume_file_name?: string | null
+          resume_url?: string | null
           sent_to_client_at?: string | null
           stage?: string
+          submittal_notes?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -909,6 +921,334 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: false
             referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interviews: {
+        Row: {
+          additional_interviewers: Json | null
+          ai_confidence: number | null
+          ai_sentiment: string | null
+          ai_summary: string | null
+          calendar_attendees: Json | null
+          calendar_event_id: string | null
+          calendar_event_url: string | null
+          calendar_synced_at: string | null
+          cancelled_at: string | null
+          candidate_id: string | null
+          completed_at: string | null
+          created_at: string | null
+          debrief_at: string | null
+          debrief_notes: string | null
+          debrief_source: string | null
+          end_at: string | null
+          id: string
+          interview_type: string | null
+          interviewer_company: string | null
+          interviewer_contact_id: string | null
+          interviewer_name: string | null
+          interviewer_title: string | null
+          job_id: string | null
+          location: string | null
+          meeting_link: string | null
+          outcome: string | null
+          owner_id: string | null
+          round: number | null
+          scheduled_at: string | null
+          send_out_id: string | null
+          stage: string
+          timezone: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          additional_interviewers?: Json | null
+          ai_confidence?: number | null
+          ai_sentiment?: string | null
+          ai_summary?: string | null
+          calendar_attendees?: Json | null
+          calendar_event_id?: string | null
+          calendar_event_url?: string | null
+          calendar_synced_at?: string | null
+          cancelled_at?: string | null
+          candidate_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          debrief_at?: string | null
+          debrief_notes?: string | null
+          debrief_source?: string | null
+          end_at?: string | null
+          id?: string
+          interview_type?: string | null
+          interviewer_company?: string | null
+          interviewer_contact_id?: string | null
+          interviewer_name?: string | null
+          interviewer_title?: string | null
+          job_id?: string | null
+          location?: string | null
+          meeting_link?: string | null
+          outcome?: string | null
+          owner_id?: string | null
+          round?: number | null
+          scheduled_at?: string | null
+          send_out_id?: string | null
+          stage?: string
+          timezone?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          additional_interviewers?: Json | null
+          ai_confidence?: number | null
+          ai_sentiment?: string | null
+          ai_summary?: string | null
+          calendar_attendees?: Json | null
+          calendar_event_id?: string | null
+          calendar_event_url?: string | null
+          calendar_synced_at?: string | null
+          cancelled_at?: string | null
+          candidate_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          debrief_at?: string | null
+          debrief_notes?: string | null
+          debrief_source?: string | null
+          end_at?: string | null
+          id?: string
+          interview_type?: string | null
+          interviewer_company?: string | null
+          interviewer_contact_id?: string | null
+          interviewer_name?: string | null
+          interviewer_title?: string | null
+          job_id?: string | null
+          location?: string | null
+          meeting_link?: string | null
+          outcome?: string | null
+          owner_id?: string | null
+          round?: number | null
+          scheduled_at?: string | null
+          send_out_id?: string | null
+          stage?: string
+          timezone?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interviews_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_interviewer_contact_id_fkey"
+            columns: ["interviewer_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_send_out_id_fkey"
+            columns: ["send_out_id"]
+            isOneToOne: false
+            referencedRelation: "send_outs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      placements: {
+        Row: {
+          candidate_id: string | null
+          contact_id: string | null
+          created_at: string | null
+          falloff: boolean | null
+          falloff_date: string | null
+          falloff_reason: string | null
+          fee_amount: number | null
+          fee_pct: number | null
+          fee_type: string | null
+          guarantee_days: number | null
+          guarantee_end_date: string | null
+          id: string
+          invoice_date: string | null
+          invoice_number: string | null
+          invoice_status: string | null
+          job_id: string | null
+          notes: string | null
+          payment_date: string | null
+          placed_at: string | null
+          replacement_candidate_id: string | null
+          salary: number | null
+          send_out_id: string | null
+          start_date: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          candidate_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          falloff?: boolean | null
+          falloff_date?: string | null
+          falloff_reason?: string | null
+          fee_amount?: number | null
+          fee_pct?: number | null
+          fee_type?: string | null
+          guarantee_days?: number | null
+          guarantee_end_date?: string | null
+          id?: string
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_status?: string | null
+          job_id?: string | null
+          notes?: string | null
+          payment_date?: string | null
+          placed_at?: string | null
+          replacement_candidate_id?: string | null
+          salary?: number | null
+          send_out_id?: string | null
+          start_date?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          candidate_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          falloff?: boolean | null
+          falloff_date?: string | null
+          falloff_reason?: string | null
+          fee_amount?: number | null
+          fee_pct?: number | null
+          fee_type?: string | null
+          guarantee_days?: number | null
+          guarantee_end_date?: string | null
+          id?: string
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_status?: string | null
+          job_id?: string | null
+          notes?: string | null
+          payment_date?: string | null
+          placed_at?: string | null
+          replacement_candidate_id?: string | null
+          salary?: number | null
+          send_out_id?: string | null
+          start_date?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "placements_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_replacement_candidate_id_fkey"
+            columns: ["replacement_candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_replacement_candidate_id_fkey"
+            columns: ["replacement_candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "placements_send_out_id_fkey"
+            columns: ["send_out_id"]
+            isOneToOne: false
+            referencedRelation: "send_outs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stage_transitions: {
+        Row: {
+          ai_confidence: number | null
+          ai_reasoning: string | null
+          created_at: string | null
+          entity_id: string
+          entity_type: string
+          from_stage: string | null
+          id: string
+          moved_by: string
+          to_stage: string
+          trigger_source: string | null
+          triggered_by_message_id: string | null
+          triggered_by_user_id: string | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          ai_reasoning?: string | null
+          created_at?: string | null
+          entity_id: string
+          entity_type: string
+          from_stage?: string | null
+          id?: string
+          moved_by: string
+          to_stage: string
+          trigger_source?: string | null
+          triggered_by_message_id?: string | null
+          triggered_by_user_id?: string | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          ai_reasoning?: string | null
+          created_at?: string | null
+          entity_id?: string
+          entity_type?: string
+          from_stage?: string | null
+          id?: string
+          moved_by?: string
+          to_stage?: string
+          trigger_source?: string | null
+          triggered_by_message_id?: string | null
+          triggered_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stage_transitions_triggered_by_message_id_fkey"
+            columns: ["triggered_by_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
