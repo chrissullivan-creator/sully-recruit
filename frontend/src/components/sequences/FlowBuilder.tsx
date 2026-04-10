@@ -15,11 +15,10 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { ActionNode, type ActionData } from "./ActionNode";
-import { WaitNode } from "./WaitNode";
 import { BranchNode } from "./BranchNode";
 import { EndNode } from "./EndNode";
 import { Button } from "@/components/ui/button";
-import { Plus, GitBranch, Clock, StopCircle, Zap, Wand2 } from "lucide-react";
+import { GitBranch, StopCircle, Zap, Wand2 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for serialization
@@ -27,10 +26,9 @@ import { Plus, GitBranch, Clock, StopCircle, Zap, Wand2 } from "lucide-react";
 
 export interface FlowNodeData {
   id: string;
-  type: "action" | "wait" | "branch" | "end";
+  type: "action" | "branch" | "end";
   label: string;
   actions?: ActionData[];
-  waitDays?: number;
   condition?: string;
   afterDays?: number | null;
   nodeOrder: number;
@@ -251,7 +249,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
   const nodeTypes = useMemo(
     () => ({
       actionNode: ActionNode,
-      waitNode: WaitNode,
       branchNode: BranchNode,
       endNode: EndNode,
     }),
@@ -274,19 +271,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
                 );
               },
               onAskJoe: onAskJoe ? (actionIndex: number) => onAskJoe(n.id, actionIndex) : undefined,
-            },
-          };
-        }
-        if (n.type === "waitNode" && !(n.data as any).onUpdate) {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              onUpdate: (waitDays: number) => {
-                setNodes((nds2) =>
-                  nds2.map((nn) => (nn.id === n.id ? { ...nn, data: { ...nn.data, waitDays } } : nn)),
-                );
-              },
             },
           };
         }
@@ -334,14 +318,11 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
       type:
         n.type === "actionNode"
           ? "action"
-          : n.type === "waitNode"
-            ? "wait"
-            : n.type === "branchNode"
-              ? "branch"
-              : "end",
+          : n.type === "branchNode"
+            ? "branch"
+            : "end",
       label: (n.data as any).label || "",
       actions: (n.data as any).actions,
-      waitDays: (n.data as any).waitDays,
       condition: (n.data as any).condition,
       afterDays: (n.data as any).afterDays,
       nodeOrder: i + 1,
@@ -365,7 +346,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
   }, [setNodes, setEdges]);
 
   const addNode = useCallback(
-    (type: "action" | "wait" | "branch" | "end") => {
+    (type: "action" | "branch" | "end") => {
       const id = `node-${nodeCounter + 1}`;
       setNodeCounter((c) => c + 1);
 
@@ -400,22 +381,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
                 );
               },
               onAskJoe: onAskJoe ? (actionIndex: number) => onAskJoe(id, actionIndex) : undefined,
-            },
-          };
-          break;
-        case "wait":
-          newNode = {
-            id,
-            type: "waitNode",
-            position: { x: 275, y: maxY + 220 },
-            data: {
-              label: "Wait",
-              waitDays: 3,
-              onUpdate: (waitDays: number) => {
-                setNodes((nds) =>
-                  nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, waitDays } } : n)),
-                );
-              },
             },
           };
           break;
@@ -463,9 +428,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         <div className="w-px bg-border mx-1" />
         <Button variant="outline" size="sm" onClick={() => addNode("action")}>
           <Zap className="h-3 w-3 mr-1" /> Action
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => addNode("wait")}>
-          <Clock className="h-3 w-3 mr-1" /> Wait
         </Button>
         <Button variant="outline" size="sm" onClick={() => addNode("branch")}>
           <GitBranch className="h-3 w-3 mr-1" /> Branch
