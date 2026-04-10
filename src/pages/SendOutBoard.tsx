@@ -103,22 +103,20 @@ export default function SendOutBoardPage() {
       const { error } = await supabase.from('send_outs').update({ stage: toStage }).eq('id', id);
       if (error) throw error;
 
-      // The DB trigger logs human updates to stage_transitions, but we
-      // also pass the user-facing `source` field manually here so the
-      // history shows where the move came from.
+      // Log this move so the drawer's history panel shows where it came from.
       const { data: userData } = await supabase.auth.getUser();
-      await (supabase as any).from('stage_transitions').insert({
+      await supabase.from('stage_transitions').insert({
         entity_type: 'send_out',
         entity_id: id,
         from_stage: fromStage ?? null,
         to_stage: toStage,
-        moved_by_type: 'human',
-        moved_by: userData.user?.id ?? null,
-        source: 'board',
+        moved_by: 'human',
+        triggered_by_user_id: userData.user?.id ?? null,
+        trigger_source: 'board',
       });
 
-      qc.invalidateQueries({ queryKey: ['send_out_board_rows'] });
-      qc.invalidateQueries({ queryKey: ['send_out_board_row', id] });
+      qc.invalidateQueries({ queryKey: ['send_out_rows'] });
+      qc.invalidateQueries({ queryKey: ['send_out_row', id] });
       qc.invalidateQueries({ queryKey: ['stage_transitions', 'send_out', id] });
       toast.success(`Moved to ${STAGE_LABEL[toStage as SendOutStage] ?? toStage}`);
     } catch (err: any) {

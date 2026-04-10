@@ -19,11 +19,13 @@ interface StageTransitionRow {
   entity_id: string;
   from_stage: string | null;
   to_stage: string;
-  moved_by_type: 'human' | 'ai' | 'system' | string;
-  moved_by: string | null;
-  source: string | null;
+  moved_by: string;              // 'human' | 'ai' | 'system'
+  trigger_source: string | null;
   ai_reasoning: string | null;
-  created_at: string;
+  ai_confidence: number | null;
+  triggered_by_user_id: string | null;
+  triggered_by_message_id: string | null;
+  created_at: string | null;
 }
 
 export function useStageTransitions(entityType: string, entityId: string | undefined) {
@@ -31,14 +33,14 @@ export function useStageTransitions(entityType: string, entityId: string | undef
     queryKey: ['stage_transitions', entityType, entityId],
     enabled: !!entityId,
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('stage_transitions')
         .select('*')
         .eq('entity_type', entityType)
         .eq('entity_id', entityId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data ?? []) as StageTransitionRow[];
+      return (data ?? []) as unknown as StageTransitionRow[];
     },
   });
 }
@@ -102,26 +104,35 @@ export function StageTransitionLog({
                 {rows.map((row) => (
                   <tr key={row.id} className="border-t border-border/60 align-top">
                     <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
-                      {formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}
+                      {row.created_at
+                        ? formatDistanceToNow(new Date(row.created_at), { addSuffix: true })
+                        : '—'}
                     </td>
                     <td className="px-3 py-1.5 capitalize">{prettyStage(row.from_stage)}</td>
                     <td className="px-3 py-1.5 capitalize font-medium">{prettyStage(row.to_stage)}</td>
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <MovedByIcon type={row.moved_by_type} />
+                        <MovedByIcon type={row.moved_by} />
                         <span className="truncate">
-                          {row.moved_by_type === 'ai'
+                          {row.moved_by === 'ai'
                             ? 'Joe (AI)'
-                            : row.moved_by_type === 'system'
+                            : row.moved_by === 'system'
                             ? 'System'
-                            : (row.moved_by && nameById[row.moved_by]) || 'Teammate'}
+                            : (row.triggered_by_user_id && nameById[row.triggered_by_user_id]) || 'Teammate'}
                         </span>
                       </div>
                       {row.ai_reasoning && (
-                        <div className="mt-1 text-[11px] italic text-muted-foreground">{row.ai_reasoning}</div>
+                        <div className="mt-1 text-[11px] italic text-muted-foreground">
+                          {row.ai_reasoning}
+                          {row.ai_confidence != null && (
+                            <span className="ml-1 not-italic text-muted-foreground/70">
+                              ({Math.round((row.ai_confidence > 1 ? row.ai_confidence : row.ai_confidence * 100))}%)
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{row.source || '—'}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{row.trigger_source || '—'}</td>
                   </tr>
                 ))}
               </tbody>

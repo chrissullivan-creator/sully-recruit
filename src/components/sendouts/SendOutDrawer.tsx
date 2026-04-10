@@ -40,7 +40,7 @@ export function SendOutDrawer({ sendOutId, open, onClose }: SendOutDrawerProps) 
   const [stage, setStage] = useState<SendOutStage>('send_out');
   const [submittedAt, setSubmittedAt] = useState<string>('');
   const [submittalNotes, setSubmittalNotes] = useState<string>('');
-  const [resumeLink, setResumeLink] = useState<string>('');
+  const [resumeUrl, setResumeUrl] = useState<string>('');
   const [rejectionReason, setRejectionReason] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
@@ -52,7 +52,7 @@ export function SendOutDrawer({ sendOutId, open, onClose }: SendOutDrawerProps) 
     setStage((row.stage as SendOutStage) ?? 'send_out');
     setSubmittedAt(row.sent_to_client_at ? row.sent_to_client_at.slice(0, 16) : '');
     setSubmittalNotes(row.submittal_notes ?? '');
-    setResumeLink(row.resume_link ?? '');
+    setResumeUrl((row as any).resume_url ?? '');
     setRejectionReason(row.rejection_reason ?? '');
   }, [row]);
 
@@ -66,27 +66,27 @@ export function SendOutDrawer({ sendOutId, open, onClose }: SendOutDrawerProps) 
           stage,
           sent_to_client_at: submittedAt ? new Date(submittedAt).toISOString() : null,
           submittal_notes: submittalNotes || null,
-          resume_link: resumeLink || null,
+          resume_url: resumeUrl || null,
           rejection_reason: rejectionReason || null,
-        } as any)
+        })
         .eq('id', sendOutId);
       if (error) throw error;
 
       if (row && row.stage !== stage) {
         const { data: userData } = await supabase.auth.getUser();
-        await (supabase as any).from('stage_transitions').insert({
+        await supabase.from('stage_transitions').insert({
           entity_type: 'send_out',
           entity_id: sendOutId,
           from_stage: row.stage,
           to_stage: stage,
-          moved_by_type: 'human',
-          moved_by: userData.user?.id ?? null,
-          source: 'drawer',
+          moved_by: 'human',
+          triggered_by_user_id: userData.user?.id ?? null,
+          trigger_source: 'drawer',
         });
       }
 
-      qc.invalidateQueries({ queryKey: ['send_out_board_rows'] });
-      qc.invalidateQueries({ queryKey: ['send_out_board_row', sendOutId] });
+      qc.invalidateQueries({ queryKey: ['send_out_rows'] });
+      qc.invalidateQueries({ queryKey: ['send_out_row', sendOutId] });
       qc.invalidateQueries({ queryKey: ['stage_transitions', 'send_out', sendOutId] });
       toast.success('Saved');
     } catch (err: any) {
@@ -217,18 +217,18 @@ export function SendOutDrawer({ sendOutId, open, onClose }: SendOutDrawerProps) 
                       <div className="relative flex-1">
                         <LinkIcon className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <Input
-                          value={resumeLink}
-                          onChange={(e) => setResumeLink(e.target.value)}
+                          value={resumeUrl}
+                          onChange={(e) => setResumeUrl(e.target.value)}
                           placeholder="https://…"
                           className="pl-8 h-9"
                         />
                       </div>
-                      {resumeLink && (
+                      {resumeUrl && (
                         <Button
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(resumeLink, '_blank', 'noopener')}
+                          onClick={() => window.open(resumeUrl, '_blank', 'noopener')}
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </Button>

@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useContacts } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 import {
   INTERVIEW_TYPES, INTERVIEW_TYPE_LABEL, type InterviewRow,
@@ -39,14 +40,16 @@ interface PanelMember {
   email?: string | null;
 }
 
+const DEFAULT_STAGE = 'to_be_scheduled';
+
 export function InterviewModal({
   open, onClose, sendOutId, nextRound, interview, onSaved,
 }: InterviewModalProps) {
   const { data: contacts = [] } = useContacts();
 
   const [round, setRound] = useState<number>(nextRound);
-  const [type, setType] = useState<string>('phone_screen');
-  const [stage, setStage] = useState<string>('');
+  const [interviewType, setInterviewType] = useState<string>('phone_screen');
+  const [stage, setStage] = useState<string>(DEFAULT_STAGE);
   const [scheduledDate, setScheduledDate] = useState<string>('');
   const [scheduledTime, setScheduledTime] = useState<string>('');
   const [timezone, setTimezone] = useState<string>(
@@ -54,7 +57,7 @@ export function InterviewModal({
   );
   const [location, setLocation] = useState<string>('');
   const [meetingLink, setMeetingLink] = useState<string>('');
-  const [primaryInterviewerId, setPrimaryInterviewerId] = useState<string | null>(null);
+  const [interviewerContactId, setInterviewerContactId] = useState<string | null>(null);
   const [interviewerPickerOpen, setInterviewerPickerOpen] = useState(false);
   const [panel, setPanel] = useState<PanelMember[]>([]);
   const [panelQuery, setPanelQuery] = useState('');
@@ -64,9 +67,9 @@ export function InterviewModal({
   useEffect(() => {
     if (!open) return;
     if (interview) {
-      setRound(interview.round);
-      setType(interview.type);
-      setStage(interview.stage ?? '');
+      setRound(interview.round ?? 1);
+      setInterviewType(interview.interview_type ?? 'phone_screen');
+      setStage(interview.stage ?? DEFAULT_STAGE);
       if (interview.scheduled_at) {
         const d = new Date(interview.scheduled_at);
         setScheduledDate(d.toISOString().slice(0, 10));
@@ -78,17 +81,17 @@ export function InterviewModal({
       setTimezone(interview.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
       setLocation(interview.location ?? '');
       setMeetingLink(interview.meeting_link ?? '');
-      setPrimaryInterviewerId(interview.primary_interviewer_id ?? null);
-      setPanel(Array.isArray(interview.panel_members) ? interview.panel_members : []);
+      setInterviewerContactId(interview.interviewer_contact_id ?? null);
+      setPanel(Array.isArray(interview.additional_interviewers) ? interview.additional_interviewers : []);
     } else {
       setRound(nextRound);
-      setType('phone_screen');
-      setStage('');
+      setInterviewType('phone_screen');
+      setStage(DEFAULT_STAGE);
       setScheduledDate('');
       setScheduledTime('');
       setLocation('');
       setMeetingLink('');
-      setPrimaryInterviewerId(null);
+      setInterviewerContactId(null);
       setPanel([]);
     }
   }, [open, interview, nextRound]);
@@ -127,37 +130,41 @@ export function InterviewModal({
   const save = async (): Promise<InterviewRow | null> => {
     setSaving(true);
     try {
-      const payload: any = {
+      const primaryContact = interviewerContactId ? contactById[interviewerContactId] : null;
+      const payload = {
         send_out_id: sendOutId,
         round,
-        type,
-        stage: stage || null,
+        interview_type: interviewType,
+        stage: stage || DEFAULT_STAGE,
         scheduled_at: scheduledAtIso,
         timezone,
         location: location || null,
         meeting_link: meetingLink || null,
-        primary_interviewer_id: primaryInterviewerId,
-        panel_members: panel,
+        interviewer_contact_id: interviewerContactId,
+        interviewer_name: (primaryContact?.full_name as string | null) ?? null,
+        interviewer_title: (primaryContact?.title as string | null) ?? null,
+        interviewer_company: (primaryContact?.companies?.name as string | null) ?? null,
+        additional_interviewers: panel as unknown as Json,
       };
 
       let saved: InterviewRow | null = null;
       if (interview?.id) {
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from('interviews')
           .update(payload)
           .eq('id', interview.id)
           .select()
           .single();
         if (error) throw error;
-        saved = data as InterviewRow;
+        saved = data as unknown as InterviewRow;
       } else {
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from('interviews')
           .insert(payload)
           .select()
           .single();
         if (error) throw error;
-        saved = data as InterviewRow;
+        saved = data as unknown as InterviewRow;
       }
 
       toast.success(interview?.id ? 'Interview updated' : 'Interview scheduled');
@@ -187,7 +194,7 @@ export function InterviewModal({
       const saved = await save();
       if (!saved) return;
 
-      const primary = primaryInterviewerId ? contactById[primaryInterviewerId] : null;
+      const primary = interviewerContactId ? contactById[interviewerContactId] : null;
       const attendees: Array<{ email: string; name?: string }> = [];
       if (primary?.email) attendees.push({ email: primary.email, name: primary.full_name });
       for (const m of panel) {
@@ -198,7 +205,7 @@ export function InterviewModal({
         body: {
           interview_id: saved.id,
           send_out_id: sendOutId,
-          subject: `${INTERVIEW_TYPE_LABEL[type as keyof typeof INTERVIEW_TYPE_LABEL] ?? type} — Round ${round}`,
+          subject: `${INTERVIEW_TYPE_LABEL[interviewType as keyof typeof INTERVIEW_TYPE_LABEL] ?? interviewType} — Round ${round}`,
           start: scheduledAtIso,
           timezone,
           location: location || meetingLink || undefined,
@@ -208,11 +215,17 @@ export function InterviewModal({
       });
       if (error) throw error;
 
-      const calendarEventId = (data as any)?.event_id ?? (data as any)?.id ?? null;
-      if (calendarEventId) {
-        await (supabase as any)
+      const d = (data as any) ?? {};
+      const calendarEventId = d.event_id ?? d.id ?? null;
+      const calendarEventUrl = d.event_url ?? d.url ?? null;
+      if (calendarEventId || calendarEventUrl) {
+        await supabase
           .from('interviews')
-          .update({ calendar_event_id: calendarEventId })
+          .update({
+            calendar_event_id: calendarEventId,
+            calendar_event_url: calendarEventUrl,
+            calendar_synced_at: new Date().toISOString(),
+          })
           .eq('id', saved.id);
       }
       toast.success('Calendar event created');
@@ -225,7 +238,7 @@ export function InterviewModal({
     }
   };
 
-  const selectedInterviewer = primaryInterviewerId ? contactById[primaryInterviewerId] : null;
+  const selectedInterviewer = interviewerContactId ? contactById[interviewerContactId] : null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -247,7 +260,7 @@ export function InterviewModal({
             </div>
             <div className="col-span-2 space-y-1.5">
               <Label className="text-xs">Type</Label>
-              <Select value={type} onValueChange={setType}>
+              <Select value={interviewType} onValueChange={setInterviewType}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {INTERVIEW_TYPES.map((t) => (
@@ -339,14 +352,14 @@ export function InterviewModal({
                         key={c.id}
                         value={`${c.full_name || ''} ${c.email || ''}`}
                         onSelect={() => {
-                          setPrimaryInterviewerId(c.id);
+                          setInterviewerContactId(c.id);
                           setInterviewerPickerOpen(false);
                         }}
                       >
                         <Check
                           className={cn(
                             'mr-2 h-3.5 w-3.5',
-                            primaryInterviewerId === c.id ? 'opacity-100' : 'opacity-0',
+                            interviewerContactId === c.id ? 'opacity-100' : 'opacity-0',
                           )}
                         />
                         <span className="truncate">{c.full_name || c.email}</span>

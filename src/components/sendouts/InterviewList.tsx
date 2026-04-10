@@ -27,14 +27,14 @@ function useInterviews(sendOutId: string) {
     queryKey: ['interviews', sendOutId],
     enabled: !!sendOutId,
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('interviews')
         .select('*')
         .eq('send_out_id', sendOutId)
         .order('round', { ascending: true })
         .order('scheduled_at', { ascending: true });
       if (error) throw error;
-      return (data ?? []) as InterviewRow[];
+      return (data ?? []) as unknown as InterviewRow[];
     },
   });
 }
@@ -50,7 +50,7 @@ export function InterviewList({ sendOutId }: InterviewListProps) {
 
   const contactById = Object.fromEntries((contacts as any[]).map((c) => [c.id, c]));
 
-  const nextRound = Math.max(0, ...interviews.map((i) => i.round)) + 1;
+  const nextRound = Math.max(0, ...interviews.map((i) => i.round ?? 0)) + 1;
 
   return (
     <div className="space-y-3">
@@ -82,8 +82,9 @@ export function InterviewList({ sendOutId }: InterviewListProps) {
 
       <div className="space-y-2">
         {interviews.map((iv) => {
-          const interviewer = iv.primary_interviewer_id ? contactById[iv.primary_interviewer_id] : null;
+          const interviewer = iv.interviewer_contact_id ? contactById[iv.interviewer_contact_id] : null;
           const outcome = (iv.outcome || 'pending') as InterviewOutcome;
+          const fallbackInterviewerName = iv.interviewer_name || iv.interviewer_title || null;
           return (
             <div
               key={iv.id}
@@ -92,9 +93,9 @@ export function InterviewList({ sendOutId }: InterviewListProps) {
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">R{iv.round}</Badge>
+                    <Badge variant="outline" className="text-[10px]">R{iv.round ?? 1}</Badge>
                     <span className="text-sm font-medium">
-                      {INTERVIEW_TYPE_LABEL[iv.type as InterviewType] ?? iv.type}
+                      {INTERVIEW_TYPE_LABEL[iv.interview_type as InterviewType] ?? iv.interview_type ?? 'Interview'}
                     </span>
                     {iv.stage && (
                       <span className="text-[11px] text-muted-foreground">· {iv.stage}</span>
@@ -115,10 +116,12 @@ export function InterviewList({ sendOutId }: InterviewListProps) {
                         {iv.timezone ? ` ${iv.timezone}` : ''}
                       </span>
                     )}
-                    {interviewer && (
+                    {(interviewer || fallbackInterviewerName) && (
                       <span className="flex items-center gap-1">
                         <User className="h-3 w-3" />
-                        {interviewer.full_name || interviewer.email}
+                        {interviewer
+                          ? (interviewer.full_name || interviewer.email)
+                          : fallbackInterviewerName}
                       </span>
                     )}
                     {iv.meeting_link && (

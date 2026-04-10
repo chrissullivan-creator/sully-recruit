@@ -48,25 +48,38 @@ export const INTERVIEW_OUTCOME_BADGE: Record<InterviewOutcome, string> = {
   cancelled: 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
+// Matches the live `interviews` table shape in Supabase.
 export interface InterviewRow {
   id: string;
-  send_out_id: string;
-  round: number;
-  type: string;
-  stage: string | null;
+  send_out_id: string | null;
+  candidate_id: string | null;
+  job_id: string | null;
+  round: number | null;
+  interview_type: string | null;
+  stage: string;
   scheduled_at: string | null;
+  end_at: string | null;
   timezone: string | null;
   location: string | null;
   meeting_link: string | null;
-  primary_interviewer_id: string | null;
-  panel_members: any;
+  interviewer_contact_id: string | null;
+  interviewer_name: string | null;
+  interviewer_title: string | null;
+  interviewer_company: string | null;
+  additional_interviewers: any;
   calendar_event_id: string | null;
-  outcome: string;
+  calendar_event_url: string | null;
+  calendar_attendees: any;
+  outcome: string | null;
   completed_at: string | null;
+  cancelled_at: string | null;
   debrief_notes: string | null;
+  debrief_at: string | null;
+  debrief_source: string | null;
   ai_summary: string | null;
   ai_sentiment: string | null;
   ai_confidence: number | null;
-  created_at: string;
-  updated_at: string;
+  owner_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }

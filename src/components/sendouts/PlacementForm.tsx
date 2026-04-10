@@ -23,7 +23,7 @@ interface PlacementRow {
   send_out_id: string;
   salary: number | null;
   fee_type: 'percent' | 'flat' | string | null;
-  fee_percent: number | null;
+  fee_pct: number | null;
   fee_amount: number | null;
   invoice_status: 'pending' | 'sent' | 'paid' | 'overdue' | string | null;
   invoice_date: string | null;
@@ -40,13 +40,13 @@ function usePlacement(sendOutId: string) {
     queryKey: ['placement', sendOutId],
     enabled: !!sendOutId,
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('placements')
         .select('*')
         .eq('send_out_id', sendOutId)
         .maybeSingle();
       if (error) throw error;
-      return (data as PlacementRow | null) ?? null;
+      return (data as unknown as PlacementRow | null) ?? null;
     },
   });
 }
@@ -72,7 +72,7 @@ export function PlacementForm({ sendOutId }: PlacementFormProps) {
     if (!placement) return;
     setSalary(placement.salary != null ? String(placement.salary) : '');
     setFeeType(placement.fee_type ?? 'percent');
-    setFeePercent(placement.fee_percent != null ? String(placement.fee_percent) : '');
+    setFeePercent(placement.fee_pct != null ? String(placement.fee_pct) : '');
     setFeeAmount(placement.fee_amount != null ? String(placement.fee_amount) : '');
     setInvoiceStatus(placement.invoice_status ?? 'pending');
     setInvoiceDate(placement.invoice_date ?? '');
@@ -109,11 +109,11 @@ export function PlacementForm({ sendOutId }: PlacementFormProps) {
   const save = async () => {
     setSaving(true);
     try {
-      const payload: any = {
+      const payload = {
         send_out_id: sendOutId,
         salary: salary ? parseFloat(salary) : null,
         fee_type: feeType,
-        fee_percent: feePercent ? parseFloat(feePercent) : null,
+        fee_pct: feePercent ? parseFloat(feePercent) : null,
         fee_amount: feeAmount ? parseFloat(feeAmount) : null,
         invoice_status: invoiceStatus,
         invoice_date: invoiceDate || null,
@@ -126,13 +126,13 @@ export function PlacementForm({ sendOutId }: PlacementFormProps) {
       };
 
       if (placement?.id) {
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from('placements')
           .update(payload)
           .eq('id', placement.id);
         if (error) throw error;
       } else {
-        const { error } = await (supabase as any).from('placements').insert(payload);
+        const { error } = await supabase.from('placements').insert(payload);
         if (error) throw error;
       }
       qc.invalidateQueries({ queryKey: ['placement', sendOutId] });

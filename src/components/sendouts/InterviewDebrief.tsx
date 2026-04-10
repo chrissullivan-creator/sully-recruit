@@ -83,7 +83,7 @@ export function InterviewDebrief({
           company_name: (sendOut as any)?.company_name,
           candidate_name: (sendOut as any)?.candidate_name,
           round: interview.round,
-          type: interview.type,
+          interview_type: interview.interview_type,
           outcome,
           debrief_notes: debriefNotes,
         },
@@ -112,12 +112,14 @@ export function InterviewDebrief({
     setSaving(true);
     try {
       const prevOutcome = interview.outcome;
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('interviews')
         .update({
           outcome,
           completed_at: completedAt ? new Date(completedAt).toISOString() : null,
           debrief_notes: debriefNotes || null,
+          debrief_at: new Date().toISOString(),
+          debrief_source: 'manual',
           ai_summary: aiSummary,
           ai_sentiment: aiSentiment,
           ai_confidence: aiConfidence,
@@ -128,14 +130,14 @@ export function InterviewDebrief({
       // Log a stage transition on the interview entity itself.
       if (prevOutcome !== outcome) {
         const { data: userData } = await supabase.auth.getUser();
-        await (supabase as any).from('stage_transitions').insert({
+        await supabase.from('stage_transitions').insert({
           entity_type: 'interview',
           entity_id: interview.id,
           from_stage: prevOutcome,
           to_stage: outcome,
-          moved_by_type: 'human',
-          moved_by: userData.user?.id ?? null,
-          source: 'debrief',
+          moved_by: 'human',
+          triggered_by_user_id: userData.user?.id ?? null,
+          trigger_source: 'debrief',
         });
       }
 
@@ -173,18 +175,18 @@ export function InterviewDebrief({
       if (error) throw error;
 
       const { data: userData } = await supabase.auth.getUser();
-      await (supabase as any).from('stage_transitions').insert({
+      await supabase.from('stage_transitions').insert({
         entity_type: 'send_out',
         entity_id: sendOutId,
         from_stage: sendOut?.stage ?? null,
         to_stage: toStage,
-        moved_by_type: 'human',
-        moved_by: userData.user?.id ?? null,
-        source: 'debrief',
+        moved_by: 'human',
+        triggered_by_user_id: userData.user?.id ?? null,
+        trigger_source: 'debrief',
       });
 
-      qc.invalidateQueries({ queryKey: ['send_out_board_rows'] });
-      qc.invalidateQueries({ queryKey: ['send_out_board_row', sendOutId] });
+      qc.invalidateQueries({ queryKey: ['send_out_rows'] });
+      qc.invalidateQueries({ queryKey: ['send_out_row', sendOutId] });
       qc.invalidateQueries({ queryKey: ['stage_transitions', 'send_out', sendOutId] });
       toast.success(`Send-out moved to ${toStage}`);
     } catch (err: any) {
