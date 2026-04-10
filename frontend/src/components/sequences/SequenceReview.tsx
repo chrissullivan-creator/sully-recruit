@@ -46,7 +46,8 @@ export function SequenceReview({ setup, nodes, edges, enrollmentCount = 0, onSav
   const warnings = useMemo(() => {
     const warns: string[] = [];
     if (!setup.name) warns.push("Sequence name is required");
-    if (stats.totalActions === 0) warns.push("Add at least one action node");
+    if (!setup.senderUserId) warns.push("Select a sender (Send As) in Setup");
+    if (stats.totalActions === 0) warns.push("Add at least one action node in the Flow Builder");
 
     // Check if day-1 sends would exceed caps
     if (enrollmentCount > 0) {

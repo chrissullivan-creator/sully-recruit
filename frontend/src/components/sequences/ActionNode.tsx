@@ -164,7 +164,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                 {/* Timing */}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <Label className="text-[10px]">Base delay (hrs)</Label>
+                    <Label className="text-[10px]" title="Hours to wait from enrollment before this action">Base delay (hrs)</Label>
                     <Input
                       type="number"
                       min={0}
@@ -174,7 +174,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px]">+ delay (min)</Label>
+                    <Label className="text-[10px]" title="Additional minutes to add on top of base delay">+ delay (min)</Label>
                     <Select
                       value={String(action.delayIntervalMinutes)}
                       onValueChange={(v) => updateAction(i, "delayIntervalMinutes", Number(v))}
@@ -190,7 +190,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-[10px]">Jiggle ±</Label>
+                    <Label className="text-[10px]" title="Randomizes send time by ±N minutes (e.g. 5 = ±5 min random)">Random ± (min)</Label>
                     <Input
                       type="number"
                       min={0}
@@ -200,6 +200,19 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                     />
                   </div>
                 </div>
+                <p className="text-[9px] text-muted-foreground italic">
+                  {action.channel === "linkedin_connection"
+                    ? "Connection requests send 24/7 (send window ignored)"
+                    : action.channel === "linkedin_message"
+                      ? "Sent only after LinkedIn connection is accepted (4h+ minimum)"
+                      : action.channel === "email"
+                        ? "Skipped if candidate has no email on record"
+                        : action.channel === "sms"
+                          ? "Skipped if candidate has no phone number"
+                          : action.channel === "linkedin_inmail"
+                            ? "InMail — respects send window, no connection required"
+                            : null}
+                </p>
 
                 {/* Post-connection label for linkedin_message after connection */}
                 {action.channel === "linkedin_message" && data.isAfterConnection && (

@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Sparkles } from "lucide-react";
 
 export interface SequenceSetupData {
@@ -17,6 +18,7 @@ export interface SequenceSetupData {
   sendWindowStart: string;
   sendWindowEnd: string;
   timezone: string;
+  senderUserId: string | null;
 }
 
 interface Props {
@@ -26,7 +28,9 @@ interface Props {
 }
 
 export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
+  const { user } = useAuth();
   const [jobs, setJobs] = useState<{ id: string; title: string; company_name: string | null; status: string }[]>([]);
+  const [profiles, setProfiles] = useState<{ id: string; full_name: string | null; email: string | null }[]>([]);
 
   useEffect(() => {
     supabase
@@ -38,7 +42,22 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
       .then(({ data: jobData }) => {
         if (jobData) setJobs(jobData as any);
       });
+
+    supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .order("full_name", { ascending: true })
+      .then(({ data: profileData }) => {
+        if (profileData) setProfiles(profileData as any);
+      });
   }, []);
+
+  // Default sender to current user
+  useEffect(() => {
+    if (!data.senderUserId && user?.id) {
+      onChange({ ...data, senderUserId: user.id });
+    }
+  }, [user?.id]);
 
   // Auto-fill objective when job is selected
   useEffect(() => {
@@ -68,6 +87,28 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
             onChange={(e) => update("name", e.target.value)}
             placeholder="e.g. Senior Engineer Outreach"
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Send As</Label>
+          <Select
+            value={data.senderUserId || ""}
+            onValueChange={(v) => update("senderUserId", v)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select sender" />
+            </SelectTrigger>
+            <SelectContent>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.full_name || p.email || p.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">
+            Messages will be sent from this recruiter's email, LinkedIn, and SMS accounts.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -138,6 +179,10 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
             />
           </div>
         </div>
+
+        <p className="text-[11px] text-muted-foreground">
+          LinkedIn connection requests ignore send window (fire 24/7). All other channels respect it.
+        </p>
 
         {onAskJoe && (
           <Button variant="outline" className="w-full" onClick={onAskJoe}>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,12 +24,37 @@ export default function SequenceBuilder() {
     sendWindowStart: "09:00",
     sendWindowEnd: "18:00",
     timezone: "America/New_York",
+    senderUserId: null,
   });
 
   const [flowNodes, setFlowNodes] = useState<FlowNodeData[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdgeData[]>([]);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("setup");
+
+  // Load existing sequence when editing
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const { data: seq } = await supabase
+        .from("sequences")
+        .select("*")
+        .eq("id", id)
+        .single() as any;
+      if (seq) {
+        setSetup({
+          name: seq.name || "",
+          jobId: seq.job_id,
+          audienceType: seq.audience_type,
+          objective: seq.objective || "",
+          sendWindowStart: (seq.send_window_start || "09:00").slice(0, 5),
+          sendWindowEnd: (seq.send_window_end || "18:00").slice(0, 5),
+          timezone: seq.timezone || "America/New_York",
+          senderUserId: seq.sender_user_id || seq.created_by,
+        });
+      }
+    })();
+  }, [id]);
 
   const handleFlowChange = useCallback((nodes: FlowNodeData[], edges: FlowEdgeData[]) => {
     setFlowNodes(nodes);
@@ -62,6 +87,7 @@ export default function SequenceBuilder() {
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
             created_by: user.id,
+            sender_user_id: setup.senderUserId || user.id,
           } as any)
           .select("id")
           .single();
@@ -79,6 +105,7 @@ export default function SequenceBuilder() {
             send_window_start: setup.sendWindowStart,
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
+            sender_user_id: setup.senderUserId || user.id,
           } as any)
           .eq("id", sequenceId);
 
@@ -186,9 +213,19 @@ export default function SequenceBuilder() {
 
           <TabsContent value="flow" className="mt-4">
             <FlowBuilder onChange={handleFlowChange} />
-            <div className="mt-4 flex justify-between">
+            <div className="mt-4 flex justify-between items-center">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
-              <Button onClick={() => setActiveTab("review")}>Next: Review</Button>
+              <div className="text-xs text-muted-foreground">
+                {flowNodes.filter((n) => n.type === "action").length} action node(s),{" "}
+                {flowNodes.filter((n) => n.type === "action").reduce((sum, n) => sum + (n.actions?.length || 0), 0)}{" "}
+                total action(s)
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
+                  Save Draft
+                </Button>
+                <Button onClick={() => setActiveTab("review")}>Next: Review</Button>
+              </div>
             </div>
           </TabsContent>
 

@@ -168,6 +168,9 @@ export const sequenceActionExecute = task({
       return { action: "error", reason: "no_entity_id" };
     }
 
+    // Use sender_user_id (selected in UI) or fall back to created_by, then to payload.enrolledBy
+    const senderUserId = sequence.sender_user_id || sequence.created_by || payload.enrolledBy;
+
     // Manual call → just log it, don't send anything
     if (action.channel === "manual_call") {
       await markStepLog(supabase, payload.stepLogId, "sent", new Date());
@@ -175,10 +178,38 @@ export const sequenceActionExecute = task({
       return { action: "manual_call_logged" };
     }
 
+    // Pre-flight: check recipient has required contact info, skip gracefully if not
+    const entityTable = entityType === "candidate" ? "candidates" : "contacts";
+    const { data: entityRow } = await supabase
+      .from(entityTable)
+      .select("email, phone, linkedin_url")
+      .eq("id", entityId)
+      .maybeSingle();
+
+    if (action.channel === "email" && !entityRow?.email) {
+      await markStepSkipped(supabase, payload.stepLogId, "no_email_on_record");
+      await advanceToNextNode(supabase, enrollment, payload.nodeId, sequence);
+      return { action: "skipped", reason: "no_email_on_record" };
+    }
+    if (action.channel === "sms" && !entityRow?.phone) {
+      await markStepSkipped(supabase, payload.stepLogId, "no_phone_on_record");
+      await advanceToNextNode(supabase, enrollment, payload.nodeId, sequence);
+      return { action: "skipped", reason: "no_phone_on_record" };
+    }
+    if (
+      (action.channel === "linkedin_connection" ||
+        action.channel === "linkedin_message" ||
+        action.channel === "linkedin_inmail") &&
+      !entityRow?.linkedin_url
+    ) {
+      await markStepSkipped(supabase, payload.stepLogId, "no_linkedin_url");
+      await advanceToNextNode(supabase, enrollment, payload.nodeId, sequence);
+      return { action: "skipped", reason: "no_linkedin_url" };
+    }
+
     // Resolve merge tags
     const mergeVars = await resolveMergeTags(supabase, entityId, entityType);
-    // Add extra merge tags
-    mergeVars.sender_name = await getSenderName(supabase, payload.enrolledBy);
+    mergeVars.sender_name = await getSenderName(supabase, senderUserId);
     if (sequence.job_id) {
       const { data: job } = await supabase.from("jobs").select("title").eq("id", sequence.job_id).maybeSingle();
       mergeVars.job_name = job?.title || "";
@@ -186,15 +217,26 @@ export const sequenceActionExecute = task({
 
     const messageBody = applyMergeTags(action.message_body, mergeVars);
 
-    // Resolve recipient
-    const { to, conversationId } = await resolveRecipient(
-      supabase,
-      action.channel === "linkedin_inmail" ? "linkedin_message" : action.channel,
-      entityId,
-      entityType,
-      payload.enrolledBy,
-      payload.accountId,
-    );
+    // Resolve recipient — catch "no X" errors and mark skipped
+    let to: string;
+    let conversationId: string | null;
+    try {
+      const resolved = await resolveRecipient(
+        supabase,
+        action.channel === "linkedin_inmail" ? "linkedin_message" : action.channel,
+        entityId,
+        entityType,
+        senderUserId,
+        payload.accountId,
+      );
+      to = resolved.to;
+      conversationId = resolved.conversationId;
+    } catch (err: any) {
+      logger.warn("Recipient resolution failed, skipping", { channel: action.channel, error: err.message });
+      await markStepSkipped(supabase, payload.stepLogId, `resolve_failed: ${err.message}`);
+      await advanceToNextNode(supabase, enrollment, payload.nodeId, sequence);
+      return { action: "skipped", reason: err.message };
+    }
 
     // Send via appropriate channel
     let sendResult: any;
@@ -203,24 +245,25 @@ export const sequenceActionExecute = task({
         case "email": {
           const emailValidation = validateEmail(to);
           if (!emailValidation.valid) {
-            await markStepLog(supabase, payload.stepLogId, "failed");
-            return { action: "failed", reason: `invalid_email_${emailValidation.reason}` };
+            await markStepSkipped(supabase, payload.stepLogId, `invalid_email_${emailValidation.reason}`);
+            await advanceToNextNode(supabase, enrollment, payload.nodeId, sequence);
+            return { action: "skipped", reason: `invalid_email_${emailValidation.reason}` };
           }
           const htmlBody = formatEmailBody(messageBody);
-          sendResult = await sendEmail(supabase, to, undefined, htmlBody, payload.enrolledBy, undefined, true);
+          sendResult = await sendEmail(supabase, to, undefined, htmlBody, senderUserId, undefined, true);
           break;
         }
         case "sms":
-          sendResult = await sendSms(supabase, to, messageBody, payload.enrolledBy);
+          sendResult = await sendSms(supabase, to, messageBody, senderUserId);
           break;
         case "linkedin_connection":
-          sendResult = await sendLinkedIn(supabase, to, messageBody, payload.enrolledBy, payload.accountId, "linkedin_connection");
+          sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_connection");
           break;
         case "linkedin_message":
-          sendResult = await sendLinkedIn(supabase, to, messageBody, payload.enrolledBy, payload.accountId, "linkedin_message");
+          sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_message");
           break;
         case "linkedin_inmail":
-          sendResult = await sendLinkedIn(supabase, to, messageBody, payload.enrolledBy, payload.accountId, "recruiter_inmail");
+          sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "recruiter_inmail");
           break;
         default:
           await markStepLog(supabase, payload.stepLogId, "failed");
@@ -240,7 +283,7 @@ export const sequenceActionExecute = task({
     const est = sentAt.toLocaleString("en-US", { timeZone: "America/New_York" });
     const estDate = new Date(est);
     const dateStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, "0")}-${String(estDate.getDate()).padStart(2, "0")}`;
-    await incrementDailySend(supabase, payload.accountId || payload.enrolledBy, action.channel, dateStr);
+    await incrementDailySend(supabase, payload.accountId || senderUserId, action.channel, dateStr);
 
     // Log the outbound message
     const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
@@ -253,7 +296,7 @@ export const sequenceActionExecute = task({
       sent_at: sentAt.toISOString(),
       provider: action.channel.startsWith("linkedin") ? "unipile" : action.channel === "email" ? "microsoft_graph" : "ringcentral",
       external_message_id: sendResult?.messageId || sendResult?.message_id || sendResult?.id,
-      owner_id: payload.enrolledBy,
+      owner_id: senderUserId,
     } as any);
 
     logger.info("Action sent", {
@@ -287,7 +330,7 @@ export const sequenceSweep = schedules.task({
         id, enrollment_id, action_id, node_id, channel,
         sequence_enrollments!inner(
           id, sequence_id, candidate_id, contact_id, status,
-          sequences!inner(id, created_by)
+          sequences!inner(id, created_by, sender_user_id)
         )
       `)
       .eq("status", "scheduled")
@@ -319,7 +362,7 @@ export const sequenceSweep = schedules.task({
         sequenceId: enrollment.sequence_id,
         candidateId: enrollment.candidate_id || undefined,
         contactId: enrollment.contact_id || undefined,
-        enrolledBy: sequence?.created_by,
+        enrolledBy: sequence?.sender_user_id || sequence?.created_by,
         accountId: undefined,
       });
     }
@@ -637,6 +680,17 @@ async function markStepLog(
   const update: any = { status };
   if (sentAt) update.sent_at = sentAt.toISOString();
   await supabase.from("sequence_step_logs").update(update).eq("id", stepLogId);
+}
+
+async function markStepSkipped(
+  supabase: any,
+  stepLogId: string,
+  reason: string,
+): Promise<void> {
+  await supabase
+    .from("sequence_step_logs")
+    .update({ status: "skipped", skip_reason: reason } as any)
+    .eq("id", stepLogId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
