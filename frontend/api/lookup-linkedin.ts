@@ -7,7 +7,12 @@ import { createClient } from "@supabase/supabase-js";
  * Fetches a LinkedIn profile via the Unipile API and normalizes it to
  * form-compatible fields for the Add Person wizard.
  *
- * Body: { linkedin_url?, unipile_id?, account_id? }
+ * Resolution order (first hit wins):
+ *   1. unipile_id           — direct user fetch
+ *   2. linkedin_url         — slug extracted from URL
+ *   3. chat_id              — fetch chat attendees, pick the "other" one
+ *
+ * Body: { linkedin_url?, unipile_id?, chat_id?, integration_account_id?, account_id? }
  * Auth: Supabase JWT
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,8 +29,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { linkedin_url, unipile_id, account_id } = req.body || {};
-  if (!linkedin_url && !unipile_id) return res.status(200).json({});
+  const { linkedin_url, unipile_id, chat_id, integration_account_id, account_id } = req.body || {};
+  if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
 
   try {
     // Get Unipile config from app_settings table
@@ -47,8 +52,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({});
     }
 
-    // Get a Unipile account ID if not provided
+    // Resolve a Unipile account ID — prefer the one associated with this thread's
+    // integration_account, falling back to any active account.
     let acctId = account_id;
+    if (!acctId && integration_account_id) {
+      const { data: ia } = await supabase
+        .from("integration_accounts")
+        .select("unipile_account_id")
+        .eq("id", integration_account_id)
+        .maybeSingle();
+      acctId = ia?.unipile_account_id ?? undefined;
+    }
     if (!acctId) {
       const { data: accounts } = await supabase
         .from("integration_accounts")
@@ -63,12 +77,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({});
     }
 
+    const uniHeaders = { "X-API-KEY": apiKey, Accept: "application/json" };
+    const apiBase = baseUrl.replace(/\/+$/, "");
     let profileData: any = null;
+    let attendeeData: any = null;
 
     // Try direct fetch by Unipile ID
     if (unipile_id) {
-      const r = await fetch(`${baseUrl}/api/v1/users/${unipile_id}?account_id=${acctId}`, {
-        headers: { "X-API-KEY": apiKey, Accept: "application/json" },
+      const r = await fetch(`${apiBase}/api/v1/users/${unipile_id}?account_id=${acctId}`, {
+        headers: uniHeaders,
       });
       if (r.ok) profileData = await r.json();
     }
@@ -78,11 +95,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const match = linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
       const slug = match?.[1];
       if (slug) {
-        const r = await fetch(`${baseUrl}/api/v1/users/${slug}?account_id=${acctId}`, {
-          headers: { "X-API-KEY": apiKey, Accept: "application/json" },
+        const r = await fetch(`${apiBase}/api/v1/users/${slug}?account_id=${acctId}`, {
+          headers: uniHeaders,
         });
         if (r.ok) profileData = await r.json();
       }
+    }
+
+    // Try resolving via chat attendees — used when the inbound message has no
+    // LinkedIn URL (common: backfill-populated LinkedIn threads store only the
+    // Unipile provider_id, not a URL).
+    if (!profileData && chat_id) {
+      // Unipile's /chats/{id} response typically embeds attendees; we also
+      // try /chats/{id}/attendees as a backup.
+      let attendees: any[] = [];
+      const chatResp = await fetch(
+        `${apiBase}/chats/${encodeURIComponent(chat_id)}?account_id=${acctId}`,
+        { headers: uniHeaders },
+      );
+      if (chatResp.ok) {
+        const chatJson: any = await chatResp.json();
+        attendees = chatJson.attendees ?? chatJson.members ?? chatJson.participants ?? [];
+      }
+      if (attendees.length === 0) {
+        const attResp = await fetch(
+          `${apiBase}/chats/${encodeURIComponent(chat_id)}/attendees?account_id=${acctId}`,
+          { headers: uniHeaders },
+        );
+        if (attResp.ok) {
+          const attJson: any = await attResp.json();
+          attendees = attJson.items ?? attJson.attendees ?? [];
+        }
+      }
+
+      const other = attendees.find(
+        (a: any) => a.provider_id !== acctId && a.id !== acctId,
+      ) ?? attendees[0];
+
+      if (other) {
+        attendeeData = other;
+        const providerId = other.provider_id ?? other.id;
+        if (providerId) {
+          const r = await fetch(
+            `${apiBase}/api/v1/users/${providerId}?account_id=${acctId}`,
+            { headers: uniHeaders },
+          );
+          if (r.ok) profileData = await r.json();
+        }
+      }
+    }
+
+    // If we couldn't get a full profile but do have attendee data, synthesize
+    // a minimal profile so the form still gets something useful.
+    if (!profileData && attendeeData) {
+      const name = attendeeData.display_name ?? attendeeData.name ?? "";
+      const parts = name.trim().split(/\s+/);
+      profileData = {
+        first_name: parts[0] ?? "",
+        last_name: parts.slice(1).join(" "),
+        headline: attendeeData.headline ?? attendeeData.title ?? undefined,
+        company: attendeeData.company ?? undefined,
+        location: attendeeData.location ?? undefined,
+        public_profile_url:
+          attendeeData.public_profile_url ??
+          attendeeData.profile_url ??
+          attendeeData.url ??
+          undefined,
+      };
     }
 
     if (!profileData) return res.status(200).json({});

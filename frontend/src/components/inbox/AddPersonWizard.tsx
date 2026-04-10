@@ -183,11 +183,17 @@ export function AddPersonWizard({
       const token = await getToken();
 
       if (channel === 'email' && rawBody) {
-        // Parse email signature via Claude
+        // Parse email signature via Claude. Pass the sender name/address as
+        // hints so Claude prefers the header identity over any random names
+        // mentioned in a quoted reply chain.
         const res = await fetch('/api/parse-email-signature', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ body: rawBody }),
+          body: JSON.stringify({
+            body: rawBody,
+            sender_name: prefill.name || undefined,
+            sender_address: prefill.email || undefined,
+          }),
         });
         if (res.ok) {
           const parsed = await res.json();
@@ -204,7 +210,7 @@ export function AddPersonWizard({
           }));
         }
       } else if (channel === 'linkedin') {
-        // Resolve via Unipile — try inline first (same pattern as existing CreatePersonDialog)
+        // Resolve via Unipile chat attendees + user profile.
         await resolveLinkedInProfile(token);
       }
       // SMS — no enrichment, form is already seeded with phone
@@ -215,127 +221,40 @@ export function AddPersonWizard({
     setStep('form');
   }, [channel, rawBody, prefill]);
 
-  // LinkedIn resolution using the same pattern as the existing codebase
+  // LinkedIn resolution — delegates to /api/lookup-linkedin, which reads the
+  // Unipile API key from app_settings and handles both slug-based and
+  // chat-attendee-based resolution server-side.
   const resolveLinkedInProfile = async (token: string) => {
-    const slug = prefill.linkedinUrl || '';
-    if (!slug) {
-      // Try fetching chat attendees from Unipile for LinkedIn threads without a URL
-      if (externalConversationId) {
-        await resolveFromChatAttendees();
-      }
-      return;
-    }
+    // Only pass linkedin_url if it actually looks like a URL (not a raw URN/provider_id,
+    // which is what inbound LinkedIn messages from backfill commonly contain).
+    const rawUrl = prefill.linkedinUrl || '';
+    const looksLikeUrl = /linkedin\.com\/in\//.test(rawUrl);
+    const body: Record<string, string> = {};
+    if (looksLikeUrl) body.linkedin_url = rawUrl;
+    if (externalConversationId) body.chat_id = externalConversationId;
+    if (integrationAccountId) body.integration_account_id = integrationAccountId;
 
-    // Try the lookup-linkedin API route
+    // Nothing to resolve with — bail.
+    if (!body.linkedin_url && !body.chat_id) return;
+
     const res = await fetch('/api/lookup-linkedin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ linkedin_url: slug }),
+      body: JSON.stringify(body),
     });
-    if (res.ok) {
-      const profile = await res.json();
-      setForm(prev => ({
-        ...prev,
-        first_name: profile.first_name || prev.first_name,
-        last_name: profile.last_name || prev.last_name,
-        email: profile.email || prev.email,
-        phone: profile.phone || prev.phone,
-        title: profile.title || profile.headline || prev.title,
-        company: profile.company_name || profile.company || prev.company,
-        location: profile.location || prev.location,
-        linkedin_url: profile.linkedin_url || prev.linkedin_url,
-      }));
-    }
-  };
-
-  // Fetch chat attendees from Unipile for LinkedIn threads with no sender_address
-  const resolveFromChatAttendees = async () => {
-    try {
-      const { data: unipileCfg } = await supabase
-        .from('user_integrations')
-        .select('config')
-        .eq('integration_type', 'unipile')
-        .limit(1)
-        .maybeSingle();
-      const cfg = unipileCfg?.config as any;
-      if (!cfg?.api_key || !cfg?.base_url) return;
-
-      let accountId: string | null = null;
-      if (integrationAccountId) {
-        const { data: ia } = await supabase
-          .from('integration_accounts')
-          .select('unipile_account_id')
-          .eq('id', integrationAccountId)
-          .maybeSingle();
-        accountId = ia?.unipile_account_id || null;
-      }
-      if (!accountId) {
-        const { data: accounts } = await supabase
-          .from('integration_accounts')
-          .select('unipile_account_id')
-          .not('unipile_account_id', 'is', null)
-          .eq('is_active', true)
-          .limit(1);
-        accountId = accounts?.[0]?.unipile_account_id || null;
-      }
-      if (!accountId) return;
-
-      const chatResp = await fetch(
-        `${cfg.base_url.replace(/\/+$/, '')}/chats/${externalConversationId}`,
-        { headers: { 'X-API-KEY': cfg.api_key, Accept: 'application/json' } },
-      );
-      if (!chatResp.ok) return;
-      const chatData = await chatResp.json();
-
-      const attendees = chatData.attendees || chatData.participants || [];
-      const other = attendees.find((a: any) =>
-        a.provider_id !== accountId && a.id !== accountId
-      ) || attendees[0];
-
-      if (other) {
-        const name = other.display_name || other.name || '';
-        const parts = name.split(' ');
-        setForm(prev => ({
-          ...prev,
-          first_name: parts[0] || prev.first_name,
-          last_name: parts.slice(1).join(' ') || prev.last_name,
-          linkedin_url: other.public_profile_url || other.linkedin_url ||
-            (other.provider_id ? `https://linkedin.com/in/${other.provider_id}` : prev.linkedin_url),
-          title: other.headline || other.title || prev.title,
-          company: other.company || prev.company,
-          location: other.location || prev.location,
-        }));
-
-        // Now try getting full profile
-        const profileId = other.provider_id || other.id;
-        if (profileId) {
-          try {
-            const profileResp = await fetch(
-              `${cfg.base_url.replace(/\/+$/, '')}/api/v1/users/${profileId}?account_id=${accountId}`,
-              { headers: { 'X-API-KEY': cfg.api_key, Accept: 'application/json' } },
-            );
-            if (profileResp.ok) {
-              const fp = await profileResp.json();
-              setForm(prev => ({
-                ...prev,
-                first_name: fp.first_name || prev.first_name,
-                last_name: fp.last_name || prev.last_name,
-                title: fp.headline || fp.title || fp.current_title || prev.title,
-                company: fp.company || fp.current_company || fp.company_name || prev.company,
-                location: fp.location || fp.region || prev.location,
-                email: fp.email || prev.email,
-                phone: fp.phone || fp.phone_number || prev.phone,
-                linkedin_url: fp.public_profile_url || fp.linkedin_url || prev.linkedin_url,
-              }));
-            }
-          } catch (e) {
-            console.warn('Full profile fetch failed:', e);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Chat attendee lookup failed:', err);
-    }
+    if (!res.ok) return;
+    const profile = await res.json();
+    setForm(prev => ({
+      ...prev,
+      first_name: profile.first_name || prev.first_name,
+      last_name: profile.last_name || prev.last_name,
+      email: profile.email || prev.email,
+      phone: profile.phone || prev.phone,
+      title: profile.title || profile.headline || prev.title,
+      company: profile.company_name || profile.company || prev.company,
+      location: profile.location || prev.location,
+      linkedin_url: profile.linkedin_url || prev.linkedin_url,
+    }));
   };
 
   // ── Connect to existing match ──────────────────────────────────────────────
