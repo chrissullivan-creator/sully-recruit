@@ -26,16 +26,17 @@ interface Props {
 }
 
 export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
-  const [jobs, setJobs] = useState<{ id: string; title: string; company: string }[]>([]);
+  const [jobs, setJobs] = useState<{ id: string; title: string; company_name: string | null; status: string }[]>([]);
 
   useEffect(() => {
     supabase
       .from("jobs")
-      .select("id, title, company")
-      .in("stage", ["open", "active"])
-      .order("title")
+      .select("id, title, company_name, status")
+      .in("status", ["hot", "lead"])
+      .order("status", { ascending: true })
+      .order("title", { ascending: true })
       .then(({ data: jobData }) => {
-        if (jobData) setJobs(jobData);
+        if (jobData) setJobs(jobData as any);
       });
   }, []);
 
@@ -44,7 +45,7 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
     if (data.jobId && !data.objective) {
       const job = jobs.find((j) => j.id === data.jobId);
       if (job) {
-        onChange({ ...data, objective: `Recruit candidates for ${job.title} at ${job.company}` });
+        onChange({ ...data, objective: `Recruit candidates for ${job.title}${job.company_name ? ` at ${job.company_name}` : ""}` });
       }
     }
   }, [data.jobId]);
@@ -82,7 +83,8 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
               <SelectItem value="none">None</SelectItem>
               {jobs.map((job) => (
                 <SelectItem key={job.id} value={job.id}>
-                  {job.title} — {job.company}
+                  {job.status === "hot" ? "🔥 " : "📋 "}
+                  {job.title}{job.company_name ? ` — ${job.company_name}` : ""}
                 </SelectItem>
               ))}
             </SelectContent>
