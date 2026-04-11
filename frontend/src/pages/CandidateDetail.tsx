@@ -23,7 +23,7 @@ import {
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -215,6 +215,23 @@ const CandidateDetail = () => {
   const [eduForm, setEduForm] = useState({ institution: '', degree: '', field_of_study: '', start_year: '', end_year: '' });
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteCandidate = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('candidates').delete().eq('id', id);
+      if (error) { toast.error(error.message || 'Failed to delete candidate'); return; }
+      toast.success('Candidate deleted');
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      navigate('/candidates');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete candidate');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // Ask Joe chat state
   const [joeChatMessages, setJoeChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
@@ -552,43 +569,59 @@ const CandidateDetail = () => {
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
-    const updates: any = { [field]: value || null };
+    try {
+      const updates: any = { [field]: value || null };
 
-    // Auto-compute full_name when first_name or last_name changes
-    if (field === 'first_name' || field === 'last_name') {
-      const first = field === 'first_name' ? value : candidate?.first_name || '';
-      const last = field === 'last_name' ? value : candidate?.last_name || '';
-      updates.full_name = `${first} ${last}`.trim() || null;
+      // Auto-compute full_name when first_name or last_name changes
+      if (field === 'first_name' || field === 'last_name') {
+        const first = field === 'first_name' ? value : candidate?.first_name || '';
+        const last = field === 'last_name' ? value : candidate?.last_name || '';
+        updates.full_name = `${first} ${last}`.trim() || null;
+      }
+
+      const { error } = await supabase.from('candidates').update(updates).eq('id', id);
+      if (error) { toast.error(`Failed to update ${field.replace(/_/g, ' ')}`); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update');
     }
-
-    const { error } = await supabase.from('candidates').update(updates).eq('id', id);
-    if (error) { toast.error(`Failed to update`); return; }
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-    queryClient.invalidateQueries({ queryKey: ['candidates'] });
   };
 
   const updateComp = async (field: string, value: string) => {
     if (!id) return;
-    const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
-    const updates: any = { [field]: isNaN(num as number) ? null : num };
+    try {
+      const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
+      const updates: any = { [field]: isNaN(num as number) ? null : num };
 
-    // Auto-move to "back_of_resume" when compensation is entered and status is "new"
-    if (num && !isNaN(num) && candidate?.status === 'new') {
-      updates.status = 'back_of_resume';
-      toast.success('Compensation added — status moved to Back of Resume');
+      // Auto-move to "back_of_resume" when compensation is entered and status is "new"
+      if (num && !isNaN(num) && candidate?.status === 'new') {
+        updates.status = 'back_of_resume';
+        toast.success('Compensation added — status moved to Back of Resume');
+      }
+
+      const { error } = await supabase.from('candidates').update(updates).eq('id', id);
+      if (error) { toast.error('Failed to update compensation'); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update compensation');
     }
-
-    await supabase.from('candidates').update(updates).eq('id', id);
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-    queryClient.invalidateQueries({ queryKey: ['candidates'] });
   };
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
     setUpdatingJobStatus(true);
-    await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-    setUpdatingJobStatus(false);
+    try {
+      const { error } = await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+      if (error) { toast.error('Failed to update status'); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update status');
+    } finally {
+      setUpdatingJobStatus(false);
+    }
   };
 
   const generateJoeSays = async () => {
@@ -733,7 +766,7 @@ const CandidateDetail = () => {
             <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe ✍️
           </Button>
           <Button variant="outline" size="sm" onClick={async () => {
-            toast.info('Syncing activity across all channels...');
+            toast.info('Syncing activity across all channels…');
             try {
               const resp = await fetch('/api/trigger-sync-activity', {
                 method: 'POST',
@@ -750,6 +783,25 @@ const CandidateDetail = () => {
           }}>
             <RefreshCw className="h-3.5 w-3.5 mr-1" />Sync Activity
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={deleting} title="Delete candidate">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this candidate?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently removes {fullName} and any related notes/conversations from the pipeline. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteCandidate}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
@@ -855,10 +907,15 @@ const CandidateDetail = () => {
                   setPendingOwnerId(newOwnerId);
                 } else {
                   (async () => {
-                    await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                    toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                    try {
+                      const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                      if (error) { toast.error('Failed to update owner'); return; }
+                      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                      toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to update owner');
+                    }
                   })();
                 }
               }} disabled={!canEdit}>
@@ -874,10 +931,15 @@ const CandidateDetail = () => {
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Active Job</h3>
               <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
                 const newJobId = val === 'none' ? null : val;
-                await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                try {
+                  const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                  if (error) { toast.error('Failed to update job assignment'); return; }
+                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                  toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                } catch (err: any) {
+                  toast.error(err?.message || 'Failed to update job assignment');
+                }
               }} disabled={!canEdit}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
                 <SelectContent>

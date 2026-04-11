@@ -108,12 +108,12 @@ export interface Contact {
   notes?: string;
 }
 
-// Campaign types
-export type CampaignType = 'candidate_outreach' | 'account_based' | 'opportunity_based' | 'check_in';
-export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
+// Sequence types (canonical) — also exported under legacy Campaign* aliases
+export type SequenceType = 'candidate_outreach' | 'account_based' | 'opportunity_based' | 'check_in';
+export type SequenceStatus = 'draft' | 'active' | 'paused' | 'completed';
 export type ChannelType = 'linkedin_recruiter' | 'linkedin_message' | 'linkedin_connection' | 'email' | 'sms' | 'phone';
 
-export interface CampaignStep {
+export interface SequenceStep {
   id: string;
   order: number;
   channel: ChannelType;
@@ -132,17 +132,23 @@ export interface CampaignStep {
   attachments?: { name: string; path: string; size: number; type: string }[];
 }
 
-export interface Campaign {
+export interface Sequence {
   id: string;
   name: string;
-  type: CampaignType;
-  status: CampaignStatus;
-  steps: CampaignStep[];
+  type: SequenceType;
+  status: SequenceStatus;
+  steps: SequenceStep[];
   enrolledCount: number;
   responseRate: number;
   createdAt: Date;
   updatedAt: Date;
 }
+
+// Legacy aliases — kept for any callers still importing Campaign* names.
+export type CampaignType = SequenceType;
+export type CampaignStatus = SequenceStatus;
+export type CampaignStep = SequenceStep;
+export type Campaign = Sequence;
 
 // Communication types
 export type CommunicationType = 'email' | 'linkedin' | 'sms' | 'call' | 'note';

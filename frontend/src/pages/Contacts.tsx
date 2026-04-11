@@ -20,6 +20,12 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -59,6 +65,23 @@ const Contacts = () => {
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      const { error } = await supabase.from('contacts').delete().in('id', selectedIds);
+      if (error) { toast.error(error.message || 'Failed to delete contacts'); return; }
+      toast.success(`${selectedIds.length} contact${selectedIds.length === 1 ? '' : 's'} deleted`);
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete contacts');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 100;
   const { data: contacts = [], isLoading, isError, error, refetch } = useContacts();
@@ -191,10 +214,32 @@ const Contacts = () => {
         actions={
           <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-                <Play className="h-3.5 w-3.5" />
-                Enroll in Sequence ({selectedIds.length})
-              </Button>
+              <>
+                <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                  <Play className="h-3.5 w-3.5" />
+                  Enroll in Sequence ({selectedIds.length})
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={bulkDeleting}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete ({selectedIds.length})
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {selectedIds.length} contact{selectedIds.length === 1 ? '' : 's'}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently removes the selected contacts. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleBulkDelete}>Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
             )}
             <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(true)}>
               <Sparkles className="h-4 w-4 mr-1" />
@@ -222,7 +267,7 @@ const Contacts = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search contacts..."
+              placeholder="Search contacts…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -251,7 +296,7 @@ const Contacts = () => {
 
         {isLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading contacts...
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading contacts…
           </div>
         ) : isError ? (
           <div className="text-center py-16">
@@ -334,10 +379,16 @@ const Contacts = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{contact.title ?? '-'}</td>
                     <td className="px-4 py-3">
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Building className="h-3.5 w-3.5" />
-                        {(contact as any).company_name || (contact.companies as any)?.name || '-'}
-                      </span>
+                      {(() => {
+                        const companyName = (contact as any).company_name || (contact.companies as any)?.name || '-';
+                        const companyDomain = (contact.companies as any)?.domain ?? null;
+                        return (
+                          <span className="text-sm text-muted-foreground flex items-center gap-2">
+                            <CompanyLogo name={companyName} domain={companyDomain} size="xs" />
+                            {companyName}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

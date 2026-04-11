@@ -3,10 +3,11 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
-import { Plus, Search, Building, Globe, MapPin, Briefcase, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Globe, MapPin, Briefcase, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -72,7 +73,7 @@ const Companies = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search companies..."
+              placeholder="Search companies…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -87,7 +88,7 @@ const Companies = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading companies...</p>
+          <p className="text-muted-foreground text-sm">Loading companies…</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCompanies.map((company) => (
@@ -98,9 +99,7 @@ const Companies = () => {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                      <Building className="h-5 w-5" />
-                    </div>
+                    <CompanyLogo domain={company.domain} name={company.name} size="md" />
                     <div>
                       <h3 className="text-sm font-semibold text-foreground">{company.name}</h3>
                       <p className="text-xs text-muted-foreground">{company.company_type ?? '-'}</p>

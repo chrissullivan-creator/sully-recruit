@@ -1,12 +1,25 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
+import { AddJobDialog } from '@/components/jobs/AddJobDialog';
+import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { useDashboardMetrics } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   Briefcase,
   Users,
@@ -31,7 +44,33 @@ const getGreeting = () => {
 const Dashboard = () => {
   const { data: metrics, isLoading } = useDashboardMetrics();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [period, setPeriod] = useState<'week' | 'month'>('week');
+
+  const [addCandidateOpen, setAddCandidateOpen] = useState(false);
+  const [addJobOpen, setAddJobOpen] = useState(false);
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [creatingSequence, setCreatingSequence] = useState(false);
+
+  const handleCreateSequence = async () => {
+    setCreatingSequence(true);
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      const { data: seq, error } = await supabase
+        .from('sequences')
+        .insert({ name: 'Untitled Sequence', channel: 'email', status: 'draft', stop_on_reply: true, created_by: userId } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['sequences'] });
+      navigate(`/sequences/${seq.id}`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create sequence');
+    } finally {
+      setCreatingSequence(false);
+    }
+  };
 
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
 
@@ -53,10 +92,28 @@ const Dashboard = () => {
         title="Dashboard"
         description="Welcome back. Here's what's happening today."
         actions={
-          <Button variant="gold">
-            <Plus className="h-4 w-4" />
-            Quick Add
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="gold">
+                <Plus className="h-4 w-4" />
+                Quick Add
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={() => setAddContactOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />Add Contact
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAddCandidateOpen(true)}>
+                <Users className="h-4 w-4 mr-2" />Add Candidate
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAddJobOpen(true)}>
+                <Briefcase className="h-4 w-4 mr-2" />Add Job
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCreateSequence} disabled={creatingSequence}>
+                <Mail className="h-4 w-4 mr-2" />Add Sequence
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
 
@@ -72,7 +129,7 @@ const Dashboard = () => {
                 {getGreeting()}, {displayName}
               </h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {isLoading ? 'Loading your stats...' : (
+                {isLoading ? 'Loading your stats…' : (
                   <>
                     You have <span className="font-semibold text-foreground">{m?.activeJobs ?? 0} active jobs</span> and{' '}
                     <span className="font-semibold text-foreground">{candidates ?? 0} new candidates</span> {period === 'week' ? 'this week' : 'this month'}.
@@ -113,19 +170,19 @@ const Dashboard = () => {
 
         {/* Primary Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <MetricCard label="Active Jobs" value={isLoading ? '...' : (m?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
-          <MetricCard label="My Candidates" value={isLoading ? '...' : (myCandidates ?? 0)} icon={<User className="h-5 w-5" />} />
-          <MetricCard label="New" value={isLoading ? '...' : (newCount ?? 0)} icon={<Users className="h-5 w-5" />} />
-          <MetricCard label="Contacted" value={isLoading ? '...' : (contacted ?? 0)} icon={<Mail className="h-5 w-5" />} />
-          <MetricCard label="Pitched" value={isLoading ? '...' : (pitched ?? 0)} icon={<Target className="h-5 w-5" />} />
+          <MetricCard label="Active Jobs" value={isLoading ? '…' : (m?.activeJobs ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="My Candidates" value={isLoading ? '…' : (myCandidates ?? 0)} icon={<User className="h-5 w-5" />} />
+          <MetricCard label="New" value={isLoading ? '…' : (newCount ?? 0)} icon={<Users className="h-5 w-5" />} />
+          <MetricCard label="Contacted" value={isLoading ? '…' : (contacted ?? 0)} icon={<Mail className="h-5 w-5" />} />
+          <MetricCard label="Pitched" value={isLoading ? '…' : (pitched ?? 0)} icon={<Target className="h-5 w-5" />} />
         </div>
 
         {/* Pipeline Stage Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard label="Send Out" value={isLoading ? '...' : (sendOut ?? 0)} icon={<FileText className="h-5 w-5" />} />
-          <MetricCard label="Submitted" value={isLoading ? '...' : (submitted ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
-          <MetricCard label="Interviewing" value={isLoading ? '...' : (interviewing ?? 0)} icon={<Calendar className="h-5 w-5" />} />
-          <MetricCard label="Offers Out" value={isLoading ? '...' : (offer ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="Send Outs" value={isLoading ? '…' : (sendOut ?? 0)} icon={<FileText className="h-5 w-5" />} />
+          <MetricCard label="Submitted" value={isLoading ? '…' : (submitted ?? 0)} icon={<TrendingUp className="h-5 w-5" />} />
+          <MetricCard label="Interviewing" value={isLoading ? '…' : (interviewing ?? 0)} icon={<Calendar className="h-5 w-5" />} />
+          <MetricCard label="Offers Out" value={isLoading ? '…' : (offer ?? 0)} icon={<Briefcase className="h-5 w-5" />} />
         </div>
 
         {/* Tasks + Quick Actions */}
@@ -137,10 +194,10 @@ const Dashboard = () => {
             <div className="rounded-lg border border-border bg-card p-6">
               <h2 className="text-lg font-semibold text-foreground mb-4">Quick Actions</h2>
               <div className="space-y-2">
-                <Button variant="outline" className="w-full justify-start"><Plus className="h-4 w-4 mr-2" />Add New Lead</Button>
-                <Button variant="outline" className="w-full justify-start"><Users className="h-4 w-4 mr-2" />Add Candidate</Button>
-                <Button variant="outline" className="w-full justify-start"><Briefcase className="h-4 w-4 mr-2" />Create Job</Button>
-                <Button variant="outline" className="w-full justify-start"><Mail className="h-4 w-4 mr-2" />New Sequence</Button>
+                <Button variant="outline" className="w-full justify-start" onClick={() => setAddContactOpen(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
+                <Button variant="outline" className="w-full justify-start" onClick={() => setAddCandidateOpen(true)}><Users className="h-4 w-4 mr-2" />Add Candidate</Button>
+                <Button variant="outline" className="w-full justify-start" onClick={() => setAddJobOpen(true)}><Briefcase className="h-4 w-4 mr-2" />Add Job</Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleCreateSequence} disabled={creatingSequence}><Mail className="h-4 w-4 mr-2" />Add Sequence</Button>
               </div>
             </div>
           </div>
@@ -150,11 +207,15 @@ const Dashboard = () => {
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground">Job Pipeline</h2>
-            <Button variant="ghost" size="sm">View All Jobs</Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>View All Jobs</Button>
           </div>
           <JobPipeline />
         </section>
       </div>
+
+      <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} />
+      <AddJobDialog open={addJobOpen} onOpenChange={setAddJobOpen} />
+      <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
     </MainLayout>
   );
 };

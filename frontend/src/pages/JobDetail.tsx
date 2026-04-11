@@ -22,8 +22,13 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
@@ -252,6 +257,23 @@ const JobDetail = () => {
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [deletingJob, setDeletingJob] = useState(false);
+
+  const handleDeleteJob = async () => {
+    if (!id) return;
+    setDeletingJob(true);
+    try {
+      const { error } = await supabase.from('jobs').delete().eq('id', id);
+      if (error) { toast.error(error.message || 'Failed to delete job'); return; }
+      toast.success('Job deleted');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      navigate('/jobs');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete job');
+    } finally {
+      setDeletingJob(false);
+    }
+  };
 
   // Per-field edit dialogs
   const [editField, setEditField] = useState<{
@@ -476,6 +498,25 @@ const JobDetail = () => {
           <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
             <ListTodo className="h-3.5 w-3.5 mr-1" /> Tasks
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={deletingJob} title="Delete job">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently removes “{job?.title}” and any related send-outs and candidate links. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteJob}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
@@ -752,7 +793,7 @@ const JobDetail = () => {
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                           <Input
                             className="pl-8 h-9 text-sm"
-                            placeholder="Search contacts..."
+                            placeholder="Search contacts…"
                             value={contactSearch}
                             onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
                             onFocus={() => setContactSearchOpen(true)}
@@ -846,7 +887,7 @@ const JobDetail = () => {
                 </div>
                 {candidatesLoading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates...
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates…
                   </div>
                 ) : jobCandidates.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">

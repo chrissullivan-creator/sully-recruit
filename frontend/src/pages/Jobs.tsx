@@ -7,6 +7,7 @@ import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useData';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -106,7 +107,7 @@ const Jobs = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search jobs..."
+            placeholder="Search jobs…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -114,7 +115,7 @@ const Jobs = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading jobs...</p>
+          <p className="text-muted-foreground text-sm">Loading jobs…</p>
         ) : view === 'pipeline' ? (
           <JobPipeline />
         ) : (
@@ -136,7 +137,16 @@ const Jobs = () => {
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {job.company_name ?? (job.companies as any)?.name ?? '-'}
+                      {(() => {
+                        const companyName = job.company_name ?? (job.companies as any)?.name ?? '-';
+                        const companyDomain = (job.companies as any)?.domain ?? null;
+                        return (
+                          <span className="flex items-center gap-2">
+                            <CompanyLogo name={companyName} domain={companyDomain} size="xs" />
+                            {companyName}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
                     <td className="px-4 py-3">

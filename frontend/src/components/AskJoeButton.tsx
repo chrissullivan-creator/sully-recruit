@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { X, Send, Martini, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -35,6 +36,8 @@ export function AskJoeButton() {
     setIsLoading(true);
 
     let assistantSoFar = '';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
 
     try {
       const resp = await fetch(CHAT_URL, {
@@ -46,6 +49,7 @@ export function AskJoeButton() {
         body: JSON.stringify({
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
         }),
+        signal: controller.signal,
       });
 
       if (!resp.ok || !resp.body) {
@@ -99,12 +103,15 @@ export function AskJoeButton() {
         }
       }
     } catch (err: any) {
-      console.error('Ask Joe error:', err);
+      const aborted = err?.name === 'AbortError';
+      const msg = aborted ? 'Joe timed out. Please try again.' : (err?.message || 'Joe had a problem. Please try again.');
+      toast.error(msg);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: `Sorry, something went wrong: ${err.message}` },
+        { role: 'assistant', content: `Sorry, something went wrong: ${msg}` },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };
