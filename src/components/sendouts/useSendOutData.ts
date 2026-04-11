@@ -31,6 +31,7 @@ export interface SendOutBoardRow {
   candidate_linkedin_url: string | null;
   job_title: string | null;
   company_name: string | null;
+  company_domain: string | null;
   contact_name: string | null;
   recruiter_name: string | null;
   recruiter_avatar_url: string | null;
@@ -39,7 +40,7 @@ export interface SendOutBoardRow {
 const SELECT_WITH_JOINS = `
   *,
   candidates!send_outs_candidate_id_fkey ( full_name, email, avatar_url, linkedin_url ),
-  jobs!send_outs_job_id_fkey ( title, companies ( name ) ),
+  jobs!send_outs_job_id_fkey ( title, companies ( name, domain ) ),
   contacts!send_outs_contact_id_fkey ( full_name )
 `.trim();
 
@@ -75,6 +76,7 @@ function mergeRow(raw: any, profilesById: Record<string, Profile>): SendOutBoard
     candidate_linkedin_url: c.linkedin_url ?? null,
     job_title: j.title ?? null,
     company_name: co.name ?? null,
+    company_domain: co.domain ?? null,
     contact_name: ct.full_name ?? null,
     recruiter_name: recruiter?.full_name ?? null,
     recruiter_avatar_url: recruiter?.avatar_url ?? null,

@@ -8,6 +8,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { EntityAvatar } from '@/components/shared/EntityAvatar';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { SendOutDrawer } from '@/components/sendouts/SendOutDrawer';
 import {
   SEND_OUT_STAGES,
@@ -21,7 +22,12 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, Search, X, Trash2 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -46,6 +52,7 @@ export default function SendOutBoardPage() {
   const [recruiterFilter, setRecruiterFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<'all' | '7d' | '30d' | '90d'>('all');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingRow, setDeletingRow] = useState<SendOutBoardRow | null>(null);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get('id');
@@ -95,6 +102,21 @@ export default function SendOutBoardPage() {
     const next = SEND_OUT_STAGES[idx + direction];
     if (!next) return;
     await updateStage(row.id, next, row.stage);
+  };
+
+  const handleDeleteSendOut = async () => {
+    if (!deletingRow) return;
+    const id = deletingRow.id;
+    try {
+      const { error } = await supabase.from('send_outs').delete().eq('id', id);
+      if (error) { toast.error(error.message || 'Failed to delete send-out'); return; }
+      toast.success('Send-out deleted');
+      qc.invalidateQueries({ queryKey: ['send_out_rows'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete send-out');
+    } finally {
+      setDeletingRow(null);
+    }
   };
 
   const updateStage = async (id: string, toStage: string, fromStage?: string) => {
@@ -175,7 +197,7 @@ export default function SendOutBoardPage() {
         <Select value={jobFilter} onValueChange={setJobFilter}>
           <SelectTrigger className="h-8 w-48"><SelectValue placeholder="Job" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All jobs</SelectItem>
+            <SelectItem value="all">All Jobs</SelectItem>
             {jobs.map((j: any) => (
               <SelectItem key={j.id} value={j.id}>
                 {j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}
@@ -273,7 +295,10 @@ export default function SendOutBoardPage() {
                                 {row.job_title || 'No job'}
                               </div>
                               {row.company_name && (
-                                <div className="text-[11px] text-muted-foreground truncate">{row.company_name}</div>
+                                <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
+                                  <CompanyLogo name={row.company_name} domain={row.company_domain} size="xs" />
+                                  {row.company_name}
+                                </div>
                               )}
                             </div>
                           </div>
@@ -304,6 +329,14 @@ export default function SendOutBoardPage() {
                             </button>
                             <button
                               type="button"
+                              title="Delete send-out"
+                              onClick={(e) => { e.stopPropagation(); setDeletingRow(row); }}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               title="Move forward"
                               disabled={!canForward || updatingId === row.id}
                               onClick={(e) => { e.stopPropagation(); moveStage(row, 1); }}
@@ -328,6 +361,22 @@ export default function SendOutBoardPage() {
         open={!!selectedId}
         onClose={closeDrawer}
       />
+
+      <AlertDialog open={!!deletingRow} onOpenChange={(o) => !o && setDeletingRow(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this send-out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the send-out for {deletingRow?.candidate_name || 'this candidate'}
+              {deletingRow?.job_title ? ` on ${deletingRow.job_title}` : ''}. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteSendOut}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

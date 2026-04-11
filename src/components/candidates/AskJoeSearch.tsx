@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Send, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -48,6 +49,8 @@ export function AskJoeSearch({ open, onOpenChange }: Props) {
     setIsLoading(true);
 
     let assistantSoFar = '';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
 
     try {
       const resp = await fetch(CHAT_URL, {
@@ -60,6 +63,7 @@ export function AskJoeSearch({ open, onOpenChange }: Props) {
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
           mode: mode,
         }),
+        signal: controller.signal,
       });
 
       if (!resp.ok) {
@@ -106,11 +110,15 @@ export function AskJoeSearch({ open, onOpenChange }: Props) {
         }
       }
     } catch (err: any) {
+      const aborted = err?.name === 'AbortError';
+      const msg = aborted ? 'Joe timed out. Please try again.' : (err?.message || 'Joe had a problem. Please try again.');
+      toast.error(msg);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: `Error: ${err.message}` },
+        { role: 'assistant', content: `Error: ${msg}` },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };

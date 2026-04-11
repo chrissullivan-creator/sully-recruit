@@ -31,7 +31,7 @@ const MicrosoftCallback = () => {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center space-y-3">
         <div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-sm text-muted-foreground">Connecting Microsoft account...</p>
+        <p className="text-sm text-muted-foreground">Connecting Microsoft account…</p>
       </div>
     </div>
   );

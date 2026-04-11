@@ -196,7 +196,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
 
   const handleAiSuggest = async () => {
     if (!name.trim()) {
-      toast.error('Enter a campaign name first so AI can generate relevant steps.');
+      toast.error('Enter a sequence name first so AI can generate relevant steps.');
       return;
     }
 
@@ -242,7 +242,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
       });
 
       if (aiSteps.length === 0) {
-        toast.error('AI returned no steps. Try a more descriptive campaign name.');
+        toast.error('AI returned no steps. Try a more descriptive sequence name.');
         return;
       }
 
@@ -364,7 +364,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
       <DialogContent className="max-w-3xl h-[90vh] flex flex-col overflow-hidden p-0">
         <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
           <DialogTitle className="text-xl">
-            {isEditMode ? 'Edit Sequence' : 'Create New Sequence'}
+            {isEditMode ? 'Edit Sequence' : 'Add Sequence'}
           </DialogTitle>
           <DialogDescription>
             {isEditMode
@@ -376,13 +376,13 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
         {loadingEdit ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Loading sequence...</span>
+            <span className="ml-2 text-muted-foreground">Loading sequence…</span>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="campaign-name">Campaign Name</Label>
+                <Label htmlFor="campaign-name">Sequence Name</Label>
                 <Input
                   id="campaign-name"
                   placeholder="e.g., Q1 Engineering Leaders Outreach"
@@ -411,7 +411,7 @@ export const CampaignBuilder = ({ open, onOpenChange, editSequenceId }: Campaign
               <Label htmlFor="campaign-desc">Description (optional)</Label>
               <Input
                 id="campaign-desc"
-                placeholder="Brief description of this campaign..."
+                placeholder="Brief description of this sequence…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />

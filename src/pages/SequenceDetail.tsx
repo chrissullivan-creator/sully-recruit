@@ -94,6 +94,7 @@ const SequenceDetail = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [steps, setSteps] = useState<CampaignStep[]>([]);
 
+  const [editingName, setEditingName] = useState(false);
   // Enroll dialog
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollType, setEnrollType] = useState<'candidate' | 'contact'>('candidate');
@@ -316,7 +317,27 @@ const SequenceDetail = () => {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-semibold text-foreground truncate">{sequence.name}</h1>
+          {editingName ? (
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => { setEditingName(false); if (name.trim() && name !== sequence.name) handleSave(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.currentTarget.blur(); }
+                if (e.key === 'Escape') { setName(sequence.name); setEditingName(false); }
+              }}
+              className="h-8 text-lg font-semibold"
+            />
+          ) : (
+            <h1
+              className="text-lg font-semibold text-foreground truncate cursor-pointer hover:bg-accent/10 rounded px-1 -mx-1"
+              title="Click to rename"
+              onClick={() => setEditingName(true)}
+            >
+              {sequence.name}
+            </h1>
+          )}
           <p className="text-sm text-muted-foreground">
             {sequence.channel} • {steps.length} steps • {enrollments.length} enrolled
             {jobId && jobs.find((j: any) => j.id === jobId) && <> • <span className="text-gold font-medium">{jobs.find((j: any) => j.id === jobId)?.title}</span></>}

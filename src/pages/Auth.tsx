@@ -89,7 +89,7 @@ const Auth = () => {
           </div>
 
           <Button type="submit" variant="gold" className="w-full" disabled={loading}>
-            {loading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
+            {loading ? 'Please wait…' : isSignUp ? 'Create Account' : 'Sign In'}
           </Button>
         </form>
 

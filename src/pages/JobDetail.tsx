@@ -20,8 +20,14 @@ import { Label } from '@/components/ui/label';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon,
+  Search, Pencil, Link as LinkIcon, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
@@ -212,7 +218,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
             <Textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="Why is this candidate a strong fit? Add context for the client, key highlights, any caveats..."
+              placeholder="Why is this candidate a strong fit? Add context for the client, key highlights, any caveats…"
               className="min-h-[110px] text-sm resize-none"
             />
             <Button
@@ -262,6 +268,23 @@ const JobDetail = () => {
   const [companyEditId, setCompanyEditId] = useState('');
   const [companyEditName, setCompanyEditName] = useState('');
   const [savingCompany, setSavingCompany] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(false);
+
+  const handleDeleteJob = async () => {
+    if (!id) return;
+    setDeletingJob(true);
+    try {
+      const { error } = await supabase.from('jobs').delete().eq('id', id);
+      if (error) { toast.error(error.message || 'Failed to delete job'); return; }
+      toast.success('Job deleted');
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      navigate('/jobs');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete job');
+    } finally {
+      setDeletingJob(false);
+    }
+  };
 
   const openCompanyEdit = () => {
     setCompanyEditId(job?.company_id || '');
@@ -421,7 +444,7 @@ const JobDetail = () => {
   if (isLoading) {
     return (
       <MainLayout>
-        <div className="p-8 text-muted-foreground">Loading job...</div>
+        <div className="p-8 text-muted-foreground">Loading job…</div>
       </MainLayout>
     );
   }
@@ -435,18 +458,7 @@ const JobDetail = () => {
   }
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
-  const companyWebsite = (job.companies as any)?.website ?? null;
-
-  // Derive logo from company website domain via Google favicon service
-  const companyLogoUrl = (() => {
-    if (!companyWebsite) return null;
-    try {
-      const domain = new URL(companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`).hostname;
-      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
-    } catch {
-      return null;
-    }
-  })();
+  const companyDomain = (job.companies as any)?.domain ?? null;
 
   return (
     <MainLayout>
@@ -463,6 +475,25 @@ const JobDetail = () => {
               <ListTodo className="h-4 w-4 mr-1" />
               Tasks
             </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" disabled={deletingJob} title="Delete job">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes “{job?.title}” and any related send-outs and candidate links. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDeleteJob}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         }
       />
@@ -473,8 +504,8 @@ const JobDetail = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              {companyLogoUrl ? (
-                <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain" />
+              {companyName ? (
+                <CompanyLogo name={companyName} domain={companyDomain} size="sm" />
               ) : (
                 <Briefcase className="h-5 w-5 text-accent" />
               )}
@@ -698,7 +729,7 @@ const JobDetail = () => {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                       <Input
                         className="pl-8 h-9 text-sm"
-                        placeholder="Search contacts..."
+                        placeholder="Search contacts…"
                         value={contactSearch}
                         onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
                         onFocus={() => setContactSearchOpen(true)}
@@ -776,7 +807,7 @@ const JobDetail = () => {
               </div>
               <Button variant="outline" size="sm" onClick={() => setAddContactOpen(true)}>
                 <UserPlus className="h-4 w-4 mr-1" />
-                Create New Contact
+                Add Contact
               </Button>
             </div>
           </CardContent>

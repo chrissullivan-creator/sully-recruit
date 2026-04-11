@@ -368,7 +368,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {step === 'source' ? 'Add New Job' : step === 'pick' ? `${parsedJobs.length} Jobs Found` : 'Review & Create Job'}
+            {step === 'source' ? 'Add Job' : step === 'pick' ? `${parsedJobs.length} Jobs Found` : 'Review & Add Job'}
           </DialogTitle>
         </DialogHeader>
 

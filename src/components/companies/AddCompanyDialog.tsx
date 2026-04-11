@@ -49,7 +49,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Add New Company</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Add Company</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Name *</Label>

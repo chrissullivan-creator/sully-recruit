@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { AskJoeButton } from '@/components/AskJoeButton';
+import { JoeErrorBoundary } from '@/components/joe/JoeErrorBoundary';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -15,7 +16,9 @@ export function MainLayout({ children }: MainLayoutProps) {
           {children}
         </div>
       </main>
-      <AskJoeButton />
+      <JoeErrorBoundary>
+        <AskJoeButton />
+      </JoeErrorBoundary>
     </div>
   );
 }

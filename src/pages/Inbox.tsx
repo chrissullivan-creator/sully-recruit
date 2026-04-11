@@ -16,8 +16,13 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare,
+  PenSquare, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Link } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 
@@ -318,7 +323,7 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
             </div>
             <div className="flex gap-2">
               <Input
-                placeholder="Search name..."
+                placeholder="Search name…"
                 value={linkSearch}
                 onChange={(e) => setLinkSearch(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -376,11 +381,28 @@ function EntityPanel({ thread }: { thread: InboxThread | null }) {
 }
 
 // ---------- Message Detail ----------
-function MessagePane({ threadId }: { threadId: string | null }) {
+function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteThread = async () => {
+    if (!threadId) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('conversations').delete().eq('id', threadId);
+      if (error) { toast.error(error.message || 'Failed to delete thread'); return; }
+      toast.success('Conversation deleted');
+      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      onDeleted?.();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete thread');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
@@ -534,6 +556,25 @@ function MessagePane({ threadId }: { threadId: string | null }) {
             >
               <Users className="h-4 w-4" />
             </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" disabled={deleting} title="Delete conversation">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes the conversation and its message history. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDeleteThread}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
 
@@ -687,7 +728,7 @@ export default function Inbox() {
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search messages, names..."
+                placeholder="Search messages, names…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-8 h-8 text-xs"
@@ -788,7 +829,7 @@ export default function Inbox() {
 
         {/* Right: Message pane */}
         <div className="flex-1 min-w-0">
-          <MessagePane threadId={selectedId} />
+          <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
         </div>
       </div>
     </MainLayout>

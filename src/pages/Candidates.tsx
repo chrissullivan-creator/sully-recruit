@@ -12,10 +12,11 @@ import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { ResumeSearchDialog } from '@/components/candidates/ResumeSearchDialog';
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
-import { useCandidates, useJobs } from '@/hooks/useData';
+import { useCandidates, useJobs, useCompanies } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileSearch, FileUp, Sparkles, X, Target, User } from 'lucide-react';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { format } from 'date-fns';
@@ -67,7 +68,15 @@ const Candidates = () => {
   const [addOpen, setAddOpen] = useState(false);
   const { data: candidates = [], isLoading } = useCandidates();
   const { data: jobs = [] } = useJobs();
+  const { data: companies = [] } = useCompanies();
   const { data: profiles = [] } = useProfiles();
+  const companyDomainByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of companies as any[]) {
+      if (c?.name && c?.domain) map.set(c.name.toLowerCase().trim(), c.domain);
+    }
+    return map;
+  }, [companies]);
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
@@ -191,7 +200,7 @@ const Candidates = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search candidates..."
+              placeholder="Search candidates…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -269,7 +278,7 @@ const Candidates = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading candidates...</p>
+          <p className="text-muted-foreground text-sm">Loading candidates…</p>
         ) : view === 'pipeline' ? (
           <CandidatePipeline />
         ) : (
@@ -323,8 +332,12 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.current_title ?? '-'}</td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Building className="h-3 w-3" />
+                      <span className="text-sm text-muted-foreground flex items-center gap-2">
+                        <CompanyLogo
+                          name={candidate.current_company ?? ''}
+                          domain={candidate.current_company ? companyDomainByName.get(candidate.current_company.toLowerCase().trim()) ?? null : null}
+                          size="xs"
+                        />
                         {candidate.current_company ?? '-'}
                       </span>
                     </td>
@@ -335,7 +348,7 @@ const Candidates = () => {
                         </span>
                         {(candidate as any).no_answer && (
                           <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                            no answer
+                            No Answer
                           </span>
                         )}
                       </div>

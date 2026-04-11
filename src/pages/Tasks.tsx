@@ -92,7 +92,7 @@ export default function Tasks() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search tasks..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            <Input placeholder="Search tasks…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
@@ -126,7 +126,7 @@ export default function Tasks() {
 
         {/* Task list */}
         {isLoading ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">Loading tasks...</p>
+          <p className="text-sm text-muted-foreground py-8 text-center">Loading tasks…</p>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12 space-y-2">
             <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />

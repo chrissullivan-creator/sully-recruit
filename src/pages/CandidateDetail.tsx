@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
-import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
+import { useCandidate, useNotes, useCandidateConversations, useJobs, useCompanies } from '@/hooks/useData';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { useProfiles } from '@/hooks/useProfiles';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,8 +19,13 @@ import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
-  DollarSign, ChevronDown, ChevronUp, PhoneCall,
+  DollarSign, ChevronDown, ChevronUp, PhoneCall, Trash2, Upload,
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -121,6 +127,7 @@ const CandidateDetail = () => {
   const queryClient = useQueryClient();
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
+  const { data: companies = [] } = useCompanies();
   const { data: profiles = [] } = useProfiles();
   const openJobs = (jobs as any[]).filter(j => ['open','warm','hot','interviewing','offer'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
@@ -146,6 +153,48 @@ const CandidateDetail = () => {
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [compExpanded, setCompExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const resumeFileRef = useRef<HTMLInputElement>(null);
+
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('candidates').delete().eq('id', id);
+      if (error) { toast.error(error.message || 'Failed to delete candidate'); return; }
+      toast.success('Candidate deleted');
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      navigate('/candidates');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete candidate');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleReplaceResume = async (file: File) => {
+    if (!id || !file) return;
+    setUploadingResume(true);
+    try {
+      const ext = file.name.split('.').pop() ?? 'pdf';
+      const path = `${id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: false });
+      if (uploadErr) { toast.error(uploadErr.message || 'Resume upload failed'); return; }
+      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
+      const publicUrl = urlData?.publicUrl ?? null;
+      if (publicUrl) {
+        await updateField('resume_url', publicUrl);
+        await supabase.from('resumes').insert({ candidate_id: id, file_path: path } as any);
+        setResumeUrl(publicUrl);
+        toast.success('Resume updated');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Resume upload failed');
+    } finally {
+      setUploadingResume(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -165,43 +214,75 @@ const CandidateDetail = () => {
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
-    const { error } = await supabase.from('candidates').update({ [field]: value || null }).eq('id', id);
-    if (error) { toast.error(`Failed to update`); return; }
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    try {
+      const { error } = await supabase.from('candidates').update({ [field]: value || null }).eq('id', id);
+      if (error) { toast.error(`Failed to update ${field.replace(/_/g, ' ')}`); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update');
+    }
   };
 
   const updateComp = async (field: string, value: string) => {
     if (!id) return;
-    const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
-    await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    try {
+      const num = value ? parseFloat(value.replace(/[^0-9.]/g, '')) : null;
+      const { error } = await supabase.from('candidates').update({ [field]: isNaN(num as number) ? null : num }).eq('id', id);
+      if (error) { toast.error('Failed to update compensation'); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update compensation');
+    }
   };
 
   const updateJobStatus = async (newStatus: string) => {
     if (!id) return;
     setUpdatingJobStatus(true);
-    await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
-    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-    setUpdatingJobStatus(false);
+    try {
+      const { error } = await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+      if (error) { toast.error('Failed to update status'); return; }
+      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update status');
+    } finally {
+      setUpdatingJobStatus(false);
+    }
   };
 
   const generateJoeSays = async () => {
     if (!id) return;
     setGeneratingJoe(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
     try {
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-joe-says`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
         body: JSON.stringify({ candidate_id: id }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       toast.success('Joe Says updated');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to generate');
+      const aborted = err?.name === 'AbortError';
+      toast.error(aborted ? 'Joe timed out. Please try again.' : (err.message || 'Failed to generate'));
+      // Fallback: ensure Joe Says field is never blank after a failure
+      if (!(candidate as any)?.joe_says) {
+        try {
+          await supabase
+            .from('candidates')
+            .update({ joe_says: 'Summary unavailable — click Ask Joe to retry.' } as any)
+            .eq('id', id);
+          queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+        } catch { /* swallow fallback error */ }
+      }
     } finally {
+      clearTimeout(timeoutId);
       setGeneratingJoe(false);
     }
   };
@@ -226,6 +307,13 @@ const CandidateDetail = () => {
     <MainLayout>
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
         <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
+        {candidate.current_company && (
+          <CompanyLogo
+            name={candidate.current_company}
+            domain={(companies as any[]).find((c: any) => c?.name?.toLowerCase().trim() === candidate.current_company?.toLowerCase().trim())?.domain ?? null}
+            size="md"
+          />
+        )}
         <div className="flex-1">
           <h1 className="text-lg font-semibold text-foreground">{fullName}</h1>
           <p className="text-sm text-muted-foreground">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
@@ -239,8 +327,39 @@ const CandidateDetail = () => {
           <Button variant="gold" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={deleting} title="Delete candidate">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this candidate?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently removes {fullName} and any related notes/conversations from the pipeline. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
+
+      <input
+        ref={resumeFileRef}
+        type="file"
+        accept=".pdf,.doc,.docx"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleReplaceResume(file);
+          e.target.value = '';
+        }}
+      />
 
       {showResume && resumeUrl && (
         <div className="border-b border-border">
@@ -252,9 +371,25 @@ const CandidateDetail = () => {
                 Open in new tab <ExternalLink className="h-3 w-3" />
               </a>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowResume(false)}><X className="h-3.5 w-3.5" /></Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => resumeFileRef.current?.click()} disabled={uploadingResume}>
+                {uploadingResume ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Upload className="h-3 w-3 mr-1" />}
+                Replace
+              </Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowResume(false)}><X className="h-3.5 w-3.5" /></Button>
+            </div>
           </div>
           <iframe src={resumeUrl} className="w-full h-[500px]" title="Resume" />
+        </div>
+      )}
+
+      {!resumeUrl && (
+        <div className="border-b border-border bg-muted/20 px-8 py-2 flex items-center justify-between">
+          <span className="text-xs text-muted-foreground italic">No resume on file</span>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => resumeFileRef.current?.click()} disabled={uploadingResume}>
+            {uploadingResume ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Upload className="h-3 w-3 mr-1" />}
+            Upload Resume
+          </Button>
         </div>
       )}
 
@@ -312,10 +447,15 @@ const CandidateDetail = () => {
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Owner</h3>
               <Select value={candidate.owner_id ?? 'none'} onValueChange={async (val) => {
                 const newOwnerId = val === 'none' ? null : val;
-                await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                try {
+                  const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                  if (error) { toast.error('Failed to update owner'); return; }
+                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                  toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                } catch (err: any) {
+                  toast.error(err?.message || 'Failed to update owner');
+                }
               }}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
                 <SelectContent>
@@ -329,10 +469,15 @@ const CandidateDetail = () => {
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Active Job</h3>
               <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
                 const newJobId = val === 'none' ? null : val;
-                await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                try {
+                  const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                  if (error) { toast.error('Failed to update job assignment'); return; }
+                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                  toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                } catch (err: any) {
+                  toast.error(err?.message || 'Failed to update job assignment');
+                }
               }}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
                 <SelectContent>

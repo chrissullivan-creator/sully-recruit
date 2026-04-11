@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Search, Send, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -44,6 +45,8 @@ export function AskJoeAdvancedSearch({ open, onOpenChange, mode = 'candidate_sea
     setIsLoading(true);
 
     let assistantSoFar = '';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
 
     try {
       const resp = await fetch(CHAT_URL, {
@@ -56,6 +59,7 @@ export function AskJoeAdvancedSearch({ open, onOpenChange, mode = 'candidate_sea
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
           mode: mode,
         }),
+        signal: controller.signal,
       });
 
       if (!resp.ok || !resp.body) {
@@ -106,11 +110,15 @@ export function AskJoeAdvancedSearch({ open, onOpenChange, mode = 'candidate_sea
         }
       }
     } catch (err: any) {
+      const aborted = err?.name === 'AbortError';
+      const msg = aborted ? 'Joe timed out. Please try again.' : (err?.message || 'Joe had a problem. Please try again.');
+      toast.error(msg);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: `Error: ${err.message}` },
+        { role: 'assistant', content: `Error: ${msg}` },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };

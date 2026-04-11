@@ -178,7 +178,7 @@ const Campaigns = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search sequences..."
+              placeholder="Search sequences…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -194,7 +194,7 @@ const Campaigns = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading sequences...</p>
+          <p className="text-muted-foreground text-sm">Loading sequences…</p>
         ) : filteredSequences.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-muted-foreground mb-2">No sequences found</p>
@@ -282,7 +282,7 @@ const Campaigns = () => {
                       <p className="text-xs text-muted-foreground">Enrolled</p>
                     </div>
                     <div className="flex items-center justify-end">
-                      <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/campaigns/${seq.id}`); }}>
                         <BarChart3 className="h-4 w-4 mr-1" />
                         Analytics
                       </Button>
