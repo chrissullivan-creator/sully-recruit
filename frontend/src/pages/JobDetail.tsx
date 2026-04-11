@@ -1,9 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
@@ -18,10 +18,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -258,7 +259,7 @@ const JobDetail = () => {
     value: string; options?: { value: string; label: string }[]; placeholder?: string;
   } | null>(null);
 
-  // Company edit dialog (handles both company_id and company_name)
+  // Company edit dialog
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
   const [companyEditId, setCompanyEditId] = useState('');
   const [companyEditName, setCompanyEditName] = useState('');
@@ -300,7 +301,6 @@ const JobDetail = () => {
     }
   };
 
-  // Helper to save a single field
   const saveField = async (field: string, value: string) => {
     if (!id) return;
     try {
@@ -422,7 +422,9 @@ const JobDetail = () => {
   if (isLoading) {
     return (
       <MainLayout>
-        <div className="p-8 text-muted-foreground">Loading job...</div>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
       </MainLayout>
     );
   }
@@ -430,7 +432,9 @@ const JobDetail = () => {
   if (!job) {
     return (
       <MainLayout>
-        <div className="p-8 text-muted-foreground">Job not found.</div>
+        <div className="flex items-center justify-center h-full">
+          <p className="text-muted-foreground">Job not found.</p>
+        </div>
       </MainLayout>
     );
   }
@@ -438,7 +442,6 @@ const JobDetail = () => {
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
   const companyWebsite = (job.companies as any)?.website ?? null;
 
-  // Derive logo from company website domain via Google favicon service
   const companyLogoUrl = (() => {
     if (!companyWebsite) return null;
     try {
@@ -451,89 +454,86 @@ const JobDetail = () => {
 
   return (
     <MainLayout>
-      <PageHeader
-        title={job.title}
-        description={companyName ? `at ${companyName}` : undefined}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Back
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
-              <ListTodo className="h-4 w-4 mr-1" />
-              Tasks
-            </Button>
+      {/* ── Top Header Bar ─────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/jobs')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+          {companyLogoUrl ? (
+            <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain shrink-0" />
+          ) : (
+            <Briefcase className="h-5 w-5 text-accent shrink-0" />
+          )}
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-foreground truncate">{job.title}</h1>
+            {companyName && (
+              <p className="text-sm text-muted-foreground truncate">at {companyName}</p>
+            )}
           </div>
-        }
-      />
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
+            <ListTodo className="h-3.5 w-3.5 mr-1" /> Tasks
+          </Button>
+        </div>
+      </div>
 
-      <div className="p-8 space-y-6 max-w-4xl">
+      {/* ── Sidebar + Tabs Layout ──────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
 
-        {/* ── Job Info ──────────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              {companyLogoUrl ? (
-                <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain" />
-              ) : (
-                <Briefcase className="h-5 w-5 text-accent" />
-              )}
-              Job Details
-              <span className="text-xs text-muted-foreground font-normal ml-auto">Click any field to edit</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-              {/* Title */}
-              <EditableField onClick={() => openFieldEdit('title', 'Title', 'text', job.title || '', undefined, 'e.g. Senior Software Engineer')}>
-                <span className="text-muted-foreground">Title</span>
-                <p className="mt-1 font-medium text-foreground">{job.title || <span className="italic text-muted-foreground">Not set</span>}</p>
-              </EditableField>
+        {/* ── Left Sidebar ─────────────────────────────────── */}
+        <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
+          <div className="p-5 space-y-5">
 
-              {/* Status */}
-              <EditableField onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}>
-                <span className="text-muted-foreground">Status</span>
-                <div className="mt-1"><Badge variant="secondary" className={cn(
+            {/* Status badge */}
+            <div className="flex flex-col items-center text-center">
+              <Badge
+                variant="secondary"
+                className={cn(
+                  'text-xs cursor-pointer',
                   job.status === 'lead' && 'bg-gray-100 text-gray-600',
                   job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
                   job.status === 'closed_won' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
                   job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
-                )}>{STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}</Badge></div>
+                )}
+                onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}
+              >
+                {STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}
+              </Badge>
+            </div>
+
+            {/* Key fields */}
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Job Info</h3>
+
+              <EditableField onClick={() => openFieldEdit('title', 'Title', 'text', job.title || '', undefined, 'e.g. Senior Software Engineer')}>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Title</Label>
+                <p className="text-sm font-medium text-foreground mt-0.5">{job.title || <span className="italic text-muted-foreground">Not set</span>}</p>
               </EditableField>
 
-              {/* Company */}
               <EditableField onClick={openCompanyEdit}>
-                <span className="text-muted-foreground">Company</span>
-                <p className="mt-1 font-medium text-foreground">{companyName || <span className="italic text-muted-foreground">Not set</span>}</p>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Briefcase className="h-3 w-3" /> Company</Label>
+                <p className="text-sm text-foreground mt-0.5">{companyName || <span className="italic text-muted-foreground">Not set</span>}</p>
               </EditableField>
 
-              {/* Location */}
               <EditableField onClick={() => openFieldEdit('location', 'Location', 'text', job.location || '', undefined, 'e.g. New York, NY')}>
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <MapPin className="h-3 w-3" /> Location
-                </span>
-                <p className="mt-1 font-medium text-foreground">{job.location || <span className="italic text-muted-foreground">Not set</span>}</p>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><MapPin className="h-3 w-3" /> Location</Label>
+                <p className="text-sm text-foreground mt-0.5">{job.location || <span className="italic text-muted-foreground">Not set</span>}</p>
               </EditableField>
 
-              {/* Compensation */}
               <EditableField onClick={() => openFieldEdit('compensation', 'Compensation', 'text', job.compensation || '', undefined, 'e.g. $120k - $150k')}>
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <DollarSign className="h-3 w-3" /> Compensation
-                </span>
-                <p className="mt-1 font-medium text-foreground">{job.compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><DollarSign className="h-3 w-3" /> Compensation</Label>
+                <p className="text-sm text-foreground mt-0.5">{job.compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
               </EditableField>
 
-              {/* Job URL */}
               <div className="relative">
                 <EditableField onClick={() => openFieldEdit('job_url', 'Job Posting URL', 'text', (job as any).job_url || '', undefined, 'https://...')}>
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <LinkIcon className="h-3 w-3" /> Job URL
-                  </span>
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><LinkIcon className="h-3 w-3" /> Job URL</Label>
                   {(job as any).job_url ? (
-                    <p className="mt-1 font-medium text-accent truncate">{(job as any).job_url}</p>
+                    <p className="text-sm text-accent truncate mt-0.5">{(job as any).job_url}</p>
                   ) : (
-                    <p className="mt-1 font-medium italic text-muted-foreground">Not set</p>
+                    <p className="text-sm italic text-muted-foreground mt-0.5">Not set</p>
                   )}
                 </EditableField>
                 {(job as any).job_url && (
@@ -550,339 +550,395 @@ const JobDetail = () => {
               </div>
             </div>
 
-            {/* Description — rich text display */}
-            <div className="mt-5">
-              <EditableField onClick={() => openFieldEdit('description', 'Description', 'richtext', job.description || '', undefined, 'Job description, requirements, qualifications...')}>
-                <span className="text-sm text-muted-foreground">Description</span>
-                {job.description ? (
-                  <div
-                    className="mt-1 text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm italic text-muted-foreground">No description yet. Click to add.</p>
+            {/* Quick contacts preview */}
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
+                <Users className="h-3 w-3" /> Contacts
+                {(jobContacts as any[]).length > 0 && (
+                  <span className="text-muted-foreground ml-1">({(jobContacts as any[]).length})</span>
                 )}
-              </EditableField>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Submittal Instructions ───────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-accent" />
-              Submittal Instructions
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">
-              Instructions for submitting candidates to this role — format requirements, what to include, client preferences, etc.
-            </p>
-            <EditableField onClick={() => openFieldEdit(
-              'submittal_instructions', 'Submittal Instructions', 'richtext',
-              (job as any).submittal_instructions || '',
-              undefined,
-              'e.g. Send blind resume only. Include comp expectations and reason for looking...',
-            )}>
-              {(job as any).submittal_instructions ? (
-                <div
-                  className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
-                />
+              </h3>
+              {(jobContacts as any[]).length === 0 ? (
+                <p className="text-xs text-muted-foreground">No contacts assigned.</p>
               ) : (
-                <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
+                <div className="space-y-1.5">
+                  {(jobContacts as any[]).slice(0, 3).map(jc => (
+                    <div key={jc.id} className="text-xs">
+                      <span className="text-foreground font-medium">{jc.contacts?.full_name}</span>
+                      {jc.is_primary && <span className="text-accent ml-1 text-[9px]">★</span>}
+                      {jc.contacts?.title && <p className="text-muted-foreground truncate">{jc.contacts.title}</p>}
+                    </div>
+                  ))}
+                  {(jobContacts as any[]).length > 3 && (
+                    <p className="text-[10px] text-muted-foreground">+{(jobContacts as any[]).length - 3} more</p>
+                  )}
+                </div>
               )}
-            </EditableField>
-          </CardContent>
-        </Card>
+            </div>
 
-        {/* ── Submittal Instructions (read-only callout under contacts) ────── */}
-        {(job as any).submittal_instructions && (
-          <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
-            <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
-              <ClipboardList className="h-3.5 w-3.5" /> Submittal Instructions
-            </p>
-            <div
-              className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
-            />
+            {/* Pipeline summary */}
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
+                <Briefcase className="h-3 w-3" /> Pipeline
+              </h3>
+              <p className="text-sm font-medium text-foreground">{jobCandidates.length} candidates</p>
+            </div>
           </div>
-        )}
+        </aside>
 
-        {/* ── AI Candidate Matches ──────────────────────────────────────────── */}
-        <JobMatchesList jobId={job.id} />
+        {/* ── Tabs Area ────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-8 pt-4 border-b border-border">
+              <TabsList className="bg-secondary">
+                <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
+                <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
+                <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
+                <TabsTrigger value="pipeline" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
+                <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
+              </TabsList>
+            </div>
 
-        {/* ── Job Contacts (multi) ─────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <UserPlus className="h-5 w-5 text-accent" />
-              Job Contacts
-              {(jobContacts as any[]).length > 0 && (
-                <Badge variant="secondary" className="ml-1">{(jobContacts as any[]).length}</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(jobContacts as any[]).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No contacts assigned yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {(jobContacts as any[]).map(jc => {
-                  const c = jc.contacts;
-                  return (
-                    <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
-                      <div className="flex-1 min-w-0 text-sm">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium text-foreground">{c?.full_name}</p>
-                          {jc.is_primary && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded font-medium">
-                              <Star className="h-2.5 w-2.5 fill-current" /> Primary
-                            </span>
-                          )}
-                          {jc.role && (
-                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                              {jc.role}
-                            </span>
-                          )}
-                        </div>
-                        {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
-                        {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
-                        {c?.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {!jc.is_primary && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                            onClick={() => setPrimary(jc.id, jc.contact_id)}
-                          >
-                            Set Primary
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => removeContact(jc.id, jc.contact_id, jc.is_primary)}
-                          disabled={removingId === jc.id}
-                        >
-                          {removingId === jc.id
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            : <X className="h-3.5 w-3.5" />}
-                        </Button>
-                      </div>
+            <ScrollArea className="flex-1">
+
+              {/* ── Details Tab ────────────────────────────── */}
+              <TabsContent value="details" className="px-8 py-5 mt-0 space-y-6">
+
+                {/* Description */}
+                <div>
+                  <EditableField onClick={() => openFieldEdit('description', 'Description', 'richtext', job.description || '', undefined, 'Job description, requirements, qualifications...')}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Briefcase className="h-4 w-4 text-accent" />
+                      <h2 className="text-base font-semibold text-foreground">Description</h2>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Add contact — searchable */}
-            <div className="pt-3 border-t border-border space-y-3">
-              <Label className="text-sm font-medium">Add Contact</Label>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 relative">
-                  {selectedContactId ? (
-                    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-                      <span className="flex-1 truncate">
-                        {(() => {
-                          const c = (contacts as any[]).find((c: any) => c.id === selectedContactId);
-                          return c ? `${c.full_name}${c.title ? ` — ${c.title}` : ''}` : 'Selected';
-                        })()}
-                      </span>
-                      <button onClick={() => { setSelectedContactId(''); setContactSearch(''); }} className="text-muted-foreground hover:text-foreground">
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                      <Input
-                        className="pl-8 h-9 text-sm"
-                        placeholder="Search contacts..."
-                        value={contactSearch}
-                        onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
-                        onFocus={() => setContactSearchOpen(true)}
-                        onBlur={() => setTimeout(() => setContactSearchOpen(false), 150)}
+                    {job.description ? (
+                      <div
+                        className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
                       />
-                      {contactSearchOpen && (
-                        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card text-foreground shadow-md max-h-56 overflow-y-auto">
-                          {(() => {
-                            const q = contactSearch.toLowerCase();
-                            const filtered = (availableSorted as any[]).filter((c: any) =>
-                              !q ||
-                              c.full_name?.toLowerCase().includes(q) ||
-                              c.title?.toLowerCase().includes(q) ||
-                              c.email?.toLowerCase().includes(q)
-                            );
-                            const companyOnes = filtered.filter((c: any) => companyContactIds.has(c.id));
-                            const others = filtered.filter((c: any) => !companyContactIds.has(c.id));
-                            if (filtered.length === 0) return (
-                              <div className="px-3 py-3 text-sm text-muted-foreground">No contacts found</div>
-                            );
-                            return (
-                              <>
-                                {companyOnes.length > 0 && (
-                                  <>
-                                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0">
-                                      {companyName ?? 'Company'} Contacts
-                                    </div>
-                                    {companyOnes.map((c: any) => (
-                                      <button
-                                        key={c.id}
-                                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
-                                        onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
-                                      >
-                                        <span className="font-medium text-foreground">{c.full_name}</span>
-                                        {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
-                                      </button>
-                                    ))}
-                                  </>
-                                )}
-                                {others.length > 0 && (
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">No description yet. Click to add.</p>
+                    )}
+                  </EditableField>
+                </div>
+
+                {/* Submittal Instructions */}
+                <div className="border-t border-border pt-5">
+                  <EditableField onClick={() => openFieldEdit(
+                    'submittal_instructions', 'Submittal Instructions', 'richtext',
+                    (job as any).submittal_instructions || '',
+                    undefined,
+                    'e.g. Send blind resume only. Include comp expectations and reason for looking...',
+                  )}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <ClipboardList className="h-4 w-4 text-accent" />
+                      <h2 className="text-base font-semibold text-foreground">Submittal Instructions</h2>
+                    </div>
+                    {(job as any).submittal_instructions ? (
+                      <div
+                        className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+                      />
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
+                    )}
+                  </EditableField>
+                </div>
+
+                {/* Submittal callout */}
+                {(job as any).submittal_instructions && (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
+                    <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
+                      <ClipboardList className="h-3.5 w-3.5" /> Quick Reference — Submittal Instructions
+                    </p>
+                    <div
+                      className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+                    />
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── AI Matches Tab ─────────────────────────── */}
+              <TabsContent value="matches" className="px-8 py-5 mt-0">
+                <JobMatchesList jobId={job.id} />
+              </TabsContent>
+
+              {/* ── Contacts Tab ───────────────────────────── */}
+              <TabsContent value="contacts" className="px-8 py-5 mt-0 space-y-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <UserPlus className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold text-foreground">Job Contacts</h2>
+                  {(jobContacts as any[]).length > 0 && (
+                    <Badge variant="secondary" className="ml-1">{(jobContacts as any[]).length}</Badge>
+                  )}
+                </div>
+
+                {/* Existing contacts */}
+                {(jobContacts as any[]).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No contacts assigned yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(jobContacts as any[]).map(jc => {
+                      const c = jc.contacts;
+                      return (
+                        <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
+                          <div className="flex-1 min-w-0 text-sm">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-foreground">{c?.full_name}</p>
+                              {jc.is_primary && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded font-medium">
+                                  <Star className="h-2.5 w-2.5 fill-current" /> Primary
+                                </span>
+                              )}
+                              {jc.role && (
+                                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                  {jc.role}
+                                </span>
+                              )}
+                            </div>
+                            {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
+                            {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                            {c?.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!jc.is_primary && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => setPrimary(jc.id, jc.contact_id)}
+                              >
+                                Set Primary
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => removeContact(jc.id, jc.contact_id, jc.is_primary)}
+                              disabled={removingId === jc.id}
+                            >
+                              {removingId === jc.id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <X className="h-3.5 w-3.5" />}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Add contact search */}
+                <div className="pt-3 border-t border-border space-y-3">
+                  <Label className="text-sm font-medium">Add Contact</Label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 relative">
+                      {selectedContactId ? (
+                        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                          <span className="flex-1 truncate">
+                            {(() => {
+                              const c = (contacts as any[]).find((c: any) => c.id === selectedContactId);
+                              return c ? `${c.full_name}${c.title ? ` — ${c.title}` : ''}` : 'Selected';
+                            })()}
+                          </span>
+                          <button onClick={() => { setSelectedContactId(''); setContactSearch(''); }} className="text-muted-foreground hover:text-foreground">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                          <Input
+                            className="pl-8 h-9 text-sm"
+                            placeholder="Search contacts..."
+                            value={contactSearch}
+                            onChange={e => { setContactSearch(e.target.value); setContactSearchOpen(true); }}
+                            onFocus={() => setContactSearchOpen(true)}
+                            onBlur={() => setTimeout(() => setContactSearchOpen(false), 150)}
+                          />
+                          {contactSearchOpen && (
+                            <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card text-foreground shadow-md max-h-56 overflow-y-auto">
+                              {(() => {
+                                const q = contactSearch.toLowerCase();
+                                const filtered = (availableSorted as any[]).filter((c: any) =>
+                                  !q ||
+                                  c.full_name?.toLowerCase().includes(q) ||
+                                  c.title?.toLowerCase().includes(q) ||
+                                  c.email?.toLowerCase().includes(q)
+                                );
+                                const companyOnes = filtered.filter((c: any) => companyContactIds.has(c.id));
+                                const others = filtered.filter((c: any) => !companyContactIds.has(c.id));
+                                if (filtered.length === 0) return (
+                                  <div className="px-3 py-3 text-sm text-muted-foreground">No contacts found</div>
+                                );
+                                return (
                                   <>
                                     {companyOnes.length > 0 && (
-                                      <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0 border-t border-border">
-                                        Other Contacts
-                                      </div>
+                                      <>
+                                        <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0">
+                                          {companyName ?? 'Company'} Contacts
+                                        </div>
+                                        {companyOnes.map((c: any) => (
+                                          <button
+                                            key={c.id}
+                                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
+                                            onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
+                                          >
+                                            <span className="font-medium text-foreground">{c.full_name}</span>
+                                            {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
+                                          </button>
+                                        ))}
+                                      </>
                                     )}
-                                    {others.map((c: any) => (
-                                      <button
-                                        key={c.id}
-                                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
-                                        onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
-                                      >
-                                        <span className="font-medium text-foreground">{c.full_name}</span>
-                                        {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
-                                      </button>
-                                    ))}
+                                    {others.length > 0 && (
+                                      <>
+                                        {companyOnes.length > 0 && (
+                                          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted sticky top-0 border-t border-border">
+                                            Other Contacts
+                                          </div>
+                                        )}
+                                        {others.map((c: any) => (
+                                          <button
+                                            key={c.id}
+                                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
+                                            onMouseDown={() => { setSelectedContactId(c.id); setContactSearch(''); setContactSearchOpen(false); }}
+                                          >
+                                            <span className="font-medium text-foreground">{c.full_name}</span>
+                                            {c.title && <span className="text-xs text-muted-foreground">{c.title}</span>}
+                                          </button>
+                                        ))}
+                                      </>
+                                    )}
                                   </>
-                                )}
-                              </>
-                            );
-                          })()}
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
+                    <Button
+                      variant="gold"
+                      onClick={addContact}
+                      disabled={!selectedContactId || assigning}
+                    >
+                      {assigning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      Add
+                    </Button>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setAddContactOpen(true)}>
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Create New Contact
+                  </Button>
+                </div>
+              </TabsContent>
+
+              {/* ── Pipeline Tab ───────────────────────────── */}
+              <TabsContent value="pipeline" className="px-8 py-5 mt-0">
+                <div className="flex items-center gap-2 mb-4">
+                  <Users className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold text-foreground">Candidate Pipeline</h2>
+                  {jobCandidates.length > 0 && (
+                    <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
                   )}
                 </div>
-                <Button
-                  variant="gold"
-                  onClick={addContact}
-                  disabled={!selectedContactId || assigning}
-                >
-                  {assigning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-                  Add
-                </Button>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setAddContactOpen(true)}>
-                <UserPlus className="h-4 w-4 mr-1" />
-                Create New Contact
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Candidates Kanban Board ───────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className="h-5 w-5 text-accent" />
-              Candidate Pipeline
-              {jobCandidates.length > 0 && (
-                <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {candidatesLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates...
-              </div>
-            ) : jobCandidates.length === 0 ? (
-              <p className="text-sm text-muted-foreground p-6">
-                No candidates linked yet. Enroll candidates in a sequence tagged to this job.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <div className="flex gap-0 min-w-max">
-                  {JOB_STATUSES.map((stage, idx) => {
-                    const stageCandidates = (jobCandidates as any[]).filter(c => c.job_status === stage.value);
-                    const isLast = idx === JOB_STATUSES.length - 1;
-                    return (
-                      <div
-                        key={stage.value}
-                        className={cn(
-                          'flex flex-col min-w-[160px] w-[160px] border-r border-border',
-                          isLast && 'border-r-0'
-                        )}
-                      >
-                        <div className={cn(
-                          'px-3 py-2.5 border-b border-border flex items-center justify-between gap-1',
-                        )}>
-                          <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', stage.color)}>
-                            {stage.label}
-                          </span>
-                          {stageCandidates.length > 0 && (
-                            <span className="text-xs text-muted-foreground font-medium">
-                              {stageCandidates.length}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
-                          {stageCandidates.map((c: any) => (
-                            <div
-                              key={c.id}
-                              onClick={() => navigate(`/candidates/${c.id}`)}
-                              className="group rounded-md border border-border bg-card hover:border-accent/50 hover:bg-accent/5 p-2.5 cursor-pointer transition-colors"
-                            >
-                              <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
-                                {c.first_name} {c.last_name}
-                              </p>
-                              {c.current_title && (
-                                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                  {c.current_title}
-                                </p>
-                              )}
-                              {c.current_company && (
-                                <p className="text-[10px] text-muted-foreground truncate">
-                                  {c.current_company}
-                                </p>
+                {candidatesLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates...
+                  </div>
+                ) : jobCandidates.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No candidates linked yet</p>
+                    <p className="text-xs text-muted-foreground">Enroll candidates in a sequence tagged to this job.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <div className="flex gap-0 min-w-max">
+                      {JOB_STATUSES.map((stage, idx) => {
+                        const stageCandidates = (jobCandidates as any[]).filter(c => c.job_status === stage.value);
+                        const isLast = idx === JOB_STATUSES.length - 1;
+                        return (
+                          <div
+                            key={stage.value}
+                            className={cn(
+                              'flex flex-col min-w-[160px] w-[160px] border-r border-border',
+                              isLast && 'border-r-0'
+                            )}
+                          >
+                            <div className="px-3 py-2.5 border-b border-border flex items-center justify-between gap-1">
+                              <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', stage.color)}>
+                                {stage.label}
+                              </span>
+                              {stageCandidates.length > 0 && (
+                                <span className="text-xs text-muted-foreground font-medium">
+                                  {stageCandidates.length}
+                                </span>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                            <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
+                              {stageCandidates.map((c: any) => (
+                                <div
+                                  key={c.id}
+                                  onClick={() => navigate(`/candidates/${c.id}`)}
+                                  className="group rounded-md border border-border bg-card hover:border-accent/50 hover:bg-accent/5 p-2.5 cursor-pointer transition-colors"
+                                >
+                                  <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
+                                    {c.first_name} {c.last_name}
+                                  </p>
+                                  {c.current_title && (
+                                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                      {c.current_title}
+                                    </p>
+                                  )}
+                                  {c.current_company && (
+                                    <p className="text-[10px] text-muted-foreground truncate">
+                                      {c.current_company}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
 
-        {/* ── Send Outs with submittal notes + resume ──────────────────────── */}
-        {(sendOuts as any[]).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <FileText className="h-5 w-5 text-accent" />
-                Send Outs
-                <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {(sendOuts as any[]).map(so => (
-                <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
-              ))}
-            </CardContent>
-          </Card>
-        )}
+              {/* ── Send Outs Tab ──────────────────────────── */}
+              <TabsContent value="send-outs" className="px-8 py-5 mt-0">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold text-foreground">Send Outs</h2>
+                  {(sendOuts as any[]).length > 0 && (
+                    <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
+                  )}
+                </div>
+                {(sendOuts as any[]).length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No send outs yet</p>
+                    <p className="text-xs text-muted-foreground">Send outs will appear here once candidates are submitted.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {(sendOuts as any[]).map(so => (
+                      <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+            </ScrollArea>
+          </Tabs>
+        </div>
       </div>
 
+      {/* ── Dialogs & Panels ──────────────────────────────── */}
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
       {taskPanel && (
         <TaskSlidePanel
@@ -894,7 +950,6 @@ const JobDetail = () => {
         />
       )}
 
-      {/* Company edit dialog */}
       <Dialog open={companyEditOpen} onOpenChange={setCompanyEditOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -932,7 +987,6 @@ const JobDetail = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Per-field edit dialog */}
       {editField && (
         <FieldEditDialog
           open={!!editField}

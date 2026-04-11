@@ -15,9 +15,9 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        // Sully Recruit custom variants
-        gold: "bg-accent text-accent-foreground hover:bg-accent/90 shadow-sm hover:shadow-glow",
-        "gold-outline": "border border-accent text-accent hover:bg-accent hover:text-accent-foreground",
+        // Sully Recruit custom variants — dark forest green bg, gold text
+        gold: "bg-primary text-accent hover:bg-primary/85 shadow-sm hover:shadow-glow font-semibold",
+        "gold-outline": "border border-primary text-primary hover:bg-primary hover:text-accent",
         subtle: "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
       },
       size: {
