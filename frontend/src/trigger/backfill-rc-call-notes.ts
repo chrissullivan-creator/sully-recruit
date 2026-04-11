@@ -100,19 +100,72 @@ async function getRcToken(
   return token;
 }
 
-async function fetchCallDetail(token: string, externalCallId: string): Promise<any | null> {
-  const res = await fetch(
-    `${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log/${externalCallId}?view=Detailed`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-  if (!res.ok) {
-    logger.warn("Call detail fetch failed", { status: res.status, externalCallId });
-    return null;
+/**
+ * Paginate /call-log for a date range. Returns every record in the window.
+ * This is the ONLY reliable way to fetch historical calls: fetching a single
+ * record by id 404s whenever poll-rc-calls stored a sessionId or
+ * telephonySessionId in external_call_id instead of the record id.
+ */
+async function fetchCallsInRange(
+  token: string,
+  dateFrom: string,
+  dateTo: string,
+): Promise<any[]> {
+  const all: any[] = [];
+  let page = 1;
+  const maxPages = 50; // safety: 50 × 100 = 5000 calls
+  while (page <= maxPages) {
+    const params = new URLSearchParams({
+      type: "Voice",
+      view: "Detailed",
+      dateFrom,
+      dateTo,
+      perPage: "100",
+      page: String(page),
+    });
+    const res = await fetch(
+      `${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log?${params}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.warn("RC call-log range fetch failed", {
+        status: res.status,
+        page,
+        body: body.slice(0, 300),
+      });
+      break;
+    }
+    const data = await res.json();
+    const records = (data.records ?? []) as any[];
+    all.push(...records);
+    logger.info("Fetched RC call-log page", {
+      page,
+      count: records.length,
+      totalSoFar: all.length,
+    });
+    if (records.length < 100) break;
+    page++;
   }
-  return await res.json();
+  return all;
+}
+
+/**
+ * Build a lookup map from any of the three RC id variants → the call record.
+ * poll-rc-calls stores `call.id ?? call.sessionId` in external_call_id, and
+ * some records only carry telephonySessionId, so we index all three.
+ */
+function buildCallLookup(records: any[]): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const rec of records) {
+    if (rec.id) map.set(String(rec.id), rec);
+    if (rec.sessionId) map.set(String(rec.sessionId), rec);
+    if (rec.telephonySessionId) map.set(String(rec.telephonySessionId), rec);
+  }
+  return map;
 }
 
 async function downloadAndTranscribeRecording(
@@ -294,33 +347,96 @@ export const backfillRcCallNotes = task({
       no_recording: 0,
       no_transcript: 0,
       rc_error: 0,
+      not_in_rc: 0,
       claude_error: 0,
       entity_matched: 0,
       insert_error: 0,
+      dry_run_ready: 0,
     };
 
+    // 4. Bulk-fetch RC call records per owner, over a date range spanning all
+    //    of that owner's un-noted calls. Build a lookup map keyed by every id
+    //    variant (id / sessionId / telephonySessionId) so we can match whatever
+    //    poll-rc-calls happened to store.
+    const byOwner = new Map<string, any[]>();
+    for (const cl of toProcess) {
+      const arr = byOwner.get(cl.owner_id) ?? [];
+      arr.push(cl);
+      byOwner.set(cl.owner_id, arr);
+    }
+
+    const callLookupByOwner = new Map<string, Map<string, any>>();
+    for (const [ownerId, calls] of byOwner) {
+      const acct = acctByOwner.get(ownerId);
+      if (!acct) {
+        logger.warn("No RC account for owner — all their calls will rc_error", {
+          ownerId,
+          count: calls.length,
+        });
+        continue;
+      }
+      const token = await getRcToken(acct, tokenCache);
+      if (!token) {
+        logger.warn("Could not get RC token for owner", { ownerId });
+        continue;
+      }
+
+      const sorted = calls
+        .slice()
+        .sort(
+          (a: any, b: any) =>
+            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+        );
+      // Pad the range by 1 day on each side to absorb TZ / clock skew.
+      const dateFrom = new Date(
+        new Date(sorted[0].started_at).getTime() - 24 * 3600 * 1000,
+      )
+        .toISOString()
+        .replace(/\.\d{3}Z$/, "Z");
+      const dateTo = new Date(
+        new Date(sorted[sorted.length - 1].started_at).getTime() + 24 * 3600 * 1000,
+      )
+        .toISOString()
+        .replace(/\.\d{3}Z$/, "Z");
+
+      logger.info("Bulk-fetching RC calls for owner", {
+        ownerId,
+        account: acct.account_label,
+        dateFrom,
+        dateTo,
+        unnotedCount: calls.length,
+      });
+
+      const records = await fetchCallsInRange(token, dateFrom, dateTo);
+      const lookup = buildCallLookup(records);
+      callLookupByOwner.set(ownerId, lookup);
+
+      logger.info("Built RC call lookup for owner", {
+        ownerId,
+        recordsFetched: records.length,
+        lookupKeys: lookup.size,
+      });
+    }
+
+    // 5. Process each un-noted call using the cached lookup
     for (const cl of toProcess) {
       stats.processed++;
       try {
         const acct = acctByOwner.get(cl.owner_id);
         if (!acct) {
-          logger.warn("No active RC account for owner", {
-            callLogId: cl.id,
-            owner: cl.owner_id,
-          });
           stats.rc_error++;
           continue;
         }
 
-        const token = await getRcToken(acct, tokenCache);
-        if (!token) {
-          stats.rc_error++;
-          continue;
-        }
-
-        const detail = await fetchCallDetail(token, cl.external_call_id);
+        const lookup = callLookupByOwner.get(cl.owner_id);
+        const detail = lookup?.get(String(cl.external_call_id));
         if (!detail) {
-          stats.rc_error++;
+          logger.info("Call not found in RC for owner's date range", {
+            callLogId: cl.id,
+            externalCallId: cl.external_call_id,
+            startedAt: cl.started_at,
+          });
+          stats.not_in_rc++;
           continue;
         }
 
@@ -338,6 +454,14 @@ export const backfillRcCallNotes = task({
             duration: cl.duration_seconds,
             recordingUrl,
           });
+          stats.dry_run_ready++;
+          continue;
+        }
+
+        // Get a fresh token for the download (cached, so usually instant)
+        const token = await getRcToken(acct, tokenCache);
+        if (!token) {
+          stats.rc_error++;
           continue;
         }
 
