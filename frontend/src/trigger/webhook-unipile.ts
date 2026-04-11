@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getAppSetting, getUnipileBaseUrl } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment, scheduleNodeActions } from "./sequence-scheduler";
@@ -15,6 +15,155 @@ interface UnipileWebhookPayload {
     connection?: any;
   };
   receivedAt: string;
+}
+
+const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB — skip anything larger
+
+type UploadedAttachment = {
+  name: string;
+  storage_path: string;
+  mime_type: string | null;
+  size: number | null;
+};
+
+/**
+ * Download inbound attachments for a LinkedIn message from Unipile, upload
+ * each to Supabase Storage, and return metadata rows for messages.attachments.
+ *
+ * Best-effort: any per-attachment failure is logged and skipped — we never
+ * fail the entire message log because one file couldn't be retrieved.
+ *
+ * Unipile exposes attachments at:
+ *   GET /messages/{message_id}/attachments/{attachment_id}?account_id=...
+ * which may return either the raw file bytes OR a JSON wrapper with
+ * base64 content, depending on account type. We handle both.
+ */
+async function fetchAndUploadUnipileAttachments(
+  supabase: any,
+  baseUrl: string,
+  apiKey: string,
+  unipileAccountId: string | null,
+  messageId: string | null,
+  rawAttachments: any[],
+  conversationId: string,
+): Promise<UploadedAttachment[]> {
+  if (!messageId || !Array.isArray(rawAttachments) || rawAttachments.length === 0) {
+    return [];
+  }
+
+  const results: UploadedAttachment[] = [];
+  const uniHeaders: Record<string, string> = {
+    "X-API-KEY": apiKey,
+    Accept: "application/octet-stream, application/json",
+  };
+
+  for (const att of rawAttachments) {
+    const attachmentId = att?.id ?? att?.attachment_id ?? att?.file_id;
+    const rawName = att?.file_name ?? att?.name ?? att?.filename ?? `attachment_${attachmentId ?? Date.now()}`;
+    const declaredMime = att?.mime_type ?? att?.mimetype ?? att?.content_type ?? null;
+    const declaredSize: number | null = typeof att?.file_size === "number"
+      ? att.file_size
+      : typeof att?.size === "number"
+        ? att.size
+        : null;
+
+    if (!attachmentId) {
+      logger.warn("Unipile attachment missing id — skipping", { name: rawName });
+      continue;
+    }
+    if (declaredSize !== null && declaredSize > MAX_ATTACHMENT_BYTES) {
+      logger.warn("Skipping oversized inbound attachment", { name: rawName, size: declaredSize });
+      continue;
+    }
+
+    try {
+      const url =
+        `${baseUrl}/messages/${encodeURIComponent(messageId)}` +
+        `/attachments/${encodeURIComponent(attachmentId)}` +
+        (unipileAccountId ? `?account_id=${encodeURIComponent(unipileAccountId)}` : "");
+
+      const resp = await fetch(url, { headers: uniHeaders });
+      if (!resp.ok) {
+        logger.warn("Unipile attachment fetch failed", {
+          status: resp.status,
+          attachmentId,
+          messageId,
+        });
+        continue;
+      }
+
+      // Handle both response shapes: raw binary or JSON { data_base64, ... }
+      const contentType = resp.headers.get("content-type") || "";
+      let buffer: Buffer;
+      let resolvedMime: string | null = declaredMime;
+
+      if (contentType.includes("application/json")) {
+        const json: any = await resp.json();
+        const b64: string = json.data_base64 ?? json.data ?? json.content ?? "";
+        if (!b64) {
+          logger.warn("Unipile JSON attachment had no base64 payload", { attachmentId });
+          continue;
+        }
+        buffer = Buffer.from(b64, "base64");
+        resolvedMime = json.content_type ?? json.mime_type ?? declaredMime;
+      } else {
+        const arrayBuf = await resp.arrayBuffer();
+        buffer = Buffer.from(arrayBuf);
+        resolvedMime = contentType || declaredMime;
+      }
+
+      if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
+        logger.warn("Skipping oversized inbound attachment (post-download)", {
+          name: rawName,
+          bytes: buffer.byteLength,
+        });
+        continue;
+      }
+
+      // Build a deterministic, safe storage path — mirrors webhook-microsoft.ts
+      const safeName = String(rawName).replace(/[^a-zA-Z0-9._-]/g, "_");
+      const safeMsgId = String(messageId).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+      const storagePath = `inbound/${conversationId}/${safeMsgId}/${attachmentId}_${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(MESSAGE_ATTACHMENTS_BUCKET)
+        .upload(storagePath, buffer, {
+          contentType: resolvedMime || "application/octet-stream",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.warn("Failed to upload inbound Unipile attachment", {
+          name: rawName,
+          error: uploadError.message,
+        });
+        continue;
+      }
+
+      results.push({
+        name: String(rawName),
+        storage_path: storagePath,
+        mime_type: resolvedMime,
+        size: declaredSize ?? buffer.byteLength,
+      });
+    } catch (err: any) {
+      logger.warn("Error fetching Unipile attachment", {
+        attachmentId,
+        messageId,
+        error: err?.message,
+      });
+    }
+  }
+
+  if (results.length > 0) {
+    logger.info("Inbound Unipile attachments uploaded", {
+      conversationId,
+      messageId,
+      count: results.length,
+    });
+  }
+  return results;
 }
 
 /**
@@ -116,6 +265,42 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
+  // Resolve the target conversation ID up-front so attachments can be
+  // filed under a stable path even when we end up in the unlinked branch.
+  const conversationId = externalConversationId
+    || (entityId ? `li_${entityId}` : `li_unknown_${senderId}`);
+
+  // Best-effort attachment download. We only fetch when the event actually
+  // includes an attachments array; Unipile sends this inline on new_message
+  // events for most LinkedIn account types.
+  const rawAttachments: any[] = Array.isArray(messageData.attachments)
+    ? messageData.attachments
+    : Array.isArray(messageData.files)
+      ? messageData.files
+      : [];
+  const unipileAccountId: string | null =
+    messageData.account_id ?? event.account_id ?? event.data?.account_id ?? null;
+
+  let attachmentsForDb: UploadedAttachment[] = [];
+  if (rawAttachments.length > 0) {
+    try {
+      const baseUrl = await getUnipileBaseUrl();
+      const apiKey = await getAppSetting("UNIPILE_API_KEY");
+      attachmentsForDb = await fetchAndUploadUnipileAttachments(
+        supabase,
+        baseUrl,
+        apiKey,
+        unipileAccountId,
+        externalMessageId ?? null,
+        rawAttachments,
+        conversationId,
+      );
+    } catch (err: any) {
+      // Never let attachment handling block message logging.
+      logger.warn("Unipile attachment pipeline errored", { error: err?.message });
+    }
+  }
+
   // Handle unknown sender — create unlinked conversation and message
   if (!entityId) {
     logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
@@ -123,7 +308,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
     const senderAddress = messageData.sender_address || messageData.from?.identifier || messageData.from?.profile_url || senderId;
 
-    const conversationId = externalConversationId || `li_unknown_${senderId}`;
     const { data: existingConv } = await supabase
       .from("conversations")
       .select("id")
@@ -155,6 +339,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       external_conversation_id: externalConversationId,
       sender_name: senderName,
       sender_address: senderAddress,
+      attachments: attachmentsForDb,
       is_read: false,
     } as any);
 
@@ -170,8 +355,8 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "logged_unlinked", senderId, senderName, type: "linkedin_message" };
   }
 
-  // Determine or create conversation
-  const conversationId = externalConversationId || `li_${entityId}`;
+  // Determine or create conversation (conversationId was resolved above so
+  // attachments land under a stable path regardless of link state).
   const { data: existingConv } = await supabase
     .from("conversations")
     .select("id")
@@ -199,6 +384,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     provider: "unipile",
     external_message_id: externalMessageId,
     external_conversation_id: externalConversationId,
+    attachments: attachmentsForDb,
     is_read: false,
   } as any);
 
