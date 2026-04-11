@@ -40,13 +40,12 @@ export function Sidebar() {
 
       {/* ── Logo ── */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-center flex-1">
           <img
             src={logo}
             alt="Emerald"
-            className="h-9 w-9 object-contain shrink-0 drop-shadow-[0_0_6px_hsl(43_68%_50%/0.35)]"
+            className="h-12 w-12 object-contain drop-shadow-[0_0_6px_hsl(43_68%_50%/0.35)]"
           />
-          <span className="text-sm font-semibold tracking-wide text-sidebar-primary">Sully Recruit</span>
         </div>
         <NotificationBell />
       </div>
