@@ -52,6 +52,24 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
+  // Detect LinkedIn variant (classic / Recruiter / Sales Navigator) from the
+  // event. Unipile surfaces this under several keys depending on event shape,
+  // so check the common ones. Mirrors the backfill's classification logic in
+  // backfill-linkedin-messages.ts.
+  const providerType = String(
+    messageData.provider_type ??
+    messageData.chat?.provider_type ??
+    messageData.account_type ??
+    messageData.folder ??
+    event.account_type ??
+    ""
+  ).toLowerCase();
+  const channel = providerType.includes("sales")
+    ? "linkedin_sales_nav"
+    : providerType.includes("recruiter")
+      ? "linkedin_recruiter"
+      : "linkedin";
+
   if (!senderId) {
     logger.info("No sender ID in message event");
     return { action: "skipped", reason: "no_sender_id" };
@@ -69,31 +87,30 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
-  // Match sender to candidate via candidate_channels
-  const { data: channelMatch } = await supabase
-    .from("candidate_channels")
-    .select("candidate_id")
-    .or(`provider_id.eq.${senderId},unipile_id.eq.${senderId}`)
-    .eq("channel", "linkedin")
-    .limit(1)
+  // Match sender directly via candidates.unipile_id / contacts.unipile_id.
+  // (Mirrors backfill-linkedin-messages.ts findEntity — the previous
+  // candidate_channels/contact_channels tables don't exist in prod.)
+  let entityId: string | null = null;
+  let entityType: "candidate" | "contact" = "candidate";
+  let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
+
+  const { data: candMatch } = await supabase
+    .from("candidates")
+    .select("id")
+    .eq("unipile_id", senderId)
     .maybeSingle();
 
-  let entityId = channelMatch?.candidate_id;
-  let entityType = "candidate";
-  let entityColumn = "candidate_id";
-
-  // Try contact_channels if no candidate match
-  if (!entityId) {
+  if (candMatch) {
+    entityId = candMatch.id;
+  } else {
     const { data: contactMatch } = await supabase
-      .from("contact_channels")
-      .select("contact_id")
-      .or(`provider_id.eq.${senderId},unipile_id.eq.${senderId}`)
-      .eq("channel", "linkedin")
-      .limit(1)
+      .from("contacts")
+      .select("id")
+      .eq("unipile_id", senderId)
       .maybeSingle();
 
     if (contactMatch) {
-      entityId = contactMatch.contact_id;
+      entityId = contactMatch.id;
       entityType = "contact";
       entityColumn = "contact_id";
     }
@@ -118,7 +135,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         id: conversationId,
         candidate_id: null,
         contact_id: null,
-        channel: "linkedin",
+        channel,
         external_conversation_id: externalConversationId,
         last_message_at: receivedAt,
         is_read: false,
@@ -129,7 +146,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       conversation_id: conversationId,
       candidate_id: null,
       contact_id: null,
-      channel: "linkedin",
+      channel,
       direction: "inbound",
       body: messageBody,
       sent_at: messageData.created_at || receivedAt,
@@ -165,7 +182,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     await supabase.from("conversations").insert({
       id: conversationId,
       [entityColumn]: entityId,
-      channel: "linkedin",
+      channel,
       external_conversation_id: externalConversationId,
       last_message_at: receivedAt,
     } as any);
@@ -175,7 +192,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
-    channel: "linkedin",
+    channel,
     direction: "inbound",
     body: messageBody,
     sent_at: messageData.created_at || receivedAt,

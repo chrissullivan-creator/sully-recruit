@@ -74,10 +74,16 @@ interface Message {
 }
 
 // ---------- Constants ----------
+// All LinkedIn variants (classic, Recruiter, Sales Nav) render under the
+// single "LinkedIn" tab — the per-thread badge distinguishes them.
+const LINKEDIN_CHANNELS = ['linkedin', 'linkedin_recruiter', 'linkedin_sales_nav'] as const;
+
 const CHANNEL_ICONS: Record<string, React.ElementType> = {
   email: Mail,
   sms: MessageSquare,
   linkedin: Linkedin,
+  linkedin_recruiter: Linkedin,
+  linkedin_sales_nav: Linkedin,
   phone: Phone,
   call: Phone,
 };
@@ -85,12 +91,16 @@ const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
   sms: 'SMS',
   linkedin: 'LinkedIn',
+  linkedin_recruiter: 'Recruiter',
+  linkedin_sales_nav: 'Sales Nav',
   phone: 'Phone',
   call: 'Call',
 };
 const CHANNEL_COLORS: Record<string, string> = {
   email: 'bg-info/10 text-info',
   linkedin: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
+  linkedin_recruiter: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
+  linkedin_sales_nav: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   sms: 'bg-success/10 text-success',
   phone: 'bg-accent/10 text-accent',
   call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
@@ -432,7 +442,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
           name: senderName,
           email: senderAddress.includes('@') ? senderAddress : '',
           phone: !senderAddress.includes('@') ? senderAddress : '',
-          linkedinUrl: thread.channel === 'linkedin' ? senderAddress : '',
+          linkedinUrl: LINKEDIN_CHANNELS.includes(thread.channel as any) ? senderAddress : '',
         }}
         rawBody={firstInbound?.body || undefined}
         externalConversationId={thread.external_conversation_id}
@@ -685,7 +695,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
         toAddress = lastInbound?.sender_address || '';
       } else if (thread.channel === 'sms') {
         toAddress = lastInbound?.sender_address || '';
-      } else if (thread.channel === 'linkedin') {
+      } else if (LINKEDIN_CHANNELS.includes(thread.channel as any)) {
         // Try candidate_channels first
         if (thread.candidate_id) {
           const { data: channelData } = await supabase
@@ -716,7 +726,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
       // that received the original message), falling back to looking up the recipient's
       // account from the original inbound message
       let sendAccountId = thread.account_id || '';
-      if (!sendAccountId && thread.channel === 'linkedin') {
+      if (!sendAccountId && LINKEDIN_CHANNELS.includes(thread.channel as any)) {
         // Try to find the account from the last inbound message's recipient_address
         const recipientAddr = lastInbound?.recipient_address;
         if (recipientAddr) {
@@ -1124,7 +1134,7 @@ function MessagePane({ threadId }: { threadId: string | null }) {
             name: senderName,
             email: senderAddress.includes('@') ? senderAddress : '',
             phone: !senderAddress.includes('@') ? senderAddress : '',
-            linkedinUrl: thread.channel === 'linkedin' ? senderAddress : '',
+            linkedinUrl: LINKEDIN_CHANNELS.includes(thread.channel as any) ? senderAddress : '',
           }}
           rawBody={firstInbound?.body || undefined}
           externalConversationId={thread.external_conversation_id}
@@ -1205,10 +1215,10 @@ export default function Inbox() {
   });
 
   const filtered = allThreads.filter((t) => {
-    // Channel filter
+    // Channel filter (LinkedIn tab covers classic, Recruiter, and Sales Nav)
     if (filterTab === 'email' && t.channel !== 'email') return false;
     if (filterTab === 'sms' && t.channel !== 'sms') return false;
-    if (filterTab === 'linkedin' && t.channel !== 'linkedin') return false;
+    if (filterTab === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
     if (filterTab === 'candidates' && !t.candidate_id) return false;
     if (filterTab === 'contacts' && !t.contact_id) return false;
     if (filterTab === 'unlinked' && (t.candidate_id || t.contact_id)) return false;
