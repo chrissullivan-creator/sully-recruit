@@ -162,3 +162,12 @@ memory/test_credentials.md
 *.env
 *.env.*
 supabase/.temp/
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
