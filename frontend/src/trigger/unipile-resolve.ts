@@ -25,17 +25,21 @@ export const resolveUnipileIds = schedules.task({
     const apiKey = await getAppSetting("UNIPILE_API_KEY");
     const UNIPILE_BASE_URL = await getUnipileBaseUrl();
 
+    // Use a LinkedIn Recruiter account for resolution — recruiter IDs are
+    // needed for InMail matching. Fall back to any LinkedIn account.
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id")
+      .select("id, unipile_account_id, account_type")
       .or(
-        "account_type.eq.linkedin,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_classic"
+        "account_type.eq.linkedin_recruiter,account_type.eq.linkedin_classic,account_type.eq.linkedin"
       )
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
+      .order("account_type", { ascending: false }) // linkedin_recruiter sorts first
       .limit(1);
 
-    const unipileAccountId = accounts?.[0]?.unipile_account_id as string | null;
+    const account = accounts?.[0];
+    const unipileAccountId = account?.unipile_account_id as string | null;
 
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry
     //    Order by created_at DESC (newest first) as user requested
@@ -144,8 +148,13 @@ export const resolveUnipileIds = schedules.task({
           );
 
           // Update candidate resolve status + store IDs + full profile data
+          const idColumn = account?.account_type === "linkedin_recruiter"
+            ? "unipile_recruiter_id"
+            : account?.account_type === "linkedin_classic"
+              ? "unipile_classic_id"
+              : "unipile_recruiter_id"; // default to recruiter
           const enrichment: Record<string, any> = {
-            unipile_id: unipileId,
+            [idColumn]: providerId ?? unipileId,
             unipile_provider_id: providerId,
             unipile_resolve_status: "resolved",
             linkedin_profile_data: JSON.stringify(profile),
