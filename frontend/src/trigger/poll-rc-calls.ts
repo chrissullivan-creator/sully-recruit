@@ -1,5 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
+import { processCallDeepgram } from "./process-call-deepgram";
 
 // Poll RingCentral call log as a safety net for missed webhooks.
 // Looks back 10 minutes, dedupes against call_logs table.
@@ -169,6 +170,20 @@ export const pollRcCalls = schedules.task({
             entity: entity?.name ?? "unlinked",
             account: acct.account_label,
           });
+
+          // Trigger Deepgram transcription for completed calls ≥ 30s
+          if (duration >= 30 && status === "completed") {
+            // Find the call_log row we just inserted to get its UUID
+            const { data: inserted } = await supabase
+              .from("call_logs")
+              .select("id")
+              .eq("external_call_id", callId)
+              .maybeSingle();
+            if (inserted?.id) {
+              await processCallDeepgram.trigger({ call_log_id: inserted.id });
+              logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
+            }
+          }
         }
       }
     }

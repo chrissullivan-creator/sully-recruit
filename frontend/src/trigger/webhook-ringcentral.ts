@@ -3,6 +3,7 @@ import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
+import { processCallDeepgram } from "./process-call-deepgram";
 
 interface RingCentralWebhookPayload {
   body: any;
@@ -130,23 +131,19 @@ export const processRingcentralEvent = task({
 
       logger.info("Call logged", { entityId: match.entityId, callLogId: callLog?.id });
 
-      // ── Transcribe + extract + summarize (candidates only) ────────
+      // ── Trigger Deepgram transcription for completed calls ≥ 30s ──
       const isCompletedCall =
         eventBody.result === "Completed" ||
         eventBody.result === "Call connected" ||
         (eventBody.duration && eventBody.duration > 30);
 
-      if (isCompletedCall) {
-        await transcribeAndExtract(
-          supabase,
-          eventBody,
-          match.entityId,
-          callLog?.id,
-          payload.receivedAt,
-          match.entityType,
-          direction,
-          otherPhone,
+      if (isCompletedCall && callLog?.id) {
+        // Delay 30s to let RingCentral finish processing the recording
+        await processCallDeepgram.trigger(
+          { call_log_id: callLog.id },
+          { delay: "30s" },
         );
+        logger.info("Triggered Deepgram transcription", { callLogId: callLog.id });
       }
     }
 
