@@ -9,7 +9,7 @@ import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
-import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies } from '@/hooks/useData';
+import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -249,6 +249,7 @@ const JobDetail = () => {
   const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
   const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
+  const { data: jobFunctions = [] } = useJobFunctions();
 
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
@@ -280,6 +281,89 @@ const JobDetail = () => {
     field: string; title: string; type: 'text' | 'richtext' | 'select';
     value: string; options?: { value: string; label: string }[]; placeholder?: string;
   } | null>(null);
+
+  // Function edit dialog
+  const [functionEditOpen, setFunctionEditOpen] = useState(false);
+  const [functionEditId, setFunctionEditId] = useState('');
+  const [savingFunction, setSavingFunction] = useState(false);
+
+  const openFunctionEdit = () => {
+    setFunctionEditId((job as any)?.job_function_id || '');
+    setFunctionEditOpen(true);
+  };
+
+  const saveFunction = async () => {
+    if (!id) return;
+    setSavingFunction(true);
+    try {
+      const newFunctionId = functionEditId || null;
+      let jobCode = (job as any)?.job_code ?? null;
+
+      // Regenerate job code if function changed
+      if (newFunctionId !== ((job as any)?.job_function_id || null)) {
+        if (newFunctionId) {
+          const fn = jobFunctions.find((f: any) => f.id === newFunctionId);
+          if (fn) {
+            const { data: existing } = await supabase
+              .from('jobs')
+              .select('job_code')
+              .eq('job_function_id', newFunctionId)
+              .not('job_code', 'is', null);
+            const maxNum = (existing ?? []).reduce((max: number, row: any) => {
+              const match = row.job_code?.match(/-(\d+)$/);
+              return match ? Math.max(max, parseInt(match[1], 10)) : max;
+            }, 0);
+            jobCode = `${fn.code}-${String(maxNum + 1).padStart(3, '0')}`;
+          }
+        } else {
+          jobCode = null;
+        }
+      }
+
+      const { error } = await supabase.from('jobs').update({
+        job_function_id: newFunctionId,
+        job_code: jobCode,
+      }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Function updated');
+      setFunctionEditOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update function');
+    } finally {
+      setSavingFunction(false);
+    }
+  };
+
+  // Openings edit dialog
+  const [openingsEditOpen, setOpeningsEditOpen] = useState(false);
+  const [openingsEditValue, setOpeningsEditValue] = useState(1);
+  const [savingOpenings, setSavingOpenings] = useState(false);
+
+  const openOpeningsEdit = () => {
+    setOpeningsEditValue((job as any)?.num_openings ?? 1);
+    setOpeningsEditOpen(true);
+  };
+
+  const saveOpenings = async () => {
+    if (!id) return;
+    setSavingOpenings(true);
+    try {
+      const { error } = await supabase.from('jobs').update({
+        num_openings: Math.max(1, openingsEditValue),
+      }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Openings updated');
+      setOpeningsEditOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update openings');
+    } finally {
+      setSavingOpenings(false);
+    }
+  };
 
   // Company edit dialog
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
@@ -551,8 +635,8 @@ const JobDetail = () => {
         <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
           <div className="p-5 space-y-5">
 
-            {/* Status badge */}
-            <div className="flex flex-col items-center text-center">
+            {/* Status badge + Job Code */}
+            <div className="flex flex-col items-center text-center gap-1.5">
               <Badge
                 variant="secondary"
                 className={cn(
@@ -566,6 +650,11 @@ const JobDetail = () => {
               >
                 {STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}
               </Badge>
+              {(job as any).job_code && (
+                <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded">
+                  {(job as any).job_code}
+                </span>
+              )}
             </div>
 
             {/* Key fields */}
@@ -613,6 +702,28 @@ const JobDetail = () => {
                   </a>
                 )}
               </div>
+
+              <EditableField onClick={openFunctionEdit}>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Hash className="h-3 w-3" /> Function</Label>
+                {(() => {
+                  const fn = (job as any).job_functions;
+                  return fn ? (
+                    <div className="mt-0.5">
+                      <p className="text-sm text-foreground">{fn.name} ({fn.code})</p>
+                      {fn.examples?.length > 0 && (
+                        <p className="text-[10px] text-muted-foreground">{fn.examples.join(', ')}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm italic text-muted-foreground mt-0.5">Not set</p>
+                  );
+                })()}
+              </EditableField>
+
+              <EditableField onClick={openOpeningsEdit}>
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><UsersRound className="h-3 w-3" /> Openings</Label>
+                <p className="text-sm text-foreground mt-0.5">{(job as any).num_openings ?? 1}</p>
+              </EditableField>
             </div>
 
             {/* Quick contacts preview */}
@@ -1046,6 +1157,72 @@ const JobDetail = () => {
             <Button variant="ghost" onClick={() => setCompanyEditOpen(false)}>Cancel</Button>
             <Button variant="gold" onClick={saveCompany} disabled={savingCompany}>
               {savingCompany && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={functionEditOpen} onOpenChange={setFunctionEditOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Function</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Job Function</Label>
+              <Select value={functionEditId || 'none'} onValueChange={v => setFunctionEditId(v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="Select function" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No function</SelectItem>
+                  {jobFunctions.map((fn: any) => (
+                    <SelectItem key={fn.id} value={fn.id}>
+                      {fn.name} ({fn.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(() => {
+                const selectedFn = jobFunctions.find((f: any) => f.id === functionEditId);
+                if (selectedFn?.examples?.length > 0) {
+                  return (
+                    <p className="text-xs text-muted-foreground">
+                      Examples: {selectedFn.examples.join(', ')}
+                    </p>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setFunctionEditOpen(false)}>Cancel</Button>
+            <Button variant="gold" onClick={saveFunction} disabled={savingFunction}>
+              {savingFunction && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openingsEditOpen} onOpenChange={setOpeningsEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit Number of Openings</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>Openings</Label>
+            <Input
+              type="number"
+              min={1}
+              value={openingsEditValue}
+              onChange={e => setOpeningsEditValue(Math.max(1, parseInt(e.target.value) || 1))}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpeningsEditOpen(false)}>Cancel</Button>
+            <Button variant="gold" onClick={saveOpenings} disabled={savingOpenings}>
+              {savingOpenings && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               Save
             </Button>
           </DialogFooter>

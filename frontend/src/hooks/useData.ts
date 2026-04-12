@@ -124,6 +124,21 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
   });
 }
 
+// Job functions lookup
+export function useJobFunctions() {
+  return useQuery({
+    queryKey: ['job_functions'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_functions')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
 // Jobs with company info
 export function useJobs(includesClosed = false) {
   return useQuery({
@@ -131,7 +146,7 @@ export function useJobs(includesClosed = false) {
     queryFn: async () => {
       let query = supabase
         .from('jobs')
-        .select('*, companies(name, domain)')
+        .select('*, companies(name, domain), job_functions(id, name, code, examples)')
         .order('created_at', { ascending: false });
       if (!includesClosed) {
         query = query.not('status', 'in', '("lost","closed","closed_won","closed_lost")');
@@ -151,7 +166,7 @@ export function useJob(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
-        .select('*, companies(name, domain, website)')
+        .select('*, companies(name, domain, website), job_functions(id, name, code, examples)')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;

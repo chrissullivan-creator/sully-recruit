@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCompanies } from '@/hooks/useData';
+import { useCompanies, useJobFunctions } from '@/hooks/useData';
 import { toast } from 'sonner';
 import { Loader2, ExternalLink } from 'lucide-react';
 
@@ -20,6 +20,7 @@ interface Props {
 export function EditJobDialog({ open, onOpenChange, job }: Props) {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useCompanies();
+  const { data: jobFunctions = [] } = useJobFunctions();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     title: '',
@@ -30,6 +31,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
     compensation: '',
     status: 'lead',
     job_url: '',
+    job_function_id: '',
+    num_openings: 1,
   });
 
   useEffect(() => {
@@ -43,6 +46,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
         compensation: job.compensation || '',
         status: job.status || 'open',
         job_url: job.job_url || '',
+        job_function_id: job.job_function_id || '',
+        num_openings: job.num_openings ?? 1,
       });
     }
   }, [job, open]);
@@ -62,10 +67,34 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
     }));
   };
 
+  // Generate next job code for a function
+  const generateJobCode = async (functionId: string): Promise<string | null> => {
+    if (!functionId) return null;
+    const fn = jobFunctions.find((f: any) => f.id === functionId);
+    if (!fn) return null;
+    const { data: existing } = await supabase
+      .from('jobs')
+      .select('job_code')
+      .eq('job_function_id', functionId)
+      .not('job_code', 'is', null);
+    const maxNum = (existing ?? []).reduce((max: number, row: any) => {
+      const match = row.job_code?.match(/-(\d+)$/);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
+    return `${fn.code}-${String(maxNum + 1).padStart(3, '0')}`;
+  };
+
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     setSaving(true);
     try {
+      // Regenerate job code if function changed
+      const functionChanged = form.job_function_id !== (job.job_function_id || '');
+      let jobCode = job.job_code;
+      if (functionChanged) {
+        jobCode = form.job_function_id ? await generateJobCode(form.job_function_id) : null;
+      }
+
       const { error } = await supabase
         .from('jobs')
         .update({
@@ -77,6 +106,9 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
           compensation: form.compensation,
           status: form.status,
           job_url: form.job_url.trim() || null,
+          job_function_id: form.job_function_id || null,
+          job_code: jobCode,
+          num_openings: form.num_openings || 1,
         })
         .eq('id', job.id);
       if (error) throw error;
@@ -106,6 +138,37 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
               onChange={(e) => update('title', e.target.value)}
               placeholder="e.g. Senior Software Engineer"
             />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Function</Label>
+              <Select value={form.job_function_id || 'none'} onValueChange={v => setForm(prev => ({ ...prev, job_function_id: v === 'none' ? '' : v }))}>
+                <SelectTrigger><SelectValue placeholder="Select function" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No function</SelectItem>
+                  {jobFunctions.map((fn: any) => (
+                    <SelectItem key={fn.id} value={fn.id}>
+                      {fn.name} ({fn.code})
+                      {fn.examples?.length > 0 && (
+                        <span className="text-muted-foreground ml-1 text-xs">— {fn.examples.join(', ')}</span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {job.job_code && (
+                <p className="text-xs text-muted-foreground mt-1">Current Job Code: <span className="font-mono font-medium text-foreground">{job.job_code}</span></p>
+              )}
+            </div>
+            <div>
+              <Label>Number of Openings</Label>
+              <Input
+                type="number"
+                min={1}
+                value={form.num_openings}
+                onChange={e => setForm(prev => ({ ...prev, num_openings: Math.max(1, parseInt(e.target.value) || 1) }))}
+              />
+            </div>
           </div>
           <div>
             <Label htmlFor="company">Company</Label>

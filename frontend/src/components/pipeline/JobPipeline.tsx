@@ -71,9 +71,14 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
           <GripVertical className="h-3.5 w-3.5" />
         </button>
         <div className="flex-1 min-w-0" onClick={() => navigate(`/jobs/${job.id}`)}>
-          <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">
-            {job.title}
-          </h4>
+          <div className="flex items-center gap-1.5">
+            {job.job_code && (
+              <span className="font-mono text-[10px] font-semibold text-accent bg-accent/10 px-1 py-0.5 rounded shrink-0">{job.job_code}</span>
+            )}
+            <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">
+              {job.title}
+            </h4>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
             <Briefcase className="h-3 w-3" />
             {job.company_name ?? (job.companies as any)?.name ?? '-'}

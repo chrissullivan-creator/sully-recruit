@@ -60,7 +60,8 @@ const Jobs = () => {
 
   const filteredJobs = jobs.filter((job) =>
     job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (job.company_name ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+    (job.company_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    ((job as any).job_code ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -123,9 +124,11 @@ const Jobs = () => {
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Code</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Openings</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                   <th className="w-10 px-4 py-3"></th>
                 </tr>
@@ -133,6 +136,13 @@ const Jobs = () => {
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
                   <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="group hover:bg-muted/50 transition-colors cursor-pointer">
+                    <td className="px-4 py-3">
+                      {(job as any).job_code ? (
+                        <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded">{(job as any).job_code}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-foreground">{job.title}</span>
                     </td>
@@ -149,6 +159,7 @@ const Jobs = () => {
                       })()}
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
                     <td className="px-4 py-3">
                       <span className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
