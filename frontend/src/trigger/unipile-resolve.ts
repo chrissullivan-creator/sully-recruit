@@ -1,6 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 50;
 const DELAY_MS = 350;
 const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per API call
 const MAX_ELAPSED_MS = 240_000; // 4 min safety margin
