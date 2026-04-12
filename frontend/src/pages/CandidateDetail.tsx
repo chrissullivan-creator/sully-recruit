@@ -21,6 +21,7 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
+  Search, Calendar,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -216,6 +217,9 @@ const CandidateDetail = () => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState(false);
+  const [activeTab, setActiveTab] = useState('joe');
+  const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
+  const [sidebarSearch, setSidebarSearch] = useState('');
 
   const handleDeleteCandidate = async () => {
     if (!id) return;
@@ -739,14 +743,59 @@ const CandidateDetail = () => {
   const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
   const c = candidate as any;
 
+  const filteredNotes = (notes as any[]).filter((n: any) => {
+    if (sidebarSearch) {
+      const text = (n.note || '').toLowerCase();
+      if (!text.includes(sidebarSearch.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const filteredCallLogs = (callLogs as any[]).filter((cl: any) => {
+    if (sidebarSearch) {
+      const text = (cl.summary || cl.notes || '').toLowerCase();
+      if (!text.includes(sidebarSearch.toLowerCase())) return false;
+    }
+    return true;
+  });
+
   return (
     <MainLayout>
+      {/* Top header bar — ContactDetail style */}
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
         <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
-        <div className="flex-1">
-          <h1 className="text-lg font-semibold text-foreground">{fullName}</h1>
-          <p className="text-sm text-muted-foreground">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
+        {c.avatar_url ? (
+          <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">{initials}</div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
+            <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground truncate">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
         </div>
+
+        {/* Social / contact links */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {candidate.email && (
+            <a href={`mailto:${candidate.email}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={candidate.email}>
+              <Mail className="h-4 w-4" />
+            </a>
+          )}
+          {candidate.phone && (
+            <a href={`tel:${candidate.phone}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={candidate.phone}>
+              <Phone className="h-4 w-4" />
+            </a>
+          )}
+          {candidate.linkedin_url && (
+            <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
+              <Linkedin className="h-4 w-4" />
+            </a>
+          )}
+        </div>
+
         <div className="flex items-center gap-2">
           {resumeUrl && (
             <Button variant="outline" size="sm" onClick={() => setShowResume(!showResume)}>
@@ -759,11 +808,8 @@ const CandidateDetail = () => {
           <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
-          <Button variant="outline" size="sm" onClick={() => {
-            const tabsList = document.querySelector('[data-value="joe"]') as HTMLElement;
-            if (tabsList) tabsList.click();
-          }}>
-            <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe ✍️
+          <Button variant="outline" size="sm" onClick={() => setActiveTab('joe')}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe
           </Button>
           <Button variant="outline" size="sm" onClick={async () => {
             toast.info('Syncing activity across all channels…');
@@ -821,183 +867,157 @@ const CandidateDetail = () => {
         </div>
       )}
 
+      {/* Main content: left panel + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
-          <div className="p-5 space-y-5">
-            <div className="flex flex-col items-center text-center">
-              {c.avatar_url ? (
-                <img src={c.avatar_url} alt={fullName} className="h-14 w-14 rounded-full object-cover mb-2" />
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">{initials}</div>
-              )}
-              <Badge variant="secondary" className="text-xs">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
-            </div>
 
-            <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Contact</h3>
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
-              <EditableField label="LinkedIn" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
-            </div>
+        {/* ============ LEFT PANEL (70-75%) ============ */}
+        <div className="flex-1 flex flex-col overflow-hidden" style={{ flex: '3 1 0%' }}>
 
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Clock className="h-3 w-3" /> Last Activity</h3>
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Last Reached Out</span>
-                  <span className="text-foreground">{c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Last Response</span>
-                  <span className="text-foreground">{c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}</span>
-                </div>
-                {c.last_comm_channel && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Channel</span>
-                    <span className="inline-flex items-center gap-1 text-foreground capitalize">
-                      <ChannelIcon channel={c.last_comm_channel} />
-                      {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Current Role</h3>
+          {/* Contact info grid */}
+          <div className="px-8 py-5 border-b border-border">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
               <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} />
               <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} />
               <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} />
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
               <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} />
+              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
               <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} />
-            </div>
-
-            <div className="space-y-2">
-              <button className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest w-full" onClick={() => setCompExpanded(!compExpanded)}>
-                <DollarSign className="h-3 w-3" /> Compensation
-                {compExpanded ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
-              </button>
-              {compExpanded && (
-                <div className="space-y-2 pl-1">
-                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
-                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
-                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
-                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
-                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
-                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Preferences</h3>
               <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} />
               <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} />
               <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} />
               <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} />
-              <EditableField label="Reason for Leaving" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Comp, culture, layoff..." disabled={!canEdit} />
             </div>
 
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest" title="Last recruiter who screened this candidate">Owner (Screener)</h3>
-              <Select value={candidate.owner_id ?? 'none'} onValueChange={(val) => {
-                const newOwnerId = val === 'none' ? null : val;
-                if (newOwnerId && newOwnerId !== user?.id) {
-                  setPendingOwnerId(newOwnerId);
-                } else {
-                  (async () => {
-                    try {
-                      const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                      if (error) { toast.error('Failed to update owner'); return; }
-                      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                      toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                    } catch (err: any) {
-                      toast.error(err?.message || 'Failed to update owner');
-                    }
-                  })();
-                }
-              }} disabled={!canEdit}>
-                <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— Unassigned —</SelectItem>
-                  {profiles.filter(p => p.full_name).map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            {/* Compensation — collapsible */}
+            <div className="mt-4">
+              <Collapsible open={compExpanded} onOpenChange={setCompExpanded}>
+                <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  <DollarSign className="h-3 w-3" /> Compensation
+                  {compExpanded ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
+                    <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
+                    <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
+                    <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
+                    <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
+                    <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
+                    <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </div>
 
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Active Job</h3>
-              <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
-                const newJobId = val === 'none' ? null : val;
-                try {
-                  const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                  if (error) { toast.error('Failed to update job assignment'); return; }
-                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                  toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                } catch (err: any) {
-                  toast.error(err?.message || 'Failed to update job assignment');
-                }
-              }} disabled={!canEdit}>
-                <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— None —</SelectItem>
-                  {openJobs.map((j: any) => <SelectItem key={j.id} value={j.id}>{j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {candidate.job_id && (
-                <Select value={c.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
-                  <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Set status…" /></SelectTrigger>
+            {/* Timestamps + sentiment row */}
+            <div className="flex items-center gap-6 mt-4 text-xs text-muted-foreground flex-wrap">
+              <span className="flex items-center gap-1">
+                <Send className="h-3 w-3" /> Last Reached Out: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}
+              </span>
+              <span className="flex items-center gap-1">
+                <MessageSquare className="h-3 w-3" /> Last Response: {c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}
+              </span>
+              {c.last_comm_channel && (
+                <span className="inline-flex items-center gap-1 capitalize">
+                  <ChannelIcon channel={c.last_comm_channel} />
+                  {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
+                </span>
+              )}
+              <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
+              <span>Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</span>
+            </div>
+
+            {/* Owner + Job assignment row */}
+            <div className="flex items-center gap-4 mt-4 flex-wrap">
+              <div className="space-y-1">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
+                <Select value={candidate.owner_id ?? 'none'} onValueChange={(val) => {
+                  const newOwnerId = val === 'none' ? null : val;
+                  if (newOwnerId && newOwnerId !== user?.id) {
+                    setPendingOwnerId(newOwnerId);
+                  } else {
+                    (async () => {
+                      try {
+                        const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                        if (error) { toast.error('Failed to update owner'); return; }
+                        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                        toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                      } catch (err: any) {
+                        toast.error(err?.message || 'Failed to update owner');
+                      }
+                    })();
+                  }
+                }} disabled={!canEdit}>
+                  <SelectTrigger className="h-7 text-xs w-44"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
                   <SelectContent>
-                    {SEND_OUT_STAGES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>
-                        <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="none">— Unassigned —</SelectItem>
+                    {profiles.filter(p => p.full_name).map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-              )}
-            </div>
+              </div>
 
-            {/* Match score for assigned job */}
-            {candidateJobMatch && (
-              <div className="rounded-md border border-border bg-secondary/30 p-2.5 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Job Match Score</span>
+              <div className="space-y-1">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Active Job</Label>
+                <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
+                  const newJobId = val === 'none' ? null : val;
+                  try {
+                    const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                    if (error) { toast.error('Failed to update job assignment'); return; }
+                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                  } catch (err: any) {
+                    toast.error(err?.message || 'Failed to update job assignment');
+                  }
+                }} disabled={!canEdit}>
+                  <SelectTrigger className="h-7 text-xs w-52"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— None —</SelectItem>
+                    {openJobs.map((j: any) => <SelectItem key={j.id} value={j.id}>{j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {candidate.job_id && (
+                <div className="space-y-1">
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Job Status</Label>
+                  <Select value={c.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
+                    <SelectTrigger className="h-7 text-xs w-36"><SelectValue placeholder="Set status…" /></SelectTrigger>
+                    <SelectContent>
+                      {SEND_OUT_STAGES.map(s => (
+                        <SelectItem key={s.value} value={s.value}>
+                          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Match score badge */}
+              {candidateJobMatch && (
+                <div className="flex items-center gap-2">
                   <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums',
                     (candidateJobMatch as any).overall_score >= 80 ? 'text-green-400 bg-green-500/15' :
                     (candidateJobMatch as any).overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' :
                     'text-muted-foreground bg-muted'
                   )}>
-                    {(candidateJobMatch as any).overall_score}%
+                    Match: {(candidateJobMatch as any).overall_score}%
                   </span>
                 </div>
-                <p className="text-[10px] text-muted-foreground leading-relaxed">{(candidateJobMatch as any).reasoning}</p>
-                {(candidateJobMatch as any).strengths?.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {(candidateJobMatch as any).strengths.map((s: string, i: number) => (
-                      <span key={i} className="text-[9px] px-1 py-0.5 rounded bg-green-500/10 text-green-400">{s}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <p className="text-[10px] text-muted-foreground">Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</p>
+              )}
+            </div>
           </div>
-        </aside>
 
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs defaultValue="joe" className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-4 border-b border-border">
+          {/* ---- Tabs ---- */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-8 pt-3 border-b border-border">
               <TabsList className="bg-secondary">
                 <TabsTrigger value="joe" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
                 <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5"><User className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-                <TabsTrigger value="call-notes" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
@@ -1276,111 +1296,6 @@ const CandidateDetail = () => {
                     ))}
                   </div>
                 )}
-              </TabsContent>
-
-              <TabsContent value="notes" className="px-8 py-5 mt-0 space-y-4">
-                <RichTextEditor
-                  value={noteText}
-                  onChange={setNoteText}
-                  placeholder="Add a note..."
-                  minHeight="80px"
-                />
-                <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()}>
-                  {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
-                </Button>
-                {(notes as any[]).length > 0 ? (
-                  <div className="space-y-3">
-                    {(notes as any[]).map((n) => (
-                      <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-4">
-                        <div className="text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
-                        <p className="text-xs text-muted-foreground mt-2">{format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm text-muted-foreground">No notes yet.</p>}
-              </TabsContent>
-
-              <TabsContent value="call-notes" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-5">
-                  <PhoneCall className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Calls</h2>
-                  <span className="text-xs text-muted-foreground">({(callLogs as any[]).length} calls, {(callNotes as any[]).length} with AI notes)</span>
-                </div>
-                {(callLogs as any[]).length === 0 && (callNotes as any[]).length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <PhoneCall className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No calls yet</p>
-                    <p className="text-xs text-muted-foreground">Call logs and AI-extracted notes will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {/* Show call_logs first — they have the timeline */}
-                    {(callLogs as any[]).map((call: any) => {
-                      const isOut = call.direction === 'outbound';
-                      const dur = call.duration_seconds;
-                      const durStr = dur ? `${Math.floor(dur / 60)}:${(dur % 60).toString().padStart(2, '0')}` : '--:--';
-                      const aiNote = (callNotes as any[]).find((n: any) => n.call_log_id === call.id || n.external_call_id === call.external_call_id);
-                      const summaryPreview = aiNote?.ai_summary || call.summary || call.notes || '';
-                      return (
-                        <button
-                          key={call.id}
-                          onClick={() => setSelectedCall({ call, aiNote })}
-                          className="w-full text-left rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', isOut ? 'bg-info/10 text-info' : 'bg-success/10 text-success')}>
-                              {isOut ? <PhoneOutgoing className="h-4 w-4" /> : <PhoneIncoming className="h-4 w-4" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-foreground">{isOut ? 'Outbound' : 'Inbound'} Call</span>
-                                <span className="text-xs text-muted-foreground">{call.phone_number}</span>
-                                {call.audio_url && <Volume2 className="h-3 w-3 text-accent shrink-0" />}
-                                {aiNote && <Badge variant="secondary" className="text-[9px]">AI Notes</Badge>}
-                              </div>
-                              {summaryPreview && (
-                                <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-lg">{summaryPreview.slice(0, 120)}{summaryPreview.length > 120 ? '...' : ''}</p>
-                              )}
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-xs text-muted-foreground">{call.started_at ? format(new Date(call.started_at), 'MMM d, h:mm a') : '—'}</p>
-                              <p className="text-xs text-muted-foreground flex items-center gap-1 justify-end"><Clock className="h-3 w-3" /> {durStr}</p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                    {/* Show orphan AI notes (no matching call_log) */}
-                    {(callNotes as any[]).filter((n: any) => !(callLogs as any[]).some((cl: any) => cl.id === n.call_log_id || (cl.external_call_id && cl.external_call_id === n.external_call_id))).map((note: any, idx: number) => (
-                      <button
-                        key={note.id ?? idx}
-                        onClick={() => setSelectedCall({ call: { id: note.id, direction: note.call_direction || 'outbound', phone_number: note.phone_number || '', duration_seconds: note.call_duration_seconds, started_at: note.call_started_at || note.created_at, audio_url: note.recording_url, summary: note.ai_summary, notes: note.extracted_notes, linked_entity_name: c.full_name }, aiNote: note })}
-                        className="w-full text-left rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
-                            <PhoneCall className="h-4 w-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-foreground">Call Notes</span>
-                              {note.recording_url && <Volume2 className="h-3 w-3 text-accent shrink-0" />}
-                              <Badge variant="secondary" className="text-[9px]">AI Notes</Badge>
-                            </div>
-                            {note.ai_summary && <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-lg">{note.ai_summary.slice(0, 120)}...</p>}
-                          </div>
-                          <p className="text-xs text-muted-foreground shrink-0">{note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d') : '—'}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <CallDetailModal
-                  open={!!selectedCall}
-                  onOpenChange={(v) => !v && setSelectedCall(null)}
-                  call={selectedCall?.call}
-                  aiNotes={selectedCall?.aiNote}
-                />
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-4">
@@ -1804,7 +1719,168 @@ const CandidateDetail = () => {
           </Tabs>
         </div>
 
+        {/* ============ RIGHT SIDEBAR (25-30%) ============ */}
+        <aside className="w-80 shrink-0 border-l border-border flex flex-col overflow-hidden" style={{ flex: '0 0 320px' }}>
+          {/* Sidebar sub-tabs */}
+          <div className="px-4 pt-4 pb-2 border-b border-border space-y-3">
+            <div className="flex items-center gap-1 flex-wrap">
+              {(['all', 'notes', 'tasks', 'meetings'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setSidebarTab(tab)}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize',
+                    sidebarTab === tab
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  )}
+                >
+                  {tab === 'all' ? 'All' : tab === 'notes' ? 'Notes & Calls' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search activity..."
+                value={sidebarSearch}
+                onChange={e => setSidebarSearch(e.target.value)}
+                className="w-full h-8 pl-8 pr-3 rounded-md border border-input bg-background text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+          </div>
+
+          <ScrollArea className="flex-1">
+            <div className="p-4 space-y-4">
+              {/* NOTES section (shown on all, notes tabs) */}
+              {(sidebarTab === 'all' || sidebarTab === 'notes') && (
+                <div className="space-y-3">
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Notes</h3>
+                  <RichTextEditor
+                    value={noteText}
+                    onChange={setNoteText}
+                    placeholder="Add a note..."
+                    minHeight="60px"
+                  />
+                  <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()} className="w-full">
+                    {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
+                  </Button>
+                  {filteredNotes.length > 0 ? (
+                    <div className="space-y-2">
+                      {filteredNotes.map((n: any) => (
+                        <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
+                          <div className="text-xs prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
+                          <p className="text-[10px] text-muted-foreground mt-1.5">
+                            {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No notes yet.</p>
+                  )}
+                </div>
+              )}
+
+              {/* CALLS section (shown on all, notes tabs) */}
+              {(sidebarTab === 'all' || sidebarTab === 'notes') && (
+                <div>
+                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <PhoneCall className="h-3 w-3" /> Calls
+                    <span className="text-muted-foreground font-normal">({(callLogs as any[]).length})</span>
+                  </h3>
+                  {filteredCallLogs.length === 0 && (callNotes as any[]).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No calls yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredCallLogs.map((call: any) => {
+                        const isOut = call.direction === 'outbound';
+                        const dur = call.duration_seconds;
+                        const durStr = dur ? `${Math.floor(dur / 60)}:${(dur % 60).toString().padStart(2, '0')}` : '--:--';
+                        const aiNote = (callNotes as any[]).find((n: any) => n.call_log_id === call.id || n.external_call_id === call.external_call_id);
+                        return (
+                          <button
+                            key={call.id}
+                            onClick={() => setSelectedCall({ call, aiNote })}
+                            className="w-full text-left rounded-md border border-border bg-secondary/30 p-2.5 hover:border-accent/40 transition-all"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full', isOut ? 'bg-info/10 text-info' : 'bg-success/10 text-success')}>
+                                {isOut ? <PhoneOutgoing className="h-3.5 w-3.5" /> : <PhoneIncoming className="h-3.5 w-3.5" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-medium text-foreground">{isOut ? 'Outbound' : 'Inbound'}</span>
+                                  {call.audio_url && <Volume2 className="h-2.5 w-2.5 text-accent shrink-0" />}
+                                  {aiNote && <Badge variant="secondary" className="text-[8px] px-1 py-0">AI</Badge>}
+                                </div>
+                                <p className="text-[10px] text-muted-foreground">{call.started_at ? format(new Date(call.started_at), 'MMM d, h:mm a') : '—'} · {durStr}</p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {/* Orphan AI notes */}
+                      {(callNotes as any[]).filter((n: any) => !(callLogs as any[]).some((cl: any) => cl.id === n.call_log_id || (cl.external_call_id && cl.external_call_id === n.external_call_id))).map((note: any, idx: number) => (
+                        <button
+                          key={note.id ?? idx}
+                          onClick={() => setSelectedCall({ call: { id: note.id, direction: note.call_direction || 'outbound', phone_number: note.phone_number || '', duration_seconds: note.call_duration_seconds, started_at: note.call_started_at || note.created_at, audio_url: note.recording_url, summary: note.ai_summary, notes: note.extracted_notes, linked_entity_name: c.full_name }, aiNote: note })}
+                          className="w-full text-left rounded-md border border-border bg-secondary/30 p-2.5 hover:border-accent/40 transition-all"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
+                              <PhoneCall className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-foreground">Call Notes</span>
+                                <Badge variant="secondary" className="text-[8px] px-1 py-0">AI</Badge>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground">{note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d') : '—'}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TASKS section (shown on all, tasks tabs) */}
+              {(sidebarTab === 'all' || sidebarTab === 'tasks') && (
+                <div>
+                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <FileText className="h-3 w-3" /> Tasks
+                  </h3>
+                  <p className="text-xs text-muted-foreground">No tasks yet.</p>
+                </div>
+              )}
+
+              {/* MEETINGS section (shown on all, meetings tabs) */}
+              {(sidebarTab === 'all' || sidebarTab === 'meetings') && (
+                <div>
+                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <Calendar className="h-3 w-3" /> Meetings
+                  </h3>
+                  <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </aside>
       </div>
+
+      {/* CallDetailModal — rendered at component root for proper portal behavior */}
+      <CallDetailModal
+        open={!!selectedCall}
+        onOpenChange={(v) => !v && setSelectedCall(null)}
+        call={selectedCall?.call}
+        aiNotes={selectedCall?.aiNote}
+      />
 
       {/* Owner transfer confirmation */}
       <AlertDialog open={!!pendingOwnerId} onOpenChange={(open) => { if (!open) setPendingOwnerId(null); }}>
