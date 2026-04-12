@@ -239,97 +239,201 @@ export const pushToClay = schedules.task({
   },
 });
 
-// ─── Task B: Process Clay webhook (enrichment results) ─────────────────────
+// ─── Task B: Pull enriched data FROM Clay tables ──────────────────────────
 
-interface ClayWebhookPayload {
-  body: any;
-  receivedAt: string;
+async function fetchClayRows(
+  apiKey: string,
+  tableId: string,
+): Promise<Record<string, any>[]> {
+  const res = await fetch(`https://api.clay.com/v3/tables/${tableId}/rows`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Clay API ${res.status}: ${text}`);
+  }
+
+  const data = await res.json();
+  // Clay returns { rows: [...] } or an array directly
+  return Array.isArray(data) ? data : data?.rows ?? data?.data ?? [];
 }
 
-export const processClayEnrichment = task({
-  id: "process-clay-enrichment",
-  retry: { maxAttempts: 3 },
-  run: async (payload: ClayWebhookPayload) => {
+export const pullFromClay = schedules.task({
+  id: "pull-from-clay",
+  maxDuration: 120,
+  run: async () => {
     const supabase = getSupabaseAdmin();
-    const body = payload.body;
 
-    // Clay may send a single row or an array of rows
-    const rows: Record<string, any>[] = Array.isArray(body) ? body : body?.rows ?? body?.data ?? [body];
+    let enabled: string;
+    try {
+      enabled = await getAppSetting("CLAY_ENRICHMENT_ENABLED");
+    } catch {
+      logger.info("CLAY_ENRICHMENT_ENABLED not set, skipping pull");
+      return { skipped: true, reason: "toggle_off" };
+    }
+    if (enabled !== "true") {
+      logger.info("Clay enrichment disabled");
+      return { skipped: true, reason: "toggle_off" };
+    }
 
-    let updated = 0;
+    const apiKey = await getAppSetting("CLAY_API_KEY");
+    if (!apiKey) {
+      logger.error("CLAY_API_KEY not set");
+      return { skipped: true, reason: "no_api_key" };
+    }
+
+    let candidateTableId = "";
+    let contactTableId = "";
+    try { candidateTableId = await getAppSetting("CLAY_TABLE_ID_CANDIDATES"); } catch {}
+    try { contactTableId = await getAppSetting("CLAY_TABLE_ID_CONTACTS"); } catch {}
+
+    let candidatesUpdated = 0;
+    let contactsUpdated = 0;
     let skipped = 0;
-    let failed = 0;
 
-    for (const row of rows) {
+    // ── Pull candidates ───────────────────────────────────────────────
+    if (candidateTableId) {
       try {
-        const sullyId = row.sully_id || row.sullyId || row.sully_record_id;
-        if (!sullyId || typeof sullyId !== "string") {
-          logger.warn("Clay row missing sully_id", { row: JSON.stringify(row).slice(0, 200) });
-          skipped++;
-          continue;
-        }
+        const rows = await fetchClayRows(apiKey, candidateTableId);
+        logger.info("Fetched candidate rows from Clay", { count: rows.length });
 
-        const [entityType, entityId] = sullyId.split("::");
-        if (!entityType || !entityId) {
-          logger.warn("Invalid sully_id format", { sullyId });
-          skipped++;
-          continue;
-        }
+        for (const row of rows) {
+          const sullyId = row.sully_id || row.sullyId || row.sully_record_id;
+          if (!sullyId || typeof sullyId !== "string" || !sullyId.startsWith("candidate::")) {
+            skipped++;
+            continue;
+          }
+          const entityId = sullyId.split("::")[1];
 
-        if (entityType === "candidate") {
-          // Fetch current record to check which fields are null
           const { data: existing } = await supabase
             .from("candidates")
-            .select("email, phone, linkedin_url, current_title, current_company, location_text")
+            .select("first_name, last_name, email, phone, linkedin_url, current_title, current_company, location_text")
             .eq("id", entityId)
             .single();
 
-          if (!existing) {
-            logger.warn("Candidate not found", { entityId });
-            skipped++;
-            continue;
+          if (!existing) { skipped++; continue; }
+
+          const updates: Record<string, string> = {};
+
+          // Clay enriched columns — "Email Address" and "Phone Number" are the final outputs
+          if (!existing.email) {
+            const v = extractField(row, "Email Address", "email", "Personal Email", "personal_email", "work_email");
+            if (v) updates.email = v;
+          }
+          if (!existing.phone) {
+            const v = extractField(row, "Phone Number", "phone_number", "Mobile Phone", "mobile_phone", "phone");
+            if (v) updates.phone = v;
+          }
+          if (!existing.linkedin_url) {
+            const v = extractField(row, "linkedin_url", "LinkedIn URL", "linkedin_profile_url");
+            if (v) updates.linkedin_url = v;
+          }
+          if (!existing.current_title) {
+            const v = extractField(row, "title", "Title", "job_title");
+            if (v) updates.current_title = v;
+          }
+          if (!existing.current_company) {
+            const v = extractField(row, "company", "Company", "company_name");
+            if (v) updates.current_company = v;
+          }
+          if (!existing.first_name) {
+            const v = extractField(row, "first_name", "First Name");
+            if (v) updates.first_name = v;
+          }
+          if (!existing.last_name) {
+            const v = extractField(row, "last_name", "Last Name");
+            if (v) updates.last_name = v;
+          }
+          if (!existing.location_text) {
+            const v = extractField(row, "location", "Location", "city");
+            if (v) updates.location_text = v;
           }
 
-          const updates = buildCandidateUpdate(row, existing);
           if (Object.keys(updates).length > 0) {
             await supabase.from("candidates").update(updates).eq("id", entityId);
-            logger.info("Updated candidate from Clay", { entityId, fields: Object.keys(updates) });
-            updated++;
+            logger.info("Pulled candidate update from Clay", { entityId, fields: Object.keys(updates) });
+            candidatesUpdated++;
           } else {
             skipped++;
           }
-        } else if (entityType === "contact") {
-          const { data: existing } = await supabase
-            .from("contacts")
-            .select("email, phone, linkedin_url, title, department")
-            .eq("id", entityId)
-            .single();
-
-          if (!existing) {
-            logger.warn("Contact not found", { entityId });
-            skipped++;
-            continue;
-          }
-
-          const updates = buildContactUpdate(row, existing);
-          if (Object.keys(updates).length > 0) {
-            await supabase.from("contacts").update(updates).eq("id", entityId);
-            logger.info("Updated contact from Clay", { entityId, fields: Object.keys(updates) });
-            updated++;
-          } else {
-            skipped++;
-          }
-        } else {
-          logger.warn("Unknown entity type in sully_id", { sullyId });
-          skipped++;
         }
       } catch (err: any) {
-        failed++;
-        logger.error("Clay row processing error", { error: err.message });
+        logger.error("Failed to pull candidates from Clay", { error: err.message });
       }
     }
 
-    logger.info("Clay enrichment processing complete", { updated, skipped, failed });
-    return { updated, skipped, failed };
+    // ── Pull contacts ─────────────────────────────────────────────────
+    if (contactTableId) {
+      try {
+        const rows = await fetchClayRows(apiKey, contactTableId);
+        logger.info("Fetched contact rows from Clay", { count: rows.length });
+
+        for (const row of rows) {
+          const sullyId = row.sully_id || row.sullyId || row.sully_record_id;
+          if (!sullyId || typeof sullyId !== "string" || !sullyId.startsWith("contact::")) {
+            skipped++;
+            continue;
+          }
+          const entityId = sullyId.split("::")[1];
+
+          const { data: existing } = await supabase
+            .from("contacts")
+            .select("first_name, last_name, email, phone, linkedin_url, title, department")
+            .eq("id", entityId)
+            .single();
+
+          if (!existing) { skipped++; continue; }
+
+          const updates: Record<string, string> = {};
+
+          if (!existing.email) {
+            const v = extractField(row, "Email Address", "email", "Personal Email", "work_email");
+            if (v) updates.email = v;
+          }
+          if (!existing.phone) {
+            const v = extractField(row, "Phone Number", "phone_number", "Mobile Phone", "phone");
+            if (v) updates.phone = v;
+          }
+          if (!existing.linkedin_url) {
+            const v = extractField(row, "linkedin_url", "LinkedIn URL", "linkedin_profile_url");
+            if (v) updates.linkedin_url = v;
+          }
+          if (!existing.title) {
+            const v = extractField(row, "title", "Title", "job_title");
+            if (v) updates.title = v;
+          }
+          if (!existing.first_name) {
+            const v = extractField(row, "first_name", "First Name");
+            if (v) updates.first_name = v;
+          }
+          if (!existing.last_name) {
+            const v = extractField(row, "last_name", "Last Name");
+            if (v) updates.last_name = v;
+          }
+          if (!existing.department) {
+            const v = extractField(row, "department", "Department");
+            if (v) updates.department = v;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await supabase.from("contacts").update(updates).eq("id", entityId);
+            logger.info("Pulled contact update from Clay", { entityId, fields: Object.keys(updates) });
+            contactsUpdated++;
+          } else {
+            skipped++;
+          }
+        }
+      } catch (err: any) {
+        logger.error("Failed to pull contacts from Clay", { error: err.message });
+      }
+    }
+
+    logger.info("Pull from Clay complete", { candidatesUpdated, contactsUpdated, skipped });
+    return { candidatesUpdated, contactsUpdated, skipped };
   },
 });

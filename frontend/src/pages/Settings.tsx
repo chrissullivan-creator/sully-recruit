@@ -96,6 +96,8 @@ const Settings = () => {
     api_key: '',
     webhook_url_candidates: '',
     webhook_url_contacts: '',
+    table_id_candidates: '',
+    table_id_contacts: '',
     webhook_secret: '',
   });
   const [clayActive, setClayActive] = useState(false);
@@ -369,6 +371,8 @@ const Settings = () => {
           CLAY_API_KEY: config.api_key || '',
           CLAY_WEBHOOK_URL_CANDIDATES: config.webhook_url_candidates || '',
           CLAY_WEBHOOK_URL_CONTACTS: config.webhook_url_contacts || '',
+          CLAY_TABLE_ID_CANDIDATES: config.table_id_candidates || '',
+          CLAY_TABLE_ID_CONTACTS: config.table_id_contacts || '',
         };
         for (const [key, value] of Object.entries(appSettingsMap)) {
           await supabase.from('app_settings').upsert(
@@ -967,6 +971,30 @@ Senior Recruiter | Your Company
                             />
                             <p className="text-[10px] text-muted-foreground mt-1">
                               Paste the full webhook URL from your Clay table's webhook source
+                            </p>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Clay Table ID — Candidates (for pull)</Label>
+                            <Input
+                              placeholder="t_0tdejrpM5hBVNVWo5zU"
+                              value={clayConfig.table_id_candidates}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_candidates: e.target.value }))}
+                              className="mt-1"
+                            />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              From the Clay table URL — used to pull enriched data back
+                            </p>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Clay Table ID — Contacts (for pull)</Label>
+                            <Input
+                              placeholder="t_0tdekad8wfsfBYsP6KV"
+                              value={clayConfig.table_id_contacts}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_contacts: e.target.value }))}
+                              className="mt-1"
+                            />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              From the Clay table URL — used to pull enriched data back
                             </p>
                           </div>
                           <div>
