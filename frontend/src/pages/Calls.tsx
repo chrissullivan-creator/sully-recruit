@@ -385,11 +385,25 @@ function LinkCallDialog({
 const Calls = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [recruiterFilter, setRecruiterFilter] = useState<string>('all');
   const [logOpen, setLogOpen] = useState(false);
   const [linkCall, setLinkCall] = useState<CallLog | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [detailCall, setDetailCall] = useState<{ call: CallLog; aiNotes?: any } | null>(null);
   const queryClient = useQueryClient();
+
+  // Fetch recruiter profiles for filter
+  const { data: recruiters = [] } = useQuery({
+    queryKey: ['recruiter_profiles'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles' as any)
+        .select('id, full_name')
+        .order('full_name');
+      if (error) throw error;
+      return (data ?? []) as { id: string; full_name: string }[];
+    },
+  });
 
   const { data: calls = [], isLoading, isError, error: callsError, refetch } = useQuery({
     queryKey: ['call_logs'],
@@ -451,7 +465,14 @@ const Calls = () => {
     return ai?.candidates?.id ?? null;
   };
 
+  const getRecruiterName = (call: CallLog) =>
+    recruiters.find(r => r.id === call.owner_id)?.full_name ?? null;
+
   const filtered = calls.filter(c => {
+    // Recruiter filter
+    if (recruiterFilter !== 'all' && c.owner_id !== recruiterFilter) return false;
+
+    // Search
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     const name = getCandidateName(c);
@@ -498,16 +519,46 @@ const Calls = () => {
       />
 
       <div className="p-8">
-        {/* Search */}
-        <div className="relative max-w-md mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search by name, phone, or notes..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+        {/* Search + Recruiter Filter */}
+        <div className="flex items-center gap-4 mb-6">
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by name, phone, or notes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          {/* Recruiter filter */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setRecruiterFilter('all')}
+              className={cn(
+                'px-3 py-2 text-xs font-medium rounded-md transition-colors',
+                recruiterFilter === 'all'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+              )}
+            >
+              All
+            </button>
+            {recruiters.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setRecruiterFilter(r.id)}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium rounded-md transition-colors',
+                  recruiterFilter === r.id
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                )}
+              >
+                {r.full_name?.split(' ')[0]}
+              </button>
+            ))}
+          </div>
         </div>
 
         <p className="text-xs text-muted-foreground mb-4">{filtered.length} calls</p>
@@ -571,6 +622,9 @@ const Calls = () => {
                             {call.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call
                           </h3>
                           <span className="text-xs text-muted-foreground">{call.phone_number}</span>
+                          {getRecruiterName(call) && (
+                            <span className="text-xs text-muted-foreground/70">{getRecruiterName(call)?.split(' ')[0]}</span>
+                          )}
                           {personName && (
                             <button
                               onClick={(e) => {
