@@ -174,6 +174,22 @@ async function processAccount(
             continue;
           }
 
+          // Detect LinkedIn InMail notifications — re-tag as linkedin channel
+          const isInmailNotification =
+            !isOutbound &&
+            senderEmail === "messages-noreply@linkedin.com" &&
+            senderName?.includes("via LinkedIn");
+          // Block LinkedIn marketing emails (not real InMail replies)
+          const isLinkedInMarketing =
+            !isOutbound &&
+            senderEmail === "messages-noreply@linkedin.com" &&
+            !senderName?.includes("via LinkedIn");
+
+          if (isLinkedInMarketing) {
+            skipped++;
+            continue;
+          }
+
           // Skip marketing/newsletter emails
           if (isMarketingEmail(isOutbound ? null : senderEmail)) {
             skipped++;
@@ -201,7 +217,7 @@ async function processAccount(
               .insert({
                 candidate_id: candidateId,
                 contact_id: contactId,
-                channel: "email",
+                channel: isInmailNotification ? "linkedin" : "email",
                 integration_account_id: account.id,
                 external_conversation_id: externalConversationId,
                 subject,
@@ -226,9 +242,9 @@ async function processAccount(
             conversation_id: conversation.id,
             candidate_id: candidateId,
             contact_id: contactId,
-            channel: "email",
+            channel: isInmailNotification ? "linkedin" : "email",
             direction: isOutbound ? "outbound" : "inbound",
-            message_type: "email",
+            message_type: isInmailNotification ? "inmail" : "email",
             external_message_id: externalMessageId,
             external_conversation_id: externalConversationId,
             subject,
