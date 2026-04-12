@@ -6,23 +6,28 @@ import { delay } from "./lib/resume-parsing";
 
 async function pushRowsToClay(
   apiKey: string,
-  tableId: string,
+  webhookUrl: string,
   rows: Record<string, any>[],
 ): Promise<void> {
   if (rows.length === 0) return;
 
-  const res = await fetch(`https://api.clay.com/v3/sources/${tableId}/rows`, {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  // Include API key as Bearer token if available (recommended by Clay)
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  const res = await fetch(webhookUrl, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ rows }),
+    headers,
+    body: JSON.stringify(rows),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Clay API ${res.status}: ${text}`);
+    throw new Error(`Clay webhook ${res.status}: ${text}`);
   }
 }
 
@@ -115,25 +120,30 @@ export const pushToClay = schedules.task({
       return { skipped: true, reason: "toggle_off" };
     }
 
-    const apiKey = await getAppSetting("CLAY_API_KEY");
-    let candidateTableId: string;
-    let contactTableId: string;
+    let apiKey = "";
     try {
-      candidateTableId = await getAppSetting("CLAY_TABLE_ID_CANDIDATES");
+      apiKey = await getAppSetting("CLAY_API_KEY");
     } catch {
-      candidateTableId = "";
+      // API key is optional for webhook URLs (URL itself is the auth)
+    }
+    let candidateWebhookUrl: string;
+    let contactWebhookUrl: string;
+    try {
+      candidateWebhookUrl = await getAppSetting("CLAY_WEBHOOK_URL_CANDIDATES");
+    } catch {
+      candidateWebhookUrl = "";
     }
     try {
-      contactTableId = await getAppSetting("CLAY_TABLE_ID_CONTACTS");
+      contactWebhookUrl = await getAppSetting("CLAY_WEBHOOK_URL_CONTACTS");
     } catch {
-      contactTableId = "";
+      contactWebhookUrl = "";
     }
 
     let candidatesPushed = 0;
     let contactsPushed = 0;
 
     // ── Candidates (personal info) ────────────────────────────────────
-    if (candidateTableId) {
+    if (candidateWebhookUrl) {
       // Case 1: Has linkedin_url, missing email or phone — Unipile already tried
       const { data: cands1 } = await supabase
         .from("candidates")
@@ -169,7 +179,7 @@ export const pushToClay = schedules.task({
         }));
 
         try {
-          await pushRowsToClay(apiKey, candidateTableId, rows);
+          await pushRowsToClay(apiKey, candidateWebhookUrl, rows);
           candidatesPushed = rows.length;
 
           // Mark as sent
@@ -185,7 +195,7 @@ export const pushToClay = schedules.task({
     }
 
     // ── Contacts (business info) ──────────────────────────────────────
-    if (contactTableId) {
+    if (contactWebhookUrl) {
       const { data: contacts } = await supabase
         .from("contacts")
         .select("id, first_name, last_name, full_name, email, phone, linkedin_url, title, company_id, companies(domain)")
@@ -210,7 +220,7 @@ export const pushToClay = schedules.task({
         }));
 
         try {
-          await pushRowsToClay(apiKey, contactTableId, rows);
+          await pushRowsToClay(apiKey, contactWebhookUrl, rows);
           contactsPushed = rows.length;
 
           const ids = contactList.map((c: any) => c.id);

@@ -85,8 +85,8 @@ const Settings = () => {
   // Clay enrichment state
   const [clayConfig, setClayConfig] = useState<IntegrationConfig>({
     api_key: '',
-    table_id_candidates: '',
-    table_id_contacts: '',
+    webhook_url_candidates: '',
+    webhook_url_contacts: '',
     webhook_secret: '',
   });
   const [clayActive, setClayActive] = useState(false);
@@ -281,6 +281,23 @@ const Settings = () => {
         );
 
       if (error) throw error;
+
+      // Sync Clay settings to app_settings so Trigger.dev tasks can read them
+      if (type === 'clay_enrichment') {
+        const appSettingsMap: Record<string, string> = {
+          CLAY_ENRICHMENT_ENABLED: isActive ? 'true' : 'false',
+          CLAY_API_KEY: config.api_key || '',
+          CLAY_WEBHOOK_URL_CANDIDATES: config.webhook_url_candidates || '',
+          CLAY_WEBHOOK_URL_CONTACTS: config.webhook_url_contacts || '',
+        };
+        for (const [key, value] of Object.entries(appSettingsMap)) {
+          await supabase.from('app_settings').upsert(
+            { key, value, updated_at: new Date().toISOString() },
+            { onConflict: 'key' }
+          );
+        }
+      }
+
       toast.success('Settings saved');
     } catch (err: any) {
       console.error('Save error', err);
@@ -730,22 +747,28 @@ Senior Recruiter | Your Company
                             />
                           </div>
                           <div>
-                            <Label className="text-xs text-muted-foreground">Clay Table ID — Candidates</Label>
+                            <Label className="text-xs text-muted-foreground">Clay Webhook URL — Candidates</Label>
                             <Input
-                              placeholder="Clay table/source ID for candidates"
-                              value={clayConfig.table_id_candidates}
-                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_candidates: e.target.value }))}
+                              placeholder="https://api.clay.com/v3/sources/webhook/..."
+                              value={clayConfig.webhook_url_candidates}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, webhook_url_candidates: e.target.value }))}
                               className="mt-1"
                             />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Paste the full webhook URL from your Clay table's webhook source
+                            </p>
                           </div>
                           <div>
-                            <Label className="text-xs text-muted-foreground">Clay Table ID — Contacts</Label>
+                            <Label className="text-xs text-muted-foreground">Clay Webhook URL — Contacts</Label>
                             <Input
-                              placeholder="Clay table/source ID for contacts"
-                              value={clayConfig.table_id_contacts}
-                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_contacts: e.target.value }))}
+                              placeholder="https://api.clay.com/v3/sources/webhook/..."
+                              value={clayConfig.webhook_url_contacts}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, webhook_url_contacts: e.target.value }))}
                               className="mt-1"
                             />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Paste the full webhook URL from your Clay table's webhook source
+                            </p>
                           </div>
                           <div>
                             <Label className="text-xs text-muted-foreground">Webhook Secret (optional)</Label>
