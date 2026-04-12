@@ -54,6 +54,9 @@ export const MARKETING_DOMAINS = [
   "jobalerts-noreply@linkedin.com",
   "notifications@linkedin.com",
   "news@linkedin.com",
+  // Note: messages-noreply@linkedin.com is handled specially in backfill-emails.ts
+  // — InMail replies (sender_name "X via LinkedIn") are kept as channel=linkedin,
+  // — marketing (sender_name "LinkedIn" or "LinkedIn Recruiter") are blocked there.
 
   // Noreply / system
   "noreply@email.openai.com",
