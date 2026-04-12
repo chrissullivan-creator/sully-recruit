@@ -91,41 +91,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Route by action
     if (action === "list_projects") {
-      // Try primary endpoint, fallback to alternative paths if 404/403
-      const endpoints = [
-        `${baseUrl}/linkedin/hiring_projects`,
-        `${baseUrl}/hiring_projects`,
-        `${baseUrl}/linkedin/recruiter/projects`,
-      ];
-
-      for (const endpoint of endpoints) {
-        try {
-          const items = await fetchAllPages(endpoint);
-          if (res.headersSent) return;
-          return res.status(200).json({ items });
-        } catch (err: any) {
-          const msg = err?.message || "";
-          // If 404 or 403, try next endpoint
-          if (msg.includes("404") || msg.includes("403")) {
-            console.log(`Endpoint ${endpoint} returned ${msg}, trying next...`);
-            continue;
-          }
-          throw err; // Other errors bubble up
-        }
-      }
-
-      // All endpoints failed
-      console.error("All hiring project endpoints returned 403/404");
-      return res.status(502).json({
-        error: "Unipile hiring projects API not accessible. The connected accounts may not have LinkedIn Recruiter access.",
-      });
+      const items = await fetchAllPages(`${baseUrl}/linkedin/projects`);
+      if (res.headersSent) return;
+      return res.status(200).json({ items });
     }
 
     if (action === "list_applicants") {
-      if (!job_id) return res.status(400).json({ error: "Missing job_id" });
-      const items = await fetchAllPages(`${baseUrl}/jobs/${encodeURIComponent(job_id)}/applicants`);
-      if (res.headersSent) return;
-      return res.status(200).json({ items });
+      // Applicants come from the project detail endpoint
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+
+      const params = new URLSearchParams({ account_id });
+      const resp = await fetch(
+        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${params}`,
+        { headers },
+      );
+
+      if (resp.status === 429) {
+        return res.status(429).json({
+          error: "Unipile rate limit reached. Please wait a moment and try again.",
+        });
+      }
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error(`Unipile project detail error: ${resp.status}`, errText);
+        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
+      }
+
+      const data = await resp.json();
+      // The project detail may return applicants nested in the response
+      const applicants = data.applicants ?? data.candidates ?? data.items ?? data.members ?? [];
+      return res.status(200).json({ items: Array.isArray(applicants) ? applicants : [], project: data });
     }
 
     if (action === "download_resume") {
@@ -135,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const params = new URLSearchParams({ account_id });
 
       const resp = await fetch(
-        `${baseUrl}/jobs/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
+        `${baseUrl}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
         { headers },
       );
 
