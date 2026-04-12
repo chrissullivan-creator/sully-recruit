@@ -158,6 +158,7 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
   const handleImport = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast.error('Not authenticated'); return; }
+    const userId = session.user.id;
 
     setImporting(true);
     setProgress(0);
@@ -207,9 +208,12 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
         const companyId = companyName ? (companyCache[companyName] ?? await resolveCompany(companyName)) : null;
 
         // Insert contact
+        const firstName = applicant.first_name || '';
+        const lastName = applicant.last_name || '';
         const contactData = {
-          first_name: applicant.first_name || null,
-          last_name: applicant.last_name || null,
+          first_name: firstName || null,
+          last_name: lastName || null,
+          full_name: `${firstName} ${lastName}`.trim() || null,
           email: applicant.email || null,
           phone: applicant.phone || null,
           title: applicant.current_title || applicant.headline || null,
@@ -219,6 +223,7 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           linkedin_url: applicant.linkedin_url || null,
           avatar_url: applicant.profile_picture_url || null,
           status: 'active',
+          owner_id: userId,
         };
 
         const { data: inserted, error: insertErr } = await supabase

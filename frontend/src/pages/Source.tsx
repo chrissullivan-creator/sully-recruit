@@ -282,6 +282,20 @@ export default function Source() {
     }
   };
 
+  const toggleStageApplicants = (stageApplicants: Applicant[]) => {
+    const stageIds = stageApplicants.map(a => a.id);
+    const allSelected = stageIds.every(id => selectedApplicantIds.has(id));
+    setSelectedApplicantIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        stageIds.forEach(id => next.delete(id));
+      } else {
+        stageIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
   // ---- Group applicants by stage ----
   const applicantsByStage = applicants.reduce<Record<string, Applicant[]>>((acc, a) => {
     const stage = a.stage || 'unknown';
@@ -306,7 +320,7 @@ export default function Source() {
   return (
     <MainLayout>
       <PageHeader
-        title="Source"
+        title={`Source${projects.length > 0 ? ` (${projects.length})` : ''}`}
         description="Import applicants from LinkedIn Hiring Projects"
       />
 
@@ -445,6 +459,9 @@ export default function Source() {
                   {/* Bulk action bar */}
                   {selectedApplicantIds.size > 0 && (
                     <div className="flex items-center gap-3 px-4 py-2 bg-accent/10 border-b border-border">
+                      <button onClick={toggleAllApplicants} className="text-xs text-muted-foreground hover:text-foreground underline">
+                        {selectedApplicantIds.size === applicants.length ? 'Deselect all' : 'Select all'}
+                      </button>
                       <span className="text-sm text-muted-foreground">
                         {selectedApplicantIds.size} selected
                       </span>
@@ -507,8 +524,12 @@ export default function Source() {
                         <thead>
                           <tr className="border-b border-border text-xs text-muted-foreground">
                             <th className="w-10 px-4 py-2 text-left">
-                              <button onClick={toggleAllApplicants} className="hover:text-foreground">
-                                {selectedApplicantIds.size === applicants.length && applicants.length > 0
+                              <button
+                                onClick={() => toggleStageApplicants(applicantsByStage[stage])}
+                                className="hover:text-foreground"
+                                title={`Select all in ${stage}`}
+                              >
+                                {applicantsByStage[stage].every(a => selectedApplicantIds.has(a.id))
                                   ? <CheckSquare className="h-3.5 w-3.5" />
                                   : <Square className="h-3.5 w-3.5" />
                                 }

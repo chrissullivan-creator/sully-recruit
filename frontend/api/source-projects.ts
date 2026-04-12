@@ -49,37 +49,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const headers: Record<string, string> = {
       "X-API-KEY": apiKey,
+      "X-ACCOUNT-ID": account_id,
       Accept: "application/json",
     };
 
+    /** Fetch a paginated Unipile endpoint, accumulating all pages (up to safety limit). */
+    async function fetchAllPages(url: string, maxItems = 1000): Promise<any[]> {
+      const all: any[] = [];
+      let nextCursor: string | null = cursor || null;
+      let page = 0;
+
+      do {
+        const pageUrl = new URL(url);
+        pageUrl.searchParams.set("account_id", account_id);
+        pageUrl.searchParams.set("limit", "100");
+        if (nextCursor) pageUrl.searchParams.set("cursor", nextCursor);
+
+        const resp = await fetch(pageUrl.toString(), { headers });
+
+        if (resp.status === 429) {
+          return res.status(429).json({
+            error: "Unipile rate limit reached. Please wait a moment and try again.",
+          }) as any;
+        }
+        if (!resp.ok) {
+          const errText = await resp.text();
+          console.error(`Unipile error (page ${page}): ${resp.status}`, errText);
+          throw new Error(`Unipile error ${resp.status}: ${errText}`);
+        }
+
+        const data = await resp.json();
+        const items = data.items ?? data.results ?? (Array.isArray(data) ? data : []);
+        all.push(...items);
+
+        nextCursor = data.cursor ?? data.next_cursor ?? null;
+        page++;
+      } while (nextCursor && all.length < maxItems && page < 10);
+
+      return all;
+    }
+
     // Route by action
     if (action === "list_projects") {
-      const params = new URLSearchParams({ account_id, limit: "100" });
-      if (cursor) params.set("cursor", cursor);
-
-      const resp = await fetch(`${baseUrl}/linkedin/hiring_projects?${params}`, { headers });
-      if (!resp.ok) {
-        const errText = await resp.text();
-        console.error(`Unipile list_projects error: ${resp.status}`, errText);
-        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
-      }
-      const data = await resp.json();
-      return res.status(200).json(data);
+      const items = await fetchAllPages(`${baseUrl}/linkedin/hiring_projects`);
+      if (res.headersSent) return; // early return from 429 inside fetchAllPages
+      return res.status(200).json({ items });
     }
 
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id" });
-      const params = new URLSearchParams({ account_id, limit: "100" });
-      if (cursor) params.set("cursor", cursor);
-
-      const resp = await fetch(`${baseUrl}/jobs/${encodeURIComponent(job_id)}/applicants?${params}`, { headers });
-      if (!resp.ok) {
-        const errText = await resp.text();
-        console.error(`Unipile list_applicants error: ${resp.status}`, errText);
-        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
-      }
-      const data = await resp.json();
-      return res.status(200).json(data);
+      const items = await fetchAllPages(`${baseUrl}/jobs/${encodeURIComponent(job_id)}/applicants`);
+      if (res.headersSent) return;
+      return res.status(200).json({ items });
     }
 
     if (action === "download_resume") {
@@ -92,6 +113,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${baseUrl}/jobs/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
         { headers },
       );
+
+      if (resp.status === 429) {
+        return res.status(429).json({
+          error: "Unipile rate limit reached. Please wait a moment and try again.",
+        });
+      }
       if (!resp.ok) {
         const errText = await resp.text();
         console.error(`Unipile download_resume error: ${resp.status}`, errText);

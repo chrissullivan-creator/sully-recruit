@@ -219,12 +219,13 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           continue;
         }
 
-        // Try to download and parse resume if available
+        // Try to download and parse resume — attempt even if has_resume is false
         let parsedData: any = {};
         let resumeFilePath: string | null = null;
         let resumeFileName: string | null = null;
+        let resumeImported = false;
 
-        if (applicant.has_resume && project) {
+        if (project) {
           try {
             const resumeData = await callSourceApi({
               action: 'download_resume',
@@ -247,6 +248,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
 
               if (!uploadErr && uploadResult) {
                 resumeFilePath = uploadResult.path;
+                resumeImported = true;
 
                 // Parse the resume
                 const parseResp = await fetch('/api/parse-resume', {
@@ -264,8 +266,11 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
                 }
               }
             }
-          } catch (resumeErr) {
-            console.warn(`Resume download/parse failed for ${name}:`, resumeErr);
+          } catch (resumeErr: any) {
+            // 404 = no resume available, not an error worth logging loudly
+            if (!resumeErr?.message?.includes('404')) {
+              console.warn(`Resume download/parse failed for ${name}:`, resumeErr);
+            }
           }
         }
 
@@ -311,7 +316,12 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           console.warn(`[Source] Enrichment not configured — missing email/phone for ${name}`);
         }
 
-        importResults.push({ id: applicant.id, name, status: 'success' });
+        importResults.push({
+          id: applicant.id,
+          name,
+          status: 'success',
+          message: resumeImported ? 'with resume' : undefined,
+        });
       } catch (err: any) {
         importResults.push({ id: applicant.id, name, status: 'error', message: err.message });
       }
