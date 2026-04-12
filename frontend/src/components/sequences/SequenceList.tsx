@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Users, BarChart3, Calendar } from "lucide-react";
+import { Plus, BarChart3, Calendar } from "lucide-react";
 
 interface SequenceRow {
   id: string;
@@ -27,15 +28,17 @@ export function SequenceList() {
   }, []);
 
   async function loadSequences() {
-    const { data } = await supabase
-      .from("sequences")
-      .select("id, name, audience_type, created_at, job_id, jobs(title)")
-      .order("created_at", { ascending: false }) as any;
+    try {
+      const { data, error } = await supabase
+        .from("sequences")
+        .select("id, name, audience_type, created_at, job_id, jobs(title)")
+        .order("created_at", { ascending: false }) as any;
 
-    if (data) {
+      if (error) throw error;
+
       // Fetch enrollment counts
       const enriched = await Promise.all(
-        data.map(async (seq: SequenceRow) => {
+        (data || []).map(async (seq: SequenceRow) => {
           const { count: totalCount } = await supabase
             .from("sequence_enrollments")
             .select("id", { count: "exact", head: true })
@@ -51,8 +54,12 @@ export function SequenceList() {
         }),
       );
       setSequences(enriched);
+    } catch (err: any) {
+      console.error("Failed to load sequences:", err);
+      toast.error(err?.message || "Failed to load sequences");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (

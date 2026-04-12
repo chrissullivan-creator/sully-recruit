@@ -407,15 +407,27 @@ const JobDetail = () => {
   const removeContact = async (jobContactId: string, contactId: string, isPrimary: boolean) => {
     setRemovingId(jobContactId);
     try {
-      const { error } = await supabase.from('job_contacts').delete().eq('id', jobContactId);
-      if (error) throw error;
+      const { error: deleteErr } = await supabase.from('job_contacts').delete().eq('id', jobContactId);
+      if (deleteErr) throw deleteErr;
       if (isPrimary) {
         const remaining = (jobContacts as any[]).filter(jc => jc.id !== jobContactId);
         if (remaining.length > 0) {
-          await supabase.from('job_contacts').update({ is_primary: true }).eq('id', remaining[0].id);
-          await supabase.from('jobs').update({ contact_id: remaining[0].contact_id }).eq('id', id!);
+          const { error: promoteErr } = await supabase
+            .from('job_contacts')
+            .update({ is_primary: true })
+            .eq('id', remaining[0].id);
+          if (promoteErr) throw promoteErr;
+          const { error: jobErr } = await supabase
+            .from('jobs')
+            .update({ contact_id: remaining[0].contact_id })
+            .eq('id', id!);
+          if (jobErr) throw jobErr;
         } else {
-          await supabase.from('jobs').update({ contact_id: null }).eq('id', id!);
+          const { error: jobErr } = await supabase
+            .from('jobs')
+            .update({ contact_id: null })
+            .eq('id', id!);
+          if (jobErr) throw jobErr;
         }
       }
       refetchJobContacts();
@@ -430,14 +442,26 @@ const JobDetail = () => {
 
   const setPrimary = async (jobContactId: string, contactId: string) => {
     try {
-      await supabase.from('job_contacts').update({ is_primary: false }).eq('job_id', id!);
-      await supabase.from('job_contacts').update({ is_primary: true }).eq('id', jobContactId);
-      await supabase.from('jobs').update({ contact_id: contactId }).eq('id', id!);
+      const { error: clearErr } = await supabase
+        .from('job_contacts')
+        .update({ is_primary: false })
+        .eq('job_id', id!);
+      if (clearErr) throw clearErr;
+      const { error: setErr } = await supabase
+        .from('job_contacts')
+        .update({ is_primary: true })
+        .eq('id', jobContactId);
+      if (setErr) throw setErr;
+      const { error: jobErr } = await supabase
+        .from('jobs')
+        .update({ contact_id: contactId })
+        .eq('id', id!);
+      if (jobErr) throw jobErr;
       refetchJobContacts();
       queryClient.invalidateQueries({ queryKey: ['job', id] });
       toast.success('Primary contact updated');
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to set primary contact');
     }
   };
 

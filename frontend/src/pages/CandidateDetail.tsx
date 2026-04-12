@@ -1818,7 +1818,14 @@ const CandidateDetail = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
-              await supabase.from('candidates').update({ owner_id: pendingOwnerId }).eq('id', id!);
+              const { error } = await supabase
+                .from('candidates')
+                .update({ owner_id: pendingOwnerId })
+                .eq('id', id!);
+              if (error) {
+                toast.error(error.message || 'Failed to transfer owner');
+                return;
+              }
               queryClient.invalidateQueries({ queryKey: ['candidate', id] });
               queryClient.invalidateQueries({ queryKey: ['candidates'] });
               toast.success('Owner transferred');

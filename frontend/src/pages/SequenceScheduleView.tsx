@@ -50,31 +50,33 @@ export default function SequenceScheduleView() {
   }, [id]);
 
   async function loadData() {
-    // Load sequence
-    const { data: seq } = await supabase
-      .from("sequences")
-      .select("*")
-      .eq("id", id)
-      .single() as any;
-    setSequence(seq);
+    try {
+      // Load sequence
+      const { data: seq, error: seqError } = await supabase
+        .from("sequences")
+        .select("*")
+        .eq("id", id)
+        .single() as any;
+      if (seqError) throw seqError;
+      setSequence(seq);
 
-    // Load scheduled step logs with enrollment details
-    const { data: logs } = await supabase
-      .from("sequence_step_logs")
-      .select(`
-        id, enrollment_id, channel, scheduled_at, status,
-        sequence_enrollments!inner(
-          candidate_id, contact_id,
-          candidates(first_name, last_name),
-          contacts(first_name, last_name)
-        )
-      `)
-      .eq("sequence_enrollments.sequence_id", id)
-      .in("status", ["scheduled", "sent"])
-      .order("scheduled_at", { ascending: true }) as any;
+      // Load scheduled step logs with enrollment details
+      const { data: logs, error: logsError } = await supabase
+        .from("sequence_step_logs")
+        .select(`
+          id, enrollment_id, channel, scheduled_at, status,
+          sequence_enrollments!inner(
+            candidate_id, contact_id,
+            candidates(first_name, last_name),
+            contacts(first_name, last_name)
+          )
+        `)
+        .eq("sequence_enrollments.sequence_id", id)
+        .in("status", ["scheduled", "sent"])
+        .order("scheduled_at", { ascending: true }) as any;
+      if (logsError) throw logsError;
 
-    if (logs) {
-      const mapped: ScheduledSend[] = logs.map((log: any) => {
+      const mapped: ScheduledSend[] = (logs || []).map((log: any) => {
         const enrollment = log.sequence_enrollments;
         const candidate = enrollment?.candidates;
         const contact = enrollment?.contacts;
@@ -96,27 +98,29 @@ export default function SequenceScheduleView() {
         };
       });
       setSends(mapped);
-    }
 
-    // Load daily send counts
-    const { data: dailyLogs } = await supabase
-      .from("daily_send_log")
-      .select("channel, send_date, count")
-      .order("send_date", { ascending: false })
-      .limit(100) as any;
+      // Load daily send counts
+      const { data: dailyLogs, error: dailyError } = await supabase
+        .from("daily_send_log")
+        .select("channel, send_date, count")
+        .order("send_date", { ascending: false })
+        .limit(100) as any;
+      if (dailyError) throw dailyError;
 
-    if (dailyLogs) {
       const counts: Record<string, number> = {};
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-      for (const log of dailyLogs) {
+      for (const log of dailyLogs || []) {
         if (log.send_date === today) {
           counts[log.channel] = (counts[log.channel] || 0) + log.count;
         }
       }
       setDailyCounts(counts);
+    } catch (err: any) {
+      console.error("Failed to load sequence schedule:", err);
+      toast.error(err?.message || "Failed to load sequence schedule");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   // Group sends by day
@@ -145,7 +149,14 @@ export default function SequenceScheduleView() {
   };
 
   const handlePauseSend = async (logId: string) => {
-    await supabase.from("sequence_step_logs").update({ status: "skipped" } as any).eq("id", logId);
+    const { error } = await supabase
+      .from("sequence_step_logs")
+      .update({ status: "skipped" } as any)
+      .eq("id", logId);
+    if (error) {
+      toast.error(error.message || "Failed to skip send");
+      return;
+    }
     setSends((prev) => prev.filter((s) => s.id !== logId));
     toast.success("Send skipped");
   };
