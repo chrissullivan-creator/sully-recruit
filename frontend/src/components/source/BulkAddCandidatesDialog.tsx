@@ -182,6 +182,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast.error('Not authenticated'); return; }
+    const userId = session.user.id;
 
     setImporting(true);
     setProgress(0);
@@ -289,6 +290,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           status,
           source: 'linkedin_hiring_project',
           job_id: jobId,
+          owner_id: userId,
         };
 
         const { data: inserted, error: insertErr } = await supabase
