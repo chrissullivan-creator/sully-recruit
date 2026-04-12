@@ -76,7 +76,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add New Job</DialogTitle>
+          <DialogTitle>Add Job</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">

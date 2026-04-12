@@ -1,5 +1,0 @@
-const markBackOfResume = async () => {
-  await supabase.rpc("mark_candidate_back_of_resume", {
-    candidate_id: candidate.id
-  })
-}

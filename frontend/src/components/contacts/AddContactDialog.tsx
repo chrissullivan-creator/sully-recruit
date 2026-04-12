@@ -139,7 +139,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Add New Contact</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Add Contact</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Send, Loader2, Sparkles, Play, Building, Mail, Linkedin, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface ContactResult {
   id: string;
@@ -77,6 +78,8 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
     let assistantText = '';
     let foundContacts: ContactResult[] | undefined;
     const msgIndex = allMessages.length; // index of the upcoming assistant msg
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
 
     try {
       const resp = await fetch(CHAT_URL, {
@@ -91,6 +94,7 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
             .map((m) => ({ role: m.role, content: m.content })),
           mode: 'contact_search',
         }),
+        signal: controller.signal,
       });
 
       if (!resp.ok || !resp.body) {
@@ -150,11 +154,15 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
         }
       }
     } catch (err: any) {
+      const aborted = err?.name === 'AbortError';
+      const msg = aborted ? 'Joe timed out. Please try again.' : (err?.message || 'Joe had a problem. Please try again.');
+      toast.error(msg);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: `Error: ${err.message}` },
+        { role: 'assistant', content: `Error: ${msg}` },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };

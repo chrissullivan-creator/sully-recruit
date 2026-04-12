@@ -434,7 +434,7 @@ const Candidates = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search candidates... (supports AND, OR, NOT, &quot;quotes&quot;)"
+              placeholder="Search candidates… (supports AND, OR, NOT, &quot;quotes&quot;)"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
               className="w-full h-9 pl-10 pr-8 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -519,7 +519,7 @@ const Candidates = () => {
 
         {isLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading candidates...
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading candidates…
           </div>
         ) : isError ? (
           <div className="text-center py-16">

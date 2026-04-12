@@ -13,13 +13,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 interface AddCandidateDialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children?: React.ReactNode;
 }
 
-export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
-  const [open, setOpen] = useState(false);
+export function AddCandidateDialog({ open: openProp, onOpenChange, children }: AddCandidateDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (isControlled) onOpenChange?.(v);
+    else setInternalOpen(v);
+  };
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -32,6 +42,7 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
     setLoading(true);
 
     try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
       const { error } = await supabase
         .from('candidates')
         .insert([
@@ -41,39 +52,44 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
             full_name: `${firstName} ${lastName}`.trim() || null,
             email,
             phone,
-            status: 'new'
-          }
+            status: 'new',
+            owner_id: userId,
+          },
         ]);
 
       if (error) {
-        console.error(error);
+        toast.error(error.message || 'Failed to add candidate');
         return;
       }
 
-      // Reset form
+      toast.success('Candidate added');
+
       setFirstName('');
       setLastName('');
       setEmail('');
       setPhone('');
       setOpen(false);
 
-      // Refresh candidates list
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
-    } catch (error) {
-      console.error(error);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add candidate');
     } finally {
       setLoading(false);
     }
   };
 
+  const showTrigger = !isControlled || !!children;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {children || <Button>Add Candidate</Button>}
-      </DialogTrigger>
+      {showTrigger && (
+        <DialogTrigger asChild>
+          {children || <Button>Add Candidate</Button>}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Add New Candidate</DialogTitle>
+          <DialogTitle>Add Candidate</DialogTitle>
           <DialogDescription>
             Add a new candidate to your recruitment pipeline.
           </DialogDescription>
@@ -132,7 +148,7 @@ export function AddCandidateDialog({ children }: AddCandidateDialogProps) {
           </div>
           <DialogFooter>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Adding...' : 'Add Candidate'}
+              {loading ? 'Adding…' : 'Add Candidate'}
             </Button>
           </DialogFooter>
         </form>
