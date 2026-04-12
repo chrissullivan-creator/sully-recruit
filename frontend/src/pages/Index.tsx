@@ -64,7 +64,7 @@ const Dashboard = () => {
         .single();
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['sequences'] });
-      navigate(`/sequences/${seq.id}`);
+      navigate(`/sequences/${seq.id}/edit`);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create sequence');
     } finally {

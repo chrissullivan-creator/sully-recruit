@@ -63,14 +63,21 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
         supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
         supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
       ]);
+      if (cRes.error) throw cRes.error;
+      if (ctRes.error) throw ctRes.error;
       const normalize = (p: string) => p.replace(/[^0-9+]/g, '');
       const candidate = cRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
-      if (candidate) { setMatchResult({ matched: true, entity_type: 'candidate', entity_id: candidate.id, entity_name: candidate.full_name }); setMatching(false); return; }
+      if (candidate) { setMatchResult({ matched: true, entity_type: 'candidate', entity_id: candidate.id, entity_name: candidate.full_name }); return; }
       const contact = ctRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
-      if (contact) { setMatchResult({ matched: true, entity_type: 'contact', entity_id: contact.id, entity_name: contact.full_name }); setMatching(false); return; }
+      if (contact) { setMatchResult({ matched: true, entity_type: 'contact', entity_id: contact.id, entity_name: contact.full_name }); return; }
       setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null });
-    } catch { setMatchResult(null); }
-    setMatching(false);
+    } catch (err: any) {
+      console.error('Phone lookup failed:', err);
+      toast.error(err?.message || 'Phone lookup failed');
+      setMatchResult(null);
+    } finally {
+      setMatching(false);
+    }
   };
 
   const handleSave = async () => {
@@ -94,6 +101,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       if (callError) throw callError;
 
       // Create note linked to entity
+      let noteWarning = false;
       if (matchResult?.matched && matchResult.entity_id && matchResult.entity_type) {
         const { error: noteError } = await supabase.from('notes').insert({
           entity_id: matchResult.entity_id,
@@ -101,11 +109,18 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           note: `📞 Call Notes: ${notes}`,
           created_by: user?.id,
         });
-        if (noteError) console.error('Note error:', noteError);
+        if (noteError) {
+          console.error('Note error:', noteError);
+          noteWarning = true;
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
-      toast.success('Call logged successfully');
+      if (noteWarning) {
+        toast.warning('Call logged, but the contact note failed to save');
+      } else {
+        toast.success('Call logged successfully');
+      }
       setPhone(''); setNotes(''); setDuration(''); setMatchResult(null);
       onOpenChange(false);
     } catch (err: any) {

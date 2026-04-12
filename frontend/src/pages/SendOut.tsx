@@ -503,47 +503,73 @@ export default function SendOut() {
         }
       }
 
-      // Update send_out stage or create send_out record
+      // Update send_out stage or create send_out record.
+      // Email already went out — DB failures here should be reported but not
+      // block the post-send UI flow.
+      const postSendWarnings: string[] = [];
       if (id && selectedJobId) {
         // Check if send_out exists for this candidate + job
-        const { data: existingSO } = await supabase
+        const { data: existingSO, error: existingErr } = await supabase
           .from('send_outs')
           .select('id, stage')
           .eq('candidate_id', id)
           .eq('job_id', selectedJobId)
           .limit(1)
           .maybeSingle();
-
-        if (existingSO) {
+        if (existingErr) {
+          console.error('send_outs lookup failed:', existingErr);
+          postSendWarnings.push('send-out lookup');
+        } else if (existingSO) {
           // Advance to 'sent' if currently at new/reached_out/pitch/send_out
           if (['new', 'reached_out', 'pitch', 'send_out'].includes(existingSO.stage)) {
-            await supabase.from('send_outs').update({
+            const { error: updErr } = await supabase.from('send_outs').update({
               stage: 'sent',
               sent_to_client_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             } as any).eq('id', existingSO.id);
+            if (updErr) {
+              console.error('send_outs stage update failed:', updErr);
+              postSendWarnings.push('send-out stage');
+            }
           }
         } else {
-          await supabase.from('send_outs').insert({
+          const { error: insErr } = await supabase.from('send_outs').insert({
             job_id: selectedJobId,
             candidate_id: id,
             stage: 'sent',
             recruiter_id: user?.id,
             sent_to_client_at: new Date().toISOString(),
           } as any);
+          if (insErr) {
+            console.error('send_outs insert failed:', insErr);
+            postSendWarnings.push('send-out record');
+          }
         }
       }
 
       // Update candidate status
       if (id) {
-        await supabase.from('candidates').update({ job_status: 'send_out' } as any).eq('id', id);
+        const { error: candErr } = await supabase
+          .from('candidates')
+          .update({ job_status: 'send_out' } as any)
+          .eq('id', id);
+        if (candErr) {
+          console.error('candidate status update failed:', candErr);
+          postSendWarnings.push('candidate status');
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
       queryClient.invalidateQueries({ queryKey: ['formatted_resumes', id] });
-      toast.success('Send-out email sent! Resume saved & status updated.');
+      if (postSendWarnings.length > 0) {
+        toast.warning(
+          `Send-out email sent, but ${postSendWarnings.join(', ')} failed to update — check the record.`
+        );
+      } else {
+        toast.success('Send-out email sent! Resume saved & status updated.');
+      }
       navigate(`/candidates/${id}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');

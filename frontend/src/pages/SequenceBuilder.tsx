@@ -214,7 +214,7 @@ export default function SequenceBuilder() {
         // 3. Create actions for action nodes
         if (node.type === "action" && node.actions) {
           for (const action of node.actions) {
-            await supabase.from("sequence_actions").insert({
+            const { error: actionErr } = await supabase.from("sequence_actions").insert({
               node_id: dbNode.id,
               channel: action.channel,
               message_body: action.messageBody,
@@ -224,6 +224,7 @@ export default function SequenceBuilder() {
               post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
               respect_send_window: action.respectSendWindow,
             } as any);
+            if (actionErr) throw new Error(`Action save failed (${node.label}): ${actionErr.message}`);
           }
         }
       }
@@ -234,12 +235,13 @@ export default function SequenceBuilder() {
         const toDbId = nodeIdMap[edge.target];
         if (!fromDbId || !toDbId) continue;
 
-        await supabase.from("sequence_branches").insert({
+        const { error: branchErr } = await supabase.from("sequence_branches").insert({
           from_node_id: fromDbId,
           to_node_id: toDbId,
           condition: edge.condition || "no_response",
           after_days: edge.afterDays || null,
         } as any);
+        if (branchErr) throw new Error(`Branch save failed: ${branchErr.message}`);
       }
 
       return sequenceId;
