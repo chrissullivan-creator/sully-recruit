@@ -129,9 +129,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const params = new URLSearchParams({ account_id });
 
-      // Try project-based resume path
       const resp = await fetch(
-        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
+        `${baseUrl}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
         { headers },
       );
 
