@@ -206,16 +206,16 @@ export default function Source() {
       );
 
       const merged: HiringProject[] = [];
-      const errors: string[] = [];
-      for (const r of results) {
-        if (r.status === 'fulfilled') merged.push(...r.value);
-        else errors.push(r.reason?.message || 'Unknown error');
-      }
-
-      // Surface API errors so the user can see what's failing
-      if (errors.length > 0 && merged.length === 0) {
-        toast.error(`Unipile API error: ${errors[0]}`);
-        console.error('All project fetches failed:', errors);
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const acctLabel = filtered[i]?.label || `Account ${i + 1}`;
+        if (r.status === 'fulfilled') {
+          merged.push(...r.value);
+        } else {
+          const errMsg = r.reason?.message || 'Unknown error';
+          toast.error(`${acctLabel}: ${errMsg}`);
+          console.error(`[Source] ${acctLabel} project fetch failed:`, errMsg);
+        }
       }
 
       // Sort newest first

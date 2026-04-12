@@ -90,6 +90,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Route by action
+    if (action === "list_accounts") {
+      // Diagnostic: list all Unipile accounts to find correct IDs
+      const resp = await fetch(`${baseUrl}/accounts`, { headers });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
+      }
+      const data = await resp.json();
+      return res.status(200).json(data);
+    }
+
     if (action === "list_projects") {
       const items = await fetchAllPages(`${baseUrl}/linkedin/projects`);
       if (res.headersSent) return;
