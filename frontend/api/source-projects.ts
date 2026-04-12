@@ -91,9 +91,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Route by action
     if (action === "list_projects") {
-      const items = await fetchAllPages(`${baseUrl}/linkedin/hiring_projects`);
-      if (res.headersSent) return; // early return from 429 inside fetchAllPages
-      return res.status(200).json({ items });
+      // Try primary endpoint, fallback to alternative paths if 404/403
+      const endpoints = [
+        `${baseUrl}/linkedin/hiring_projects`,
+        `${baseUrl}/hiring_projects`,
+        `${baseUrl}/linkedin/recruiter/projects`,
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const items = await fetchAllPages(endpoint);
+          if (res.headersSent) return;
+          return res.status(200).json({ items });
+        } catch (err: any) {
+          const msg = err?.message || "";
+          // If 404 or 403, try next endpoint
+          if (msg.includes("404") || msg.includes("403")) {
+            console.log(`Endpoint ${endpoint} returned ${msg}, trying next...`);
+            continue;
+          }
+          throw err; // Other errors bubble up
+        }
+      }
+
+      // All endpoints failed
+      console.error("All hiring project endpoints returned 403/404");
+      return res.status(502).json({
+        error: "Unipile hiring projects API not accessible. The connected accounts may not have LinkedIn Recruiter access.",
+      });
     }
 
     if (action === "list_applicants") {
