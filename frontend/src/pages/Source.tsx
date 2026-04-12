@@ -157,11 +157,14 @@ export default function Source() {
       try {
         const [{ data: ashley }, { data: nancy }, { data: chris }] = await Promise.all([
           supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Ashley%').eq('is_active', true).maybeSingle(),
+            .ilike('account_label', '%Ashley%').eq('is_active', true)
+            .not('unipile_account_id', 'is', null).maybeSingle(),
           supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Nancy%').eq('is_active', true).maybeSingle(),
+            .ilike('account_label', '%Nancy%').eq('is_active', true)
+            .not('unipile_account_id', 'is', null).maybeSingle(),
           supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Chris Sullivan%').eq('is_active', true).maybeSingle(),
+            .ilike('account_label', '%Chris Sullivan%').eq('is_active', true)
+            .not('unipile_account_id', 'is', null).maybeSingle(),
         ]);
         setAccounts([
           { label: 'Ashley', mode: 'ashley', accountId: ashley?.unipile_account_id ?? null, ownerUserId: ashley?.owner_user_id ?? null },
