@@ -176,7 +176,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           const csvStage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
           const skills = c.skills ? c.skills.split(/[,;|]/).map((s: string) => s.trim()).filter(Boolean) : [];
           const row: Record<string, any> = {
-            user_id: user.id, first_name: c.first_name, last_name: c.last_name,
+            first_name: c.first_name, last_name: c.last_name,
             full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
             email: c.email || '',
             status: VALID_CANDIDATE_STAGES.includes(csvStage) ? csvStage : 'new',
@@ -212,7 +212,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           const e = (r.mapped as any).email?.toLowerCase().trim();
           const id = existingMap.get(e);
           const row = buildRow(r);
-          delete row.user_id; delete row.status; delete row.skills;
+          delete row.status; delete row.skills;
           await supabase.from('candidates').update(row).eq('id', id);
           processed++;
         }
