@@ -151,7 +151,7 @@ Deno.serve(async (req: Request) => {
 
         const updates: Record<string, string> = {};
         if (!existing.email) {
-          const v = extractField(row, "work_email", "email", "personal_email");
+          const v = extractField(row, "Work Email", "work_email", "email", "personal_email");
           if (v) updates.email = v;
         }
         if (!existing.phone) {
