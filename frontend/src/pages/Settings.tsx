@@ -82,6 +82,15 @@ const Settings = () => {
   const [outlookConfig, setOutlookConfig] = useState<IntegrationConfig>({});
   const [outlookActive, setOutlookActive] = useState(false);
 
+  // Clay enrichment state
+  const [clayConfig, setClayConfig] = useState<IntegrationConfig>({
+    api_key: '',
+    table_id_candidates: '',
+    table_id_contacts: '',
+    webhook_secret: '',
+  });
+  const [clayActive, setClayActive] = useState(false);
+
   // Email signature
   const [signatureConfig, setSignatureConfig] = useState<IntegrationConfig>({
     signature_html: '',
@@ -161,6 +170,10 @@ const Settings = () => {
           case 'outlook':
             setOutlookConfig((prev) => ({ ...prev, ...cfg }));
             setOutlookActive(row.is_active);
+            break;
+          case 'clay_enrichment':
+            setClayConfig((prev) => ({ ...prev, ...cfg }));
+            setClayActive(row.is_active);
             break;
         }
       });
@@ -672,6 +685,98 @@ Senior Recruiter | Your Company
                           )}
                         </Button>
                       </div>
+                    </div>
+
+                    {/* Clay Enrichment */}
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          clayActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
+                        )}>
+                          <Wrench className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-sm font-semibold text-foreground">Clay Enrichment</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Enrich candidates &amp; contacts with missing email, phone, and LinkedIn URL via Clay.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="clay-toggle" className="text-xs text-muted-foreground">
+                            Send to Clay
+                          </Label>
+                          <Switch
+                            id="clay-toggle"
+                            checked={clayActive}
+                            onCheckedChange={(checked) => {
+                              setClayActive(checked);
+                              saveIntegration('clay_enrichment', clayConfig, checked);
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {clayActive && (
+                        <div className="space-y-3 pt-2 border-t border-border">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Clay API Key</Label>
+                            <Input
+                              type={showPasswords['clay_api_key'] ? 'text' : 'password'}
+                              placeholder="Your Clay API key"
+                              value={clayConfig.api_key}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, api_key: e.target.value }))}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Clay Table ID — Candidates</Label>
+                            <Input
+                              placeholder="Clay table/source ID for candidates"
+                              value={clayConfig.table_id_candidates}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_candidates: e.target.value }))}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Clay Table ID — Contacts</Label>
+                            <Input
+                              placeholder="Clay table/source ID for contacts"
+                              value={clayConfig.table_id_contacts}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, table_id_contacts: e.target.value }))}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Webhook Secret (optional)</Label>
+                            <Input
+                              type={showPasswords['clay_webhook'] ? 'text' : 'password'}
+                              placeholder="Shared secret for webhook validation"
+                              value={clayConfig.webhook_secret}
+                              onChange={(e) => setClayConfig((c) => ({ ...c, webhook_secret: e.target.value }))}
+                              className="mt-1"
+                            />
+                          </div>
+                          <Button
+                            variant="gold"
+                            size="sm"
+                            disabled={isSaving('clay_enrichment')}
+                            onClick={() => {
+                              if (!clayConfig.api_key?.trim()) {
+                                toast.error('Clay API Key is required');
+                                return;
+                              }
+                              saveIntegration('clay_enrichment', clayConfig, clayActive);
+                            }}
+                          >
+                            {isSaving('clay_enrichment') ? (
+                              <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Saving...</>
+                            ) : (
+                              'Save Clay Settings'
+                            )}
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Microsoft / Outlook OAuth */}
