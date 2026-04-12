@@ -173,13 +173,14 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
       if (entityType === 'candidates') {
         const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
-          const stage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
+          const csvStage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
           const skills = c.skills ? c.skills.split(/[,;|]/).map((s: string) => s.trim()).filter(Boolean) : [];
           const row: Record<string, any> = {
             user_id: user.id, first_name: c.first_name, last_name: c.last_name,
             full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
-            email: c.email || '', stage: VALID_CANDIDATE_STAGES.includes(stage) ? stage : 'back_of_resume',
-            status: 'new', skills,
+            email: c.email || '',
+            status: VALID_CANDIDATE_STAGES.includes(csvStage) ? csvStage : 'new',
+            skills,
           };
           if (c.phone) row.phone = c.phone;
           if (c.current_title) row.current_title = c.current_title;
@@ -211,7 +212,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           const e = (r.mapped as any).email?.toLowerCase().trim();
           const id = existingMap.get(e);
           const row = buildRow(r);
-          delete row.user_id; delete row.status; delete row.stage; delete row.skills;
+          delete row.user_id; delete row.status; delete row.skills;
           await supabase.from('candidates').update(row).eq('id', id);
           processed++;
         }
