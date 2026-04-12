@@ -16,11 +16,14 @@ async function findEntity(
   unipileId: string | null,
   linkedinUrl: string | null,
 ): Promise<{ type: string; id: string; owner_user_id: string | null } | null> {
+  // Match by any Unipile ID column (recruiter, classic, or provider_id)
   if (unipileId) {
     const { data } = await supabase
       .from("candidates")
       .select("id, owner_user_id")
-      .eq("unipile_id", unipileId)
+      .or(
+        `unipile_recruiter_id.eq.${unipileId},unipile_classic_id.eq.${unipileId},unipile_provider_id.eq.${unipileId}`,
+      )
       .maybeSingle();
     if (data) return { type: "candidate", ...data };
   }
@@ -39,7 +42,9 @@ async function findEntity(
     const { data } = await supabase
       .from("contacts")
       .select("id, owner_user_id")
-      .eq("unipile_id", unipileId)
+      .or(
+        `unipile_recruiter_id.eq.${unipileId},unipile_classic_id.eq.${unipileId},unipile_provider_id.eq.${unipileId}`,
+      )
       .maybeSingle();
     if (data) return { type: "contact", ...data };
   }
@@ -149,11 +154,13 @@ export const backfillLinkedinMessages = schedules.task({
       if (!chatId) continue;
 
       try {
-        const providerType = String(chat.provider_type ?? chat.type ?? "").toLowerCase();
-        const channel = providerType.includes("sales")
-          ? "linkedin_sales_nav"
-          : providerType.includes("recruiter")
-            ? "linkedin_recruiter"
+        // Detect channel from folder/content_type (reliable) — provider_type is often missing
+        const folders = (chat.folder ?? []) as string[];
+        const contentType = String(chat.content_type ?? "").toLowerCase();
+        const channel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail"
+          ? "linkedin_recruiter"
+          : folders.includes("INBOX_LINKEDIN_SALES_NAV")
+            ? "linkedin_sales_nav"
             : "linkedin";
 
         const attendees: any[] = chat.attendees ?? chat.members ?? [];
@@ -162,23 +169,31 @@ export const backfillLinkedinMessages = schedules.task({
             a.id !== account.unipile_account_id &&
             !String(a.id ?? "").includes(account.unipile_account_id),
         );
-        const otherUnipileId = otherAttendee?.provider_id ?? otherAttendee?.id ?? null;
+        // Use attendee_provider_id from chat (top-level) as fallback — more reliable for InMails
+        const otherUnipileId =
+          otherAttendee?.provider_id ?? otherAttendee?.id ??
+          chat.attendee_provider_id ?? null;
         const otherUrl = otherAttendee?.url ?? otherAttendee?.profile_url ?? null;
 
         const entity = await findEntity(supabase, otherUnipileId, otherUrl);
 
-        // Stamp unipile_id if we found a match and they don't have one
+        // Stamp the appropriate unipile ID column when we match an entity
         if (entity && otherUnipileId) {
           const table = entity.type === "candidate" ? "candidates" : "contacts";
+          const idColumn = channel === "linkedin_recruiter"
+            ? "unipile_recruiter_id"
+            : channel === "linkedin_sales_nav"
+              ? "unipile_sales_nav_id"
+              : "unipile_classic_id";
           const { data: current } = await supabase
             .from(table)
-            .select("unipile_id")
+            .select(idColumn)
             .eq("id", entity.id)
             .maybeSingle();
-          if (!current?.unipile_id) {
+          if (!current?.[idColumn]) {
             await supabase
               .from(table)
-              .update({ unipile_id: otherUnipileId, updated_at: new Date().toISOString() })
+              .update({ [idColumn]: otherUnipileId, updated_at: new Date().toISOString() } as any)
               .eq("id", entity.id);
           }
         }
@@ -222,7 +237,8 @@ export const backfillLinkedinMessages = schedules.task({
           }
 
           const isSender =
-            msg.is_sender === true || msg.sender_id === account.unipile_account_id;
+            msg.is_sender === true || msg.is_sender === 1 ||
+            msg.sender_id === account.unipile_account_id;
           const direction = isSender ? "outbound" : "inbound";
           const sentAt = msg.timestamp ?? msg.sent_at ?? msg.created_at ?? new Date().toISOString();
           const body = msg.text ?? msg.body ?? msg.content ?? "";
