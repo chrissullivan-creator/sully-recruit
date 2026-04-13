@@ -137,7 +137,7 @@ const CompanyDetail = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
-      const path = `companies/${id}/contracts/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const path = `companies/${id}/contracts/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { error: dbErr } = await supabase.from('company_contracts').insert({

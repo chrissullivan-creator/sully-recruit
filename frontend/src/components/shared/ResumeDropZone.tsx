@@ -36,7 +36,7 @@ interface ParsedData {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function uploadFile(file: File, session: any) {
-  const storagePath = `${session.user.id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  const storagePath = `${session.user.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
   console.log('[ResumeDropZone] uploading to storage:', storagePath);
   const { data, error } = await supabase.storage
     .from('resumes')

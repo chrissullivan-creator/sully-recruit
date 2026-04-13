@@ -239,7 +239,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
               // Upload to Supabase Storage
               const contentType = resumeData.content_type || 'application/pdf';
               const ext = contentType.includes('pdf') ? 'pdf' : contentType.includes('docx') ? 'docx' : 'pdf';
-              resumeFileName = `${applicant.first_name}_${applicant.last_name}_resume.${ext}`.replace(/\s+/g, '_');
+              resumeFileName = `${applicant.first_name}_${applicant.last_name}_resume.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
               const storagePath = `${session.user.id}/${Date.now()}_${resumeFileName}`;
 
               const binaryData = Uint8Array.from(atob(resumeData.data_base64), c => c.charCodeAt(0));
