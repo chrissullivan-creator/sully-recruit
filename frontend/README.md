@@ -71,3 +71,26 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## Supabase duplicate candidate merge (MCP/RPC)
+
+A merge RPC is available for deduplicating candidates safely:
+
+- Function: `public.merge_duplicate_candidate(p_survivor_id uuid, p_merged_id uuid, p_duplicate_row_id uuid default null)`
+- What it does:
+  1. Repoints all `public` single-column foreign keys referencing `candidates(id)` from merged -> survivor.
+  2. Deletes the merged candidate.
+  3. Optionally marks `duplicate_candidates.status = 'merged'` and stores merge metadata.
+  4. Writes an audit row into `candidate_merge_log`.
+
+Example SQL call:
+
+```sql
+select public.merge_duplicate_candidate(
+  'SURVIVOR_CANDIDATE_UUID',
+  'MERGED_CANDIDATE_UUID',
+  'OPTIONAL_DUPLICATE_ROW_UUID'
+);
+```
+
+You can invoke this from Supabase MCP via SQL/RPC once migrations are applied.
