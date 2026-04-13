@@ -171,60 +171,72 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
       let processed = 0;
 
       if (entityType === 'candidates') {
-        const buildRow = (r: ParsedResult) => {
-          const c = r.mapped as any;
-          const csvStage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : 'back_of_resume';
-          const skills = c.skills ? c.skills.split(/[,;|]/).map((s: string) => s.trim()).filter(Boolean) : [];
-          const row: Record<string, any> = {
-            first_name: c.first_name, last_name: c.last_name,
-            full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
-            email: c.email || '',
-            status: VALID_CANDIDATE_STAGES.includes(csvStage) ? csvStage : 'new',
-            skills,
-          };
-          if (c.phone) row.phone = c.phone;
-          if (c.current_title) row.current_title = c.current_title;
-          if (c.current_company) row.current_company = c.current_company;
-          if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
-          if (c.location_text) row.location_text = c.location_text;
-          if (c.source) row.source = c.source;
-          if (c.notes) row.notes = c.notes;
-          return row;
+        const normalizeEmail = (e: string | null | undefined): string | null => {
+          if (!e) return null;
+          const v = e.trim().toLowerCase();
+          return v || null;
         };
 
-        // Prefetch existing emails
-        const emailsInCsv = valid.map(r => (r.mapped as any).email?.toLowerCase().trim()).filter(Boolean);
-        const { data: existing } = await supabase
-          .from('candidates').select('id, email').in('email', emailsInCsv);
-        const existingMap = new Map((existing ?? []).map((e: any) => [e.email?.toLowerCase().trim(), e.id]));
+        for (let i = 0; i < valid.length; i += BATCH) {
+          const batch = valid.slice(i, i + BATCH);
+          const rows = batch.map(r => {
+            const c = r.mapped as any;
+            const csvStage = c.stage ? c.stage.toLowerCase().replace(/\s/g, '_') : '';
+            const skills = c.skills ? c.skills.split(/[,;|]/).map((s: string) => s.trim()).filter(Boolean) : [];
 
-        const toUpdate = valid.filter(r => {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
-          return e && existingMap.has(e);
-        });
-        const toInsert = valid.filter(r => {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
-          return !e || !existingMap.has(e);
-        });
+            // Build payload: only include fields with actual values from CSV
+            // so we don't stomp existing enriched data with empty strings
+            const payload: Record<string, any> = {
+              first_name: c.first_name || undefined,
+              last_name: c.last_name || undefined,
+              full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined,
+              email: c.email || undefined,
+              normalized_email: normalizeEmail(c.email),
+              phone: c.phone || undefined,
+              current_title: c.current_title || undefined,
+              current_company: c.current_company || undefined,
+              linkedin_url: c.linkedin_url || undefined,
+              location_text: c.location_text || undefined,
+              source: c.source || undefined,
+              notes: c.notes || undefined,
+              status: csvStage && VALID_CANDIDATE_STAGES.includes(csvStage) ? csvStage : undefined,
+              skills: skills.length > 0 ? skills : undefined,
+              updated_at: new Date().toISOString(),
+            };
 
-        // Update existing records one by one (update by id to avoid constraint issues)
-        for (const r of toUpdate) {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
-          const id = existingMap.get(e);
-          const row = buildRow(r);
-          delete row.status; delete row.skills;
-          await supabase.from('candidates').update(row).eq('id', id);
-          processed++;
-        }
+            // Strip undefined/empty values so existing data isn't clobbered
+            Object.keys(payload).forEach(key => {
+              if (payload[key] === undefined || payload[key] === '') {
+                delete payload[key];
+              }
+            });
 
-        // Insert new records in batches
-        if (toInsert.length > 0) {
-          const rows = toInsert.map(buildRow);
-          for (let i = 0; i < rows.length; i += BATCH) {
-            const { error } = await supabase.from('candidates').insert(rows.slice(i, i + BATCH) as any);
+            return payload;
+          });
+
+          // Rows with an email can be upserted (conflict on normalized_email);
+          // rows without email get plain-inserted (no conflict key to match on)
+          const upsertRows = rows.filter(r => r.normalized_email);
+          const insertRows = rows.filter(r => !r.normalized_email);
+
+          if (upsertRows.length > 0) {
+            const { error } = await supabase
+              .from('candidates')
+              .upsert(upsertRows as any, {
+                onConflict: 'normalized_email',
+                ignoreDuplicates: false,
+              });
             if (error) throw error;
-            processed += Math.min(BATCH, rows.length - i);
           }
+
+          if (insertRows.length > 0) {
+            const { error } = await supabase
+              .from('candidates')
+              .insert(insertRows as any);
+            if (error) throw error;
+          }
+
+          processed += batch.length;
         }
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
 
