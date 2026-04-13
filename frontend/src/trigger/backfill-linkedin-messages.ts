@@ -122,7 +122,7 @@ export const backfillLinkedinMessages = schedules.task({
 
     const { data: account } = await supabase
       .from("integration_accounts")
-      .select("id, email_address, unipile_account_id, owner_user_id")
+      .select("id, email_address, unipile_account_id, owner_user_id, account_type")
       .eq("email_address", accountEmail)
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
@@ -154,12 +154,14 @@ export const backfillLinkedinMessages = schedules.task({
       if (!chatId) continue;
 
       try {
-        // Detect channel from folder/content_type (reliable) — provider_type is often missing
+        // Detect channel from folder/content_type, falling back to integration
+        // account_type when Unipile doesn't surface folder info reliably.
         const folders = (chat.folder ?? []) as string[];
         const contentType = String(chat.content_type ?? "").toLowerCase();
-        const channel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail"
+        const acctType = (account as any).account_type ?? "";
+        const channel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail" || acctType === "linkedin_recruiter"
           ? "linkedin_recruiter"
-          : folders.includes("INBOX_LINKEDIN_SALES_NAV")
+          : folders.includes("INBOX_LINKEDIN_SALES_NAV") || acctType === "sales_navigator"
             ? "linkedin_sales_nav"
             : "linkedin";
 

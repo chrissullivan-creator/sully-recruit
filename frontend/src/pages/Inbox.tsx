@@ -1281,7 +1281,7 @@ export default function Inbox() {
       // Non-admin: only show threads from this user's integration accounts
       if (!isAdmin && userId) {
         if (myAccounts.length > 0) {
-          query = query.in('account_id', myAccounts);
+          query = query.in('integration_account_id', myAccounts);
         } else {
           return [];
         }
@@ -1297,7 +1297,7 @@ export default function Inbox() {
     // Admin owner filter — restrict to selected team member's accounts
     if (isAdmin && ownerFilter !== 'all') {
       const member = teamMembers.find((m: any) => m.email === ownerFilter);
-      if (member && !member.accountIds.includes(t.account_id)) return false;
+      if (member && !member.accountIds.includes(t.integration_account_id)) return false;
     }
 
     // Channel filters

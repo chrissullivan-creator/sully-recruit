@@ -52,10 +52,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
-  // Detect LinkedIn variant (classic / Recruiter / Sales Navigator) from the
-  // event. Unipile surfaces this under several keys depending on event shape,
-  // so check the common ones. Mirrors the backfill's classification logic in
-  // backfill-linkedin-messages.ts.
+  // Detect LinkedIn variant (classic / Recruiter / Sales Navigator).
+  // Primary: check event metadata from Unipile.
+  // Fallback: look up the integration account's account_type by unipile_account_id,
+  // since Unipile event metadata is often missing the provider type.
   const providerType = String(
     messageData.provider_type ??
     messageData.chat?.provider_type ??
@@ -64,11 +64,24 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     event.account_type ??
     ""
   ).toLowerCase();
-  const channel = providerType.includes("sales")
+  let channel = providerType.includes("sales")
     ? "linkedin_sales_nav"
     : providerType.includes("recruiter")
       ? "linkedin_recruiter"
       : "linkedin";
+  // If event metadata didn't classify it, check the integration account type
+  if (channel === "linkedin") {
+    const eventAccountId = messageData.account_id ?? event.account_id ?? messageData.chat?.account_id;
+    if (eventAccountId) {
+      const { data: ia } = await supabase
+        .from("integration_accounts")
+        .select("account_type")
+        .eq("unipile_account_id", eventAccountId)
+        .maybeSingle();
+      if (ia?.account_type === "linkedin_recruiter") channel = "linkedin_recruiter";
+      else if (ia?.account_type === "sales_navigator") channel = "linkedin_sales_nav";
+    }
+  }
 
   if (!senderId) {
     logger.info("No sender ID in message event");
