@@ -16,7 +16,7 @@ import {
   UserCheck, Target, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
-  PenSquare, Plus, Paperclip, X as XIcon, Trash2,
+  PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -79,9 +79,8 @@ interface Message {
 }
 
 // ---------- Constants ----------
-// All LinkedIn variants (classic, Recruiter, Sales Nav) render under the
-// single "LinkedIn" tab — the per-thread badge distinguishes them.
-const LINKEDIN_CHANNELS = ['linkedin', 'linkedin_recruiter', 'linkedin_sales_nav'] as const;
+// Classic LinkedIn messages only — Recruiter InMails get their own tab.
+const LINKEDIN_CHANNELS = ['linkedin'] as const;
 
 const CHANNEL_ICONS: Record<string, React.ElementType> = {
   email: Mail,
@@ -591,8 +590,17 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     if (!threadId) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('conversations').delete().eq('id', threadId);
-      if (error) { toast.error(error.message || 'Failed to delete thread'); return; }
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token || '';
+      const res = await fetch('/api/delete-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversation_id: threadId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to delete thread');
+      }
       toast.success('Conversation deleted');
       queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
       onDeleted?.();
@@ -1202,6 +1210,7 @@ export default function Inbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
 
   // Get current user for permission check
   const { data: currentUser } = useQuery({
@@ -1230,6 +1239,35 @@ export default function Inbox() {
     },
   });
 
+  // For admins: load team members with their integration account IDs for the owner filter
+  const { data: teamMembers = [] } = useQuery({
+    queryKey: ['team_members_inbox'],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('integration_accounts')
+        .select('id, account_email, owner_user_id')
+        .eq('is_active', true);
+      if (error) throw error;
+      // Group account IDs by email (one person may have multiple accounts)
+      const byEmail: Record<string, { label: string; accountIds: string[] }> = {};
+      for (const acct of data || []) {
+        const email = acct.account_email || 'Unknown';
+        const label = email.split('@')[0]?.split('.')
+          .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+          .join(' ') || email;
+        if (!byEmail[email]) byEmail[email] = { label, accountIds: [] };
+        byEmail[email].accountIds.push(acct.id);
+      }
+      return Object.entries(byEmail).map(([email, { label, accountIds }]) => ({
+        email,
+        label,
+        accountIds,
+      }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
     enabled: !!userId,
@@ -1256,10 +1294,17 @@ export default function Inbox() {
   });
 
   const filtered = allThreads.filter((t) => {
-    // Channel filter (LinkedIn tab covers classic, Recruiter, and Sales Nav)
+    // Admin owner filter — restrict to selected team member's accounts
+    if (isAdmin && ownerFilter !== 'all') {
+      const member = teamMembers.find((m: any) => m.email === ownerFilter);
+      if (member && !member.accountIds.includes(t.account_id)) return false;
+    }
+
+    // Channel filters
     if (filterTab === 'email' && t.channel !== 'email') return false;
     if (filterTab === 'sms' && t.channel !== 'sms') return false;
     if (filterTab === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
+    if (filterTab === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
     if (filterTab === 'candidates' && !t.candidate_id) return false;
     if (filterTab === 'contacts' && !t.contact_id) return false;
     if (filterTab === 'unlinked' && (t.candidate_id || t.contact_id)) return false;
@@ -1344,11 +1389,12 @@ export default function Inbox() {
 
           {/* Channel filters */}
           <div className="px-3 pt-1.5 pb-2.5">
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               {[
                 { key: 'email', label: 'Email', Icon: Mail },
                 { key: 'sms', label: 'SMS', Icon: MessageSquare },
                 { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
+                { key: 'recruiter', label: 'Recruiter', Icon: Target },
               ].map(({ key, label, Icon: Ico }) => (
                 <button
                   key={key}
@@ -1364,6 +1410,20 @@ export default function Inbox() {
                   {label}
                 </button>
               ))}
+
+              {/* Admin user filter */}
+              {isAdmin && teamMembers.length > 0 && (
+                <select
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  className="text-[11px] font-medium px-2 py-1 rounded-full border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer ml-auto"
+                >
+                  <option value="all">All team</option>
+                  {teamMembers.map((m: any) => (
+                    <option key={m.email} value={m.email}>{m.label}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 

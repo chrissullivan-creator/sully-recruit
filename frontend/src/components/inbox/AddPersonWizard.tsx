@@ -114,6 +114,17 @@ export function AddPersonWizard({
     staleTime: 5 * 60 * 1000,
   });
 
+  // Auto-resolve company_id from company name after enrichment
+  useEffect(() => {
+    if (!form.company || form.company_id) return;
+    const match = (companies as any[]).find(
+      (c) => c.name?.toLowerCase() === form.company.toLowerCase()
+    );
+    if (match) {
+      setForm(prev => ({ ...prev, company_id: match.id }));
+    }
+  }, [form.company, form.company_id, companies]);
+
   // Get auth token for API calls
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
@@ -295,13 +306,22 @@ export function AddPersonWizard({
     setSaving(true);
 
     try {
+      // Safety-net: resolve company_id for contacts if user typed a matching company name
+      let resolvedForm = form;
+      if (!form.company_id && form.company && personType === 'contact') {
+        const match = (companies as any[]).find(
+          (c) => c.name?.toLowerCase() === form.company.trim().toLowerCase()
+        );
+        if (match) resolvedForm = { ...form, company_id: match.id };
+      }
+
       const token = await getToken();
       const res = await fetch('/api/add-person', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           type: personType,
-          data: form,
+          data: resolvedForm,
           conversation_id: threadId,
         }),
       });

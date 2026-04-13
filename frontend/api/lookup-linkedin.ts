@@ -157,7 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         first_name: parts[0] ?? "",
         last_name: parts.slice(1).join(" "),
         headline: attendeeData.headline ?? attendeeData.title ?? undefined,
-        company: attendeeData.company ?? undefined,
+        company: attendeeData.company ?? attendeeData.current_company ?? attendeeData.company_name ?? attendeeData.organization ?? undefined,
         location: attendeeData.location ?? undefined,
         public_profile_url:
           attendeeData.public_profile_url ??
