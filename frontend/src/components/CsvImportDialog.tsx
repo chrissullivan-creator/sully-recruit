@@ -6,8 +6,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { Upload, CheckCircle2, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, Loader2, ArrowLeft, Briefcase } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { useJobs } from '@/hooks/useData';
 
 type Step = 'upload' | 'preview' | 'done';
 interface MappedRow {
@@ -71,6 +73,17 @@ const VALID_CANDIDATE_STAGES = ['back_of_resume','pitch','send_out','submitted',
 const VALID_JOB_STAGES = ['lead','hot','offer_made','closed_won','closed_lost'];
 const VALID_PRIORITIES = ['low','medium','high'];
 
+const JOB_STAGES = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'back_of_resume', label: 'Back of Resume' },
+  { value: 'reached_out', label: 'Reached Out' },
+  { value: 'pitch', label: 'Pitch / Send Out' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'interview', label: 'Interview' },
+  { value: 'offer', label: 'Offer' },
+  { value: 'placed', label: 'Placement' },
+];
+
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { headers: [], rows: [] };
@@ -123,6 +136,9 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [updatedCount, setUpdatedCount] = useState(0);
+  const [selectedJobId, setSelectedJobId] = useState<string>('');
+  const [selectedJobStage, setSelectedJobStage] = useState<string>('lead');
+  const { data: jobs = [] } = useJobs();
 
   const aliases = entityType === 'jobs' ? JOB_ALIASES : entityType === 'contacts' ? CONTACT_ALIASES : CANDIDATE_ALIASES;
   const fieldLabels = entityType === 'jobs' ? JOB_FIELDS : entityType === 'contacts' ? CONTACT_FIELDS : CANDIDATE_FIELDS;
@@ -131,7 +147,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
   const mappedCount = Object.values(columnMap).filter(Boolean).length;
   const unmappedCount = Object.values(columnMap).filter(v => v === null).length;
 
-  const reset = () => { setStep('upload'); setFileName(''); setRawHeaders([]); setRawRows([]); setColumnMap({}); setResults([]); setActiveTab('mapping'); setImportedCount(0); setUpdatedCount(0); };
+  const reset = () => { setStep('upload'); setFileName(''); setRawHeaders([]); setRawRows([]); setColumnMap({}); setResults([]); setActiveTab('mapping'); setImportedCount(0); setUpdatedCount(0); setSelectedJobId(''); setSelectedJobStage('lead'); };
   const handleClose = () => { reset(); onOpenChange(false); };
 
   const processFile = useCallback((file: File) => {
@@ -203,6 +219,12 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
               skills: skills.length > 0 ? skills : undefined,
               updated_at: new Date().toISOString(),
             };
+
+            // Assign to job if user selected one
+            if (selectedJobId) {
+              payload.job_id = selectedJobId;
+              payload.job_status = selectedJobStage;
+            }
 
             // Strip undefined/empty values so existing data isn't clobbered
             Object.keys(payload).forEach(key => {
@@ -428,15 +450,46 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           )}
         </div>
         {step === 'preview' && (
-          <div className="px-6 py-4 border-t border-border shrink-0 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {invalid.length > 0 && `${invalid.length} rows with issues will be skipped. `}{valid.length} row{valid.length!==1?'s':''} will be imported.{unmappedCount > 0 && <span className="text-yellow-400 ml-1">({unmappedCount} columns skipped)</span>}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-              <Button variant="gold" onClick={handleImport} disabled={importing||valid.length===0}>
-                {importing?<><Loader2 className="h-4 w-4 animate-spin mr-1"/>Importing...</>:<>Import {valid.length} {entityType==='jobs'?'job':entityType==='contacts'?'contact':'candidate'}{valid.length!==1?'s':''}</>}
-              </Button>
+          <div className="border-t border-border shrink-0">
+            {entityType === 'candidates' && (
+              <div className="px-6 py-3 border-b border-border bg-muted/30 flex items-end gap-4">
+                <div className="space-y-1 flex-1">
+                  <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Briefcase className="h-3 w-3" />Assign to Job (optional)</Label>
+                  <Select value={selectedJobId || '__none__'} onValueChange={val => { setSelectedJobId(val === '__none__' ? '' : val); }}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No job" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— No job —</SelectItem>
+                      {jobs.map(job => (
+                        <SelectItem key={job.id} value={job.id}>
+                          {job.title} {job.company_name ?? (job as any).companies?.name ? `at ${job.company_name ?? (job as any).companies?.name}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedJobId && (
+                  <div className="space-y-1 w-44">
+                    <Label className="text-xs text-muted-foreground">Stage</Label>
+                    <Select value={selectedJobStage} onValueChange={setSelectedJobStage}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {JOB_STAGES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="px-6 py-4 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {invalid.length > 0 && `${invalid.length} rows with issues will be skipped. `}{valid.length} row{valid.length!==1?'s':''} will be imported.{unmappedCount > 0 && <span className="text-yellow-400 ml-1">({unmappedCount} columns skipped)</span>}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                <Button variant="gold" onClick={handleImport} disabled={importing||valid.length===0}>
+                  {importing?<><Loader2 className="h-4 w-4 animate-spin mr-1"/>Importing...</>:<>Import {valid.length} {entityType==='jobs'?'job':entityType==='contacts'?'contact':'candidate'}{valid.length!==1?'s':''}</>}
+                </Button>
+              </div>
             </div>
           </div>
         )}
