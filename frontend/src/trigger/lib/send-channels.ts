@@ -1,5 +1,6 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getMicrosoftGraphCredentials, getUnipileBaseUrl, getAppSetting } from "./supabase";
+import { getUnipileBaseUrl, getAppSetting } from "./supabase";
+import { getMicrosoftAccessToken } from "./microsoft-graph";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -20,32 +21,6 @@ import { getMicrosoftGraphCredentials, getUnipileBaseUrl, getAppSetting } from "
 // ─────────────────────────────────────────────────────────────────────────────
 // EMAIL via Microsoft Graph — per-user mailbox
 // ─────────────────────────────────────────────────────────────────────────────
-
-async function getMicrosoftAccessToken(): Promise<string> {
-  const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
-
-  const resp = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      }),
-    },
-  );
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Microsoft token error: ${errText}`);
-  }
-
-  const data = await resp.json();
-  return data.access_token;
-}
 
 /**
  * Resolve the sender email address for a given user.
