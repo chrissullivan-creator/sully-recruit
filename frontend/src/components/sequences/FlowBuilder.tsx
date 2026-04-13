@@ -38,6 +38,8 @@ export interface FlowEdgeData {
 }
 
 interface Props {
+  initialNodes?: FlowNodeData[];
+  initialEdges?: FlowEdgeData[];
   onChange?: (nodes: FlowNodeData[], edges: FlowEdgeData[]) => void;
   onAskJoe?: (
     action: ActionData,
@@ -47,11 +49,59 @@ interface Props {
   ) => Promise<string>;
 }
 
+function buildFlowState(serializedNodes?: FlowNodeData[], serializedEdges?: FlowEdgeData[]) {
+  if (!serializedNodes || serializedNodes.length === 0) {
+    return createEmptyFlow();
+  }
+
+  const orderedNodes = [...serializedNodes].sort((a, b) => a.nodeOrder - b.nodeOrder);
+  const maxOrder = orderedNodes.reduce((max, node) => Math.max(max, node.nodeOrder), 0);
+  const flowNodes: Node[] = orderedNodes.map((node, index) => ({
+    id: node.id,
+    type: node.type === "action" ? "actionNode" : "endNode",
+    position: node.type === "end"
+      ? { x: 225, y: 50 + index * 220 }
+      : { x: 150, y: 50 + index * 220 },
+    data: {
+      label: node.label,
+      actions: node.actions,
+      nodeOrder: node.nodeOrder,
+    },
+  }));
+
+  const flowEdges: Edge[] = (serializedEdges && serializedEdges.length > 0
+    ? serializedEdges
+    : orderedNodes.slice(0, -1).map((node, index) => ({
+        id: `edge-${node.id}-${orderedNodes[index + 1].id}`,
+        source: node.id,
+        target: orderedNodes[index + 1].id,
+      }))).map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { strokeWidth: 2, stroke: "#94a3b8" },
+      }));
+
+  return {
+    nodes: flowNodes,
+    edges: flowEdges,
+    nodeCounter: Math.max(maxOrder, orderedNodes.length + 1),
+  };
+}
+
+function serializeFlowSnapshot(serializedNodes?: FlowNodeData[], serializedEdges?: FlowEdgeData[]) {
+  return JSON.stringify({
+    nodes: serializedNodes || [],
+    edges: serializedEdges || [],
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Default starting flow
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createEmptyFlow(): { nodes: Node[]; edges: Edge[] } {
+function createEmptyFlow(): { nodes: Node[]; edges: Edge[]; nodeCounter: number } {
   return {
     nodes: [
       {
@@ -91,6 +141,7 @@ function createEmptyFlow(): { nodes: Node[]; edges: Edge[] } {
         style: { strokeWidth: 2, stroke: "#94a3b8" },
       },
     ],
+    nodeCounter: 2,
   };
 }
 
@@ -218,16 +269,39 @@ function createIdealTemplate(): { nodes: Node[]; edges: Edge[] } {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function FlowBuilder({ onChange, onAskJoe }: Props) {
-  const defaultFlow = useMemo(() => createEmptyFlow(), []);
-  const [nodes, setNodes, onNodesChange] = useNodesState(defaultFlow.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(defaultFlow.edges);
-  const [nodeCounter, setNodeCounter] = useState(2);
+export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: Props) {
+  const initialFlow = useMemo(
+    () => buildFlowState(initialNodes, initialEdges),
+    [initialEdges, initialNodes],
+  );
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialFlow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlow.edges);
+  const [nodeCounter, setNodeCounter] = useState(initialFlow.nodeCounter || 2);
 
   const onAskJoeRef = useRef(onAskJoe);
   useEffect(() => { onAskJoeRef.current = onAskJoe; }, [onAskJoe]);
 
   const nodeTypes = useMemo(() => ({ actionNode: ActionNode, endNode: EndNode }), []);
+
+  useEffect(() => {
+    const incomingSnapshot = serializeFlowSnapshot(initialNodes, initialEdges);
+    const currentSnapshot = serializeFlowSnapshot(
+      nodes.map((node, index) => ({
+        id: node.id,
+        type: node.type === "actionNode" ? "action" as const : "end" as const,
+        label: (node.data as any).label || "",
+        actions: (node.data as any).actions,
+        nodeOrder: (node.data as any).nodeOrder || index + 1,
+      })),
+      edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+    );
+    if (incomingSnapshot === currentSnapshot) return;
+
+    const nextFlow = buildFlowState(initialNodes, initialEdges);
+    setNodes(nextFlow.nodes);
+    setEdges(nextFlow.edges);
+    setNodeCounter(nextFlow.nodeCounter || 2);
+  }, [edges, initialEdges, initialNodes, nodes, setEdges, setNodes]);
 
   const buildAskJoeHandler = useCallback((nodeId: string) => {
     return async (_actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string): Promise<string> => {

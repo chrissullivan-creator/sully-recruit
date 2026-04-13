@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,7 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import RichTextEditor from "@/components/shared/RichTextEditor";
+import { toast } from "sonner";
+import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil } from "lucide-react";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -47,6 +50,8 @@ interface ActionNodeData {
 function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
   const { actions, onUpdate, onAskJoe, label, stepNumber } = data;
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editorDraft, setEditorDraft] = useState("");
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: any) => {
@@ -105,6 +110,38 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
     },
     [actions, updateAction],
   );
+
+  const editingAction = editingIndex === null ? null : actions[editingIndex];
+  const editingChannelLabel = useMemo(
+    () => CHANNELS.find((channel) => channel.value === editingAction?.channel)?.label || "Message",
+    [editingAction],
+  );
+  const isRichTextChannel = editingAction?.channel === "email";
+
+  const openEditor = useCallback((index: number) => {
+    setEditorDraft(actions[index].messageBody || "");
+    setEditingIndex(index);
+  }, [actions]);
+
+  const closeEditor = useCallback(() => {
+    setEditingIndex(null);
+    setEditorDraft("");
+  }, []);
+
+  const saveEditorDraft = useCallback(() => {
+    if (editingIndex === null) return;
+    updateAction(editingIndex, "messageBody", editorDraft);
+    closeEditor();
+  }, [closeEditor, editorDraft, editingIndex, updateAction]);
+
+  const copyMergeTag = useCallback(async (tag: string) => {
+    try {
+      await navigator.clipboard.writeText(tag);
+      toast.success(`${tag} copied`);
+    } catch {
+      toast.error("Couldn't copy merge tag");
+    }
+  }, []);
 
   return (
     <div className="min-w-[320px] max-w-[400px]">
@@ -173,13 +210,24 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
 
                 {action.channel !== "manual_call" && (
                   <>
-                    <Textarea
-                      value={action.messageBody}
-                      onChange={(e) => updateAction(i, "messageBody", e.target.value)}
-                      placeholder="Message body..."
-                      rows={3}
-                      className="text-xs"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => openEditor(i)}
+                      className="w-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-left text-xs transition-colors hover:border-slate-400 hover:bg-slate-100"
+                    >
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-700">Edit message in larger window</span>
+                        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <Pencil className="h-3 w-3" />
+                          Open editor
+                        </span>
+                      </div>
+                      <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+                        {action.messageBody
+                          ? action.messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+                          : "No message drafted yet."}
+                      </p>
+                    </button>
                     <div className="flex flex-wrap gap-1">
                       {MERGE_TAGS.map((tag) => (
                         <Badge
@@ -261,6 +309,65 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
       </Card>
 
       <Handle type="source" position={Position.Bottom} className="!bg-slate-400" />
+
+      <Dialog open={editingIndex !== null} onOpenChange={(open) => !open && closeEditor()}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {stepNumber ? `Step ${stepNumber}` : "Sequence Step"} Message Editor
+            </DialogTitle>
+            <DialogDescription>
+              Draft and refine the {editingChannelLabel.toLowerCase()} copy in a larger workspace.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-1.5">
+              {MERGE_TAGS.map((tag) => (
+                <Badge
+                  key={tag}
+                  variant="outline"
+                  className="cursor-pointer text-[10px] hover:bg-slate-100"
+                  onClick={() => copyMergeTag(tag)}
+                >
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+
+            {isRichTextChannel ? (
+              <RichTextEditor
+                value={editorDraft}
+                onChange={setEditorDraft}
+                placeholder="Draft the message body..."
+                minHeight="260px"
+              />
+            ) : (
+              <Textarea
+                value={editorDraft}
+                onChange={(e) => setEditorDraft(e.target.value)}
+                placeholder="Draft the message body..."
+                rows={14}
+                className="text-sm"
+              />
+            )}
+
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Merge tags copy to your clipboard so you can paste them where you want inside the message.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={closeEditor}>
+                  Cancel
+                </Button>
+                <Button onClick={saveEditorDraft}>
+                  Save Message
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

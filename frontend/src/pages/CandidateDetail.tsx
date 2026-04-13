@@ -29,6 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
+import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -443,16 +444,37 @@ const CandidateDetail = () => {
   };
 
   const handleUpdateStage = async (sendOutId: string, newStage: string) => {
-    const updates: any = { stage: newStage, updated_at: new Date().toISOString() };
+    const normalizedStage = normalizeInterviewStage(newStage);
+    const updates: any = { stage: normalizedStage, updated_at: new Date().toISOString() };
     if (newStage === 'sent_to_client') updates.sent_to_client_at = new Date().toISOString();
-    if (newStage === 'interviewing') updates.interview_at = new Date().toISOString();
-    if (newStage === 'offer') updates.offer_at = new Date().toISOString();
-    if (newStage === 'placed') updates.placed_at = new Date().toISOString();
+    if (normalizedStage === 'interviewing') updates.interview_at = new Date().toISOString();
+    if (normalizedStage === 'offer') updates.offer_at = new Date().toISOString();
+    if (normalizedStage === 'placed') updates.placed_at = new Date().toISOString();
 
-    const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOutId);
+    const { data: updatedSendOut, error } = await supabase
+      .from('send_outs')
+      .update(updates)
+      .eq('id', sendOutId)
+      .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+      .single();
     if (error) { toast.error('Failed to update stage'); return; }
+
+    if (normalizedStage === 'interviewing' && updatedSendOut) {
+      await ensureInterviewArtifacts({
+        sendOutId: updatedSendOut.id,
+        candidateId: updatedSendOut.candidate_id,
+        contactId: updatedSendOut.contact_id,
+        jobId: updatedSendOut.job_id,
+        recruiterId: updatedSendOut.recruiter_id,
+        stage: normalizedStage,
+        interviewAt: updatedSendOut.interview_at,
+      });
+    }
+
     queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
-    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === newStage)?.label ?? newStage}`);
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === normalizedStage)?.label ?? normalizedStage}`);
   };
 
   const handleReject = async (sendOutId: string) => {
@@ -617,10 +639,61 @@ const CandidateDetail = () => {
     if (!id) return;
     setUpdatingJobStatus(true);
     try {
-      const { error } = await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+      const normalizedStatus = normalizeInterviewStage(newStatus);
+      const { error } = await supabase.from('candidates').update({ job_status: normalizedStatus }).eq('id', id);
       if (error) { toast.error('Failed to update status'); return; }
+
+      if (normalizedStatus === 'interviewing' && candidate?.job_id) {
+        const { data: existingSendOut } = await supabase
+          .from('send_outs')
+          .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+          .eq('candidate_id', id)
+          .eq('job_id', candidate.job_id)
+          .maybeSingle();
+
+        const interviewAt = new Date().toISOString();
+        let sendOutRecord = existingSendOut;
+
+        if (existingSendOut) {
+          const { data: updated } = await supabase
+            .from('send_outs')
+            .update({ stage: normalizedStatus, interview_at: interviewAt } as any)
+            .eq('id', existingSendOut.id)
+            .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+            .single();
+          sendOutRecord = updated;
+        } else {
+          const { data: inserted } = await supabase
+            .from('send_outs')
+            .insert({
+              candidate_id: id,
+              job_id: candidate.job_id,
+              recruiter_id: user?.id ?? null,
+              stage: normalizedStatus,
+              interview_at: interviewAt,
+            } as any)
+            .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+            .single();
+          sendOutRecord = inserted;
+        }
+
+        if (sendOutRecord) {
+          await ensureInterviewArtifacts({
+            sendOutId: sendOutRecord.id,
+            candidateId: sendOutRecord.candidate_id,
+            contactId: sendOutRecord.contact_id,
+            jobId: sendOutRecord.job_id,
+            recruiterId: sendOutRecord.recruiter_id,
+            stage: normalizedStatus,
+            interviewAt: sendOutRecord.interview_at,
+          });
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update status');
     } finally {

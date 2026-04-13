@@ -21,6 +21,11 @@ interface EnrollInSequenceDialogProps {
   preselectedSequenceId?: string;
 }
 
+const isSequenceSelectable = (sequence: any) => {
+  const status = String(sequence?.status || '').toLowerCase();
+  return status === 'active' || status === 'draft';
+};
+
 export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -66,7 +71,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     }
   }, [open, preselectedSequenceId, allAccounts.length]);
 
-  const activeSequences = sequences.filter((s) => s.status === 'active');
+  const activeSequences = sequences.filter(isSequenceSelectable);
   const selectedSequence = sequences.find((s) => s.id === selectedSequenceId);
   const steps = (selectedSequence?.sequence_steps as any[]) ?? [];
 
@@ -198,7 +203,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
               {isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading sequences...</p>
               ) : activeSequences.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active sequences available.</p>
+                <p className="text-sm text-muted-foreground">No sequences available.</p>
               ) : (
                 <Select value={selectedSequenceId} onValueChange={setSelectedSequenceId}>
                   <SelectTrigger><SelectValue placeholder="Choose a sequence..." /></SelectTrigger>

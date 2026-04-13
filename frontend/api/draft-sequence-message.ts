@@ -15,6 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const {
       channel,
+      step_type,
       step_number,
       step_label,
       total_steps,
@@ -41,15 +42,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Channel-specific guidance
     const CHANNEL_RULES: Record<string, string> = {
       linkedin_connection:
-        "LinkedIn Connection Request — 300 character MAX, one punchy sentence. Mention their firm or role. No pitch, just a reason to connect.",
+        "LinkedIn Connection Request — 300 character MAX, one punchy sentence. Mention their role, not the company name. No pitch, just a reason to connect.",
       linkedin_message:
-        "LinkedIn Message (after connection accepted) — 3-5 sentences. Warm, specific, low-friction ask like a 15-minute call. Reference the role.",
+        "LinkedIn Message (after connection accepted) — 3-5 sentences. Warm, specific, low-friction ask like a 15-minute call. Reference the role, not the company name.",
       linkedin_inmail:
-        "LinkedIn InMail — 4-7 sentences. Open with hook, establish credibility, name the opportunity clearly, close with soft ask.",
+        "LinkedIn InMail — 4-7 sentences. Open with hook, establish credibility, name the opportunity clearly, close with soft ask. Avoid naming the company unless it is absolutely necessary.",
       email:
-        "Email — 2-3 short paragraphs. Sharp opening line (no 'hope this finds you well'). Name the opportunity. Clear CTA. Professional but warm.",
+        "Email — 2-3 short paragraphs. Sharp opening line (no 'hope this finds you well'). Name the opportunity without naming the company unless absolutely necessary. Clear CTA. Professional but warm.",
       sms:
-        "SMS — Under 160 characters. First name, context, ask. Be human. No links unless essential.",
+        "SMS — Under 160 characters. First name, context, ask. Be human. No links unless essential. Do not name the company.",
     };
 
     const channelRule = CHANNEL_RULES[channel] || "Write a professional outreach message.";
@@ -57,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Build the step context
     let stepContext = `This is step ${step_number}${total_steps ? ` of ${total_steps}` : ""} in the sequence.`;
     if (step_label) stepContext += ` The step is labeled "${step_label}".`;
+    if (step_type) stepContext += ` The step type is "${step_type}".`;
     if (step_number && step_number > 1) {
       stepContext += ` The previous step(s) already reached out via other channels — this should feel like a follow-up, not the first touch.`;
     } else {
@@ -90,6 +92,7 @@ EMERALD VOICE:
 - Establish credibility fast (Emerald places at top Wall Street firms, 82% of placements stay 2+ years)
 - Clear low-friction ask: a 15-minute call
 - Human — like a colleague who respects their time
+- Default to NOT naming the client company. Only mention it if leaving it out would make the message confusing.
 
 CHANNEL: ${channel}
 CHANNEL RULES: ${channelRule}
@@ -112,6 +115,7 @@ MERGE TAGS AVAILABLE (use them naturally):
 
 IMPORTANT:
 - Use merge tags in the body, DO NOT use placeholder brackets or "[NAME]"
+- Treat previous messages as already sent. Do not repeat their hook, CTA, or same wording.
 - DO NOT include a greeting like "Hi {{first_name}}," in the body for SMS
 - For LinkedIn Connection: one sentence, no sign-off
 - For LinkedIn Message and InMail: include a friendly close like "Best," before sender
