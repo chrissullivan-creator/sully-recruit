@@ -1,119 +1,161 @@
 /**
  * Send time calculation for sequence v2 scheduler.
  *
- * All times stored and processed in EST (America/New_York).
- * Each enrollment runs on its own independent clock starting at enrolled_at.
+ * KEY CONCEPT: Delay hours tick ONLY during the send window ("business hours").
+ * Hours outside the window don't count toward the delay.
+ *
+ * Example (window 6AM–9PM EST, 15 active hours/day):
+ *   Enrolled 5 PM, 10h email delay:
+ *     4h today (5PM→9PM) + 6h next day (6AM→noon) = fires at noon next day
+ *
+ *   Enrolled 11:15 PM, SMS 5h 35m delay:
+ *     Outside window → next open 6 AM + 5h35m = 11:35 AM
+ *
+ * LinkedIn connections ignore the window entirely — fire immediately 24/7.
  */
 import { logger } from "@trigger.dev/sdk/v3";
 
-interface SendTimeInput {
-  enrolledAt: string; // ISO timestamp
-  baseDelayHours: number;
-  delayIntervalMinutes: number;
-  jiggleMinutes: number;
-  channel: string;
-  respectSendWindow: boolean;
-  sendWindowStart: string; // "HH:MM" in EST (from sequence)
-  sendWindowEnd: string;   // "HH:MM" in EST (from sequence)
-  accountId: string;
-}
-
-interface PostConnectionInput {
-  connectionAcceptedAt: string; // ISO timestamp
-  hardcodedHours: number; // default 4
-  delayIntervalMinutes: number;
-  jiggleMinutes: number;
-  channel: string;
-  respectSendWindow: boolean;
-  sendWindowStart: string;
-  sendWindowEnd: string;
-  accountId: string;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// EST conversion helpers
+// EST helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Get EST date components from a UTC Date. */
+/** Get EST date components from a Date. */
 function toEST(date: Date): { year: number; month: number; day: number; hours: number; minutes: number } {
-  const estStr = date.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const parsed = new Date(estStr);
-  return {
-    year: parsed.getFullYear(),
-    month: parsed.getMonth(),
-    day: parsed.getDate(),
-    hours: parsed.getHours(),
-    minutes: parsed.getMinutes(),
-  };
-}
-
-/** Create a UTC Date from EST components. */
-function fromEST(year: number, month: number, day: number, hours: number, minutes: number): Date {
-  // Create a date string in EST and convert to UTC
-  const estStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`;
-
-  // Use Intl to figure out the UTC offset for this EST datetime
-  const formatter = new Intl.DateTimeFormat("en-US", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    hour12: false,
-  });
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(date);
 
-  // Approximate: EST is UTC-5, EDT is UTC-4. Use the date to determine.
-  const testDate = new Date(`${estStr}Z`);
-  const estParts = toEST(testDate);
-
-  // Calculate offset by comparing
-  const utcDate = new Date(testDate.getTime());
-  const diffHours = hours - estParts.hours;
-  utcDate.setHours(utcDate.getHours() + diffHours);
-  const diffMinutes = minutes - estParts.minutes;
-  utcDate.setMinutes(utcDate.getMinutes() + diffMinutes);
-
-  return utcDate;
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value || 0);
+  return { year: get("year"), month: get("month") - 1, day: get("day"), hours: get("hour"), minutes: get("minute") };
 }
 
-/** Parse "HH:MM" string to hours and minutes. */
-function parseTime(timeStr: string): { hours: number; minutes: number } {
+/** Parse "HH:MM" → minutes since midnight. */
+function parseTimeToMinutes(timeStr: string): number {
   const [h, m] = timeStr.split(":").map(Number);
-  return { hours: h || 0, minutes: m || 0 };
+  return (h || 0) * 60 + (m || 0);
 }
 
-/** Convert time to minutes since midnight for comparison. */
-function timeToMinutes(hours: number, minutes: number): number {
-  return hours * 60 + minutes;
+/**
+ * Create a Date for a specific EST time on a specific EST date.
+ * Uses the offset trick: build a UTC date, then adjust by the EST offset for that moment.
+ */
+function estToUTC(year: number, month: number, day: number, hours: number, minutes: number): Date {
+  // Start with a rough UTC guess
+  const guess = new Date(Date.UTC(year, month, day, hours + 5, minutes)); // EST ≈ UTC-5
+  // Check actual EST offset for this moment
+  const actualEST = toEST(guess);
+  const diffH = hours - actualEST.hours;
+  const diffM = minutes - actualEST.minutes;
+  return new Date(guess.getTime() + diffH * 3600000 + diffM * 60000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Daily/hourly cap checking
+// Core: addWindowHours — counts delay only during send window
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Add delay minutes counting only time within the send window.
+ * Skips overnight hours. Returns the UTC timestamp when the delay expires.
+ *
+ * @param startTime  The reference time (enrollment or connection accepted)
+ * @param delayMinutes  Total delay in minutes (hours * 60 + minutes)
+ * @param windowStartStr  "HH:MM" EST when the window opens
+ * @param windowEndStr    "HH:MM" EST when the window closes
+ */
+function addWindowMinutes(
+  startTime: Date,
+  delayMinutes: number,
+  windowStartStr: string,
+  windowEndStr: string,
+): Date {
+  const winStartMin = parseTimeToMinutes(windowStartStr);
+  const winEndMin = parseTimeToMinutes(windowEndStr);
+  const windowDuration = winEndMin - winStartMin; // minutes of active window per day
+
+  if (windowDuration <= 0) {
+    // Bad config — just add calendar minutes
+    return new Date(startTime.getTime() + delayMinutes * 60000);
+  }
+
+  let remaining = delayMinutes;
+  let est = toEST(startTime);
+  let currentMin = est.hours * 60 + est.minutes;
+
+  // If zero delay, just clamp to window
+  if (remaining <= 0) {
+    if (currentMin >= winStartMin && currentMin < winEndMin) {
+      return startTime; // already inside window
+    }
+    if (currentMin < winStartMin) {
+      return estToUTC(est.year, est.month, est.day, Math.floor(winStartMin / 60), winStartMin % 60);
+    }
+    // Past window close — next day
+    const nextDay = new Date(startTime.getTime() + 86400000);
+    const nextEST = toEST(nextDay);
+    return estToUTC(nextEST.year, nextEST.month, nextEST.day, Math.floor(winStartMin / 60), winStartMin % 60);
+  }
+
+  // If outside window, jump to next window open
+  if (currentMin < winStartMin) {
+    // Before window today — jump to window start
+    est = { ...est, hours: Math.floor(winStartMin / 60), minutes: winStartMin % 60 };
+    currentMin = winStartMin;
+  } else if (currentMin >= winEndMin) {
+    // After window close — jump to next day's window start
+    const nextDay = new Date(startTime.getTime() + 86400000);
+    est = toEST(nextDay);
+    est.hours = Math.floor(winStartMin / 60);
+    est.minutes = winStartMin % 60;
+    currentMin = winStartMin;
+  }
+
+  // Count delay within windows, day by day
+  for (let safety = 0; safety < 60; safety++) {
+    // How many minutes left in today's window?
+    const availableToday = winEndMin - currentMin;
+
+    if (availableToday >= remaining) {
+      // Delay finishes today
+      const finalMin = currentMin + remaining;
+      return estToUTC(est.year, est.month, est.day, Math.floor(finalMin / 60), finalMin % 60);
+    }
+
+    // Use up today's remaining window time, roll to next day
+    remaining -= availableToday;
+    const tomorrow = estToUTC(est.year, est.month, est.day + 1, Math.floor(winStartMin / 60), winStartMin % 60);
+    est = toEST(tomorrow);
+    currentMin = winStartMin;
+  }
+
+  // Fallback — should never reach here
+  logger.warn("addWindowMinutes exceeded 60-day loop", { delayMinutes });
+  return new Date(startTime.getTime() + delayMinutes * 60000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daily/hourly cap checking (unchanged from before)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface CapCheckResult {
   allowed: boolean;
-  nextAvailableDate?: Date;
 }
 
-/**
- * Check daily send cap for a channel + account on a given EST date.
- * Returns whether there's capacity and the next available date if not.
- */
 export async function checkDailyCap(
   supabase: any,
   accountId: string,
   channel: string,
-  estDate: string, // "YYYY-MM-DD" in EST
+  estDate: string,
 ): Promise<CapCheckResult> {
-  // Get channel limits
   const { data: limit } = await supabase
     .from("channel_limits")
     .select("daily_max")
     .eq("channel", channel)
     .maybeSingle();
 
-  if (!limit?.daily_max) return { allowed: true }; // No cap
+  if (!limit?.daily_max) return { allowed: true };
 
-  // Get current count
   const { data: log } = await supabase
     .from("daily_send_log")
     .select("count")
@@ -122,15 +164,9 @@ export async function checkDailyCap(
     .eq("send_date", estDate)
     .maybeSingle();
 
-  const currentCount = log?.count || 0;
-  if (currentCount < limit.daily_max) return { allowed: true };
-
-  return { allowed: false };
+  return { allowed: (log?.count || 0) < limit.daily_max };
 }
 
-/**
- * Check hourly send cap for a channel + account in a given hour.
- */
 export async function checkHourlyCap(
   supabase: any,
   accountId: string,
@@ -145,10 +181,9 @@ export async function checkHourlyCap(
 
   if (!limit?.hourly_max) return { allowed: true };
 
-  // Count scheduled sends in the same hour
   const hourStart = new Date(scheduledAt);
   hourStart.setMinutes(0, 0, 0);
-  const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000);
+  const hourEnd = new Date(hourStart.getTime() + 3600000);
 
   const { count } = await supabase
     .from("sequence_step_logs")
@@ -158,15 +193,9 @@ export async function checkHourlyCap(
     .lt("scheduled_at", hourEnd.toISOString())
     .in("status", ["scheduled", "sent"]);
 
-  if ((count || 0) < limit.hourly_max) return { allowed: true };
-
-  return { allowed: false };
+  return { allowed: (count || 0) < limit.hourly_max };
 }
 
-/**
- * Increment the daily send count for an account + channel.
- * Call this after a send is confirmed.
- */
 export async function incrementDailySend(
   supabase: any,
   accountId: string,
@@ -182,178 +211,127 @@ export async function incrementDailySend(
     .maybeSingle();
 
   if (existing) {
-    await supabase
-      .from("daily_send_log")
-      .update({ count: existing.count + 1 })
-      .eq("id", existing.id);
+    await supabase.from("daily_send_log").update({ count: existing.count + 1 }).eq("id", existing.id);
   } else {
-    await supabase.from("daily_send_log").insert({
-      account_id: accountId,
-      channel,
-      send_date: estDate,
-      count: 1,
-    });
+    await supabase.from("daily_send_log").insert({ account_id: accountId, channel, send_date: estDate, count: 1 });
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main send time calculator
+// Main: calculateSendTime (business-hours model)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Calculate the optimal send time for a sequence action.
- *
- * 1. Start from enrolled_at + base_delay_hours + delay_interval_minutes
- * 2. Apply jiggle (random offset)
- * 3. linkedin_connection → send anytime 24/7
- * 4. Other channels → clamp to send window (EST)
- * 5. Check daily cap → roll to next day if at limit
- * 6. Check hourly cap → move to next hour within window
- * 7. Randomize exact minute within assigned hour
- */
-export async function calculateSendTime(
-  supabase: any,
-  input: SendTimeInput,
-): Promise<Date> {
-  const base = new Date(input.enrolledAt);
+interface SendTimeInput {
+  startTime: Date;             // enrollment time (or connection accepted time)
+  delayHours: number;          // hours of delay (counted within window)
+  delayMinutes: number;        // additional minutes
+  jiggleMinutes: number;       // random ± offset
+  channel: string;
+  sendWindowStart: string;     // "HH:MM" EST
+  sendWindowEnd: string;       // "HH:MM" EST
+  accountId: string;
+}
 
-  // Add base delay
-  base.setTime(base.getTime() + input.baseDelayHours * 60 * 60 * 1000);
-  base.setTime(base.getTime() + input.delayIntervalMinutes * 60 * 1000);
+/**
+ * Calculate the send time for a sequence action.
+ *
+ * - linkedin_connection: fires immediately at startTime (24/7, no window)
+ * - All other channels: delay ticks only within the send window
+ * - Jiggle applied after, re-clamped to window if needed
+ * - Daily/hourly caps roll forward
+ */
+export async function calculateSendTime(supabase: any, input: SendTimeInput): Promise<Date> {
+  // LinkedIn connections bypass everything — fire now
+  if (input.channel === "linkedin_connection") {
+    const result = new Date(input.startTime);
+    // Add small random offset (0-3 min) to avoid burst
+    result.setMinutes(result.getMinutes() + Math.floor(Math.random() * 4));
+    return result;
+  }
+
+  const totalDelayMinutes = input.delayHours * 60 + input.delayMinutes;
+
+  // Count delay within window hours
+  let result = addWindowMinutes(
+    input.startTime,
+    totalDelayMinutes,
+    input.sendWindowStart,
+    input.sendWindowEnd,
+  );
 
   // Apply jiggle
   if (input.jiggleMinutes > 0) {
     const jiggle = Math.floor(Math.random() * input.jiggleMinutes * 2) - input.jiggleMinutes;
-    base.setTime(base.getTime() + jiggle * 60 * 1000);
-  }
+    result = new Date(result.getTime() + jiggle * 60000);
 
-  // LinkedIn connections send 24/7 — skip window/cap checks
-  if (input.channel === "linkedin_connection") {
-    // Still randomize minute within the hour
-    base.setMinutes(Math.floor(Math.random() * 60));
-    return base;
+    // Re-clamp if jiggle pushed outside window
+    const est = toEST(result);
+    const currentMin = est.hours * 60 + est.minutes;
+    const winStart = parseTimeToMinutes(input.sendWindowStart);
+    const winEnd = parseTimeToMinutes(input.sendWindowEnd);
+    if (currentMin < winStart || currentMin >= winEnd) {
+      result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
+    }
   }
-
-  // Clamp to send window
-  let result = clampToSendWindow(base, input.sendWindowStart, input.sendWindowEnd);
 
   // Check daily cap — roll forward if needed
   for (let attempts = 0; attempts < 14; attempts++) {
     const est = toEST(result);
     const estDate = `${est.year}-${String(est.month + 1).padStart(2, "0")}-${String(est.day).padStart(2, "0")}`;
-
     const dailyCheck = await checkDailyCap(supabase, input.accountId, input.channel, estDate);
     if (dailyCheck.allowed) break;
-
-    // Roll to next day, at window start
-    const windowStart = parseTime(input.sendWindowStart);
-    const nextDay = new Date(result);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextEst = toEST(nextDay);
-    result = fromEST(nextEst.year, nextEst.month, nextEst.day, windowStart.hours, windowStart.minutes);
-
-    logger.info("Daily cap hit, rolling to next day", { channel: input.channel, estDate });
+    // Roll to next day window start
+    result = addWindowMinutes(result, parseTimeToMinutes(input.sendWindowEnd) - parseTimeToMinutes(input.sendWindowStart) + 1, input.sendWindowStart, input.sendWindowEnd);
+    logger.info("Daily cap hit, rolling to next day", { channel: input.channel });
   }
 
-  // Check hourly cap — move to next hour within window
+  // Check hourly cap — move to next hour
   for (let attempts = 0; attempts < 24; attempts++) {
     const hourlyCheck = await checkHourlyCap(supabase, input.accountId, input.channel, result);
     if (hourlyCheck.allowed) break;
-
-    // Move to next hour
-    result = new Date(result.getTime() + 60 * 60 * 1000);
+    result = new Date(result.getTime() + 3600000);
     result.setMinutes(0, 0, 0);
-
-    // Re-check send window
-    result = clampToSendWindow(result, input.sendWindowStart, input.sendWindowEnd);
+    // Re-clamp to window
+    result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
   }
 
-  // Randomize exact minute within the assigned hour
-  result.setMinutes(Math.floor(Math.random() * 60));
-  result.setSeconds(Math.floor(Math.random() * 60));
+  // Randomize exact minute within the assigned hour (avoid all sends at :00)
+  const finalEst = toEST(result);
+  const winEnd = parseTimeToMinutes(input.sendWindowEnd);
+  const currentMin = finalEst.hours * 60 + finalEst.minutes;
+  const remainingInHour = Math.min(60 - (currentMin % 60), winEnd - currentMin);
+  if (remainingInHour > 1) {
+    result.setSeconds(Math.floor(Math.random() * 60));
+  }
 
   return result;
 }
 
 /**
- * Calculate send time for a post-connection-accepted message.
- * connection_accepted_at + 4h hardcoded + delay + jiggle → clamp to window → caps.
+ * Calculate send time for a linkedin_message after connection accepted.
+ * Uses the same business-hours model: 4h minimum + additional delay, all counted within window.
  */
 export async function calculatePostConnectionSendTime(
   supabase: any,
-  input: PostConnectionInput,
+  connectionAcceptedAt: Date,
+  additionalDelayHours: number,
+  additionalDelayMinutes: number,
+  jiggleMinutes: number,
+  sendWindowStart: string,
+  sendWindowEnd: string,
+  accountId: string,
 ): Promise<Date> {
-  const base = new Date(input.connectionAcceptedAt);
+  // 4h hardcoded minimum + additional delay, all in window hours
+  const totalMinutes = 4 * 60 + additionalDelayHours * 60 + additionalDelayMinutes;
 
-  // 4 hour hardcoded minimum
-  base.setTime(base.getTime() + input.hardcodedHours * 60 * 60 * 1000);
-
-  // Add delay interval
-  base.setTime(base.getTime() + input.delayIntervalMinutes * 60 * 1000);
-
-  // Apply jiggle
-  if (input.jiggleMinutes > 0) {
-    const jiggle = Math.floor(Math.random() * input.jiggleMinutes * 2) - input.jiggleMinutes;
-    base.setTime(base.getTime() + jiggle * 60 * 1000);
-  }
-
-  // Clamp to send window
-  let result = clampToSendWindow(base, input.sendWindowStart, input.sendWindowEnd);
-
-  // Check caps (same as regular sends)
-  for (let attempts = 0; attempts < 14; attempts++) {
-    const est = toEST(result);
-    const estDate = `${est.year}-${String(est.month + 1).padStart(2, "0")}-${String(est.day).padStart(2, "0")}`;
-    const dailyCheck = await checkDailyCap(supabase, input.accountId, input.channel, estDate);
-    if (dailyCheck.allowed) break;
-
-    const windowStart = parseTime(input.sendWindowStart);
-    const nextDay = new Date(result);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextEst = toEST(nextDay);
-    result = fromEST(nextEst.year, nextEst.month, nextEst.day, windowStart.hours, windowStart.minutes);
-  }
-
-  for (let attempts = 0; attempts < 24; attempts++) {
-    const hourlyCheck = await checkHourlyCap(supabase, input.accountId, input.channel, result);
-    if (hourlyCheck.allowed) break;
-    result = new Date(result.getTime() + 60 * 60 * 1000);
-    result.setMinutes(0, 0, 0);
-    result = clampToSendWindow(result, input.sendWindowStart, input.sendWindowEnd);
-  }
-
-  result.setMinutes(Math.floor(Math.random() * 60));
-  result.setSeconds(Math.floor(Math.random() * 60));
-
-  return result;
-}
-
-/**
- * Clamp a timestamp to fall within the send window (EST).
- * If outside, rolls forward to the next window open.
- */
-function clampToSendWindow(date: Date, windowStartStr: string, windowEndStr: string): Date {
-  const est = toEST(date);
-  const windowStart = parseTime(windowStartStr);
-  const windowEnd = parseTime(windowEndStr);
-
-  const currentMinutes = timeToMinutes(est.hours, est.minutes);
-  const startMinutes = timeToMinutes(windowStart.hours, windowStart.minutes);
-  const endMinutes = timeToMinutes(windowEnd.hours, windowEnd.minutes);
-
-  // Within window → return as-is
-  if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
-    return date;
-  }
-
-  // Before window today → move to window start today
-  if (currentMinutes < startMinutes) {
-    return fromEST(est.year, est.month, est.day, windowStart.hours, windowStart.minutes);
-  }
-
-  // After window → roll to next day window start
-  const nextDay = new Date(date);
-  nextDay.setDate(nextDay.getDate() + 1);
-  const nextEst = toEST(nextDay);
-  return fromEST(nextEst.year, nextEst.month, nextEst.day, windowStart.hours, windowStart.minutes);
+  return calculateSendTime(supabase, {
+    startTime: connectionAcceptedAt,
+    delayHours: 0,
+    delayMinutes: totalMinutes,
+    jiggleMinutes,
+    channel: "linkedin_message",
+    sendWindowStart,
+    sendWindowEnd,
+    accountId,
+  });
 }

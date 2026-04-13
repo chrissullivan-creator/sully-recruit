@@ -15,10 +15,9 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { ActionNode, type ActionData } from "./ActionNode";
-import { BranchNode } from "./BranchNode";
 import { EndNode } from "./EndNode";
 import { Button } from "@/components/ui/button";
-import { GitBranch, StopCircle, Zap, Wand2 } from "lucide-react";
+import { StopCircle, Zap, Wand2 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for serialization
@@ -26,11 +25,9 @@ import { GitBranch, StopCircle, Zap, Wand2 } from "lucide-react";
 
 export interface FlowNodeData {
   id: string;
-  type: "action" | "branch" | "end";
+  type: "action" | "end";
   label: string;
   actions?: ActionData[];
-  condition?: string;
-  afterDays?: number | null;
   nodeOrder: number;
 }
 
@@ -38,14 +35,9 @@ export interface FlowEdgeData {
   id: string;
   source: string;
   target: string;
-  label?: string;
-  condition?: string;
-  afterDays?: number | null;
 }
 
 interface Props {
-  initialNodes?: FlowNodeData[];
-  initialEdges?: FlowEdgeData[];
   onChange?: (nodes: FlowNodeData[], edges: FlowEdgeData[]) => void;
   onAskJoe?: (
     action: ActionData,
@@ -56,110 +48,62 @@ interface Props {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Default starting flow — a single empty action node
+// Default starting flow
 // ─────────────────────────────────────────────────────────────────────────────
 
 function createEmptyFlow(): { nodes: Node[]; edges: Edge[] } {
-  const startAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "linkedin_inmail",
-    messageBody: "Hi {{first_name}}, I'd love to connect about an opportunity.",
-    baseDelayHours: 0,
-    delayIntervalMinutes: 0,
-    jiggleMinutes: 5,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: true,
-  };
-
   return {
     nodes: [
       {
         id: "node-1",
         type: "actionNode",
-        position: { x: 250, y: 50 },
+        position: { x: 150, y: 50 },
         data: {
-          label: "Step 1",
-          actions: [startAction],
+          label: "",
+          actions: [
+            {
+              id: crypto.randomUUID(),
+              channel: "linkedin_inmail",
+              messageBody: "",
+              baseDelayHours: 0,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 5,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+          ],
           nodeOrder: 1,
         },
       },
+      {
+        id: "node-end",
+        type: "endNode",
+        position: { x: 225, y: 300 },
+        data: { label: "End" },
+      },
     ],
-    edges: [],
+    edges: [
+      {
+        id: "e1-end",
+        source: "node-1",
+        target: "node-end",
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { strokeWidth: 2, stroke: "#94a3b8" },
+      },
+    ],
   };
 }
 
 /**
- * Quick-start template matching the "ideal sequence":
- *   Node 1: InMail (now) + Email (parallel, if email exists) + SMS (parallel, if phone exists)
- *   Node 2: LinkedIn connection request (24/7)
- *   Node 3: LinkedIn message (4h+ after connection accepted)
- *   Node end: terminate
+ * Quick-start template — flat multi-channel outreach:
+ *   Node 1: InMail + Connection + Email + LinkedIn message (pending) + SMS
+ *   Node 2: Follow-up email (24h window-hours later)
+ *   End
  *
- * Branching:
- *   Node 1 → Node 2 via no_response after 1 day
- *   Node 2 → Node 3 via connection_accepted (4h+ post-acceptance delay)
- *   Node 2 → End via no_response after 7 days (never accepted)
- *   Node 3 → End via no_response after 3 days
- *
- * Any reply on any channel = auto-stop (handled by engine, no edges needed).
- * Email/SMS skip automatically if recipient has no email/phone.
+ * All actions pre-scheduled at enrollment. LinkedIn message parks until connected.
+ * Reply on any channel = auto-stop.
  */
 function createIdealTemplate(): { nodes: Node[]; edges: Edge[] } {
-  const inmailAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "linkedin_inmail",
-    messageBody:
-      "Hi {{first_name}}, I'm {{sender_name}} at Emerald Recruiting. I came across your profile and think you'd be a great fit for {{job_name}}. Open to a quick chat?",
-    baseDelayHours: 0,
-    delayIntervalMinutes: 0,
-    jiggleMinutes: 5,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: true,
-  };
-  const emailAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "email",
-    messageBody:
-      "Hi {{first_name}},\n\nI'm {{sender_name}} at Emerald Recruiting. I'm working on {{job_name}} at {{company}} and think your background is a strong match. Would you be open to a quick 15-minute call this week?\n\nBest,\n{{sender_name}}",
-    baseDelayHours: 0,
-    delayIntervalMinutes: 5,
-    jiggleMinutes: 8,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: true,
-  };
-  const smsAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "sms",
-    messageBody:
-      "Hi {{first_name}}, this is {{sender_name}} from Emerald Recruiting. I sent you an email about a role — let me know if you'd like to chat.",
-    baseDelayHours: 2,
-    delayIntervalMinutes: 0,
-    jiggleMinutes: 10,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: true,
-  };
-  const connectionAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "linkedin_connection",
-    messageBody: "Hi {{first_name}}, would love to connect about a role I think you'd be interested in.",
-    baseDelayHours: 0,
-    delayIntervalMinutes: 0,
-    jiggleMinutes: 8,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: false,
-  };
-  const linkedinMessageAction: ActionData = {
-    id: crypto.randomUUID(),
-    channel: "linkedin_message",
-    messageBody:
-      "Hi {{first_name}}, thanks for connecting! I'm working on {{job_name}} and thought your background was a strong match. Interested in hearing more?",
-    baseDelayHours: 0,
-    delayIntervalMinutes: 0,
-    jiggleMinutes: 10,
-    postConnectionHardcodedHours: 4,
-    respectSendWindow: true,
-  };
-
   return {
     nodes: [
       {
@@ -167,36 +111,87 @@ function createIdealTemplate(): { nodes: Node[]; edges: Edge[] } {
         type: "actionNode",
         position: { x: 50, y: 50 },
         data: {
-          label: "1. Initial Outreach (InMail + Email + SMS)",
-          actions: [inmailAction, emailAction, smsAction],
+          label: "Multi-channel outreach",
+          actions: [
+            {
+              id: crypto.randomUUID(),
+              channel: "linkedin_inmail",
+              messageBody: "Hi {{first_name}}, I'm {{sender_name}} at Emerald Recruiting. I came across your profile and think you'd be a great fit for {{job_name}}. Open to a quick chat?",
+              baseDelayHours: 0,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 5,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+            {
+              id: crypto.randomUUID(),
+              channel: "linkedin_connection",
+              messageBody: "Hi {{first_name}}, would love to connect about a role I think you'd be interested in.",
+              baseDelayHours: 0,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 8,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: false,
+            },
+            {
+              id: crypto.randomUUID(),
+              channel: "email",
+              messageBody: "Hi {{first_name}},\n\nI'm {{sender_name}} at Emerald Recruiting. I'm working on {{job_name}} and think your background is a strong match.\n\nWould you be open to a quick 15-minute call this week?\n\nBest,\n{{sender_name}}",
+              baseDelayHours: 0,
+              delayIntervalMinutes: 5,
+              jiggleMinutes: 8,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+            {
+              id: crypto.randomUUID(),
+              channel: "linkedin_message",
+              messageBody: "Hi {{first_name}}, thanks for connecting! I'm working on {{job_name}} and thought your background was a strong match. Interested in hearing more?",
+              baseDelayHours: 0,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 10,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+            {
+              id: crypto.randomUUID(),
+              channel: "sms",
+              messageBody: "Hi {{first_name}}, this is {{sender_name}} from Emerald Recruiting. I sent you an email about a role — let me know if you'd like to chat.",
+              baseDelayHours: 2,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 10,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+          ],
           nodeOrder: 1,
         },
       },
       {
         id: "node-2",
         type: "actionNode",
-        position: { x: 50, y: 280 },
+        position: { x: 50, y: 400 },
         data: {
-          label: "2. Connection Request",
-          actions: [connectionAction],
+          label: "Follow-up email",
+          actions: [
+            {
+              id: crypto.randomUUID(),
+              channel: "email",
+              messageBody: "Hi {{first_name}},\n\nJust following up on my earlier note about {{job_name}}. Would love to chat if you're open to it.\n\nBest,\n{{sender_name}}",
+              baseDelayHours: 24,
+              delayIntervalMinutes: 0,
+              jiggleMinutes: 15,
+              postConnectionHardcodedHours: 4,
+              respectSendWindow: true,
+            },
+          ],
           nodeOrder: 2,
-        },
-      },
-      {
-        id: "node-3",
-        type: "actionNode",
-        position: { x: 50, y: 460 },
-        data: {
-          label: "3. LinkedIn Message (after 4h+)",
-          actions: [linkedinMessageAction],
-          nodeOrder: 3,
-          isAfterConnection: true,
         },
       },
       {
         id: "node-end",
         type: "endNode",
-        position: { x: 50, y: 680 },
+        position: { x: 150, y: 600 },
         data: { label: "End" },
       },
     ],
@@ -205,37 +200,15 @@ function createIdealTemplate(): { nodes: Node[]; edges: Edge[] } {
         id: "e1-2",
         source: "node-1",
         target: "node-2",
-        label: "No response · 1 day",
-        data: { condition: "no_response", afterDays: 1 },
         markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2 },
-      },
-      {
-        id: "e2-3",
-        source: "node-2",
-        target: "node-3",
-        label: "Connection accepted",
-        data: { condition: "connection_accepted" },
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2, stroke: "#22c55e" },
+        style: { strokeWidth: 2, stroke: "#94a3b8" },
       },
       {
         id: "e2-end",
         source: "node-2",
         target: "node-end",
-        label: "Not accepted · 7 days",
-        data: { condition: "connection_not_accepted", afterDays: 7 },
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { strokeWidth: 2, stroke: "#94a3b8" },
-      },
-      {
-        id: "e3-end",
-        source: "node-3",
-        target: "node-end",
-        label: "No response · 3 days",
-        data: { condition: "no_response", afterDays: 3 },
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2 },
       },
     ],
   };
@@ -245,60 +218,37 @@ function createIdealTemplate(): { nodes: Node[]; edges: Edge[] } {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: Props) {
+export function FlowBuilder({ onChange, onAskJoe }: Props) {
   const defaultFlow = useMemo(() => createEmptyFlow(), []);
   const [nodes, setNodes, onNodesChange] = useNodesState(defaultFlow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(defaultFlow.edges);
   const [nodeCounter, setNodeCounter] = useState(2);
 
-  // Ref so the askJoe callback always uses the latest version without
-  // re-wiring every node
   const onAskJoeRef = useRef(onAskJoe);
-  useEffect(() => {
-    onAskJoeRef.current = onAskJoe;
-  }, [onAskJoe]);
+  useEffect(() => { onAskJoeRef.current = onAskJoe; }, [onAskJoe]);
 
-  const nodeTypes = useMemo(
-    () => ({
-      actionNode: ActionNode,
-      branchNode: BranchNode,
-      endNode: EndNode,
-    }),
-    [],
-  );
+  const nodeTypes = useMemo(() => ({ actionNode: ActionNode, endNode: EndNode }), []);
 
-  // Build the Ask Joe bridge that pulls previous messages from the flow state
   const buildAskJoeHandler = useCallback((nodeId: string) => {
-    return async (
-      _actionIndex: number,
-      action: ActionData,
-      stepNumber: number,
-      stepLabel: string,
-    ): Promise<string> => {
+    return async (_actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string): Promise<string> => {
       const handler = onAskJoeRef.current;
       if (!handler) return "";
-
-      // Collect all messages from previous action nodes (for voice continuity)
       const previousMessages: Array<{ channel: string; body: string }> = [];
       setNodes((nds) => {
         const actionNodes = nds.filter((n) => n.type === "actionNode");
         const currentIdx = actionNodes.findIndex((n) => n.id === nodeId);
         for (let i = 0; i < currentIdx; i++) {
-          const acts = (actionNodes[i].data as any).actions || [];
-          for (const a of acts) {
-            if (a.messageBody) {
-              previousMessages.push({ channel: a.channel, body: a.messageBody });
-            }
+          for (const a of ((actionNodes[i].data as any).actions || [])) {
+            if (a.messageBody) previousMessages.push({ channel: a.channel, body: a.messageBody });
           }
         }
-        return nds; // no mutation, just reading
+        return nds;
       });
-
       return handler(action, stepNumber, stepLabel, previousMessages);
     };
   }, [setNodes]);
 
-  // Wire up onUpdate + onAskJoe handlers for any node that doesn't have them
+  // Wire handlers on mount
   useEffect(() => {
     setNodes((nds) =>
       nds.map((n) => {
@@ -308,37 +258,18 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
             data: {
               ...n.data,
               onUpdate: (actions: ActionData[]) => {
-                setNodes((nds2) =>
-                  nds2.map((nn) => (nn.id === n.id ? { ...nn, data: { ...nn.data, actions } } : nn)),
-                );
+                setNodes((nds2) => nds2.map((nn) => (nn.id === n.id ? { ...nn, data: { ...nn.data, actions } } : nn)));
               },
               onAskJoe: buildAskJoeHandler(n.id),
-            },
-          };
-        }
-        if (n.type === "branchNode" && !(n.data as any).onUpdate) {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              onUpdate: (condition: string, afterDays: number | null) => {
-                setNodes((nds2) =>
-                  nds2.map((nn) =>
-                    nn.id === n.id ? { ...nn, data: { ...nn.data, condition, afterDays } } : nn,
-                  ),
-                );
-              },
             },
           };
         }
         return n;
       }),
     );
-  }, []); // run once on mount
+  }, []);
 
-  // Auto-renumber action nodes. Updates the stepNumber shown in each
-  // ActionNode header based on current order among action nodes.
-  // Also strips default "Step N" labels so the new number is always accurate.
+  // Auto-renumber action nodes
   useEffect(() => {
     setNodes((nds) => {
       let stepCounter = 0;
@@ -348,66 +279,46 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         stepCounter++;
         const currentStep = (n.data as any).stepNumber;
         const currentLabel = (n.data as any).label || "";
-        // Strip default "Step N" labels so we don't end up with "Step 2: Step 5"
         const isDefaultLabel = /^Step \d+$/.test(currentLabel);
         const newLabel = isDefaultLabel ? "" : currentLabel;
         if (currentStep !== stepCounter || currentLabel !== newLabel) {
           changed = true;
-          return {
-            ...n,
-            data: { ...n.data, stepNumber: stepCounter, label: newLabel },
-          };
+          return { ...n, data: { ...n.data, stepNumber: stepCounter, label: newLabel } };
         }
         return n;
       });
       return changed ? updated : nds;
     });
-    // Only react to nodes length and action-node IDs — not internal data —
-    // otherwise this will loop on every action edit
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length, nodes.map((n) => n.id).join(",")]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      const edge: Edge = {
-        ...connection,
-        id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
-        label: "No response · 3 days",
-        data: { condition: "no_response", afterDays: 3 },
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2 },
-      } as Edge;
-      setEdges((eds) => addEdge(edge, eds));
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...connection,
+            id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
+            markerEnd: { type: MarkerType.ArrowClosed },
+            style: { strokeWidth: 2, stroke: "#94a3b8" },
+          } as Edge,
+          eds,
+        ),
+      );
     },
     [setEdges],
   );
 
-  // Emit changes whenever nodes or edges change — this is what tells the parent
-  // what to save. Without this, the Review panel sees empty state.
+  // Emit changes to parent
   useEffect(() => {
     if (!onChange) return;
     const flowNodes: FlowNodeData[] = nodes.map((n, i) => ({
       id: n.id,
-      type:
-        n.type === "actionNode"
-          ? "action"
-          : n.type === "branchNode"
-            ? "branch"
-            : "end",
+      type: n.type === "actionNode" ? "action" as const : "end" as const,
       label: (n.data as any).label || "",
       actions: (n.data as any).actions,
-      condition: (n.data as any).condition,
-      afterDays: (n.data as any).afterDays,
       nodeOrder: i + 1,
     }));
-    const flowEdges: FlowEdgeData[] = edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      label: typeof e.label === "string" ? e.label : undefined,
-      condition: (e.data as any)?.condition,
-      afterDays: (e.data as any)?.afterDays,
-    }));
+    const flowEdges: FlowEdgeData[] = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
     onChange(flowNodes, flowEdges);
   }, [nodes, edges, onChange]);
 
@@ -419,72 +330,44 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
   }, [setNodes, setEdges]);
 
   const addNode = useCallback(
-    (type: "action" | "branch" | "end") => {
+    (type: "action" | "end") => {
       const id = `node-${nodeCounter + 1}`;
       setNodeCounter((c) => c + 1);
-
-      // Position below existing nodes
       const maxY = Math.max(...nodes.map((n) => n.position.y), 0);
 
-      let newNode: Node;
-      switch (type) {
-        case "action":
-          newNode = {
-            id,
-            type: "actionNode",
-            position: { x: 250, y: maxY + 220 },
-            data: {
-              label: "",
-              actions: [
-                {
-                  id: crypto.randomUUID(),
-                  channel: "email",
-                  messageBody: "",
-                  baseDelayHours: 24,
-                  delayIntervalMinutes: 0,
-                  jiggleMinutes: 10,
-                  postConnectionHardcodedHours: 4,
-                  respectSendWindow: true,
+      const newNode: Node =
+        type === "action"
+          ? {
+              id,
+              type: "actionNode",
+              position: { x: 150, y: maxY + 220 },
+              data: {
+                label: "",
+                actions: [
+                  {
+                    id: crypto.randomUUID(),
+                    channel: "email",
+                    messageBody: "",
+                    baseDelayHours: 24,
+                    delayIntervalMinutes: 0,
+                    jiggleMinutes: 10,
+                    postConnectionHardcodedHours: 4,
+                    respectSendWindow: true,
+                  },
+                ],
+                nodeOrder: nodeCounter + 1,
+                onUpdate: (actions: ActionData[]) => {
+                  setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, actions } } : n)));
                 },
-              ],
-              nodeOrder: nodeCounter + 1,
-              onUpdate: (actions: ActionData[]) => {
-                setNodes((nds) =>
-                  nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, actions } } : n)),
-                );
+                onAskJoe: buildAskJoeHandler(id),
               },
-              onAskJoe: buildAskJoeHandler(id),
-            },
-          };
-          break;
-        case "branch":
-          newNode = {
-            id,
-            type: "branchNode",
-            position: { x: 275, y: maxY + 220 },
-            data: {
-              label: "Branch",
-              condition: "no_response",
-              afterDays: 3,
-              onUpdate: (condition: string, afterDays: number | null) => {
-                setNodes((nds) =>
-                  nds.map((n) =>
-                    n.id === id ? { ...n, data: { ...n.data, condition, afterDays } } : n,
-                  ),
-                );
-              },
-            },
-          };
-          break;
-        case "end":
-          newNode = {
-            id,
-            type: "endNode",
-            position: { x: 300, y: maxY + 220 },
-            data: { label: "End" },
-          };
-          break;
-      }
+            }
+          : {
+              id,
+              type: "endNode",
+              position: { x: 225, y: maxY + 220 },
+              data: { label: "End" },
+            };
 
       setNodes((nds) => [...nds, newNode]);
     },
@@ -493,7 +376,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
 
   return (
     <div className="h-[600px] border rounded-lg overflow-hidden relative">
-      {/* Toolbar */}
       <div className="absolute top-3 left-3 z-10 flex gap-2 bg-white/90 backdrop-blur p-2 rounded-md shadow-sm border">
         <Button variant="default" size="sm" onClick={loadIdealTemplate} title="Load the ideal outreach sequence">
           <Wand2 className="h-3 w-3 mr-1" /> Quick Template
@@ -501,9 +383,6 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         <div className="w-px bg-border mx-1" />
         <Button variant="outline" size="sm" onClick={() => addNode("action")}>
           <Zap className="h-3 w-3 mr-1" /> Action
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => addNode("branch")}>
-          <GitBranch className="h-3 w-3 mr-1" /> Branch
         </Button>
         <Button variant="outline" size="sm" onClick={() => addNode("end")}>
           <StopCircle className="h-3 w-3 mr-1" /> End
@@ -521,22 +400,21 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         deleteKeyCode={["Backspace", "Delete"]}
         defaultEdgeOptions={{
           markerEnd: { type: MarkerType.ArrowClosed },
-          style: { strokeWidth: 2 },
+          style: { strokeWidth: 2, stroke: "#94a3b8" },
         }}
       >
         <Controls />
         <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
       </ReactFlow>
 
-      {/* Legend */}
       <div className="absolute bottom-3 right-3 z-10 bg-white/90 backdrop-blur p-2 rounded-md shadow-sm border text-[10px] text-muted-foreground space-y-1 max-w-[280px]">
         <p className="font-medium text-foreground">Engine rules (automatic):</p>
-        <p>• Any reply on any channel → stop + Joe sentiment</p>
-        <p>• Connection accepted ≠ reply (does NOT stop)</p>
-        <p>• Calendar booked → stop</p>
-        <p>• LinkedIn message requires connection (skipped otherwise)</p>
-        <p>• Email skipped if no email on record</p>
-        <p>• SMS skipped if no phone on record</p>
+        <p>&#8226; Any reply on any channel stops the sequence + Joe sentiment</p>
+        <p>&#8226; Connection accepted does NOT stop (triggers LinkedIn message)</p>
+        <p>&#8226; Calendar booked stops the sequence</p>
+        <p>&#8226; LinkedIn message waits for connection (4h min, window-hours)</p>
+        <p>&#8226; Email/SMS skipped if no email/phone on record</p>
+        <p>&#8226; Delay hours count only within send window</p>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
-import { stopEnrollment, scheduleNodeActions } from "./sequence-scheduler";
+import { stopEnrollment } from "./sequence-scheduler";
 import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
 
 interface UnipileWebhookPayload {
@@ -340,7 +340,7 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// V2 Sequence: Advance enrollment on connection accepted
+// V2 Sequence: Schedule pending_connection actions on connection accepted
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function advanceOnConnectionAccepted(
@@ -359,64 +359,43 @@ async function advanceOnConnectionAccepted(
   if (!enrollments || enrollments.length === 0) return;
 
   for (const enrollment of enrollments) {
-    const currentNodeId = enrollment.current_node_id;
-    if (!currentNodeId) continue;
-
-    // Find connection_accepted branch from current node
-    const { data: branch } = await supabase
-      .from("sequence_branches")
-      .select("*, sequence_nodes!to_node_id(*)")
-      .eq("from_node_id", currentNodeId)
-      .eq("condition", "connection_accepted")
-      .maybeSingle();
-
-    if (!branch || !branch.to_node_id) continue;
-
-    const nextNode = branch.sequence_nodes;
-    if (!nextNode) continue;
-
     const sequence = enrollment.sequences;
+    const senderUserId = sequence.sender_user_id || sequence.created_by;
 
-    // Update enrollment to next node
-    await supabase
-      .from("sequence_enrollments")
-      .update({ current_node_id: nextNode.id })
-      .eq("id", enrollment.id);
+    // Find all pending_connection step logs for this enrollment
+    const { data: pendingLogs } = await supabase
+      .from("sequence_step_logs")
+      .select("*, sequence_actions!inner(*)")
+      .eq("enrollment_id", enrollment.id)
+      .eq("status", "pending_connection");
 
-    // Get the actions on the next node and schedule them with post-connection timing
-    const { data: actions } = await supabase
-      .from("sequence_actions")
-      .select("*")
-      .eq("node_id", nextNode.id);
+    if (!pendingLogs || pendingLogs.length === 0) continue;
 
-    if (actions) {
-      for (const action of actions) {
-        const scheduledAt = await calculatePostConnectionSendTime(supabase, {
-          connectionAcceptedAt: receivedAt,
-          hardcodedHours: Number(action.post_connection_hardcoded_hours) || 4,
-          delayIntervalMinutes: action.delay_interval_minutes || 0,
-          jiggleMinutes: action.jiggle_minutes || 0,
-          channel: action.channel,
-          respectSendWindow: action.respect_send_window,
-          sendWindowStart: sequence.send_window_start || "09:00",
-          sendWindowEnd: sequence.send_window_end || "18:00",
-          accountId: sequence.created_by,
-        });
+    for (const log of pendingLogs) {
+      const action = (log as any).sequence_actions;
 
-        await supabase.from("sequence_step_logs").insert({
-          enrollment_id: enrollment.id,
-          action_id: action.id,
-          node_id: nextNode.id,
-          channel: action.channel,
-          scheduled_at: scheduledAt.toISOString(),
-          status: "scheduled",
-        });
-      }
+      // Calculate: 4h minimum + additional delay, using business-hours model
+      const scheduledAt = await calculatePostConnectionSendTime(
+        supabase,
+        new Date(receivedAt),
+        Number(action.base_delay_hours) || 0,
+        action.delay_interval_minutes || 0,
+        action.jiggle_minutes || 0,
+        sequence.send_window_start || "09:00",
+        sequence.send_window_end || "18:00",
+        senderUserId,
+      );
+
+      // Activate the step log
+      await supabase
+        .from("sequence_step_logs")
+        .update({ scheduled_at: scheduledAt.toISOString(), status: "scheduled" })
+        .eq("id", log.id);
     }
 
-    logger.info("Advanced enrollment on connection accepted", {
+    logger.info("Connection accepted — scheduled pending linkedin messages", {
       enrollmentId: enrollment.id,
-      nextNodeId: nextNode.id,
+      count: pendingLogs.length,
     });
   }
 }

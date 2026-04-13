@@ -229,20 +229,7 @@ export default function SequenceBuilder() {
         }
       }
 
-      // 4. Create branches from edges
-      for (const edge of flowEdges) {
-        const fromDbId = nodeIdMap[edge.source];
-        const toDbId = nodeIdMap[edge.target];
-        if (!fromDbId || !toDbId) continue;
-
-        const { error: branchErr } = await supabase.from("sequence_branches").insert({
-          from_node_id: fromDbId,
-          to_node_id: toDbId,
-          condition: edge.condition || "no_response",
-          after_days: edge.afterDays || null,
-        } as any);
-        if (branchErr) throw new Error(`Branch save failed: ${branchErr.message}`);
-      }
+      // No branches — flat delay-based model. All timing is on the actions.
 
       return sequenceId;
     } catch (err: any) {

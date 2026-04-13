@@ -198,7 +198,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                 {/* Timing */}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <Label className="text-[10px]" title="Hours to wait from enrollment before this action">Base delay (hrs)</Label>
+                    <Label className="text-[10px]" title="Hours of delay counted within the send window (not calendar hours)">Delay (window hrs)</Label>
                     <Input
                       type="number"
                       min={0}
@@ -248,10 +248,10 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                             : null}
                 </p>
 
-                {/* Post-connection label for linkedin_message after connection */}
-                {action.channel === "linkedin_message" && data.isAfterConnection && (
+                {/* linkedin_message always shows the 4h gate */}
+                {action.channel === "linkedin_message" && (
                   <p className="text-[10px] text-muted-foreground bg-blue-50 p-2 rounded">
-                    4 hours minimum after connection accepted (required)
+                    Waits for connection + 4h minimum (window-hours). Delay field = additional hours on top of the 4h.
                   </p>
                 )}
               </div>
