@@ -483,7 +483,7 @@ export default function SendOut() {
           if (session) {
             const doc = generatePDF(resumeData, template);
             const pdfBlob = doc.output('blob');
-            const fileName = `${resumeData.name.replace(/\s+/g, '_')}_Resume.pdf`;
+            const fileName = `${resumeData.name.replace(/[^a-zA-Z0-9._-]/g, '_')}_Resume.pdf`;
             const path = `${session.user.id}/${id}/formatted/${Date.now()}_${fileName}`;
             await supabase.storage.from('resumes').upload(path, pdfBlob, { upsert: true, contentType: 'application/pdf' });
             await supabase.from('formatted_resumes').insert({

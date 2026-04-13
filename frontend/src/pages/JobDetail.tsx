@@ -102,7 +102,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
-      const path = `${session.user.id}/${sendOut.id}_${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const path = `${session.user.id}/${sendOut.id}_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('send-outs').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage.from('send-outs').getPublicUrl(path);

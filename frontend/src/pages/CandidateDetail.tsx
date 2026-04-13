@@ -342,7 +342,7 @@ const CandidateDetail = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
-      const path = `${session.user.id}/${id}/formatted/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const path = `${session.user.id}/${id}/formatted/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { error: dbErr } = await supabase.from('formatted_resumes').insert({
@@ -384,7 +384,7 @@ const CandidateDetail = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
-      const path = `${session.user.id}/${id}/other/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const path = `${session.user.id}/${id}/other/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { error: dbErr } = await supabase.from('candidate_documents').insert({
@@ -533,7 +533,7 @@ const CandidateDetail = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
-      const path = `${session.user.id}/${id}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const path = `${session.user.id}/${id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
