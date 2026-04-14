@@ -406,6 +406,21 @@ const CandidateDetail = () => {
     }
   };
 
+  const handleDeleteDocument = async (table: 'resumes' | 'formatted_resumes' | 'candidate_documents', docId: string, filePath: string | null) => {
+    try {
+      if (filePath) {
+        await supabase.storage.from('resumes').remove([filePath]);
+      }
+      const { error } = await supabase.from(table).delete().eq('id', docId);
+      if (error) throw error;
+      const qk = table === 'resumes' ? ['resumes', id] : table === 'formatted_resumes' ? ['formatted_resumes', id] : ['candidate_documents', id];
+      queryClient.invalidateQueries({ queryKey: qk });
+      toast.success('Document deleted');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete document');
+    }
+  };
+
   const { data: sendOuts = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
     enabled: !!id,
@@ -1518,11 +1533,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete resume?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{r.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('resumes', r.id, r.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1575,11 +1609,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete formatted resume?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{r.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('formatted_resumes', r.id, r.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1620,11 +1673,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete document?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{d.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('candidate_documents', d.id, d.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
