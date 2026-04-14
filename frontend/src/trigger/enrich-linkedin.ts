@@ -203,6 +203,12 @@ export const enrichLinkedin = schedules.task({
             embed_model: VOYAGE_MODEL,
           });
 
+          // Extract current company from experience or flat fields
+          const candCurrentExp = Array.isArray(profileData.experience) && profileData.experience.length > 0
+            ? profileData.experience[0] : null;
+          const candCurrentCompany = candCurrentExp?.company || candCurrentExp?.company_name
+            || profileData.current_company || profileData.company || profileData.company_name || "";
+
           await supabase
             .from("candidates")
             .update({
@@ -210,6 +216,9 @@ export const enrichLinkedin = schedules.task({
               linkedin_enrichment_source: enrichmentSource,
               ...(!c.current_title && profileData.headline
                 ? { current_title: profileData.headline }
+                : {}),
+              ...(!c.current_company && candCurrentCompany
+                ? { current_company: candCurrentCompany }
                 : {}),
               ...(!c.location_text && profileData.location
                 ? { location_text: profileData.location }
@@ -278,11 +287,23 @@ export const enrichLinkedin = schedules.task({
             embed_model: VOYAGE_MODEL,
           });
 
+          // Extract current company from experience or flat fields
+          const contCurrentExp = Array.isArray(profileData.experience) && profileData.experience.length > 0
+            ? profileData.experience[0] : null;
+          const contCurrentCompany = contCurrentExp?.company || contCurrentExp?.company_name
+            || profileData.current_company || profileData.company || profileData.company_name || "";
+
           await supabase
             .from("contacts")
             .update({
               linkedin_enriched_at: new Date().toISOString(),
               linkedin_enrichment_source: enrichmentSource,
+              ...(!c.company_name && contCurrentCompany
+                ? { company_name: contCurrentCompany, linkedin_current_company: contCurrentCompany }
+                : {}),
+              ...(!c.title && (contCurrentExp?.title || profileData.headline)
+                ? { title: contCurrentExp?.title || profileData.headline }
+                : {}),
             })
             .eq("id", c.id);
 
