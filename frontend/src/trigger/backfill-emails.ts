@@ -282,9 +282,11 @@ export const backfillEmails = schedules.task({
     const supabase = getSupabaseAdmin();
     const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
-    // Only look back 1 day since this runs every 5 min.
-    // The first run will catch the last 24h; after that it's incremental.
-    const daysBack = 1;
+    // Look back 3 days by default since this runs every 5 min.
+    // 3 days gives enough buffer to survive brief outages or missed runs
+    // without creating excessive API calls on each run.
+    // Dedup by external_message_id prevents double-inserts.
+    const daysBack = 3;
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = new Date().toISOString();
     const maxPages = 3; // 3 pages × 50 = 150 emails per folder per account

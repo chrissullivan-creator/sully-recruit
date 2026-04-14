@@ -43,9 +43,19 @@ export const cleanupStaleEnrollments = schedules.task({
           status: "stopped",
           waiting_for_connection_acceptance: false,
           linkedin_connection_status: "expired",
+          stop_trigger: "connection_expired",
+          stop_reason: "connection_request_expired_30d",
           stopped_reason: "connection_request_expired_30d",
+          stopped_at: new Date().toISOString(),
         } as any)
         .in("id", ids);
+
+      // Also cancel any pending v2 step logs for these enrollments
+      await supabase
+        .from("sequence_step_logs")
+        .update({ status: "cancelled" } as any)
+        .in("enrollment_id", ids)
+        .in("status", ["scheduled", "pending_connection"]);
 
       if (updateErr) {
         logger.error("Failed to expire connections", { error: updateErr.message });
@@ -74,9 +84,19 @@ export const cleanupStaleEnrollments = schedules.task({
         .from("sequence_enrollments")
         .update({
           status: "stopped",
+          stop_trigger: "inactive_expired",
+          stop_reason: "inactive_60d",
           stopped_reason: "inactive_60d",
+          stopped_at: new Date().toISOString(),
         } as any)
         .in("id", ids);
+
+      // Also cancel any pending v2 step logs for these enrollments
+      await supabase
+        .from("sequence_step_logs")
+        .update({ status: "cancelled" } as any)
+        .in("enrollment_id", ids)
+        .in("status", ["scheduled", "pending_connection"]);
 
       if (updateErr) {
         logger.error("Failed to stop inactive enrollments", { error: updateErr.message });
@@ -87,24 +107,38 @@ export const cleanupStaleEnrollments = schedules.task({
     }
 
     // 3. Cancel stale outbound LinkedIn connection requests (30+ days)
-    // These clutter the LinkedIn account and waste connection slots
-    const { data: staleInvites } = await supabase
+    // These clutter the LinkedIn account and waste connection slots.
+    // Check both v1 (sequence_step_executions) and v2 (sequence_step_logs) tables.
+    const { data: staleInvitesV1 } = await supabase
       .from("sequence_step_executions")
-      .select("id, external_message_id, enrollment_id")
+      .select("id")
       .eq("channel", "linkedin_connection")
       .eq("status", "sent")
       .lt("executed_at", connectionCutoff)
       .limit(50);
 
+    const { data: staleInvitesV2 } = await supabase
+      .from("sequence_step_logs")
+      .select("id")
+      .eq("channel", "linkedin_connection")
+      .eq("status", "sent")
+      .lt("sent_at", connectionCutoff)
+      .limit(50);
+
     let invitesWithdrawn = 0;
-    if (staleInvites?.length) {
-      for (const invite of staleInvites) {
-        await supabase
-          .from("sequence_step_executions")
-          .update({ status: "expired" } as any)
-          .eq("id", invite.id);
-        invitesWithdrawn++;
-      }
+    for (const invite of staleInvitesV1 || []) {
+      await supabase
+        .from("sequence_step_executions")
+        .update({ status: "expired" } as any)
+        .eq("id", invite.id);
+      invitesWithdrawn++;
+    }
+    for (const invite of staleInvitesV2 || []) {
+      await supabase
+        .from("sequence_step_logs")
+        .update({ status: "expired" } as any)
+        .eq("id", invite.id);
+      invitesWithdrawn++;
     }
 
     const summary = { connectionExpired, inactiveExpired, invitesWithdrawn };

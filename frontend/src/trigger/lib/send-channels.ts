@@ -6,7 +6,7 @@ import { getMicrosoftAccessToken } from "./microsoft-graph";
  * Channel send helpers — routes to the correct per-user account.
  *
  * Each recruiter has their own accounts:
- *   - Email: Microsoft Graph mailbox (Chris, Nancy, Ashley)
+ *   - Email: Microsoft Graph mailbox (Chris, Nancy — Ashley has none)
  *   - SMS: RingCentral number (Chris, Nancy — Ashley has none)
  *   - LinkedIn: Unipile account (Chris, Nancy, Ashley)
  *

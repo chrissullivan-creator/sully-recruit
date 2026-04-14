@@ -183,14 +183,17 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const slug = match ? match[1] : (/^[\w-]+$/.test(linkedinUrl.trim()) ? linkedinUrl.trim() : null);
       if (!slug) return;
 
-      const { data: chrisAcct } = await supabase
+      // Use the first active LinkedIn integration account (not hardcoded to a specific user)
+      const { data: linkedinAcct } = await supabase
         .from('integration_accounts')
         .select('unipile_account_id')
-        .ilike('account_label', '%Chris Sullivan%')
+        .or('account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
         .eq('is_active', true)
+        .not('unipile_account_id', 'is', null)
+        .limit(1)
         .maybeSingle();
 
-      if (!chrisAcct?.unipile_account_id) return;
+      if (!linkedinAcct?.unipile_account_id) return;
 
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-unipile-id`,
@@ -200,7 +203,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             'Content-Type': 'application/json',
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
-          body: JSON.stringify({ linkedin_slug: slug, account_id: chrisAcct.unipile_account_id }),
+          body: JSON.stringify({ linkedin_slug: slug, account_id: linkedinAcct.unipile_account_id }),
         }
       );
 
@@ -219,8 +222,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
             }, { onConflict: 'candidate_id,channel' });
         }
       }
-    } catch (err) {
-      console.warn('Background Unipile ID resolution failed:', err);
+    } catch (err: any) {
+      console.warn('Background Unipile ID resolution failed:', err?.message || err);
     }
   };
 

@@ -151,6 +151,16 @@ export const purgeMarketingEmails = schedules.task({
     const messageIds = junkMessages.map((m: any) => m.id);
     const conversationIds = [...new Set(junkMessages.map((m: any) => m.conversation_id).filter(Boolean))];
 
+    // Log what we're about to delete for audit trail (in case blocklist is wrong)
+    const sampleSenders = [...new Set(
+      junkMessages.slice(0, 10).map((m: any) => m.sender_address).filter(Boolean),
+    )];
+    logger.info("Purging marketing emails", {
+      count: messageIds.length,
+      sampleSenders,
+      conversationIds: conversationIds.length,
+    });
+
     // Delete messages
     const { error: delErr } = await supabase
       .from("messages")
