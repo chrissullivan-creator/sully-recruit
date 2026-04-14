@@ -1249,13 +1249,27 @@ export default function Inbox() {
         .select('id, email_address, account_label, owner_user_id')
         .eq('is_active', true);
       if (error) throw error;
+
+      // Fetch profile names so the filter shows "Chris Sullivan" not "Chris Sullivan Email"
+      const ownerIds = [...new Set((data || []).map(a => a.owner_user_id).filter(Boolean))];
+      const profileMap: Record<string, string> = {};
+      if (ownerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', ownerIds);
+        for (const p of profiles || []) {
+          if (p.full_name) profileMap[p.id] = p.full_name;
+        }
+      }
+
       // Group account IDs by owner (one person may have multiple accounts)
       const byOwner: Record<string, { label: string; accountIds: string[] }> = {};
       for (const acct of data || []) {
         const key = acct.owner_user_id || acct.email_address || 'unknown';
         if (!byOwner[key]) {
           byOwner[key] = {
-            label: acct.account_label || acct.email_address || 'Unknown',
+            label: (acct.owner_user_id && profileMap[acct.owner_user_id]) || acct.account_label || acct.email_address || 'Unknown',
             accountIds: [],
           };
         }
