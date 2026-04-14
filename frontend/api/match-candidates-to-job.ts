@@ -1,14 +1,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
-  VoyageEmbedding,
-  retrieveResumeChunks,
+  getOrCreateResumePipeline,
+  retrieveFromCloud,
+  fallbackTextSearch,
   createSupabaseAdmin,
 } from "./lib/llamaindex";
 
 /**
  * POST /api/match-candidates-to-job
- * Streams candidate match results for a job using LlamaIndex.TS:
- *   Voyage embedding → pgvector retrieval → Claude scoring.
+ * Streams candidate match results for a job using LlamaCloud retrieval + Claude scoring.
+ * No Voyage dependency — all retrieval goes through LlamaCloud managed pipeline.
  * Response format: SSE with data.content chunks.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -17,7 +18,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const voyageKey = process.env.VOYAGE_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -52,67 +52,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       job_description && `Description: ${job_description.slice(0, 2000)}`,
     ].filter(Boolean).join("\n");
 
-    // ── LlamaIndex RAG: Embed job → Retrieve candidates ─────────────
+    // ── LlamaCloud retrieval ───────────────────────────────────────────
     let candidateContext = "";
-    if (voyageKey) {
-      try {
-        const embedModel = new VoyageEmbedding(voyageKey);
-        const searchText = `${job_title} ${job_company || ""} ${job_description || ""}`.slice(0, 4000);
-        const queryEmbedding = await embedModel.getQueryEmbedding(searchText);
+    try {
+      const pipelineId = await getOrCreateResumePipeline();
+      const searchText = `${job_title} ${job_company || ""} ${job_description || ""}`.slice(0, 4000);
+      const cloudResults = await retrieveFromCloud(pipelineId, searchText, 50);
 
-        const chunks = await retrieveResumeChunks(supabase, queryEmbedding, 100, 0.3);
-
-        if (chunks.length > 0) {
-          // Deduplicate by candidate_id, keep best match
-          const seen = new Map<string, typeof chunks[0]>();
-          for (const chunk of chunks) {
-            if (chunk.candidate_id && !seen.has(chunk.candidate_id)) {
-              seen.set(chunk.candidate_id, chunk);
-            }
-          }
-
-          const topIds = Array.from(seen.keys()).slice(0, 30);
-          const { data: candidates } = await supabase
-            .from("candidates")
-            .select("id, full_name, current_title, current_company, location, email, status, joe_says")
-            .in("id", topIds);
-
-          if (candidates?.length) {
-            candidateContext = candidates
-              .map((c) => {
-                const chunk = seen.get(c.id);
-                return `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}\n  Resume excerpt: ${chunk?.content?.slice(0, 300) || "N/A"}`;
-              })
-              .join("\n");
-
-            write(`Found ${candidates.length} potential matches. Analyzing...\n\n`);
+      if (cloudResults.length > 0) {
+        // Deduplicate by candidate_id, keep best match
+        const seen = new Map<string, (typeof cloudResults)[0]>();
+        for (const result of cloudResults) {
+          const candId = result.metadata?.candidate_id;
+          if (candId && !seen.has(candId)) {
+            seen.set(candId, result);
           }
         }
-      } catch {
-        // Fall back to text-based matching
+
+        const topIds = Array.from(seen.keys()).slice(0, 30);
+        const { data: candidates } = await supabase
+          .from("candidates")
+          .select("id, full_name, current_title, current_company, location, email, status, joe_says")
+          .in("id", topIds);
+
+        if (candidates?.length) {
+          candidateContext = candidates
+            .map((c) => {
+              const result = seen.get(c.id);
+              return `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}\n  Resume excerpt: ${result?.text?.slice(0, 300) || "N/A"}`;
+            })
+            .join("\n");
+
+          write(`Found ${candidates.length} potential matches. Analyzing...\n\n`);
+        }
       }
+    } catch (err) {
+      console.warn("LlamaCloud retrieval failed, falling back:", (err as Error).message);
     }
 
     // ── Fallback: text search ───────────────────────────────────────
     if (!candidateContext) {
-      const { data: candidates } = await supabase
-        .from("candidates")
-        .select("id, full_name, current_title, current_company, location, status, joe_says")
-        .or(`current_title.ilike.%${job_title.split(" ")[0]}%,current_company.ilike.%${(job_company || "").split(" ")[0]}%`)
-        .limit(30);
+      const results = await fallbackTextSearch(supabase, `${job_title} ${job_company || ""}`, 30);
 
-      if (candidates?.length) {
-        candidateContext = candidates
-          .map((c) => `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}${c.joe_says ? `\n  Joe Says: ${(c.joe_says as string).slice(0, 200)}` : ""}`)
+      if (results.length > 0) {
+        candidateContext = results
+          .map((r) => `- ${r.content}`)
           .join("\n");
-        write(`Found ${candidates.length} candidates. Analyzing...\n\n`);
+        write(`Found ${results.length} candidates. Analyzing...\n\n`);
       } else {
         write("No matching candidates found in the database.\n");
         return res.end();
       }
     }
 
-    // ── LlamaIndex Anthropic: Stream Claude's ranking ───────────────
+    // ── Stream Claude's ranking ────────────────────────────────────────
     const claudeResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {

@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey, getVoyageKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
@@ -96,33 +96,35 @@ export const resumeIngestion = task({
       }
     }
 
-    // ── 6. Embed with LlamaIndex + Voyage AI ─────────────────────────
+    // ── 6. Upload to LlamaCloud for search indexing ────────────────────
     if (rawText.length > 50) {
-      const voyageKey = await getVoyageKey();
-      const { VoyageEmbedding } = await import("../../api/lib/llamaindex");
-      const embedModel = new VoyageEmbedding(voyageKey);
+      try {
+        const { getOrCreateResumePipeline, uploadResumeToCloud } = await import("../../api/lib/llamaindex");
+        const chunks = chunkText(rawText, 512);
+        logger.info("Uploading chunks to LlamaCloud", { count: chunks.length });
 
-      const chunks = chunkText(rawText, 512); // ~512 token chunks
-      logger.info("Embedding chunks via LlamaIndex VoyageEmbedding", { count: chunks.length });
+        const pipelineId = await getOrCreateResumePipeline();
+        const candidateName = parsedJson
+          ? `${parsedJson.first_name || ""} ${parsedJson.last_name || ""}`.trim()
+          : "";
+        await uploadResumeToCloud(pipelineId, candidateId, resumeId, chunks, candidateName);
 
-      // Delete existing chunks for this resume (idempotent re-runs)
-      await supabase.from("resume_chunks").delete().eq("resume_id", resumeId);
-
-      // Batch embed for efficiency
-      const embeddings = await embedModel.getTextEmbeddings(chunks);
-
-      for (let i = 0; i < chunks.length; i++) {
-        if (embeddings[i]) {
-          await supabase.from("resume_chunks").insert({
-            resume_id: resumeId,
-            candidate_id: candidateId,
-            chunk_index: i,
-            content: chunks[i],
-            embedding: embeddings[i],
-          } as any);
-        }
+        logger.info("Uploaded to LlamaCloud", { chunks: chunks.length, pipelineId });
+      } catch (err: any) {
+        logger.warn("LlamaCloud upload failed, will retry on next ingestion", { error: err.message });
       }
-      logger.info("Stored embeddings", { chunks: chunks.length });
+
+      // Also store chunks locally in resume_chunks table (without embeddings) for fallback
+      const chunks = chunkText(rawText, 512);
+      await supabase.from("resume_chunks").delete().eq("resume_id", resumeId);
+      for (let i = 0; i < chunks.length; i++) {
+        await supabase.from("resume_chunks").insert({
+          resume_id: resumeId,
+          candidate_id: candidateId,
+          chunk_index: i,
+          content: chunks[i],
+        } as any);
+      }
     }
 
     // Chain-trigger Joe Says refresh after resume parsing
@@ -257,33 +259,6 @@ async function parseWithClaude(
   }
 
   return null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VOYAGE AI EMBEDDING
-// ─────────────────────────────────────────────────────────────────────────────
-async function embedWithVoyage(text: string, apiKey: string): Promise<number[] | null> {
-  const resp = await fetch("https://api.voyageai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "voyage-finance-2",
-      input: text,
-      input_type: "document",
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    logger.error("Voyage API error", { error: errText });
-    return null;
-  }
-
-  const data = await resp.json();
-  return data.data?.[0]?.embedding ?? null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
