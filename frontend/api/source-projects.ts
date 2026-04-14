@@ -130,30 +130,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const data = await resp.json();
 
-      // Log full response shape for debugging
-      console.log("Unipile project detail keys:", Object.keys(data));
+      // Log full response shape for debugging (use console.error so Vercel captures it)
+      const shape: Record<string, string> = {};
       for (const key of Object.keys(data)) {
         const val = data[key];
         if (Array.isArray(val)) {
-          console.log(`  ${key}: Array[${val.length}]`, val.length > 0 ? Object.keys(val[0]) : "empty");
+          shape[key] = `Array[${val.length}]${val.length > 0 ? " keys:" + Object.keys(val[0]).join(",") : ""}`;
         } else if (val && typeof val === "object") {
-          console.log(`  ${key}: Object`, Object.keys(val));
+          shape[key] = `Object{${Object.keys(val).join(",")}}`;
         } else {
-          console.log(`  ${key}:`, typeof val, String(val).slice(0, 100));
+          shape[key] = `${typeof val}:${String(val).slice(0, 60)}`;
         }
       }
+      console.error("[list_applicants] project detail shape:", JSON.stringify(shape));
 
       // Extract applicants — try known field names, then scan for any array of objects
       let applicants: any[] =
         data.applicants ?? data.candidates ?? data.items ?? data.members
         ?? data.profiles ?? data.results ?? data.people ?? data.contacts ?? null;
 
+      let foundKey = applicants ? "(direct match)" : null;
+
       if (!Array.isArray(applicants)) {
         // Deep scan: find the first sizeable array of objects in the response
         for (const key of Object.keys(data)) {
           const val = data[key];
           if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object") {
-            console.log(`Found applicant array under key: "${key}" (${val.length} items)`);
+            foundKey = key;
             applicants = val;
             break;
           }
@@ -166,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               for (const subKey of Object.keys(val)) {
                 const subVal = val[subKey];
                 if (Array.isArray(subVal) && subVal.length > 0 && typeof subVal[0] === "object") {
-                  console.log(`Found applicant array under key: "${key}.${subKey}" (${subVal.length} items)`);
+                  foundKey = `${key}.${subKey}`;
                   applicants = subVal;
                   break;
                 }
@@ -178,8 +181,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (!Array.isArray(applicants)) applicants = [];
+      console.error(`[list_applicants] found ${applicants.length} applicants via key: ${foundKey}`);
 
-      return res.status(200).json({ items: applicants, project: data });
+      return res.status(200).json({ items: applicants, project: data, _debug: { shape, foundKey, count: applicants.length } });
     }
 
     if (action === "download_resume") {
