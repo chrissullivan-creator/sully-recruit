@@ -328,6 +328,35 @@ export function useUpdateTaskStatus() {
   });
 }
 
+export function useUpdateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, updates, attendees }: {
+      taskId: string;
+      updates: Partial<Pick<Task, 'title' | 'description' | 'due_date' | 'start_time' | 'end_time' | 'timezone' | 'location' | 'meeting_url' | 'meeting_provider' | 'reminder' | 'no_calendar_invites' | 'assigned_to'>>;
+      attendees?: { entity_type: string; entity_id: string }[];
+    }) => {
+      const { error } = await supabase.from('tasks').update(updates as any).eq('id', taskId);
+      if (error) throw error;
+      if (attendees !== undefined) {
+        await supabase.from('meeting_attendees').delete().eq('task_id', taskId);
+        if (attendees.length > 0) {
+          const { error: attErr } = await supabase.from('meeting_attendees').insert(
+            attendees.map(a => ({ task_id: taskId, entity_type: a.entity_type, entity_id: a.entity_id })) as any[]
+          );
+          if (attErr) throw attErr;
+        }
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      toast.success('Task updated');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to update task'),
+  });
+}
+
 export function useBulkUpdateTasks() {
   const qc = useQueryClient();
   return useMutation({
