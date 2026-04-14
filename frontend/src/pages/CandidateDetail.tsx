@@ -11,6 +11,10 @@ import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
+import { useEntityTasks, Task } from '@/hooks/useTasks';
+import { TaskCard } from '@/components/tasks/TaskCard';
+import { EditMeetingDialog } from '@/components/tasks/EditMeetingDialog';
+import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -29,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
+import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -81,9 +86,9 @@ const ChannelIcon = ({ channel }: { channel?: string | null }) => {
   return null;
 };
 
-const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false }: {
+const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false, highlight = false }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
-  type?: string; placeholder?: string; disabled?: boolean;
+  type?: string; placeholder?: string; disabled?: boolean; highlight?: boolean;
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -109,11 +114,11 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder, disab
           </Button>
         </div>
       ) : (
-        <div className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 -mx-1.5 transition-colors", disabled ? '' : 'cursor-pointer hover:bg-accent/10')} onClick={() => !disabled && setEditing(true)}>
+        <div className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 -mx-1.5 transition-colors", disabled ? '' : 'cursor-pointer hover:bg-accent/10', highlight && !disabled && 'bg-accent/5 ring-1 ring-accent/20')} onClick={() => !disabled && setEditing(true)}>
           <span className={cn('text-sm flex-1 truncate', value ? 'text-foreground' : 'text-muted-foreground italic')}>
             {value || placeholder || '—'}
           </span>
-          {!disabled && <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />}
+          {!disabled && <Edit className={cn("h-3 w-3 text-muted-foreground shrink-0", highlight ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100')} />}
         </div>
       )}
     </div>
@@ -302,6 +307,7 @@ const CandidateDetail = () => {
   const [uploadingFormatted, setUploadingFormatted] = useState(false);
   const [uploadingOtherDoc, setUploadingOtherDoc] = useState(false);
   const [docFolder, setDocFolder] = useState<'resumes' | 'formatted' | 'other'>('resumes');
+  const [editingInfo, setEditingInfo] = useState(false);
   const otherDocInputRef = useRef<HTMLInputElement>(null);
 
   // Send Out management state
@@ -405,6 +411,28 @@ const CandidateDetail = () => {
     }
   };
 
+  const handleDeleteDocument = async (table: 'resumes' | 'formatted_resumes' | 'candidate_documents', docId: string, filePath: string | null) => {
+    try {
+      if (filePath) {
+        await supabase.storage.from('resumes').remove([filePath]);
+      }
+      const { error } = await supabase.from(table).delete().eq('id', docId);
+      if (error) throw error;
+      const qk = table === 'resumes' ? ['resumes', id] : table === 'formatted_resumes' ? ['formatted_resumes', id] : ['candidate_documents', id];
+      queryClient.invalidateQueries({ queryKey: qk });
+      toast.success('Document deleted');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete document');
+    }
+  };
+
+  // Tasks & meetings linked to this candidate
+  const { data: candidateTasks = [] } = useEntityTasks('candidate', id);
+  const regularTasks = candidateTasks.filter((t: Task) => t.task_type !== 'meeting');
+  const meetings = candidateTasks.filter((t: Task) => t.task_type === 'meeting');
+  const [editingMeeting, setEditingMeeting] = useState<Task | null>(null);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
+
   const { data: sendOuts = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
     enabled: !!id,
@@ -443,16 +471,37 @@ const CandidateDetail = () => {
   };
 
   const handleUpdateStage = async (sendOutId: string, newStage: string) => {
-    const updates: any = { stage: newStage, updated_at: new Date().toISOString() };
+    const normalizedStage = normalizeInterviewStage(newStage);
+    const updates: any = { stage: normalizedStage, updated_at: new Date().toISOString() };
     if (newStage === 'sent_to_client') updates.sent_to_client_at = new Date().toISOString();
-    if (newStage === 'interviewing') updates.interview_at = new Date().toISOString();
-    if (newStage === 'offer') updates.offer_at = new Date().toISOString();
-    if (newStage === 'placed') updates.placed_at = new Date().toISOString();
+    if (normalizedStage === 'interviewing') updates.interview_at = new Date().toISOString();
+    if (normalizedStage === 'offer') updates.offer_at = new Date().toISOString();
+    if (normalizedStage === 'placed') updates.placed_at = new Date().toISOString();
 
-    const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOutId);
+    const { data: updatedSendOut, error } = await supabase
+      .from('send_outs')
+      .update(updates)
+      .eq('id', sendOutId)
+      .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+      .single();
     if (error) { toast.error('Failed to update stage'); return; }
+
+    if (normalizedStage === 'interviewing' && updatedSendOut) {
+      await ensureInterviewArtifacts({
+        sendOutId: updatedSendOut.id,
+        candidateId: updatedSendOut.candidate_id,
+        contactId: updatedSendOut.contact_id,
+        jobId: updatedSendOut.job_id,
+        recruiterId: updatedSendOut.recruiter_id,
+        stage: normalizedStage,
+        interviewAt: updatedSendOut.interview_at,
+      });
+    }
+
     queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
-    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === newStage)?.label ?? newStage}`);
+    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+    queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === normalizedStage)?.label ?? normalizedStage}`);
   };
 
   const handleReject = async (sendOutId: string) => {
@@ -617,10 +666,61 @@ const CandidateDetail = () => {
     if (!id) return;
     setUpdatingJobStatus(true);
     try {
-      const { error } = await supabase.from('candidates').update({ job_status: newStatus }).eq('id', id);
+      const normalizedStatus = normalizeInterviewStage(newStatus);
+      const { error } = await supabase.from('candidates').update({ job_status: normalizedStatus }).eq('id', id);
       if (error) { toast.error('Failed to update status'); return; }
+
+      if (normalizedStatus === 'interviewing' && candidate?.job_id) {
+        const { data: existingSendOut } = await supabase
+          .from('send_outs')
+          .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+          .eq('candidate_id', id)
+          .eq('job_id', candidate.job_id)
+          .maybeSingle();
+
+        const interviewAt = new Date().toISOString();
+        let sendOutRecord = existingSendOut;
+
+        if (existingSendOut) {
+          const { data: updated } = await supabase
+            .from('send_outs')
+            .update({ stage: normalizedStatus, interview_at: interviewAt } as any)
+            .eq('id', existingSendOut.id)
+            .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+            .single();
+          sendOutRecord = updated;
+        } else {
+          const { data: inserted } = await supabase
+            .from('send_outs')
+            .insert({
+              candidate_id: id,
+              job_id: candidate.job_id,
+              recruiter_id: user?.id ?? null,
+              stage: normalizedStatus,
+              interview_at: interviewAt,
+            } as any)
+            .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
+            .single();
+          sendOutRecord = inserted;
+        }
+
+        if (sendOutRecord) {
+          await ensureInterviewArtifacts({
+            sendOutId: sendOutRecord.id,
+            candidateId: sendOutRecord.candidate_id,
+            contactId: sendOutRecord.contact_id,
+            jobId: sendOutRecord.job_id,
+            recruiterId: sendOutRecord.recruiter_id,
+            stage: normalizedStatus,
+            interviewAt: sendOutRecord.interview_at,
+          });
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update status');
     } finally {
@@ -875,19 +975,35 @@ const CandidateDetail = () => {
 
           {/* Contact info grid */}
           <div className="px-8 py-5 border-b border-border">
+            {canEdit && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setEditingInfo(!editingInfo)}
+                  className={cn(
+                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                    editingInfo
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  )}
+                >
+                  <Edit className="h-3 w-3" />
+                  {editingInfo ? 'Done Editing' : 'Edit Info'}
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} />
-              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} />
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} />
-              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} />
-              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} />
-              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} />
-              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} />
-              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} />
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
             </div>
 
             {/* Compensation — collapsible */}
@@ -1445,11 +1561,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete resume?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{r.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('resumes', r.id, r.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1502,11 +1637,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete formatted resume?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{r.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('formatted_resumes', r.id, r.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1547,11 +1701,30 @@ const CandidateDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                              {downloadUrl && (
-                                <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
-                                </a>
-                              )}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {downloadUrl && (
+                                  <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View
+                                  </a>
+                                )}
+                                {isAdmin && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <button className="text-destructive hover:text-destructive/80 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete document?</AlertDialogTitle>
+                                        <AlertDialogDescription>This will permanently delete "{d.file_name}". This cannot be undone.</AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteDocument('candidate_documents', d.id, d.file_path)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1849,24 +2022,71 @@ const CandidateDetail = () => {
               )}
 
               {/* TASKS section (shown on all, tasks tabs) */}
+              {/* TASKS section */}
               {(sidebarTab === 'all' || sidebarTab === 'tasks') && (
                 <div>
                   {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <FileText className="h-3 w-3" /> Tasks
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No tasks yet.</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                      <FileText className="h-3 w-3" /> Tasks ({regularTasks.length})
+                    </h3>
+                    <button onClick={() => setCreateTaskOpen(true)} className="text-[10px] text-accent hover:underline">+ Add</button>
+                  </div>
+                  {regularTasks.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No tasks yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {regularTasks.map((t: Task) => <TaskCard key={t.id} task={t} />)}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* MEETINGS section (shown on all, meetings tabs) */}
+              {/* MEETINGS section */}
               {(sidebarTab === 'all' || sidebarTab === 'meetings') && (
                 <div>
                   {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <Calendar className="h-3 w-3" /> Meetings
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3" /> Meetings ({meetings.length})
+                    </h3>
+                  </div>
+                  {meetings.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {meetings.map((m: Task) => (
+                        <div key={m.id} className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                          <p className="text-sm font-medium truncate">{m.title}</p>
+                          {m.start_time && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {format(new Date(m.start_time), 'MMM d, yyyy')}
+                              {' '}
+                              {format(new Date(m.start_time), 'h:mm a')}
+                              {m.end_time && ` – ${format(new Date(m.end_time), 'h:mm a')}`}
+                            </p>
+                          )}
+                          {m.location && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                              <MapPin className="h-3 w-3 shrink-0" /> {m.location}
+                            </p>
+                          )}
+                          {m.meeting_url && (
+                            <a href={m.meeting_url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline flex items-center gap-1">
+                              <ExternalLink className="h-3 w-3" /> Join Meeting
+                            </a>
+                          )}
+                          <button
+                            onClick={() => setEditingMeeting(m)}
+                            className="text-[10px] text-accent hover:underline mt-1"
+                          >
+                            Edit Details
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1914,6 +2134,23 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      {/* Edit meeting dialog */}
+      {editingMeeting && (
+        <EditMeetingDialog
+          open={!!editingMeeting}
+          onOpenChange={(open) => { if (!open) setEditingMeeting(null); }}
+          task={editingMeeting}
+          companyId={candidate?.job_id ? (jobs as any[]).find((j: any) => j.id === candidate.job_id)?.company_id : null}
+        />
+      )}
+
+      {/* Create task dialog */}
+      <CreateTaskDialog
+        open={createTaskOpen}
+        onOpenChange={setCreateTaskOpen}
+        defaultLinks={id ? [{ entity_type: 'candidate', entity_id: id }] : []}
+      />
     </MainLayout>
   );
 };

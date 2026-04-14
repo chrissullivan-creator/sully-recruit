@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 interface SendOutRecord {
   id: string;
@@ -72,20 +73,39 @@ export const SendOutPipeline = ({
     setUpdating(recordId);
 
     try {
+      const normalizedStage = normalizeInterviewStage(newStatus);
+      const updates: any = { stage: normalizedStage };
+      if (normalizedStage === 'interviewing') {
+        updates.interview_at = new Date().toISOString();
+      }
+
       const { error } = await supabase
-        .from('send_out_board')
-        .update({ stage: newStatus })
+        .from('send_outs')
+        .update(updates)
         .eq('id', recordId);
 
       if (error) throw error;
 
-      toast.success(`Status updated to ${statusLabels[newStatus]}`);
+      if (normalizedStage === 'interviewing') {
+        const record = sendOuts.find((item) => item.id === recordId);
+        if (record) {
+          await ensureInterviewArtifacts({
+            sendOutId: record.id,
+            candidateId: record.candidate_id,
+            contactId: record.contact_id,
+            jobId: record.job_id,
+            stage: normalizedStage,
+          });
+        }
+      }
+
+      toast.success(`Status updated to ${statusLabels[normalizedStage] || normalizedStage}`);
       queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
       queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
     } catch (err: any) {
       toast.error(err.message || 'Failed to update status');
     } finally {
-      setUpdating(recordId);
+      setUpdating(null);
     }
   };
 

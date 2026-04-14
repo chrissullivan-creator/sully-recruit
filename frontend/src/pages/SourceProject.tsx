@@ -68,20 +68,16 @@ function normalizeApplicant(raw: any): Applicant {
     location: raw.location || raw.region || '',
     linkedin_url: raw.linkedin_url || raw.public_profile_url || raw.url || '',
     profile_picture_url: raw.profile_picture_url || raw.picture_url || raw.avatar_url || '',
-    stage: raw.stage || raw.status || raw.pipeline_stage || 'unknown',
+    stage: (raw.stage || raw.status || raw.pipeline_stage || 'unknown').toLowerCase(),
     has_resume: raw.has_resume ?? raw.resume_available ?? false,
   };
 }
 
-const STAGE_ORDER = ['new', 'screen', 'interview', 'offer', 'hired', 'rejected', 'withdrawn', 'unknown'];
+const STAGE_ORDER = ['uncontacted', 'contacted', 'replied', 'unknown'];
 const STAGE_COLORS: Record<string, string> = {
-  new: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  screen: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  interview: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  offer: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  hired: 'bg-green-500/10 text-green-400 border-green-500/20',
-  rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
-  withdrawn: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  uncontacted: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  contacted: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  replied: 'bg-green-500/10 text-green-400 border-green-500/20',
   unknown: 'bg-muted text-muted-foreground border-border',
 };
 
@@ -141,6 +137,30 @@ export default function SourceProject() {
   }, [id, accountId]);
 
   useEffect(() => { fetchProject(); }, [fetchProject]);
+
+  // ---- Resume download ----
+  const handleDownloadResume = async (applicant: Applicant) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    try {
+      const data = await callSourceApi({
+        action: 'download_resume',
+        account_id: accountId,
+        job_id: id,
+        applicant_id: applicant.id,
+      }, session);
+      if (data.data_base64) {
+        const contentType = data.content_type || 'application/pdf';
+        const bytes = Uint8Array.from(atob(data.data_base64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: contentType });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else {
+        toast.error('No resume data returned');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to download resume');
+    }
+  };
 
   // ---- Selection helpers ----
   const toggleApplicant = (appId: string) => {
@@ -203,27 +223,22 @@ export default function SourceProject() {
 
       {/* Controls bar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {/* Candidate / Contact toggle */}
-        <div className="flex items-center bg-muted rounded-md p-0.5">
-          <button
-            onClick={() => setLabel('candidate')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              label === 'candidate' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <UserCheck className="h-3.5 w-3.5" />
-            Candidate
-          </button>
-          <button
-            onClick={() => setLabel('contact')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              label === 'contact' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Contact className="h-3.5 w-3.5" />
-            Contact
-          </button>
-        </div>
+        {/* Candidate / Contact dropdown */}
+        <Select value={label} onValueChange={(val) => setLabel(val as ProjectLabel)}>
+          <SelectTrigger className="w-44">
+            <div className="flex items-center gap-1.5">
+              {label === 'candidate'
+                ? <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                : <Contact className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              }
+              <SelectValue />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="candidate">Candidate</SelectItem>
+            <SelectItem value="contact">Contact</SelectItem>
+          </SelectContent>
+        </Select>
 
         {/* Job picker (candidate mode) */}
         {label === 'candidate' && (
@@ -376,7 +391,15 @@ export default function SourceProject() {
                       <td className="px-2 py-2 text-muted-foreground truncate max-w-[160px]">{applicant.current_company}</td>
                       <td className="px-2 py-2 text-muted-foreground truncate max-w-[140px]">{applicant.location}</td>
                       <td className="px-2 py-2 text-center">
-                        {applicant.has_resume && <FileText className="h-3.5 w-3.5 inline text-emerald-500" title="Has resume" />}
+                        {applicant.has_resume && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDownloadResume(applicant); }}
+                            className="hover:text-emerald-400 transition-colors"
+                            title="View resume"
+                          >
+                            <FileText className="h-3.5 w-3.5 inline text-emerald-500" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

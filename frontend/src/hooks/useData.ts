@@ -243,10 +243,36 @@ export function useSequences() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sequences')
-        .select('*, sequence_steps(*), sequence_enrollments(id), jobs(id, title, company_name)')
-        .order('created_at', { ascending: false });
+        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
+        .order('created_at', { ascending: false }) as any;
       if (error) throw error;
-      return data;
+      return (data || []).map((sequence: any) => {
+        if (sequence.sequence_steps?.length) return sequence;
+
+        let derivedStepOrder = 0;
+        const derivedSteps = (sequence.sequence_nodes || [])
+          .sort((a: any, b: any) => a.node_order - b.node_order)
+          .flatMap((node: any) =>
+            ((node.sequence_actions || []) as any[]).map((action: any) => {
+              derivedStepOrder += 1;
+              return {
+              id: action.id,
+              step_order: derivedStepOrder,
+              channel: action.channel,
+              step_type: action.channel,
+              body: action.message_body || '',
+              delay_days: 0,
+              delay_hours: Number(action.base_delay_hours) || 0,
+              min_hours_after_connection: action.post_connection_hardcoded_hours || 4,
+            };
+            }),
+          );
+
+        return {
+          ...sequence,
+          sequence_steps: derivedSteps,
+        };
+      });
     },
   });
 }
@@ -369,8 +395,18 @@ export function useDashboardMetrics() {
       const monthCandidates = candidatesMonthRes.data ?? [];
       const sendOuts = sendOutsRes.data ?? [];
 
-      const countWeek = (status: string) => weekCandidates.filter(c => c.job_status === status).length;
-      const countMonth = (status: string) => monthCandidates.filter(c => c.job_status === status).length;
+      const countWeek = (status: string) =>
+        weekCandidates.filter((candidate) =>
+          status === 'interviewing'
+            ? ['interview', 'interviewing'].includes(candidate.job_status)
+            : candidate.job_status === status,
+        ).length;
+      const countMonth = (status: string) =>
+        monthCandidates.filter((candidate) =>
+          status === 'interviewing'
+            ? ['interview', 'interviewing'].includes(candidate.job_status)
+            : candidate.job_status === status,
+        ).length;
 
       return {
         activeJobs: jobsRes.count ?? 0,
@@ -397,7 +433,7 @@ export function useDashboardMetrics() {
         monthOffer: countMonth('offer'),
         monthPlaced: countMonth('placed'),
         // Send outs (all-time, stage-based)
-        interviewsThisWeek: sendOuts.filter((s) => s.stage === 'interview').length,
+        interviewsThisWeek: sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
         offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
       };
     },

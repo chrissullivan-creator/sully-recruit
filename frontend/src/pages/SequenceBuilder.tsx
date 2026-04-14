@@ -10,6 +10,23 @@ import { FlowBuilder, type FlowNodeData, type FlowEdgeData } from "@/components/
 import { SequenceReview } from "@/components/sequences/SequenceReview";
 import { toast } from "sonner";
 
+function toTimeInput(value: unknown, fallback: string) {
+  if (typeof value === "string" && /^\d{2}:\d{2}/.test(value)) return value.slice(0, 5);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `${String(value).padStart(2, "0")}:00`;
+  }
+  return fallback;
+}
+
+function buildSequenceEdges(nodes: FlowNodeData[]) {
+  const ordered = [...nodes].sort((a, b) => a.nodeOrder - b.nodeOrder);
+  return ordered.slice(0, -1).map((node, index) => ({
+    id: `edge-${node.id}-${ordered[index + 1].id}`,
+    source: node.id,
+    target: ordered[index + 1].id,
+  }));
+}
+
 export default function SequenceBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -38,7 +55,7 @@ export default function SequenceBuilder() {
     (async () => {
       const { data: seq } = await supabase
         .from("sequences")
-        .select("*")
+        .select("*, sequence_nodes(id, node_order, node_type, label, sequence_actions(*)), sequence_steps(*)")
         .eq("id", id)
         .single() as any;
       if (seq) {
@@ -47,11 +64,56 @@ export default function SequenceBuilder() {
           jobId: seq.job_id,
           audienceType: seq.audience_type,
           objective: seq.objective || "",
-          sendWindowStart: (seq.send_window_start || "09:00").slice(0, 5),
-          sendWindowEnd: (seq.send_window_end || "18:00").slice(0, 5),
+          sendWindowStart: toTimeInput(seq.send_window_start, "09:00"),
+          sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
           timezone: seq.timezone || "America/New_York",
           senderUserId: seq.sender_user_id || seq.created_by,
         });
+
+        const nodeRows = (seq.sequence_nodes || []) as any[];
+        if (nodeRows.length > 0) {
+          const mappedNodes: FlowNodeData[] = nodeRows
+            .sort((a: any, b: any) => a.node_order - b.node_order)
+            .map((node: any) => ({
+              id: node.id,
+              type: node.node_type === "end" ? "end" : "action",
+              label: node.label || "",
+              nodeOrder: node.node_order,
+              actions: (node.sequence_actions || []).map((action: any) => ({
+                id: action.id,
+                channel: action.channel,
+                messageBody: action.message_body || "",
+                baseDelayHours: Number(action.base_delay_hours) || 0,
+                delayIntervalMinutes: action.delay_interval_minutes || 0,
+                jiggleMinutes: action.jiggle_minutes || 0,
+                postConnectionHardcodedHours: action.post_connection_hardcoded_hours || 4,
+                respectSendWindow: action.respect_send_window !== false,
+              })),
+            }));
+          setFlowNodes(mappedNodes);
+          setFlowEdges(buildSequenceEdges(mappedNodes));
+        } else if (seq.sequence_steps?.length) {
+          const mappedNodes: FlowNodeData[] = (seq.sequence_steps as any[])
+            .sort((a: any, b: any) => a.step_order - b.step_order)
+            .map((step: any, index: number) => ({
+              id: step.id,
+              type: "action",
+              label: `Step ${index + 1}`,
+              nodeOrder: index + 1,
+              actions: [{
+                id: `${step.id}-action`,
+                channel: step.channel || step.step_type || "email",
+                messageBody: step.body || "",
+                baseDelayHours: Number(step.delay_hours) || 0,
+                delayIntervalMinutes: 0,
+                jiggleMinutes: 15,
+                postConnectionHardcodedHours: step.min_hours_after_connection || 4,
+                respectSendWindow: true,
+              }],
+            }));
+          setFlowNodes(mappedNodes);
+          setFlowEdges(buildSequenceEdges(mappedNodes));
+        }
       }
     })();
   }, [id]);
@@ -109,6 +171,7 @@ export default function SequenceBuilder() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             channel: action.channel,
+            step_type: action.channel,
             step_number: stepNumber,
             step_label: stepLabel || undefined,
             total_steps: totalSteps,
@@ -142,7 +205,7 @@ export default function SequenceBuilder() {
     [setup, flowNodes],
   );
 
-  const saveSequence = useCallback(async (status?: 'draft' | 'active') => {
+  const saveSequence = useCallback(async (status: "draft" | "active") => {
     if (!setup.name) {
       toast.error("Sequence name is required");
       return null;
@@ -169,7 +232,7 @@ export default function SequenceBuilder() {
             timezone: setup.timezone,
             created_by: user.id,
             sender_user_id: setup.senderUserId || user.id,
-            status: status || 'draft',
+            status,
           } as any)
           .select("id")
           .single();
@@ -188,7 +251,7 @@ export default function SequenceBuilder() {
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
             sender_user_id: setup.senderUserId || user.id,
-            ...(status ? { status } : {}),
+            status,
           } as any)
           .eq("id", sequenceId);
 
@@ -240,10 +303,10 @@ export default function SequenceBuilder() {
     } finally {
       setSaving(false);
     }
-  }, [setup, flowNodes, flowEdges, id, user]);
+  }, [setup, flowNodes, id, user]);
 
   const handleSaveDraft = useCallback(async () => {
-    const seqId = await saveSequence('draft');
+    const seqId = await saveSequence("draft");
     if (seqId) {
       toast.success("Sequence saved as draft");
       if (!id) navigate(`/sequences/${seqId}/edit`, { replace: true });
@@ -251,7 +314,7 @@ export default function SequenceBuilder() {
   }, [saveSequence, id, navigate]);
 
   const handleActivate = useCallback(async () => {
-    const seqId = await saveSequence('active');
+    const seqId = await saveSequence("active");
     if (seqId) {
       toast.success("Sequence activated");
       navigate(`/sequences/${seqId}/schedule`);
@@ -284,7 +347,12 @@ export default function SequenceBuilder() {
           </TabsContent>
 
           <TabsContent value="flow" className="mt-4">
-            <FlowBuilder onChange={handleFlowChange} onAskJoe={handleAskJoe} />
+            <FlowBuilder
+              initialNodes={flowNodes}
+              initialEdges={flowEdges}
+              onChange={handleFlowChange}
+              onAskJoe={handleAskJoe}
+            />
             <div className="mt-4 flex justify-between items-center">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
               <div className="text-xs text-muted-foreground">

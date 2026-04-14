@@ -445,8 +445,8 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
         prefill={{
           name: senderName,
           email: senderAddress.includes('@') ? senderAddress : '',
-          phone: !senderAddress.includes('@') ? senderAddress : '',
-          linkedinUrl: LINKEDIN_CHANNELS.includes(thread.channel as any) ? senderAddress : '',
+          phone: thread.channel === 'sms' ? senderAddress : '',
+          linkedinUrl: thread.channel?.startsWith('linkedin') ? senderAddress : '',
         }}
         rawBody={firstInbound?.body || undefined}
         externalConversationId={thread.external_conversation_id}
@@ -1183,7 +1183,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
             name: senderName,
             email: senderAddress.includes('@') ? senderAddress : '',
             phone: !senderAddress.includes('@') ? senderAddress : '',
-            linkedinUrl: LINKEDIN_CHANNELS.includes(thread.channel as any) ? senderAddress : '',
+            linkedinUrl: thread.channel?.startsWith('linkedin') ? senderAddress : '',
           }}
           rawBody={firstInbound?.body || undefined}
           externalConversationId={thread.external_conversation_id}
@@ -1246,21 +1246,37 @@ export default function Inbox() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('integration_accounts')
-        .select('id, account_email, owner_user_id')
+        .select('id, email_address, account_label, owner_user_id')
         .eq('is_active', true);
       if (error) throw error;
-      // Group account IDs by email (one person may have multiple accounts)
-      const byEmail: Record<string, { label: string; accountIds: string[] }> = {};
-      for (const acct of data || []) {
-        const email = acct.account_email || 'Unknown';
-        const label = email.split('@')[0]?.split('.')
-          .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
-          .join(' ') || email;
-        if (!byEmail[email]) byEmail[email] = { label, accountIds: [] };
-        byEmail[email].accountIds.push(acct.id);
+
+      // Fetch profile names so the filter shows "Chris Sullivan" not "Chris Sullivan Email"
+      const ownerIds = [...new Set((data || []).map(a => a.owner_user_id).filter(Boolean))];
+      const profileMap: Record<string, string> = {};
+      if (ownerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', ownerIds);
+        for (const p of profiles || []) {
+          if (p.full_name) profileMap[p.id] = p.full_name;
+        }
       }
-      return Object.entries(byEmail).map(([email, { label, accountIds }]) => ({
-        email,
+
+      // Group account IDs by owner (one person may have multiple accounts)
+      const byOwner: Record<string, { label: string; accountIds: string[] }> = {};
+      for (const acct of data || []) {
+        const key = acct.owner_user_id || acct.email_address || 'unknown';
+        if (!byOwner[key]) {
+          byOwner[key] = {
+            label: (acct.owner_user_id && profileMap[acct.owner_user_id]) || acct.account_label || acct.email_address || 'Unknown',
+            accountIds: [],
+          };
+        }
+        byOwner[key].accountIds.push(acct.id);
+      }
+      return Object.entries(byOwner).map(([key, { label, accountIds }]) => ({
+        key,
         label,
         accountIds,
       }));
@@ -1296,7 +1312,7 @@ export default function Inbox() {
   const filtered = allThreads.filter((t) => {
     // Admin owner filter — restrict to selected team member's accounts
     if (isAdmin && ownerFilter !== 'all') {
-      const member = teamMembers.find((m: any) => m.email === ownerFilter);
+      const member = teamMembers.find((m: any) => m.key === ownerFilter);
       if (member && !member.accountIds.includes(t.integration_account_id)) return false;
     }
 
@@ -1420,7 +1436,7 @@ export default function Inbox() {
                 >
                   <option value="all">All team</option>
                   {teamMembers.map((m: any) => (
-                    <option key={m.email} value={m.email}>{m.label}</option>
+                    <option key={m.key} value={m.key}>{m.label}</option>
                   ))}
                 </select>
               )}

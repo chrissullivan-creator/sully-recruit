@@ -220,7 +220,7 @@ export function AddPersonWizard({
             linkedin_url: parsed.linkedin_url || prev.linkedin_url,
           }));
         }
-      } else if (channel === 'linkedin') {
+      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter' || channel === 'linkedin_sales_nav') {
         // Resolve via Unipile chat attendees + user profile.
         await resolveLinkedInProfile(token);
       }
@@ -386,7 +386,7 @@ export function AddPersonWizard({
       case 'matches': return `Found ${matches.length} possible ${matches.length === 1 ? 'match' : 'matches'}`;
       case 'enriching':
         if (channel === 'email') return 'Parsing email signature...';
-        if (channel === 'linkedin') return 'Fetching LinkedIn profile...';
+        if (channel?.startsWith('linkedin')) return 'Fetching LinkedIn profile...';
         return 'Loading...';
       case 'form': return 'Review and edit the details below.';
     }
@@ -506,7 +506,7 @@ export function AddPersonWizard({
                     <Mail className="h-4 w-4" /> Parsing email signature...
                   </p>
                 )}
-                {channel === 'linkedin' && (
+                {channel?.startsWith('linkedin') && (
                   <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center">
                     <Linkedin className="h-4 w-4" /> Fetching LinkedIn profile...
                   </p>

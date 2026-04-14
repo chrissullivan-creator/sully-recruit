@@ -108,30 +108,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === "list_applicants") {
-      // Applicants come from the project detail endpoint
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
 
-      const params = new URLSearchParams({ account_id });
-      const resp = await fetch(
-        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${params}`,
-        { headers },
-      );
+      // Step 1: Fetch project metadata
+      const metaParams = new URLSearchParams({ account_id });
+      let projectData: any = null;
+      try {
+        const metaResp = await fetch(
+          `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${metaParams}`,
+          { headers },
+        );
+        if (metaResp.ok) projectData = await metaResp.json();
+      } catch { /* project metadata is optional */ }
 
-      if (resp.status === 429) {
-        return res.status(429).json({
-          error: "Unipile rate limit reached. Please wait a moment and try again.",
-        });
-      }
-      if (!resp.ok) {
-        const errText = await resp.text();
-        console.error(`Unipile project detail error: ${resp.status}`, errText);
-        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
+      // Step 2: Fetch applicants via the paginated jobs/applicants endpoint
+      let applicants: any[] = [];
+      try {
+        applicants = await fetchAllPages(`${baseUrl}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants`);
+        if (res.headersSent) return;
+      } catch (err: any) {
+        // If jobs endpoint fails (e.g. 404), fall back to extracting from project detail
+        console.error(`Jobs applicants endpoint failed: ${err.message}`);
+        if (projectData) {
+          console.log("Falling back to project detail. Response keys:", Object.keys(projectData));
+          applicants = projectData.applicants ?? projectData.candidates ?? projectData.items
+            ?? projectData.members ?? projectData.profiles ?? projectData.results ?? [];
+          if (!Array.isArray(applicants)) applicants = [];
+        }
       }
 
-      const data = await resp.json();
-      // The project detail may return applicants nested in the response
-      const applicants = data.applicants ?? data.candidates ?? data.items ?? data.members ?? [];
-      return res.status(200).json({ items: Array.isArray(applicants) ? applicants : [], project: data });
+      return res.status(200).json({ items: applicants, project: projectData });
     }
 
     if (action === "download_resume") {
@@ -141,7 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const params = new URLSearchParams({ account_id });
 
       const resp = await fetch(
-        `${baseUrl}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
+        `${baseUrl}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}/resume?${params}`,
         { headers },
       );
 

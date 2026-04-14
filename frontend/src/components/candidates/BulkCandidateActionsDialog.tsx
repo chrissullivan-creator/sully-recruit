@@ -11,6 +11,7 @@ import { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Users, Loader2, Briefcase, Play } from 'lucide-react';
+import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 interface BulkCandidateActionsDialogProps {
   open: boolean;
@@ -56,6 +57,11 @@ type CandidateUpdate = TablesUpdate<'candidates'> & {
   job_status?: string | null;
 };
 
+const isSequenceSelectable = (sequence: any) => {
+  const status = String(sequence?.status || '').toLowerCase();
+  return status === 'active' || status === 'draft';
+};
+
 export const BulkCandidateActionsDialog = ({
   open,
   onOpenChange,
@@ -85,7 +91,7 @@ export const BulkCandidateActionsDialog = ({
     }
   }, [open]);
 
-  const activeSequences = sequences.filter((s) => s.status === 'active' || s.status === 'draft');
+  const activeSequences = sequences.filter(isSequenceSelectable);
   const selectedJob = jobs.find((j) => j.id === selectedJobId);
   const selectedCountLabel = `${candidateIds.length} candidate${candidateIds.length > 1 ? 's' : ''}`;
   const selectedNamesPreview = candidateNames.filter(Boolean).slice(0, 3).join(', ');
@@ -101,29 +107,47 @@ export const BulkCandidateActionsDialog = ({
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
 
+      const normalizedStage = normalizeInterviewStage(selectedStage);
       const sendOuts: (SendOutInsert & { rejected_by?: string; rejection_reason?: string; feedback?: string })[] = candidateIds.map((candidateId) => {
         const record: any = {
           job_id: selectedJobId,
           candidate_id: candidateId,
-          stage: selectedStage,
+          stage: normalizedStage,
           recruiter_id: userId,
         };
-        if (selectedStage === 'rejected') {
+        if (normalizedStage === 'rejected') {
           record.rejected_by = rejectedBy;
           record.rejection_reason = rejectionDetails || null;
         }
-        if (selectedStage === 'sent') record.sent_to_client_at = new Date().toISOString();
-        if (selectedStage === 'interview') record.interview_at = new Date().toISOString();
-        if (selectedStage === 'offer') record.offer_at = new Date().toISOString();
-        if (selectedStage === 'placed') record.placed_at = new Date().toISOString();
+        if (normalizedStage === 'sent') record.sent_to_client_at = new Date().toISOString();
+        if (normalizedStage === 'interviewing') record.interview_at = new Date().toISOString();
+        if (normalizedStage === 'offer') record.offer_at = new Date().toISOString();
+        if (normalizedStage === 'placed') record.placed_at = new Date().toISOString();
         return record;
       });
 
-      const { error: sendOutError } = await supabase
+      const { data: createdSendOuts, error: sendOutError } = await supabase
         .from('send_outs')
-        .insert(sendOuts as any);
+        .insert(sendOuts as any)
+        .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at');
 
       if (sendOutError) throw sendOutError;
+
+      if (normalizedStage === 'interviewing') {
+        await Promise.all(
+          (createdSendOuts || []).map((record: any) =>
+            ensureInterviewArtifacts({
+              sendOutId: record.id,
+              candidateId: record.candidate_id,
+              contactId: record.contact_id,
+              jobId: record.job_id,
+              recruiterId: record.recruiter_id,
+              stage: normalizedStage,
+              interviewAt: record.interview_at,
+            }),
+          ),
+        );
+      }
 
       if (enrollInSequence && selectedSequenceId) {
         const enrollments = candidateIds.map((candidateId) => ({
@@ -145,7 +169,7 @@ export const BulkCandidateActionsDialog = ({
       // Update job_id and job_status on candidates (fix: was using tagged_job_id)
       const { error: updateError } = await supabase
         .from('candidates')
-        .update({ job_id: selectedJobId, job_status: selectedStage } as CandidateUpdate)
+        .update({ job_id: selectedJobId, job_status: normalizedStage } as CandidateUpdate)
         .in('id', candidateIds);
 
       if (updateError) throw updateError;
@@ -153,6 +177,7 @@ export const BulkCandidateActionsDialog = ({
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
       queryClient.invalidateQueries({ queryKey: ['send_outs_job', selectedJobId] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
       if (enrollInSequence) {
         queryClient.invalidateQueries({ queryKey: ['sequences'] });
         queryClient.invalidateQueries({ queryKey: ['sequence_enrollments'] });
