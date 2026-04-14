@@ -47,7 +47,7 @@ export default function SequenceBuilder() {
   const [flowNodes, setFlowNodes] = useState<FlowNodeData[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdgeData[]>([]);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("setup");
+  const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
 
   // Load existing sequence when editing
   useEffect(() => {
@@ -88,6 +88,7 @@ export default function SequenceBuilder() {
                 jiggleMinutes: action.jiggle_minutes || 0,
                 postConnectionHardcodedHours: action.post_connection_hardcoded_hours || 4,
                 respectSendWindow: action.respect_send_window !== false,
+                useSignature: action.use_signature !== false,
               })),
             }));
           setFlowNodes(mappedNodes);
@@ -288,6 +289,7 @@ export default function SequenceBuilder() {
               jiggle_minutes: action.jiggleMinutes,
               post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
               respect_send_window: action.respectSendWindow,
+              use_signature: action.channel === "email" ? (action.useSignature !== false) : false,
             } as any);
             if (actionErr) throw new Error(`Action save failed (${node.label}): ${actionErr.message}`);
           }

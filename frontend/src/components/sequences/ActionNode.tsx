@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/shared/RichTextEditor";
 import { toast } from "sonner";
@@ -36,6 +37,7 @@ export interface ActionData {
   jiggleMinutes: number;
   postConnectionHardcodedHours: number;
   respectSendWindow: boolean;
+  useSignature?: boolean;
 }
 
 interface ActionNodeData {
@@ -134,6 +136,24 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
     closeEditor();
   }, [closeEditor, editorDraft, editingIndex, updateAction]);
 
+  const handleAskJoeInDialog = useCallback(
+    async () => {
+      if (editingIndex === null || !onAskJoe) return;
+      setLoadingIndex(editingIndex);
+      try {
+        const drafted = await onAskJoe(editingIndex, actions[editingIndex], stepNumber || 1, label || "");
+        if (drafted) {
+          setEditorDraft(drafted);
+        }
+      } catch (err) {
+        console.error("Ask Joe failed:", err);
+      } finally {
+        setLoadingIndex(null);
+      }
+    },
+    [editingIndex, onAskJoe, actions, stepNumber, label],
+  );
+
   const copyMergeTag = useCallback(async (tag: string) => {
     try {
       await navigator.clipboard.writeText(tag);
@@ -165,14 +185,14 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
             return (
               <div key={action.id} className="border rounded-md p-3 space-y-2 bg-slate-50">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4" />
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Icon className="h-4 w-4 shrink-0" />
                     <Select
                       value={action.channel}
                       onValueChange={(v) => updateAction(i, "channel", v)}
                     >
-                      <SelectTrigger className="w-[180px] h-8 text-xs">
-                        <SelectValue />
+                      <SelectTrigger className="w-full h-8 text-xs">
+                        <SelectValue placeholder="Select channel" />
                       </SelectTrigger>
                       <SelectContent>
                         {CHANNELS.map((ch) => (
@@ -213,19 +233,20 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                     <button
                       type="button"
                       onClick={() => openEditor(i)}
-                      className="w-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-left text-xs transition-colors hover:border-slate-400 hover:bg-slate-100"
+                      className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-xs transition-colors hover:bg-slate-50 hover:shadow-sm"
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <span className="font-medium text-slate-700">Edit message in larger window</span>
+                        <span className="font-medium text-slate-700">
+                          {action.messageBody ? "Edit message" : "Draft message"}
+                        </span>
                         <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                           <Pencil className="h-3 w-3" />
-                          Open editor
                         </span>
                       </div>
                       <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
                         {action.messageBody
                           ? action.messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-                          : "No message drafted yet."}
+                          : "Click to draft message..."}
                       </p>
                     </button>
                     <div className="flex flex-wrap gap-1">
@@ -302,6 +323,20 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                     Waits for connection + 4h minimum (window-hours). Delay field = additional hours on top of the 4h.
                   </p>
                 )}
+
+                {/* Email signature toggle — only for email channel */}
+                {action.channel === "email" && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`sig-${action.id}`}
+                      checked={action.useSignature !== false}
+                      onCheckedChange={(checked) => updateAction(i, "useSignature", !!checked)}
+                    />
+                    <Label htmlFor={`sig-${action.id}`} className="text-[10px] cursor-pointer">
+                      Include email signature
+                    </Label>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -353,9 +388,25 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
             )}
 
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                Merge tags copy to your clipboard so you can paste them where you want inside the message.
-              </p>
+              <div className="flex items-center gap-2">
+                {onAskJoe && (
+                  <Button
+                    variant="outline"
+                    onClick={handleAskJoeInDialog}
+                    disabled={editingIndex !== null && loadingIndex === editingIndex}
+                  >
+                    {editingIndex !== null && loadingIndex === editingIndex ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 mr-2" />
+                    )}
+                    Ask Joe
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground hidden sm:block">
+                  Merge tags copy to clipboard
+                </p>
+              </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={closeEditor}>
                   Cancel

@@ -105,43 +105,14 @@ function createEmptyFlow(): { nodes: Node[]; edges: Edge[]; nodeCounter: number 
   return {
     nodes: [
       {
-        id: "node-1",
-        type: "actionNode",
-        position: { x: 150, y: 50 },
-        data: {
-          label: "",
-          actions: [
-            {
-              id: crypto.randomUUID(),
-              channel: "linkedin_inmail",
-              messageBody: "",
-              baseDelayHours: 0,
-              delayIntervalMinutes: 0,
-              jiggleMinutes: 5,
-              postConnectionHardcodedHours: 4,
-              respectSendWindow: true,
-            },
-          ],
-          nodeOrder: 1,
-        },
-      },
-      {
         id: "node-end",
         type: "endNode",
-        position: { x: 225, y: 300 },
+        position: { x: 225, y: 50 },
         data: { label: "End" },
       },
     ],
-    edges: [
-      {
-        id: "e1-end",
-        source: "node-1",
-        target: "node-end",
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2, stroke: "#94a3b8" },
-      },
-    ],
-    nodeCounter: 2,
+    edges: [],
+    nodeCounter: 1,
   };
 }
 
@@ -407,45 +378,95 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
     (type: "action" | "end") => {
       const id = `node-${nodeCounter + 1}`;
       setNodeCounter((c) => c + 1);
-      const maxY = Math.max(...nodes.map((n) => n.position.y), 0);
 
-      const newNode: Node =
-        type === "action"
-          ? {
-              id,
-              type: "actionNode",
-              position: { x: 150, y: maxY + 220 },
-              data: {
-                label: "",
-                actions: [
-                  {
-                    id: crypto.randomUUID(),
-                    channel: "email",
-                    messageBody: "",
-                    baseDelayHours: 24,
-                    delayIntervalMinutes: 0,
-                    jiggleMinutes: 10,
-                    postConnectionHardcodedHours: 4,
-                    respectSendWindow: true,
-                  },
-                ],
-                nodeOrder: nodeCounter + 1,
-                onUpdate: (actions: ActionData[]) => {
-                  setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, actions } } : n)));
-                },
-                onAskJoe: buildAskJoeHandler(id),
+      if (type === "end") {
+        const maxY = Math.max(...nodes.map((n) => n.position.y), 0);
+        setNodes((nds) => [...nds, {
+          id,
+          type: "endNode",
+          position: { x: 225, y: maxY + 220 },
+          data: { label: "End" },
+        }]);
+        return;
+      }
+
+      // Insert action node before the End node and auto-connect
+      setNodes((nds) => {
+        const endNode = nds.find((n) => n.type === "endNode");
+        const actionNodes = nds.filter((n) => n.type === "actionNode");
+        const lastAction = actionNodes[actionNodes.length - 1];
+        const newY = lastAction ? lastAction.position.y + 220 : 50;
+
+        const newNode: Node = {
+          id,
+          type: "actionNode",
+          position: { x: 150, y: newY },
+          data: {
+            label: "",
+            actions: [
+              {
+                id: crypto.randomUUID(),
+                channel: "email",
+                messageBody: "",
+                baseDelayHours: actionNodes.length === 0 ? 0 : 24,
+                delayIntervalMinutes: 0,
+                jiggleMinutes: 10,
+                postConnectionHardcodedHours: 4,
+                respectSendWindow: true,
               },
-            }
-          : {
-              id,
-              type: "endNode",
-              position: { x: 225, y: maxY + 220 },
-              data: { label: "End" },
-            };
+            ],
+            nodeOrder: nodeCounter + 1,
+            onUpdate: (actions: ActionData[]) => {
+              setNodes((nds2) => nds2.map((n) => (n.id === id ? { ...n, data: { ...n.data, actions } } : n)));
+            },
+            onAskJoe: buildAskJoeHandler(id),
+          },
+        };
 
-      setNodes((nds) => [...nds, newNode]);
+        // Reposition End node below the new action node
+        return nds.map((n) => {
+          if (n.type === "endNode") {
+            return { ...n, position: { x: 225, y: newY + 220 } };
+          }
+          return n;
+        }).concat(newNode);
+      });
+
+      // Auto-connect: lastAction -> newNode -> End
+      setEdges((eds) => {
+        const endNodeId = nodes.find((n) => n.type === "endNode")?.id || "node-end";
+        const actionNodes = nodes.filter((n) => n.type === "actionNode");
+        const lastAction = actionNodes[actionNodes.length - 1];
+
+        // Remove existing edge to End from lastAction (if any)
+        const filtered = eds.filter((e) => e.target !== endNodeId || (lastAction && e.source !== lastAction.id));
+
+        const newEdges: Edge[] = [];
+
+        // Edge from last action -> new node (if there was a previous action)
+        if (lastAction) {
+          newEdges.push({
+            id: `edge-${lastAction.id}-${id}`,
+            source: lastAction.id,
+            target: id,
+            markerEnd: { type: MarkerType.ArrowClosed },
+            style: { strokeWidth: 2, stroke: "#94a3b8" },
+          });
+        }
+
+        // Edge from new node -> End
+        newEdges.push({
+          id: `edge-${id}-${endNodeId}`,
+          source: id,
+          target: endNodeId,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { strokeWidth: 2, stroke: "#94a3b8" },
+        });
+
+        return [...filtered, ...newEdges];
+      });
     },
-    [nodeCounter, nodes, setNodes, buildAskJoeHandler],
+    [nodeCounter, nodes, setNodes, setEdges, buildAskJoeHandler],
   );
 
   return (
@@ -463,6 +484,15 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         </Button>
       </div>
 
+      {nodes.filter((n) => n.type === "actionNode").length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center z-[5] pointer-events-none">
+          <div className="text-center text-muted-foreground space-y-2">
+            <p className="text-sm font-medium">No steps yet</p>
+            <p className="text-xs">Click <strong>+ Action</strong> to add your first step, or use <strong>Quick Template</strong></p>
+          </div>
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -470,6 +500,7 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         nodeTypes={nodeTypes}
+        nodesFocusable={false}
         fitView
         deleteKeyCode={["Backspace", "Delete"]}
         defaultEdgeOptions={{
