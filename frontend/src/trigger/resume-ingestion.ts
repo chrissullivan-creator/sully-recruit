@@ -40,7 +40,7 @@ export const resumeIngestion = task({
     // Update status to processing
     await supabase
       .from("resumes")
-      .update({ parse_status: "processing" } as any)
+      .update({ parsing_status: "processing" } as any)
       .eq("id", resumeId);
 
     // ── 1. Download file from Supabase Storage ──────────────────────
@@ -70,7 +70,7 @@ export const resumeIngestion = task({
       .update({
         raw_text: rawText,
         parsed_json: parsedJson,
-        parse_status: "completed",
+        parsing_status: "completed",
         parser: "trigger-claude",
       } as any)
       .eq("id", resumeId);
@@ -114,15 +114,15 @@ export const resumeIngestion = task({
         logger.warn("LlamaCloud upload failed, will retry on next ingestion", { error: err.message });
       }
 
-      // Also store chunks locally in resume_chunks table (without embeddings) for fallback
+      // Also store chunks locally in resume_embeddings table (without embeddings) for fallback
       const chunks = chunkText(rawText, 512);
-      await supabase.from("resume_chunks").delete().eq("resume_id", resumeId);
+      await supabase.from("resume_embeddings").delete().eq("resume_id", resumeId);
       for (let i = 0; i < chunks.length; i++) {
-        await supabase.from("resume_chunks").insert({
+        await supabase.from("resume_embeddings").insert({
           resume_id: resumeId,
           candidate_id: candidateId,
           chunk_index: i,
-          content: chunks[i],
+          chunk_text: chunks[i],
         } as any);
       }
     }

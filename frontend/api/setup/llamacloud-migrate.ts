@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: resumes, error: resumeErr } = await supabase
       .from("resumes")
       .select("id, candidate_id, candidates!inner(full_name)")
-      .eq("parse_status", "completed")
+      .eq("parsing_status", "completed")
       .order("created_at", { ascending: true })
       .range(offset, offset + batchSize - 1) as any;
 
@@ -54,10 +54,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const resume of resumes) {
       try {
-        // Get chunks for this resume
+        // Get chunks for this resume from resume_embeddings table
         const { data: chunks } = await supabase
-          .from("resume_chunks")
-          .select("content, chunk_index")
+          .from("resume_embeddings")
+          .select("chunk_text, chunk_index")
           .eq("resume_id", resume.id)
           .order("chunk_index", { ascending: true });
 
@@ -66,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        const chunkTexts = chunks.map((c: any) => c.content).filter(Boolean);
+        const chunkTexts = chunks.map((c: any) => c.chunk_text).filter(Boolean);
         if (chunkTexts.length === 0) {
           skipped++;
           continue;

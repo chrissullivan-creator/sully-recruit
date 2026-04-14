@@ -38,7 +38,7 @@ export const migrateToLlamaCloud = task({
     const { count: totalResumes } = await supabase
       .from("resumes")
       .select("id", { count: "exact", head: true })
-      .eq("parse_status", "completed");
+      .eq("parsing_status", "completed");
 
     logger.info("Total resumes to migrate", { total: totalResumes });
 
@@ -62,7 +62,7 @@ export const migrateToLlamaCloud = task({
       const { data: resumes } = (await supabase
         .from("resumes")
         .select("id, candidate_id, candidates!inner(full_name)")
-        .eq("parse_status", "completed")
+        .eq("parsing_status", "completed")
         .order("created_at", { ascending: true })
         .range(offset, offset + BATCH_SIZE - 1)) as any;
 
@@ -70,10 +70,10 @@ export const migrateToLlamaCloud = task({
 
       for (const resume of resumes) {
         try {
-          // Get chunks for this resume
+          // Get chunks for this resume from resume_embeddings table
           const { data: chunks } = await supabase
-            .from("resume_chunks")
-            .select("content, chunk_index")
+            .from("resume_embeddings")
+            .select("chunk_text, chunk_index")
             .eq("resume_id", resume.id)
             .order("chunk_index", { ascending: true });
 
@@ -83,7 +83,7 @@ export const migrateToLlamaCloud = task({
           }
 
           const chunkTexts = chunks
-            .map((c: any) => c.content)
+            .map((c: any) => c.chunk_text)
             .filter(Boolean);
 
           if (chunkTexts.length === 0) {
