@@ -76,24 +76,34 @@ export const resumeIngestion = task({
       .eq("id", resumeId);
 
     // ── 5. Update candidate with parsed fields ──────────────────────
+    // parsedJson.email = email found IN the resume = candidate's personal email.
+    // Always tag as candidate and clear is_stub on successful resume parse.
     if (parsedJson && candidateId) {
-      const updates: any = {};
+      const updates: any = {
+        roles: ["candidate"],
+        is_stub: false,
+      };
       if (parsedJson.first_name) updates.first_name = parsedJson.first_name;
       if (parsedJson.last_name) updates.last_name = parsedJson.last_name;
       if (parsedJson.first_name && parsedJson.last_name) {
         updates.full_name = `${parsedJson.first_name} ${parsedJson.last_name}`;
       }
-      if (parsedJson.email) updates.email = parsedJson.email;
-      if (parsedJson.phone) updates.phone = parsedJson.phone;
+      if (parsedJson.email) {
+        // Email in resume = candidate's personal email
+        updates.email = parsedJson.email;
+        updates.personal_email = parsedJson.email;
+      }
+      if (parsedJson.phone) {
+        updates.phone = parsedJson.phone;
+        updates.mobile_phone = parsedJson.phone;
+      }
       if (parsedJson.current_company) updates.current_company = parsedJson.current_company;
       if (parsedJson.current_title) updates.current_title = parsedJson.current_title;
-      if (parsedJson.location) updates.location_text = parsedJson.location; // location → location_text
+      if (parsedJson.location) updates.location_text = parsedJson.location;
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
 
-      if (Object.keys(updates).length > 0) {
-        await supabase.from("candidates").update(updates).eq("id", candidateId);
-      }
+      await supabase.from("candidates").update(updates).eq("id", candidateId);
     }
 
     // ── 6. Embed with Voyage AI ─────────────────────────────────────
