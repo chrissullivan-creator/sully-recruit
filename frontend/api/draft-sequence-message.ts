@@ -111,6 +111,7 @@ MERGE TAGS AVAILABLE (use them naturally):
 {{sender_name}} — your name (the recruiter sending)
 
 IMPORTANT:
+- NEVER mention the client company name in the message. The company name in the job context is for YOUR understanding only. Refer to it generically as "a top-tier firm", "a leading company", "a premier [industry] firm", or similar. Candidates should not know the company until they engage.
 - Use merge tags in the body, DO NOT use placeholder brackets or "[NAME]"
 - DO NOT include a greeting like "Hi {{first_name}}," in the body for SMS
 - For LinkedIn Connection: one sentence, no sign-off

@@ -96,24 +96,29 @@ export const resumeIngestion = task({
       }
     }
 
-    // ── 6. Embed with Voyage AI ─────────────────────────────────────
+    // ── 6. Embed with LlamaIndex + Voyage AI ─────────────────────────
     if (rawText.length > 50) {
       const voyageKey = await getVoyageKey();
+      const { VoyageEmbedding } = await import("../../api/lib/llamaindex");
+      const embedModel = new VoyageEmbedding(voyageKey);
+
       const chunks = chunkText(rawText, 512); // ~512 token chunks
-      logger.info("Embedding chunks", { count: chunks.length });
+      logger.info("Embedding chunks via LlamaIndex VoyageEmbedding", { count: chunks.length });
 
       // Delete existing chunks for this resume (idempotent re-runs)
       await supabase.from("resume_chunks").delete().eq("resume_id", resumeId);
 
+      // Batch embed for efficiency
+      const embeddings = await embedModel.getTextEmbeddings(chunks);
+
       for (let i = 0; i < chunks.length; i++) {
-        const embedding = await embedWithVoyage(chunks[i], voyageKey);
-        if (embedding) {
+        if (embeddings[i]) {
           await supabase.from("resume_chunks").insert({
             resume_id: resumeId,
             candidate_id: candidateId,
             chunk_index: i,
             content: chunks[i],
-            embedding: embedding,
+            embedding: embeddings[i],
           } as any);
         }
       }

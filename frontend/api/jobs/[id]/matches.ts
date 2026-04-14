@@ -21,16 +21,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
 
   const page = parseInt((req.query.page as string) || "1");
-  const limit = 10;
+  const limit = Math.min(parseInt((req.query.per_page as string) || "25"), 100);
   const offset = (page - 1) * limit;
 
-  // Get total count
+  // Get total count (only matches with score > 0)
   const { count } = await supabase
     .from("job_candidate_matches")
     .select("id", { count: "exact", head: true })
-    .eq("job_id", jobId);
+    .eq("job_id", jobId)
+    .gt("score", 0);
 
-  // Get paginated matches with candidate info
+  // Get paginated matches with candidate info (score > 0 only)
   const { data, error } = await supabase
     .from("job_candidate_matches")
     .select(
@@ -56,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
     )
     .eq("job_id", jobId)
+    .gt("score", 0)
     .order("score", { ascending: false })
     .range(offset, offset + limit - 1);
 

@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2 } from "lucide-react";
+import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Maximize2 } from "lucide-react";
+import { StepEditorDialog } from "./StepEditorDialog";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -47,6 +48,7 @@ interface ActionNodeData {
 function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
   const { actions, onUpdate, onAskJoe, label, stepNumber } = data;
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: any) => {
@@ -173,25 +175,32 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
 
                 {action.channel !== "manual_call" && (
                   <>
-                    <Textarea
-                      value={action.messageBody}
-                      onChange={(e) => updateAction(i, "messageBody", e.target.value)}
-                      placeholder="Message body..."
-                      rows={3}
-                      className="text-xs"
-                    />
-                    <div className="flex flex-wrap gap-1">
-                      {MERGE_TAGS.map((tag) => (
-                        <Badge
-                          key={tag}
-                          variant="outline"
-                          className="cursor-pointer text-[10px] hover:bg-slate-200"
-                          onClick={() => insertTag(i, tag)}
-                        >
-                          {tag}
-                        </Badge>
-                      ))}
+                    <div
+                      className="border rounded-md p-2 text-xs text-muted-foreground min-h-[48px] cursor-pointer hover:border-primary/50 hover:bg-white transition-colors"
+                      onClick={() => setEditingIndex(i)}
+                      title="Click to edit message"
+                    >
+                      {action.messageBody ? (
+                        <p className="line-clamp-3 whitespace-pre-wrap break-words"
+                          dangerouslySetInnerHTML={{
+                            __html: action.messageBody.replace(/<[^>]*>/g, " ").trim().slice(0, 200) || "Click to edit...",
+                          }}
+                        />
+                      ) : (
+                        <span className="italic">Click to edit message...</span>
+                      )}
                     </div>
+                    <StepEditorDialog
+                      open={editingIndex === i}
+                      onOpenChange={(open) => { if (!open) setEditingIndex(null); }}
+                      channel={action.channel}
+                      messageBody={action.messageBody}
+                      onMessageChange={(body) => updateAction(i, "messageBody", body)}
+                      stepNumber={stepNumber}
+                      stepLabel={label}
+                      onAskJoe={onAskJoe ? () => handleAskJoe(i).then(() => {}) : undefined}
+                      askJoeLoading={loadingIndex === i}
+                    />
                   </>
                 )}
 

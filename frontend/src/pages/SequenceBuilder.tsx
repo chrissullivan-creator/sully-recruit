@@ -142,7 +142,7 @@ export default function SequenceBuilder() {
     [setup, flowNodes],
   );
 
-  const saveSequence = useCallback(async () => {
+  const saveSequence = useCallback(async (status?: 'draft' | 'active') => {
     if (!setup.name) {
       toast.error("Sequence name is required");
       return null;
@@ -169,6 +169,7 @@ export default function SequenceBuilder() {
             timezone: setup.timezone,
             created_by: user.id,
             sender_user_id: setup.senderUserId || user.id,
+            status: status || 'draft',
           } as any)
           .select("id")
           .single();
@@ -187,6 +188,7 @@ export default function SequenceBuilder() {
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
             sender_user_id: setup.senderUserId || user.id,
+            ...(status ? { status } : {}),
           } as any)
           .eq("id", sequenceId);
 
@@ -241,7 +243,7 @@ export default function SequenceBuilder() {
   }, [setup, flowNodes, flowEdges, id, user]);
 
   const handleSaveDraft = useCallback(async () => {
-    const seqId = await saveSequence();
+    const seqId = await saveSequence('draft');
     if (seqId) {
       toast.success("Sequence saved as draft");
       if (!id) navigate(`/sequences/${seqId}/edit`, { replace: true });
@@ -249,7 +251,7 @@ export default function SequenceBuilder() {
   }, [saveSequence, id, navigate]);
 
   const handleActivate = useCallback(async () => {
-    const seqId = await saveSequence();
+    const seqId = await saveSequence('active');
     if (seqId) {
       toast.success("Sequence activated");
       navigate(`/sequences/${seqId}/schedule`);
