@@ -11,6 +11,10 @@ import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
+import { useEntityTasks, Task } from '@/hooks/useTasks';
+import { TaskCard } from '@/components/tasks/TaskCard';
+import { EditMeetingDialog } from '@/components/tasks/EditMeetingDialog';
+import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -421,6 +425,13 @@ const CandidateDetail = () => {
       toast.error(e.message || 'Failed to delete document');
     }
   };
+
+  // Tasks & meetings linked to this candidate
+  const { data: candidateTasks = [] } = useEntityTasks('candidate', id);
+  const regularTasks = candidateTasks.filter((t: Task) => t.task_type !== 'meeting');
+  const meetings = candidateTasks.filter((t: Task) => t.task_type === 'meeting');
+  const [editingMeeting, setEditingMeeting] = useState<Task | null>(null);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
 
   const { data: sendOuts = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
@@ -2011,24 +2022,71 @@ const CandidateDetail = () => {
               )}
 
               {/* TASKS section (shown on all, tasks tabs) */}
+              {/* TASKS section */}
               {(sidebarTab === 'all' || sidebarTab === 'tasks') && (
                 <div>
                   {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <FileText className="h-3 w-3" /> Tasks
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No tasks yet.</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                      <FileText className="h-3 w-3" /> Tasks ({regularTasks.length})
+                    </h3>
+                    <button onClick={() => setCreateTaskOpen(true)} className="text-[10px] text-accent hover:underline">+ Add</button>
+                  </div>
+                  {regularTasks.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No tasks yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {regularTasks.map((t: Task) => <TaskCard key={t.id} task={t} />)}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* MEETINGS section (shown on all, meetings tabs) */}
+              {/* MEETINGS section */}
               {(sidebarTab === 'all' || sidebarTab === 'meetings') && (
                 <div>
                   {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <Calendar className="h-3 w-3" /> Meetings
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3" /> Meetings ({meetings.length})
+                    </h3>
+                  </div>
+                  {meetings.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {meetings.map((m: Task) => (
+                        <div key={m.id} className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                          <p className="text-sm font-medium truncate">{m.title}</p>
+                          {m.start_time && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {format(new Date(m.start_time), 'MMM d, yyyy')}
+                              {' '}
+                              {format(new Date(m.start_time), 'h:mm a')}
+                              {m.end_time && ` – ${format(new Date(m.end_time), 'h:mm a')}`}
+                            </p>
+                          )}
+                          {m.location && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                              <MapPin className="h-3 w-3 shrink-0" /> {m.location}
+                            </p>
+                          )}
+                          {m.meeting_url && (
+                            <a href={m.meeting_url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline flex items-center gap-1">
+                              <ExternalLink className="h-3 w-3" /> Join Meeting
+                            </a>
+                          )}
+                          <button
+                            onClick={() => setEditingMeeting(m)}
+                            className="text-[10px] text-accent hover:underline mt-1"
+                          >
+                            Edit Details
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2076,6 +2134,23 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      {/* Edit meeting dialog */}
+      {editingMeeting && (
+        <EditMeetingDialog
+          open={!!editingMeeting}
+          onOpenChange={(open) => { if (!open) setEditingMeeting(null); }}
+          task={editingMeeting}
+          companyId={candidate?.job_id ? (jobs as any[]).find((j: any) => j.id === candidate.job_id)?.company_id : null}
+        />
+      )}
+
+      {/* Create task dialog */}
+      <CreateTaskDialog
+        open={createTaskOpen}
+        onOpenChange={setCreateTaskOpen}
+        defaultLinks={id ? [{ entity_type: 'candidate', entity_id: id }] : []}
+      />
     </MainLayout>
   );
 };
