@@ -234,7 +234,7 @@ Return ONLY the message body text. No subject line unless this is an email first
             prompt += f"\n\nSpecific request: {request.instructions}"
 
         msg = await get_claude().messages.create(
-            model="claude-sonnet-4-5-20250514",
+            model="claude-sonnet-4-20250514",
             max_tokens=1024,
             system=system_prompt,
             messages=[{"role": "user", "content": prompt}],
@@ -360,7 +360,7 @@ Candidates in database:
         try:
             user_prompt = f"Find the best candidate matches for: {request.job_title}" + (f" at {request.job_company}" if request.job_company else "")
             async with get_claude().messages.stream(
-                model="claude-sonnet-4-5-20250514",
+                model="claude-sonnet-4-20250514",
                 max_tokens=4096,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
@@ -448,7 +448,7 @@ Remember: Show ALL matching candidates ranked from highest to lowest confidence.
     async def stream_response():
         try:
             msg = await get_claude().messages.create(
-                model="claude-sonnet-4-5-20250514",
+                model="claude-sonnet-4-20250514",
                 max_tokens=4096,
                 system=system_prompt,
                 messages=api_messages,
@@ -910,7 +910,7 @@ If tailoring to a job, emphasize relevant experience and skills."""
 
     try:
         msg = await get_claude().messages.create(
-            model="claude-sonnet-4-5-20250514",
+            model="claude-sonnet-4-20250514",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": f"Parse this resume:\n\n{request.resume_text[:8000]}"}],
@@ -986,7 +986,7 @@ Use notes from the profile to make it personal. Sound like a human recruiter, no
             prompt += f"\nJob details: {request.job_description[:300]}"
 
         msg = await get_claude().messages.create(
-            model="claude-sonnet-4-5-20250514",
+            model="claude-sonnet-4-20250514",
             max_tokens=1024,
             system=system_prompt,
             messages=[{"role": "user", "content": prompt}],
@@ -1241,7 +1241,7 @@ Here is all searchable data:
     async def stream_response():
         try:
             async with get_claude().messages.stream(
-                model="claude-sonnet-4-5-20250514",
+                model="claude-sonnet-4-20250514",
                 max_tokens=4096,
                 system=system_prompt,
                 messages=api_messages,

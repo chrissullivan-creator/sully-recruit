@@ -150,17 +150,21 @@ export default function SequenceBuilder() {
         if (setup.senderUserId) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("full_name, first_name, last_name")
+            .select("full_name, first_name, last_name, title")
             .eq("id", setup.senderUserId)
             .maybeSingle() as any;
           senderName =
             profile?.full_name ||
             `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
             "";
-          // Map sender to title (Emerald convention)
-          if (senderName.toLowerCase().includes("chris")) senderTitle = "President";
-          else if (senderName.toLowerCase().includes("nancy")) senderTitle = "Managing Director";
-          else if (senderName.toLowerCase().includes("ashley")) senderTitle = "Recruiter";
+          // Use title from profiles table if available, fall back to name-based lookup
+          senderTitle = profile?.title || "";
+          if (!senderTitle) {
+            const nameLower = senderName.toLowerCase();
+            if (nameLower.includes("chris")) senderTitle = "President";
+            else if (nameLower.includes("nancy")) senderTitle = "Managing Director";
+            else if (nameLower.includes("ashley")) senderTitle = "Recruiter";
+          }
         }
 
         const totalSteps = flowNodes.filter((n) => n.type === "action").length;
