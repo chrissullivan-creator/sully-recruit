@@ -55,6 +55,7 @@ const Contacts = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'client_only' | 'also_candidate'>('all');
   const [sortField, setSortField] = useState<ContactSortField>('updated');
   const [sortDir, setSortDir] = useState<ContactSortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
@@ -95,7 +96,13 @@ const Contacts = () => {
         companyDisplay.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (contact.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesFilter = filter === 'all' || contact.status === filter;
-      return matchesSearch && matchesFilter;
+      const roles: string[] = (contact as any).roles ?? ['client'];
+      const matchesRole =
+        roleFilter === 'all' ? true :
+        roleFilter === 'client_only' ? (roles.includes('client') && !roles.includes('candidate')) :
+        roleFilter === 'also_candidate' ? (roles.includes('candidate')) :
+        true;
+      return matchesSearch && matchesFilter && matchesRole;
     });
 
     list.sort((a, b) => {
@@ -143,7 +150,7 @@ const Contacts = () => {
   const paginatedContacts = filteredContacts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset to page 1 when search or filter changes
-  useEffect(() => { setPage(1); }, [searchQuery, filter]);
+  useEffect(() => { setPage(1); }, [searchQuery, filter, roleFilter]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -280,6 +287,12 @@ const Contacts = () => {
             <Button variant={filter === 'active' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('active')}>Active</Button>
             <Button variant={filter === 'inactive' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('inactive')}>Inactive</Button>
           </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Role:</span>
+            <Button variant={roleFilter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('all')}>All</Button>
+            <Button variant={roleFilter === 'client_only' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('client_only')}>Client only</Button>
+            <Button variant={roleFilter === 'also_candidate' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('also_candidate')}>Also a Candidate</Button>
+          </div>
 
           {paginatedContacts.length > 0 && !paginatedContacts.every((c) => selectedIds.includes(c.id)) && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
@@ -375,6 +388,23 @@ const Contacts = () => {
                         <span className="text-sm font-medium text-foreground">
                           {contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`}
                         </span>
+                        {(() => {
+                          const roles: string[] = (contact as any).roles ?? ['client'];
+                          return (
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              {roles.includes('client') && (
+                                <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                                  Client
+                                </span>
+                              )}
+                              {roles.includes('candidate') && (
+                                <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
+                                  Candidate
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{contact.title ?? '-'}</td>
@@ -391,19 +421,31 @@ const Contacts = () => {
                       })()}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {contact.email && (
-                          <a href={`mailto:${contact.email}`} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                      <div className="flex items-center gap-1">
+                        {((contact as any).work_email || contact.email) && (
+                          <a href={`mailto:${(contact as any).work_email || contact.email}`}
+                            title={`Work: ${(contact as any).work_email || contact.email}`}
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Mail className="h-4 w-4" />
                           </a>
                         )}
-                        {contact.phone && (
-                          <a href={`tel:${contact.phone}`} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                        {(contact as any).personal_email && (
+                          <a href={`mailto:${(contact as any).personal_email}`}
+                            title={`Personal: ${(contact as any).personal_email}`}
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-colors">
+                            <Mail className="h-4 w-4" />
+                          </a>
+                        )}
+                        {((contact as any).mobile_phone || contact.phone) && (
+                          <a href={`tel:${(contact as any).mobile_phone || contact.phone}`}
+                            title={(contact as any).mobile_phone || contact.phone}
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Phone className="h-4 w-4" />
                           </a>
                         )}
                         {contact.linkedin_url && (
-                          <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                          <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Linkedin className="h-4 w-4" />
                           </a>
                         )}
@@ -503,6 +545,20 @@ const Contacts = () => {
                           </DropdownMenuSub>
                           <DropdownMenuItem onClick={() => { setSelectedIds([contact.id]); setEnrollOpen(true); }}>
                             <Play className="h-3.5 w-3.5 mr-2" /> Enroll in Sequence
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={async () => {
+                            const currentRoles: string[] = (contact as any).roles ?? ['client'];
+                            const newRoles = currentRoles.includes('candidate')
+                              ? currentRoles.filter((r: string) => r !== 'candidate')
+                              : [...currentRoles, 'candidate'];
+                            await supabase.from('contacts').update({ roles: newRoles } as any).eq('id', contact.id);
+                            toast.success(newRoles.includes('candidate') ? 'Tagged as Candidate' : 'Candidate tag removed');
+                            queryClient.invalidateQueries({ queryKey: ['contacts'] });
+                          }}>
+                            {((contact as any).roles ?? ['client']).includes('candidate')
+                              ? '— Remove Candidate Tag'
+                              : '+ Tag as Candidate'}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive" onClick={() => handleQuickDelete(contact.id)}>

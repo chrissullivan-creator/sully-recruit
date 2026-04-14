@@ -336,11 +336,9 @@ export async function sendLinkedIn(
     }
   }
 
-  // Determine message type
+  // recruiter_inmail (Nancy's Recruiter InMail via Unipile)
   const isInMailChannel =
-    stepChannel === "sales_nav_inmail" ||
     stepChannel === "recruiter_inmail" ||
-    stepChannel === "sales_nav" ||
     stepChannel === "linkedin_recruiter";
   const isConnectionRequest = stepChannel === "linkedin_connection";
 

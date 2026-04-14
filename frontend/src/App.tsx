@@ -17,6 +17,7 @@ import Companies from "./pages/Companies";
 import CompanyDetail from "./pages/CompanyDetail";
 import Contacts from "./pages/Contacts";
 import ContactDetail from "./pages/ContactDetail";
+import People from "./pages/People";
 import Sequences from "./pages/Sequences";
 import SequenceBuilder from "./pages/SequenceBuilder";
 import SequenceScheduleView from "./pages/SequenceScheduleView";
@@ -56,6 +57,7 @@ const App = () => (
             <Route path="/companies/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/contacts/:id" element={<ProtectedRoute><ContactDetail /></ProtectedRoute>} />
+            <Route path="/people" element={<ProtectedRoute><People /></ProtectedRoute>} />
             <Route path="/sequences" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
             <Route path="/sequences/new" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
             <Route path="/sequences/:id/edit" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />

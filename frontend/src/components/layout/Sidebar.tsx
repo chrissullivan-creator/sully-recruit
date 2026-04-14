@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald-e-logo.png';
 import {
-  LogOut, Users, UserCheck, Megaphone, Inbox, Briefcase,
+  LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch,
 } from 'lucide-react';
 
@@ -12,8 +12,7 @@ const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
   { name: 'Inbox',      href: '/inbox',      icon: Inbox           },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
-  { name: 'Candidates', href: '/candidates', icon: UserCheck       },
-  { name: 'Contacts',   href: '/contacts',   icon: Users           },
+  { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
@@ -57,7 +56,10 @@ export function Sidebar() {
           const isActive =
             item.href === '/'
               ? location.pathname === '/'
-              : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+              : item.href === '/people'
+                ? ['/people', '/candidates', '/contacts'].some(p =>
+                    location.pathname === p || location.pathname.startsWith(p + '/'))
+                : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
 
           return (
             <Link

@@ -362,8 +362,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             const channelLabel = (ch: string) => {
               if (ch === 'linkedin_connection') return 'Connection Request';
               if (ch === 'linkedin_message') return 'LinkedIn Message';
-              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail') return 'Recruiter InMail';
-              if (ch === 'sales_nav' || ch === 'sales_nav_inmail') return 'Sales Nav InMail';
+              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail' || ch === 'sales_nav' || ch === 'sales_nav_inmail') return 'Recruiter InMail';
               if (ch === 'sms') return 'SMS';
               if (ch === 'phone') return 'Phone';
               return 'Email';

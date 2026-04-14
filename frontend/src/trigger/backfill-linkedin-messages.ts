@@ -184,9 +184,7 @@ export const backfillLinkedinMessages = schedules.task({
           const table = entity.type === "candidate" ? "candidates" : "contacts";
           const idColumn = channel === "linkedin_recruiter"
             ? "unipile_recruiter_id"
-            : channel === "linkedin_sales_nav"
-              ? "unipile_sales_nav_id"
-              : "unipile_classic_id";
+            : "unipile_classic_id";
           const { data: current } = await supabase
             .from(table)
             .select(idColumn)
