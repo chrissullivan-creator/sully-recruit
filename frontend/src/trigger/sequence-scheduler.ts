@@ -284,9 +284,34 @@ export const sequenceActionExecute = task({
           return { action: "failed", reason: `unsupported_channel` };
       }
     } catch (err: any) {
-      logger.error("Send failed", { channel: action.channel, error: err.message });
+      const errMsg = err.message || "";
+
+      // LinkedIn circuit breaker: if Unipile returns limit_exceeded or 429,
+      // reschedule the step instead of marking it as permanently failed.
+      const isRateLimit =
+        errMsg.includes("limit_exceeded") ||
+        errMsg.includes("rate limit") ||
+        errMsg.includes("429") ||
+        errMsg.includes("too many requests");
+
+      if (isRateLimit && action.channel.startsWith("linkedin")) {
+        // Push the step back by 2 hours instead of failing it
+        const retryAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        await supabase
+          .from("sequence_step_logs")
+          .update({ scheduled_at: retryAt, status: "scheduled" } as any)
+          .eq("id", payload.stepLogId);
+        logger.warn("LinkedIn rate limit hit — rescheduling step in 2h", {
+          channel: action.channel,
+          enrollmentId: payload.enrollmentId,
+          retryAt,
+        });
+        return { action: "rate_limited", reason: errMsg, retryAt };
+      }
+
+      logger.error("Send failed", { channel: action.channel, error: errMsg });
       await markStepLog(supabase, payload.stepLogId, "failed");
-      return { action: "failed", reason: err.message };
+      return { action: "failed", reason: errMsg };
     }
 
     // Mark sent

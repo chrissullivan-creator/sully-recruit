@@ -1,7 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Restrict CORS to Clay's webhook origin. Clay webhooks are server-to-server
+// so CORS isn't strictly needed, but we keep it for preflight requests.
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "https://app.clay.com",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-clay-secret, x-webhook-secret",
 };

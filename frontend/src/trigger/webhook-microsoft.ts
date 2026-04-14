@@ -204,17 +204,26 @@ async function processEmailMessage(
             .from("sequence_enrollments")
             .update({
               status: "stopped",
+              stop_trigger: "email_bounced",
+              stop_reason: "email_bounced",
               stopped_reason: "email_bounced",
-              completed_at: receivedAt,
+              stopped_at: receivedAt,
             } as any)
             .eq("id", enrollment.id);
 
-          // Mark executions as bounced
+          // Mark v1 executions as bounced
           await supabase
             .from("sequence_step_executions")
             .update({ status: "bounced" } as any)
             .eq("enrollment_id", enrollment.id)
             .in("status", ["sent", "delivered", "scheduled"]);
+
+          // Mark v2 step logs as cancelled
+          await supabase
+            .from("sequence_step_logs")
+            .update({ status: "cancelled" } as any)
+            .eq("enrollment_id", enrollment.id)
+            .in("status", ["scheduled", "pending_connection"]);
         }
 
         logger.info("Bounce detected — enrollment stopped", {
@@ -423,12 +432,12 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
           })
           .eq("id", enrollment.id);
 
-        // Cancel pending sends
+        // Cancel all pending sends (both scheduled and pending_connection)
         await supabase
           .from("sequence_step_logs")
           .update({ status: "cancelled" })
           .eq("enrollment_id", enrollment.id)
-          .eq("status", "scheduled");
+          .in("status", ["scheduled", "pending_connection"]);
 
         // Log sentiment as booked_meeting
         await supabase
