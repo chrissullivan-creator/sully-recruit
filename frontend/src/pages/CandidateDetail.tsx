@@ -82,9 +82,9 @@ const ChannelIcon = ({ channel }: { channel?: string | null }) => {
   return null;
 };
 
-const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false }: {
+const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false, highlight = false }: {
   label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
-  type?: string; placeholder?: string; disabled?: boolean;
+  type?: string; placeholder?: string; disabled?: boolean; highlight?: boolean;
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -110,11 +110,11 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder, disab
           </Button>
         </div>
       ) : (
-        <div className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 -mx-1.5 transition-colors", disabled ? '' : 'cursor-pointer hover:bg-accent/10')} onClick={() => !disabled && setEditing(true)}>
+        <div className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 -mx-1.5 transition-colors", disabled ? '' : 'cursor-pointer hover:bg-accent/10', highlight && !disabled && 'bg-accent/5 ring-1 ring-accent/20')} onClick={() => !disabled && setEditing(true)}>
           <span className={cn('text-sm flex-1 truncate', value ? 'text-foreground' : 'text-muted-foreground italic')}>
             {value || placeholder || '—'}
           </span>
-          {!disabled && <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />}
+          {!disabled && <Edit className={cn("h-3 w-3 text-muted-foreground shrink-0", highlight ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100')} />}
         </div>
       )}
     </div>
@@ -303,6 +303,7 @@ const CandidateDetail = () => {
   const [uploadingFormatted, setUploadingFormatted] = useState(false);
   const [uploadingOtherDoc, setUploadingOtherDoc] = useState(false);
   const [docFolder, setDocFolder] = useState<'resumes' | 'formatted' | 'other'>('resumes');
+  const [editingInfo, setEditingInfo] = useState(false);
   const otherDocInputRef = useRef<HTMLInputElement>(null);
 
   // Send Out management state
@@ -963,19 +964,35 @@ const CandidateDetail = () => {
 
           {/* Contact info grid */}
           <div className="px-8 py-5 border-b border-border">
+            {canEdit && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setEditingInfo(!editingInfo)}
+                  className={cn(
+                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                    editingInfo
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  )}
+                >
+                  <Edit className="h-3 w-3" />
+                  {editingInfo ? 'Done Editing' : 'Edit Info'}
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} />
-              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} />
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} />
-              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} />
-              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} />
-              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} />
-              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} />
-              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} />
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
             </div>
 
             {/* Compensation — collapsible */}
