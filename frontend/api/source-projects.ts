@@ -110,34 +110,76 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
 
-      // Step 1: Fetch project metadata
-      const metaParams = new URLSearchParams({ account_id });
-      let projectData: any = null;
-      try {
-        const metaResp = await fetch(
-          `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${metaParams}`,
-          { headers },
-        );
-        if (metaResp.ok) projectData = await metaResp.json();
-      } catch { /* project metadata is optional */ }
+      // Fetch project detail — members are embedded in this response
+      const params = new URLSearchParams({ account_id });
+      const resp = await fetch(
+        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${params}`,
+        { headers },
+      );
 
-      // Step 2: Fetch applicants via the paginated jobs/applicants endpoint
-      let applicants: any[] = [];
-      try {
-        applicants = await fetchAllPages(`${baseUrl}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants`);
-        if (res.headersSent) return;
-      } catch (err: any) {
-        // If jobs endpoint fails (e.g. 404), fall back to extracting from project detail
-        console.error(`Jobs applicants endpoint failed: ${err.message}`);
-        if (projectData) {
-          console.log("Falling back to project detail. Response keys:", Object.keys(projectData));
-          applicants = projectData.applicants ?? projectData.candidates ?? projectData.items
-            ?? projectData.members ?? projectData.profiles ?? projectData.results ?? [];
-          if (!Array.isArray(applicants)) applicants = [];
+      if (resp.status === 429) {
+        return res.status(429).json({
+          error: "Unipile rate limit reached. Please wait a moment and try again.",
+        });
+      }
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error(`Unipile project detail error: ${resp.status}`, errText);
+        return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: errText });
+      }
+
+      const data = await resp.json();
+
+      // Log full response shape for debugging
+      console.log("Unipile project detail keys:", Object.keys(data));
+      for (const key of Object.keys(data)) {
+        const val = data[key];
+        if (Array.isArray(val)) {
+          console.log(`  ${key}: Array[${val.length}]`, val.length > 0 ? Object.keys(val[0]) : "empty");
+        } else if (val && typeof val === "object") {
+          console.log(`  ${key}: Object`, Object.keys(val));
+        } else {
+          console.log(`  ${key}:`, typeof val, String(val).slice(0, 100));
         }
       }
 
-      return res.status(200).json({ items: applicants, project: projectData });
+      // Extract applicants — try known field names, then scan for any array of objects
+      let applicants: any[] =
+        data.applicants ?? data.candidates ?? data.items ?? data.members
+        ?? data.profiles ?? data.results ?? data.people ?? data.contacts ?? null;
+
+      if (!Array.isArray(applicants)) {
+        // Deep scan: find the first sizeable array of objects in the response
+        for (const key of Object.keys(data)) {
+          const val = data[key];
+          if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object") {
+            console.log(`Found applicant array under key: "${key}" (${val.length} items)`);
+            applicants = val;
+            break;
+          }
+        }
+        // Also check one level deep (e.g. data.pipeline.candidates)
+        if (!Array.isArray(applicants)) {
+          for (const key of Object.keys(data)) {
+            const val = data[key];
+            if (val && typeof val === "object" && !Array.isArray(val)) {
+              for (const subKey of Object.keys(val)) {
+                const subVal = val[subKey];
+                if (Array.isArray(subVal) && subVal.length > 0 && typeof subVal[0] === "object") {
+                  console.log(`Found applicant array under key: "${key}.${subKey}" (${subVal.length} items)`);
+                  applicants = subVal;
+                  break;
+                }
+              }
+              if (Array.isArray(applicants)) break;
+            }
+          }
+        }
+      }
+
+      if (!Array.isArray(applicants)) applicants = [];
+
+      return res.status(200).json({ items: applicants, project: data });
     }
 
     if (action === "download_resume") {
