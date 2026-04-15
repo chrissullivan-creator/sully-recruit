@@ -9,7 +9,7 @@ import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
-import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies, useJobFunctions } from '@/hooks/useData';
+import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -295,7 +295,6 @@ const JobDetail = () => {
   const { data: contacts = [] } = useContacts();
   const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
-  const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
   const { data: jobFunctions = [] } = useJobFunctions();
 
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -849,12 +848,12 @@ const JobDetail = () => {
               )}
             </div>
 
-            {/* Pipeline summary */}
+            {/* Send Outs summary */}
             <div className="space-y-2">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                <Briefcase className="h-3 w-3" /> Pipeline
+                <Send className="h-3 w-3" /> Send Outs
               </h3>
-              <p className="text-sm font-medium text-foreground">{jobCandidates.length} candidates</p>
+              <p className="text-sm font-medium text-foreground">{(sendOuts as any[]).length} candidates</p>
             </div>
           </div>
         </aside>
@@ -867,7 +866,6 @@ const JobDetail = () => {
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
-                <TabsTrigger value="pipeline" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
               </TabsList>
             </div>
@@ -1106,80 +1104,6 @@ const JobDetail = () => {
                     Create New Contact
                   </Button>
                 </div>
-              </TabsContent>
-
-              {/* ── Pipeline Tab ───────────────────────────── */}
-              <TabsContent value="pipeline" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-4">
-                  <Users className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold text-foreground">Candidate Pipeline</h2>
-                  {jobCandidates.length > 0 && (
-                    <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
-                  )}
-                </div>
-                {candidatesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates…
-                  </div>
-                ) : jobCandidates.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No candidates linked yet</p>
-                    <p className="text-xs text-muted-foreground">Enroll candidates in a sequence tagged to this job.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <div className="flex gap-0 min-w-max">
-                      {JOB_STATUSES.map((stage, idx) => {
-                        const stageCandidates = (jobCandidates as any[]).filter(c => c.job_status === stage.value);
-                        const isLast = idx === JOB_STATUSES.length - 1;
-                        return (
-                          <div
-                            key={stage.value}
-                            className={cn(
-                              'flex flex-col min-w-[160px] w-[160px] border-r border-border',
-                              isLast && 'border-r-0'
-                            )}
-                          >
-                            <div className="px-3 py-2.5 border-b border-border flex items-center justify-between gap-1">
-                              <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', stage.color)}>
-                                {stage.label}
-                              </span>
-                              {stageCandidates.length > 0 && (
-                                <span className="text-xs text-muted-foreground font-medium">
-                                  {stageCandidates.length}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
-                              {stageCandidates.map((c: any) => (
-                                <div
-                                  key={c.id}
-                                  onClick={() => navigate(`/candidates/${c.id}`)}
-                                  className="group rounded-md border border-border bg-card hover:border-accent/50 hover:bg-accent/5 p-2.5 cursor-pointer transition-colors"
-                                >
-                                  <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
-                                    {c.first_name} {c.last_name}
-                                  </p>
-                                  {c.current_title && (
-                                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                      {c.current_title}
-                                    </p>
-                                  )}
-                                  {c.current_company && (
-                                    <p className="text-[10px] text-muted-foreground truncate">
-                                      {c.current_company}
-                                    </p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </TabsContent>
 
               {/* ── Send Outs Tab ──────────────────────────── */}
