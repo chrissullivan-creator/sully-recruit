@@ -372,7 +372,7 @@ async function processEmailMessage(
 async function processCalendarEvent(supabase: any, event: any, receivedAt: string) {
   // Extract attendee emails and try to match
   const attendees = event.attendees || [];
-  const matches: any[] = [];
+  const matches: { entityId: string; entityType: string; entityColumn: string; email: string }[] = [];
 
   for (const attendee of attendees) {
     const email = attendee.emailAddress?.address?.toLowerCase();
@@ -399,20 +399,54 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     }
   }
 
-  // Create tasks for matched entities (calendar events → tasks)
-  for (const match of matches) {
-    await supabase.from("tasks").insert({
+  // Build meeting metadata
+  const startDt = event.start?.dateTime || "";
+  const endDt = event.end?.dateTime || "";
+  const dateOnly = startDt ? startDt.slice(0, 10) : null;
+  const locationText = event.location?.displayName || "";
+  const meetingUrl = event.onlineMeetingUrl || event.onlineMeeting?.joinUrl || "";
+  const attendeeNames = matches.map(m => m.email).join(", ");
+
+  // Create a single meeting task for this event
+  const { data: taskData, error: taskErr } = await supabase
+    .from("tasks")
+    .insert({
       title: event.subject || "Calendar Event",
-      description: `Calendar event with ${match.email}: ${event.bodyPreview || ""}`,
-      [match.entityColumn]: match.entityId,
-      due_date: event.start?.dateTime || null,
+      description: `Calendar event with ${attendeeNames}: ${(event.bodyPreview || "").slice(0, 500)}`,
+      due_date: dateOnly,
+      start_time: startDt ? (startDt.endsWith("Z") ? startDt : startDt + "Z") : null,
+      end_time: endDt ? (endDt.endsWith("Z") ? endDt : endDt + "Z") : null,
+      timezone: event.start?.timeZone || "UTC",
       status: "pending",
       task_type: "meeting",
-      created_at: receivedAt,
+      location: locationText || null,
+      meeting_url: meetingUrl || null,
       external_id: externalEventId || null,
+      created_at: receivedAt,
+    } as any)
+    .select("id")
+    .single();
+
+  if (taskErr || !taskData) {
+    logger.error("Failed to create calendar task", { error: taskErr?.message });
+    return { action: "error", reason: "task_insert_failed" };
+  }
+
+  // Link all matched people as meeting_attendees AND task_links
+  for (const match of matches) {
+    await supabase.from("meeting_attendees").insert({
+      task_id: taskData.id,
+      entity_type: match.entityType,
+      entity_id: match.entityId,
     } as any);
 
-    // V2: Calendar booking stops active enrollments
+    await supabase.from("task_links").insert({
+      task_id: taskData.id,
+      entity_type: match.entityType,
+      entity_id: match.entityId,
+    } as any);
+
+    // Calendar booking stops active enrollments for each matched entity
     const { data: activeEnrollments } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -421,7 +455,6 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
 
     if (activeEnrollments && activeEnrollments.length > 0) {
       for (const enrollment of activeEnrollments) {
-        // Stop with calendar_booked trigger
         await supabase
           .from("sequence_enrollments")
           .update({
@@ -432,14 +465,12 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
           })
           .eq("id", enrollment.id);
 
-        // Cancel all pending sends (both scheduled and pending_connection)
         await supabase
           .from("sequence_step_logs")
           .update({ status: "cancelled" })
           .eq("enrollment_id", enrollment.id)
           .in("status", ["scheduled", "pending_connection"]);
 
-        // Log sentiment as booked_meeting
         await supabase
           .from("sequence_step_logs")
           .update({
@@ -459,8 +490,12 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     }
   }
 
-  logger.info("Calendar event processed", { matchCount: matches.length });
-  return { action: "logged", type: "calendar", matchCount: matches.length };
+  logger.info("Calendar event processed — single meeting with attendees", {
+    taskId: taskData.id,
+    matchCount: matches.length,
+    attendees: matches.map(m => m.email),
+  });
+  return { action: "logged", type: "calendar", taskId: taskData.id, matchCount: matches.length };
 }
 
 async function getMicrosoftAccessToken(): Promise<string | null> {
