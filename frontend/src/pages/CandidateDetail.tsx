@@ -30,6 +30,7 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
@@ -1101,52 +1102,60 @@ const CandidateDetail = () => {
             <div className="flex items-center gap-4 mt-4 flex-wrap">
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                <Select value={(candidate as any).owner_id ?? 'none'} onValueChange={(val) => {
-                  const newOwnerId = val === 'none' ? null : val;
-                  if (newOwnerId && newOwnerId !== user?.id) {
-                    setPendingOwnerId(newOwnerId);
-                  } else {
-                    (async () => {
-                      try {
-                        const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                        if (error) { toast.error('Failed to update owner'); return; }
-                        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                        queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                        toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                      } catch (err: any) {
-                        toast.error(err?.message || 'Failed to update owner');
-                      }
-                    })();
-                  }
-                }}>
-                  <SelectTrigger className="h-7 text-xs w-44"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Unassigned —</SelectItem>
-                    {profiles.filter(p => p.full_name).map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
+                  value={(candidate as any).owner_id ?? ''}
+                  onChange={(val) => {
+                    const newOwnerId = val || null;
+                    if (newOwnerId && newOwnerId !== user?.id) {
+                      setPendingOwnerId(newOwnerId);
+                    } else {
+                      (async () => {
+                        try {
+                          const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                          if (error) { toast.error('Failed to update owner'); return; }
+                          queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                          queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                          toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Failed to update owner');
+                        }
+                      })();
+                    }
+                  }}
+                  placeholder="Assign owner…"
+                  searchPlaceholder="Search team…"
+                  clearLabel="— Unassigned —"
+                  className="h-7 text-xs w-44"
+                />
               </div>
 
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Active Job</Label>
-                <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
-                  const newJobId = val === 'none' ? null : val;
-                  try {
-                    const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                    if (error) { toast.error('Failed to update job assignment'); return; }
-                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                  } catch (err: any) {
-                    toast.error(err?.message || 'Failed to update job assignment');
-                  }
-                }}>
-                  <SelectTrigger className="h-7 text-xs w-52"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {openJobs.map((j: any) => <SelectItem key={j.id} value={j.id}>{j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={(openJobs as any[]).map((j: any) => ({
+                    value: j.id,
+                    label: j.title,
+                    sublabel: j.companies?.name || j.company_name || undefined,
+                  }))}
+                  value={candidate.job_id ?? ''}
+                  onChange={async (val) => {
+                    const newJobId = val || null;
+                    try {
+                      const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                      if (error) { toast.error('Failed to update job assignment'); return; }
+                      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                      toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to update job assignment');
+                    }
+                  }}
+                  placeholder="Assign a job…"
+                  searchPlaceholder="Search jobs…"
+                  clearLabel="— None —"
+                  className="h-7 text-xs w-52"
+                />
               </div>
 
               {candidate.job_id && (
@@ -1852,16 +1861,18 @@ const CandidateDetail = () => {
                 {addingSendOut && (
                   <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
                     <h4 className="text-sm font-semibold">Add Candidate to Job Pipeline</h4>
-                    <Select value={selectedJobForSendOut} onValueChange={setSelectedJobForSendOut}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a job..." /></SelectTrigger>
-                      <SelectContent>
-                        {openJobs.map((j: any) => (
-                          <SelectItem key={j.id} value={j.id}>
-                            {j.title}{j.companies?.name ? ` — ${j.companies.name}` : j.company_name ? ` — ${j.company_name}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      options={(openJobs as any[]).map((j: any) => ({
+                        value: j.id,
+                        label: j.title,
+                        sublabel: j.companies?.name || j.company_name || undefined,
+                      }))}
+                      value={selectedJobForSendOut}
+                      onChange={setSelectedJobForSendOut}
+                      placeholder="Select a job..."
+                      searchPlaceholder="Search jobs…"
+                      emptyText="No jobs found."
+                    />
                     <div className="flex gap-2">
                       <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddSendOut} disabled={savingSendOut || !selectedJobForSendOut}>
                         {savingSendOut && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Add
