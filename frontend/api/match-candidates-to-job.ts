@@ -73,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (embedding) {
             const { data: chunks } = await supabase.rpc("match_resume_chunks", {
               query_embedding: embedding,
-              match_threshold: 0.3,
+              min_similarity: 0.3,
               match_count: 100,
             });
 
