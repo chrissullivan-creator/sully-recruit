@@ -389,41 +389,136 @@ export function useDashboardMetrics() {
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      const weekStart = getWeekStart();
+      const weekStart  = getWeekStart();
       const monthStart = getMonthStart();
-      const [jobsRes, candidatesWeekRes, candidatesMonthRes, sendOutsRes] = await Promise.all([
+
+      const [
+        jobsRes,
+        candidatesWeekRes,
+        candidatesMonthRes,
+        sendOutsRes,
+        backOfResumeRes,
+        sentRes,
+        interviewsRes,
+      ] = await Promise.all([
         supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
         supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', weekStart),
         supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', monthStart),
         supabase.from('send_outs').select('id, stage, created_at'),
+
+        // Back of resume — all candidates with this status updated this month
+        supabase
+          .from('candidates')
+          .select('id, full_name, first_name, last_name, current_title, current_company, owner_id, updated_at, status')
+          .eq('status', 'back_of_resume')
+          .gte('updated_at', monthStart)
+          .order('updated_at', { ascending: false }),
+
+        // Sent send_outs this month — join candidate + job
+        supabase
+          .from('send_outs')
+          .select(`
+            id, stage, sent_to_client_at, updated_at, created_at,
+            candidate_id, job_id, recruiter_id,
+            candidates!inner(id, full_name, first_name, last_name, current_title),
+            jobs!inner(title, company_name)
+          `)
+          .eq('stage', 'sent')
+          .gte('updated_at', monthStart)
+          .order('updated_at', { ascending: false }),
+
+        // Interviewing send_outs this month — join candidate + job
+        supabase
+          .from('send_outs')
+          .select(`
+            id, stage, interview_at, updated_at, created_at,
+            candidate_id, job_id, recruiter_id,
+            candidates!inner(id, full_name, first_name, last_name, current_title),
+            jobs!inner(title, company_name)
+          `)
+          .eq('stage', 'interviewing')
+          .gte('updated_at', monthStart)
+          .order('interview_at', { ascending: true, nullsFirst: false }),
       ]);
-      const weekCandidates = candidatesWeekRes.data ?? [];
+
+      const weekCandidates  = candidatesWeekRes.data  ?? [];
       const monthCandidates = candidatesMonthRes.data ?? [];
-      const sendOuts = sendOutsRes.data ?? [];
+      const sendOuts        = sendOutsRes.data        ?? [];
+      const backOfResume    = (backOfResumeRes.data   ?? []) as any[];
+      const sentList        = (sentRes.data           ?? []) as any[];
+      const interviewList   = (interviewsRes.data     ?? []) as any[];
+
       const countWeek = (status: string) =>
         weekCandidates.filter((c) =>
-          status === 'interviewing' ? ['interview', 'interviewing'].includes(c.job_status) : c.job_status === status
+          status === 'interviewing'
+            ? ['interview', 'interviewing'].includes(c.job_status)
+            : c.job_status === status
         ).length;
+
       const countMonth = (status: string) =>
         monthCandidates.filter((c) =>
-          status === 'interviewing' ? ['interview', 'interviewing'].includes(c.job_status) : c.job_status === status
+          status === 'interviewing'
+            ? ['interview', 'interviewing'].includes(c.job_status)
+            : c.job_status === status
         ).length;
+
+      // Pre-filter to this week
+      const weekBackOfResume  = backOfResume.filter(
+        (c) => new Date(c.updated_at) >= new Date(weekStart)
+      );
+      const weekSentList      = sentList.filter(
+        (s) => new Date(s.sent_to_client_at || s.updated_at) >= new Date(weekStart)
+      );
+      const weekInterviewList = interviewList.filter(
+        (s) => new Date(s.interview_at || s.updated_at) >= new Date(weekStart)
+      );
+
       return {
         activeJobs: jobsRes.count ?? 0,
-        weekCandidates: weekCandidates.length,
-        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
-        weekNew: countWeek('new'), weekContacted: countWeek('reached_out'),
-        weekPitched: countWeek('pitched'), weekSendOut: countWeek('send_out'),
-        weekSubmitted: countWeek('submitted'), weekInterviewing: countWeek('interviewing'),
-        weekOffer: countWeek('offer'), weekPlaced: countWeek('placed'),
-        monthCandidates: monthCandidates.length,
-        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
-        monthNew: countMonth('new'), monthContacted: countMonth('reached_out'),
-        monthPitched: countMonth('pitched'), monthSendOut: countMonth('send_out'),
-        monthSubmitted: countMonth('submitted'), monthInterviewing: countMonth('interviewing'),
-        monthOffer: countMonth('offer'), monthPlaced: countMonth('placed'),
-        interviewsThisWeek: sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
-        offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
+
+        // ── Week counts ──
+        weekCandidates:      weekCandidates.length,
+        myWeekCandidates:    user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
+        weekNew:             countWeek('new'),
+        weekContacted:       countWeek('reached_out'),
+        weekPitched:         countWeek('pitched'),
+        weekSendOut:         countWeek('send_out'),
+        weekSubmitted:       countWeek('submitted'),
+        weekInterviewing:    countWeek('interviewing'),
+        weekOffer:           countWeek('offer'),
+        weekPlaced:          countWeek('placed'),
+        weekBackOfResume:    weekBackOfResume.length,
+        weekSentCount:       weekSentList.length,
+        weekInterviewCount:  weekInterviewList.length,
+
+        // ── Month counts ──
+        monthCandidates:     monthCandidates.length,
+        myMonthCandidates:   user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
+        monthNew:            countMonth('new'),
+        monthContacted:      countMonth('reached_out'),
+        monthPitched:        countMonth('pitched'),
+        monthSendOut:        countMonth('send_out'),
+        monthSubmitted:      countMonth('submitted'),
+        monthInterviewing:   countMonth('interviewing'),
+        monthOffer:          countMonth('offer'),
+        monthPlaced:         countMonth('placed'),
+        monthBackOfResume:   backOfResume.length,
+        monthSentCount:      sentList.length,
+        monthInterviewCount: interviewList.length,
+
+        // Legacy fields still used by existing MetricCards
+        interviewsThisWeek:  sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
+        offersOut:           sendOuts.filter((s) => s.stage === 'offer').length,
+
+        // ── Full lists (month scope) ──
+        backOfResumeList:  backOfResume,
+        sentList,
+        interviewList,
+
+        // ── Pre-filtered week lists ──
+        weekBackOfResumeList:  weekBackOfResume,
+        weekSentList,
+        weekInterviewList,
       };
     },
   });

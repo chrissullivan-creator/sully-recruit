@@ -8,11 +8,12 @@ interface MetricCardProps {
     isPositive: boolean;
   };
   icon?: React.ReactNode;
+  highlight?: boolean;
 }
 
-export function MetricCard({ label, value, change, icon }: MetricCardProps) {
+export function MetricCard({ label, value, change, icon, highlight }: MetricCardProps) {
   return (
-    <div className="metric-card hover-lift">
+    <div className={cn("metric-card hover-lift", highlight && "ring-1 ring-accent/30 bg-accent/5")}>
       <div className="flex items-start justify-between">
         <div>
           <p className="metric-label">{label}</p>
