@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -30,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 
@@ -820,6 +821,23 @@ const JobDetail = () => {
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><UsersRound className="h-3 w-3" /> Openings</Label>
                 <p className="text-sm text-foreground mt-0.5">{(job as any).num_openings ?? 1}</p>
               </EditableField>
+
+              <div className="flex items-center justify-between rounded-md px-2 py-1.5 -mx-2 -my-1.5">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Market Over</Label>
+                <Switch
+                  checked={!!(job as any).market_over}
+                  onCheckedChange={async (checked) => {
+                    try {
+                      const { error } = await supabase.from('jobs').update({ market_over: checked }).eq('id', id!);
+                      if (error) throw error;
+                      queryClient.invalidateQueries({ queryKey: ['job', id] });
+                      toast.success(checked ? 'Marked as market over' : 'Marked as not market over');
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to update');
+                    }
+                  }}
+                />
+              </div>
             </div>
 
             {/* Quick contacts preview */}
