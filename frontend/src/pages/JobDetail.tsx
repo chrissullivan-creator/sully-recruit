@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 
@@ -1152,15 +1153,15 @@ const JobDetail = () => {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Select Company</Label>
-              <Select value={companyEditId || 'none'} onValueChange={handleCompanySelect}>
-                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No company</SelectItem>
-                  {companies.map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                options={(companies as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                value={companyEditId}
+                onChange={handleCompanySelect}
+                placeholder="Select company"
+                searchPlaceholder="Search companies..."
+                clearLabel="No company"
+                emptyText="No company found."
+              />
             </div>
             <div className="space-y-2">
               <Label>Company Name</Label>
@@ -1189,17 +1190,19 @@ const JobDetail = () => {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Job Function</Label>
-              <Select value={functionEditId || 'none'} onValueChange={v => setFunctionEditId(v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Select function" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No function</SelectItem>
-                  {jobFunctions.map((fn: any) => (
-                    <SelectItem key={fn.id} value={fn.id}>
-                      {fn.name} ({fn.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                options={(jobFunctions as any[]).map((fn: any) => ({
+                  value: fn.id,
+                  label: `${fn.name} (${fn.code})`,
+                  sublabel: fn.examples?.length > 0 ? fn.examples.join(', ') : undefined,
+                }))}
+                value={functionEditId}
+                onChange={v => setFunctionEditId(v)}
+                placeholder="Select function"
+                searchPlaceholder="Search functions..."
+                clearLabel="No function"
+                emptyText="No function found."
+              />
               {(() => {
                 const selectedFn = jobFunctions.find((f: any) => f.id === functionEditId);
                 if (selectedFn?.examples?.length > 0) {

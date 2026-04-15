@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,23 +114,19 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
 
         <div className="space-y-2">
           <Label>Tied to Job</Label>
-          <Select
-            value={data.jobId || "none"}
-            onValueChange={(v) => update("jobId", v === "none" ? null : v)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a job (optional)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              {jobs.map((job) => (
-                <SelectItem key={job.id} value={job.id}>
-                  {job.status === "hot" ? "🔥 " : "📋 "}
-                  {job.title}{job.company_name ? ` — ${job.company_name}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            options={(jobs as any[]).map((job: any) => ({
+              value: job.id,
+              label: `${job.status === 'hot' ? '🔥 ' : ''}${job.title}`,
+              sublabel: job.company_name ? job.company_name : undefined,
+            }))}
+            value={data.jobId || ''}
+            onChange={(v) => update("jobId", v || null)}
+            placeholder="Select a job (optional)"
+            searchPlaceholder="Search jobs..."
+            clearLabel="None"
+            emptyText="No job found."
+          />
         </div>
 
         <div className="space-y-2">

@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -536,20 +536,19 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Function</Label>
-                <Select value={form.job_function_id || 'none'} onValueChange={v => setForm(prev => ({ ...prev, job_function_id: v === 'none' ? '' : v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select function" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No function</SelectItem>
-                    {jobFunctions.map((fn: any) => (
-                      <SelectItem key={fn.id} value={fn.id}>
-                        {fn.name} ({fn.code})
-                        {fn.examples?.length > 0 && (
-                          <span className="text-muted-foreground ml-1 text-xs">— {fn.examples.join(', ')}</span>
-                        )}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={(jobFunctions as any[]).map((fn: any) => ({
+                    value: fn.id,
+                    label: `${fn.name} (${fn.code})`,
+                    sublabel: fn.examples?.length > 0 ? fn.examples.join(', ') : undefined,
+                  }))}
+                  value={form.job_function_id}
+                  onChange={v => setForm(prev => ({ ...prev, job_function_id: v }))}
+                  placeholder="Select function"
+                  searchPlaceholder="Search functions..."
+                  clearLabel="No function"
+                  emptyText="No function found."
+                />
               </div>
               <div className="space-y-2">
                 <Label>Number of Openings</Label>
@@ -565,15 +564,15 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Company</Label>
-                <Select value={form.company_id || 'none'} onValueChange={handleCompanyChange}>
-                  <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No company</SelectItem>
-                    {companies.map((c: any) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={(companies as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                  value={form.company_id}
+                  onChange={handleCompanyChange}
+                  placeholder="Select company"
+                  searchPlaceholder="Search companies..."
+                  clearLabel="No company"
+                  emptyText="No company found."
+                />
               </div>
               <div className="space-y-2">
                 <Label>Company Name</Label>
