@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -225,24 +226,18 @@ export const BulkCandidateActionsDialog = ({
 
           <div className="space-y-2">
             <Label>Select Job</Label>
-            <Select value={selectedJobId} onValueChange={setSelectedJobId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a job..." />
-              </SelectTrigger>
-              <SelectContent>
-                {jobs.map((job) => (
-                  <SelectItem key={job.id} value={job.id}>
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-3.5 w-3.5" />
-                      <span>{job.title}</span>
-                      <span className="text-xs text-muted-foreground">
-                        at {job.company_name ?? job.companies?.name ?? 'Unknown company'}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              options={(jobs as any[]).map((job: any) => ({
+                value: job.id,
+                label: job.title,
+                sublabel: `at ${job.company_name ?? (job.companies as any)?.name ?? 'Unknown company'}`,
+              }))}
+              value={selectedJobId}
+              onChange={setSelectedJobId}
+              placeholder="Choose a job..."
+              searchPlaceholder="Search jobs..."
+              emptyText="No job found."
+            />
           </div>
 
           <div className="space-y-2">

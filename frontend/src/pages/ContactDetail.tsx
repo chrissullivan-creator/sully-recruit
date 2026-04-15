@@ -100,8 +100,19 @@ function useContactJobs(contactId: string | undefined) {
         .map((so: any) => so.jobs)
         .filter(Boolean);
 
+      // Jobs linked via job_contacts table
+      const { data: jobContactRows, error: err3 } = await supabase
+        .from('job_contacts')
+        .select('job_id, is_primary, jobs(id, title, company_name, location, status, created_at)')
+        .eq('contact_id', contactId!);
+      if (err3) throw err3;
+
+      const jcJobs = (jobContactRows || [])
+        .map((row: any) => ({ ...row.jobs, _job_contact_id: row.job_id }))
+        .filter(Boolean);
+
       // Merge and deduplicate
-      const allJobs = [...(hiringManagerJobs || []), ...soJobs];
+      const allJobs = [...(hiringManagerJobs || []), ...soJobs, ...jcJobs];
       const seen = new Set<string>();
       return allJobs.filter((j: any) => {
         if (seen.has(j.id)) return false;
@@ -218,6 +229,56 @@ const ContactDetail = () => {
   const [joeChatInput, setJoeChatInput] = useState('');
   const [joeChatLoading, setJoeChatLoading] = useState(false);
   const joeChatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Job linking state
+  const [jobSearch, setJobSearch] = useState('');
+  const [jobSearchOpen, setJobSearchOpen] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState('');
+  const [linkingJob, setLinkingJob] = useState(false);
+  const [removingJobId, setRemovingJobId] = useState<string | null>(null);
+
+  const { data: allJobs = [] } = useJobs();
+
+  const linkJob = async () => {
+    if (!selectedJobId || !id) return;
+    setLinkingJob(true);
+    try {
+      const isFirst = linkedJobs.length === 0;
+      const { error } = await supabase.from('job_contacts').insert({
+        job_id: selectedJobId,
+        contact_id: id,
+        is_primary: isFirst,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['contact_jobs', id] });
+      toast.success('Job linked');
+      setSelectedJobId('');
+      setJobSearch('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to link job');
+    } finally {
+      setLinkingJob(false);
+    }
+  };
+
+  const unlinkJob = async (jobId: string) => {
+    if (!id) return;
+    setRemovingJobId(jobId);
+    try {
+      const { error } = await supabase
+        .from('job_contacts')
+        .delete()
+        .eq('job_id', jobId)
+        .eq('contact_id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['contact_jobs', id] });
+      toast.success('Job removed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove job');
+    } finally {
+      setRemovingJobId(null);
+    }
+  };
 
   /* ---- mutations ---- */
 
@@ -620,37 +681,126 @@ const ContactDetail = () => {
               </TabsContent>
 
               {/* ---------- JOBS TAB ---------- */}
-              <TabsContent value="jobs" className="px-8 py-5 mt-0">
+              <TabsContent value="jobs" className="px-8 py-5 mt-0 space-y-5">
+
+                {/* Linked jobs list */}
                 {linkedJobs.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
                     <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No linked jobs</p>
-                    <p className="text-xs text-muted-foreground">Jobs where this contact is the hiring manager or connected via send-outs will appear here.</p>
+                    <p className="text-xs text-muted-foreground">Link a job below, or jobs connected via send-outs will appear here automatically.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {linkedJobs.map((job: any) => (
-                      <button
-                        key={job.id}
-                        onClick={() => navigate(`/jobs/${job.id}`)}
-                        className="w-full text-left rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{job.title}</p>
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                              <Building className="h-3 w-3" /> {job.company_name || '\u2014'}
-                              {job.location && <><MapPin className="h-3 w-3 ml-2" /> {job.location}</>}
-                            </p>
-                          </div>
-                          <Badge variant="secondary" className="text-[10px] shrink-0 ml-3">
-                            {job.status ?? 'unknown'}
-                          </Badge>
+                    {linkedJobs.map((job: any) => {
+                      const isManualLink = !!(job as any)._job_contact_id;
+                      return (
+                        <div
+                          key={job.id}
+                          className="flex items-center gap-2 rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
+                        >
+                          <button
+                            onClick={() => navigate(`/jobs/${job.id}`)}
+                            className="flex-1 text-left min-w-0"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">{job.title}</p>
+                                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                  <Building className="h-3 w-3" /> {job.company_name || '\u2014'}
+                                  {job.location && <><MapPin className="h-3 w-3 ml-2" /> {job.location}</>}
+                                </p>
+                              </div>
+                              <Badge variant="secondary" className="text-[10px] shrink-0">
+                                {job.status ?? 'unknown'}
+                              </Badge>
+                            </div>
+                          </button>
+                          {isManualLink && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                              onClick={() => unlinkJob(job.id)}
+                              disabled={removingJobId === job.id}
+                            >
+                              {removingJobId === job.id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <X className="h-3.5 w-3.5" />}
+                            </Button>
+                          )}
                         </div>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
+
+                {/* Add job */}
+                <div className="border-t border-border pt-4 space-y-3">
+                  <Label className="text-sm font-medium">Link a Job</Label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 relative">
+                      {selectedJobId ? (
+                        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                          <span className="flex-1 truncate">
+                            {(() => {
+                              const j = (allJobs as any[]).find((j: any) => j.id === selectedJobId);
+                              return j ? `${j.title}${j.company_name ? ` — ${j.company_name}` : ''}` : 'Selected';
+                            })()}
+                          </span>
+                          <button onClick={() => { setSelectedJobId(''); setJobSearch(''); }} className="text-muted-foreground hover:text-foreground">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                          <Input
+                            className="pl-8 h-9 text-sm"
+                            placeholder="Search jobs…"
+                            value={jobSearch}
+                            onChange={e => { setJobSearch(e.target.value); setJobSearchOpen(true); }}
+                            onFocus={() => setJobSearchOpen(true)}
+                            onBlur={() => setTimeout(() => setJobSearchOpen(false), 150)}
+                          />
+                          {jobSearchOpen && (
+                            <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card text-foreground shadow-md max-h-56 overflow-y-auto">
+                              {(() => {
+                                const linkedIds = new Set(linkedJobs.map((j: any) => j.id));
+                                const q = jobSearch.toLowerCase();
+                                const filtered = (allJobs as any[]).filter((j: any) =>
+                                  !linkedIds.has(j.id) &&
+                                  (!q || j.title?.toLowerCase().includes(q) || j.company_name?.toLowerCase().includes(q))
+                                );
+                                if (filtered.length === 0) return (
+                                  <div className="px-3 py-3 text-sm text-muted-foreground">No jobs found</div>
+                                );
+                                return filtered.map((j: any) => (
+                                  <button
+                                    key={j.id}
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 flex flex-col"
+                                    onMouseDown={() => { setSelectedJobId(j.id); setJobSearch(''); setJobSearchOpen(false); }}
+                                  >
+                                    <span className="font-medium text-foreground">{j.title}</span>
+                                    {j.company_name && <span className="text-xs text-muted-foreground">{j.company_name}</span>}
+                                  </button>
+                                ));
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      variant="gold"
+                      onClick={linkJob}
+                      disabled={!selectedJobId || linkingJob}
+                    >
+                      {linkingJob && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      Add
+                    </Button>
+                  </div>
+                </div>
               </TabsContent>
 
               {/* ---------- CANDIDATES PITCHED TAB ---------- */}
