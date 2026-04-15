@@ -24,13 +24,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const limit = 10;
   const offset = (page - 1) * limit;
 
-  // Get total count
+  // Get the latest run_id for this job
+  const { data: latestRunData } = await supabase
+    .from("job_candidate_matches")
+    .select("run_id")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  const latestRunId = latestRunData?.run_id;
+
+  // Get total count (only for latest run)
   const { count } = await supabase
     .from("job_candidate_matches")
     .select("id", { count: "exact", head: true })
-    .eq("job_id", jobId);
+    .eq("job_id", jobId)
+    .eq("run_id", latestRunId);
 
-  // Get paginated matches with candidate info
+  // Get paginated matches with candidate info (only for latest run)
   const { data, error } = await supabase
     .from("job_candidate_matches")
     .select(
@@ -59,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
     )
     .eq("job_id", jobId)
+    .eq("run_id", latestRunId)
     .order("overall_score", { ascending: false })
     .range(offset, offset + limit - 1);
 
