@@ -86,7 +86,7 @@ Tenant 2 (House account):
 ### Channel Routing
 - Chris: SMS enabled
 - Nancy: SMS enabled
-- Ashley: NO SMS (no RingCentral account)
+- Ashley: email enabled, NO SMS (no RingCentral account)
 
 ---
 

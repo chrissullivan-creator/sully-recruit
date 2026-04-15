@@ -6,7 +6,7 @@ import { getMicrosoftAccessToken } from "./microsoft-graph";
  * Channel send helpers — routes to the correct per-user account.
  *
  * Each recruiter has their own accounts:
- *   - Email: Microsoft Graph mailbox (Chris, Nancy — Ashley has none)
+ *   - Email: Microsoft Graph mailbox (Chris, Nancy, Ashley)
  *   - SMS: RingCentral number (Chris, Nancy — Ashley has none)
  *   - LinkedIn: Unipile account (Chris, Nancy, Ashley)
  *
@@ -140,7 +140,7 @@ interface RingCentralConfig {
 /**
  * Look up the RingCentral config for a specific user from user_integrations.
  * Chris and Nancy each have their own RC number.
- * Ashley has NO RingCentral — will throw if attempted.
+ * Ashley has NO RingCentral — will throw if SMS is attempted for her.
  */
 async function getRingCentralConfig(supabase: any, userId: string): Promise<RingCentralConfig> {
   const { data, error } = await supabase
@@ -152,7 +152,7 @@ async function getRingCentralConfig(supabase: any, userId: string): Promise<Ring
     .maybeSingle();
 
   if (error || !data) {
-    throw new Error(`No RingCentral integration for user ${userId}. Ashley has no RingCentral — don't route SMS to her.`);
+    throw new Error(`No RingCentral integration for user ${userId}. Not all users have RingCentral — don't route SMS to them.`);
   }
 
   const config = data.config as RingCentralConfig;

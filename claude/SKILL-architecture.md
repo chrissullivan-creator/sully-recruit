@@ -22,12 +22,12 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 
 | Person | Email | LinkedIn | SMS |
 |---|---|---|---|
-| Chris Sullivan (President) | ✅ chris.sullivan@emeraldrecruit.com | sales_nav_inmail, classic_message, connection_request | ✅ RingCentral |
+| Chris Sullivan (President) | ✅ chris.sullivan@emeraldrecruit.com | recruiter_inmail, sales_nav_inmail, classic_message, connection_request | ✅ RingCentral |
 | Nancy Eberlein (MD) | ✅ nancy.eberlein@emeraldrecruit.com | recruiter_inmail, classic_message, connection_request | ✅ RingCentral |
-| Ashley Leichner (Recruiter) | ❌ No email integration | classic_message, connection_request ONLY | ❌ No RingCentral |
+| Ashley Leichner (Recruiter) | ✅ ashley.leichner@emeraldrecruit.com | classic_message, connection_request | ❌ No RingCentral |
 | House Account | ✅ EmeraldRecruit@theemeraldrecruitinggroup.com | ❌ | ❌ |
 
-**Ashley has NO email account and NO RingCentral. Never route email or SMS to Ashley.**
+**Ashley has email but NO RingCentral. Never route SMS to Ashley.**
 
 ---
 
@@ -320,7 +320,7 @@ Three MCP servers are configured for Claude Code:
 | `verify_jwt: true` on edge functions | `verify_jwt: false` for all Sully functions |
 | Mix `MICROSOFT_GRAPH_*` with house account | House account uses `MICROSOFT_CLIENT_*` |
 | Spread operator base64 on large files | Use `Buffer.from(buffer).toString("base64")` |
-| Email/SMS for Ashley | Ashley = LinkedIn only (no email, no RingCentral) |
+| SMS for Ashley | Ashley has no RingCentral — don't route SMS to her |
 
 ---
 

@@ -104,10 +104,10 @@ WHERE status = 'active';
 ```
 linkedin_connection     connection request (300 char limit, 24/7)
 linkedin_message        classic LinkedIn DM (must have prior connection step)
-linkedin_recruiter      Recruiter InMail (Nancy only)
+linkedin_recruiter      Recruiter InMail (Chris + Nancy)
 sales_nav               Sales Nav InMail (Chris only)
 email                   Outlook via Microsoft Graph
-sms                     RingCentral (Chris + Nancy only, NOT Ashley)
+sms                     RingCentral (Chris + Nancy only, NOT Ashley — no RingCentral)
 phone                   Call log/script
 ```
 
