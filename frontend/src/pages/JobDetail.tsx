@@ -30,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 
@@ -724,6 +725,23 @@ const JobDetail = () => {
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><UsersRound className="h-3 w-3" /> Openings</Label>
                 <p className="text-sm text-foreground mt-0.5">{(job as any).num_openings ?? 1}</p>
               </EditableField>
+
+              <div className="flex items-center justify-between rounded-md px-2 py-1.5 -mx-2 -my-1.5">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Market Over</Label>
+                <Switch
+                  checked={!!(job as any).market_over}
+                  onCheckedChange={async (checked) => {
+                    try {
+                      const { error } = await supabase.from('jobs').update({ market_over: checked }).eq('id', id!);
+                      if (error) throw error;
+                      queryClient.invalidateQueries({ queryKey: ['job', id] });
+                      toast.success(checked ? 'Marked as market over' : 'Marked as not market over');
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to update');
+                    }
+                  }}
+                />
+              </div>
             </div>
 
             {/* Quick contacts preview */}
@@ -817,29 +835,6 @@ const JobDetail = () => {
                       />
                     ) : (
                       <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
-                    )}
-                  </EditableField>
-                </div>
-
-                {/* Market Overview */}
-                <div className="border-t border-border pt-5">
-                  <EditableField onClick={() => openFieldEdit(
-                    'market_overview', 'Market Overview', 'richtext',
-                    (job as any).market_overview || '',
-                    undefined,
-                    'Market landscape, competitive intel, talent supply/demand, compensation trends...',
-                  )}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Globe className="h-4 w-4 text-accent" />
-                      <h2 className="text-base font-semibold text-foreground">Market Overview</h2>
-                    </div>
-                    {(job as any).market_overview ? (
-                      <div
-                        className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
-                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).market_overview) }}
-                      />
-                    ) : (
-                      <p className="text-sm italic text-muted-foreground">No market overview yet. Click to add.</p>
                     )}
                   </EditableField>
                 </div>
