@@ -321,9 +321,9 @@ const JobDetail = () => {
     try {
       const { data } = await supabase
         .from('candidates')
-        .select('id, full_name, current_title, current_company')
-        .or(`full_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%`)
-        .limit(10);
+        .select('id, full_name, first_name, last_name, current_title, current_company, email')
+        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%,email.ilike.%${query}%`)
+        .limit(15);
       // Filter out candidates already in send outs for this job
       const existingIds = new Set((sendOuts as any[]).map((so: any) => so.candidate_id));
       setSendOutCandidateResults((data ?? []).filter(c => !existingIds.has(c.id)));
@@ -1209,9 +1209,9 @@ const JobDetail = () => {
                     onClick={() => addCandidateToSendOuts(c.id)}
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{c.full_name}</p>
+                      <p className="text-sm font-medium text-foreground truncate">{c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed'}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        {c.current_title}{c.current_company ? ` @ ${c.current_company}` : ''}
+                        {c.current_title}{c.current_company ? ` @ ${c.current_company}` : ''}{!c.current_title && c.email ? c.email : ''}
                       </p>
                     </div>
                     {addingSendOut ? (
