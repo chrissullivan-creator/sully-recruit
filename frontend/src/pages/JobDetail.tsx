@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -817,6 +817,29 @@ const JobDetail = () => {
                       />
                     ) : (
                       <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
+                    )}
+                  </EditableField>
+                </div>
+
+                {/* Market Overview */}
+                <div className="border-t border-border pt-5">
+                  <EditableField onClick={() => openFieldEdit(
+                    'market_overview', 'Market Overview', 'richtext',
+                    (job as any).market_overview || '',
+                    undefined,
+                    'Market landscape, competitive intel, talent supply/demand, compensation trends...',
+                  )}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Globe className="h-4 w-4 text-accent" />
+                      <h2 className="text-base font-semibold text-foreground">Market Overview</h2>
+                    </div>
+                    {(job as any).market_overview ? (
+                      <div
+                        className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).market_overview) }}
+                      />
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">No market overview yet. Click to add.</p>
                     )}
                   </EditableField>
                 </div>
