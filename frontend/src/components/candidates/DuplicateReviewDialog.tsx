@@ -251,23 +251,20 @@ export function DuplicateReviewDialog({
 
     setMerging(true);
     try {
-      // Call the merge API with user's session token
-      const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch('/api/dedup/merge', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || ''}`,
-        },
-        body: JSON.stringify({ survivorId, mergedId }),
+      // Call the merge RPC directly for synchronous, atomic merge
+      const { data, error } = await supabase.rpc('merge_duplicate_candidate', {
+        p_survivor_id: survivorId,
+        p_merged_id: mergedId,
+        p_duplicate_row_id: currentPair.id,
       });
 
-      if (!resp.ok) {
-        const err = await resp.json();
-        throw new Error(err.error || 'Merge failed');
-      }
+      if (error) throw error;
 
-      toast.success('Candidates merged successfully');
+      const result = data as any;
+      const fieldsCount = result?.fields_filled?.length || 0;
+      toast.success(
+        `Merged successfully${fieldsCount > 0 ? ` — ${fieldsCount} field${fieldsCount > 1 ? 's' : ''} filled from duplicate` : ''}`
+      );
 
       // Remove this pair and move to next
       const newPairs = pairs.filter((_, i) => i !== currentIndex);
