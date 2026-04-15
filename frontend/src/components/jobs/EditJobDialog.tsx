@@ -55,8 +55,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
   const handleCompanyChange = (companyId: string) => {
-    if (companyId === 'none') {
-      update('company_id', '');
+    if (!companyId) {
+      setForm(prev => ({ ...prev, company_id: '', company_name: '' }));
       return;
     }
     const company = companies.find((c: any) => c.id === companyId);

@@ -380,8 +380,9 @@ const JobDetail = () => {
   };
 
   const handleCompanySelect = (companyId: string) => {
-    if (companyId === 'none') {
+    if (!companyId) {
       setCompanyEditId('');
+      setCompanyEditName('');
       return;
     }
     const c = companies.find((co: any) => co.id === companyId);

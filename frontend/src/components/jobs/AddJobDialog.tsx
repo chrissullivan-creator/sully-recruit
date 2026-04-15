@@ -223,8 +223,8 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
 
   // ── Company handling ──────────────────────────────────────────────
   const handleCompanyChange = (companyId: string) => {
-    if (companyId === 'none') {
-      update('company_id', '');
+    if (!companyId) {
+      setForm(prev => ({ ...prev, company_id: '', company_name: '' }));
       return;
     }
     const company = companies.find((c: any) => c.id === companyId);
