@@ -25,7 +25,7 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar,
+  Search, Calendar, Merge,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
+import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 const SEND_OUT_STAGES = [
@@ -225,6 +226,7 @@ const CandidateDetail = () => {
   const [activeTab, setActiveTab] = useState('joe');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const handleDeleteCandidate = async () => {
     if (!id) return;
@@ -945,6 +947,9 @@ const CandidateDetail = () => {
           </Button>
           <Button variant="outline" size="sm" onClick={() => setActiveTab('joe')}>
             <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setMergeOpen(true)} title="Merge with another candidate">
+            <Merge className="h-3.5 w-3.5 mr-1" />Merge
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -2162,6 +2167,21 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      {candidate && (
+        <MergeCandidateDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          currentCandidate={{
+            id: candidate.id,
+            first_name: candidate.first_name,
+            last_name: candidate.last_name,
+            email: candidate.email,
+            current_title: candidate.current_title,
+            current_company: candidate.current_company,
+          }}
+        />
+      )}
 
       {/* Edit meeting dialog */}
       {editingMeeting && (
