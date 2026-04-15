@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -72,6 +72,53 @@ const EditableField = ({
     <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2" />
   </div>
 );
+
+// ── Inline role editor for job contacts ─────────────────────────────────────
+const InlineRoleEdit = ({ role, onSave }: { role: string | null; onSave: (v: string) => Promise<void> }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(role ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(draft.trim()); toast.success('Role updated'); }
+    catch (e: any) { toast.error(e.message || 'Failed to update role'); }
+    finally { setSaving(false); setEditing(false); }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <Input
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          className="h-6 text-[10px] w-28 px-1.5"
+          placeholder="e.g. Hiring Manager"
+        />
+        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Check className="h-2.5 w-2.5 text-green-400" />}
+        </Button>
+        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => { setDraft(role ?? ''); setEditing(false); }}>
+          <X className="h-2.5 w-2.5 text-red-400" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className={cn(
+        'text-[10px] px-1.5 py-0.5 rounded hover:bg-accent/10 transition-colors',
+        role ? 'text-muted-foreground bg-muted' : 'text-muted-foreground/50 border border-dashed border-border',
+      )}
+    >
+      {role || '+ Role'}
+    </button>
+  );
+};
 
 // Stages relevant to send outs (the submission pipeline)
 const SEND_OUT_STAGES = [
@@ -976,17 +1023,25 @@ const JobDetail = () => {
                         <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-medium text-foreground">{c?.full_name}</p>
+                              <button
+                                onClick={() => navigate(`/contacts/${jc.contact_id}`)}
+                                className="font-medium text-foreground hover:text-accent transition-colors"
+                              >
+                                {c?.full_name}
+                              </button>
                               {jc.is_primary && (
                                 <span className="flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded font-medium">
                                   <Star className="h-2.5 w-2.5 fill-current" /> Primary
                                 </span>
                               )}
-                              {jc.role && (
-                                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                  {jc.role}
-                                </span>
-                              )}
+                              <InlineRoleEdit
+                                role={jc.role}
+                                onSave={async (role) => {
+                                  const { error } = await supabase.from('job_contacts').update({ role: role || null }).eq('id', jc.id);
+                                  if (error) throw error;
+                                  refetchJobContacts();
+                                }}
+                              />
                             </div>
                             {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
                             {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
