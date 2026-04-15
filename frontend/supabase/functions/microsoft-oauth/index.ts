@@ -226,7 +226,7 @@ async function handleCallback(
   }
 
   // Also upsert an integration_accounts row so sync-outlook-events can find it
-  await supabase.from("integration_accounts").upsert(
+  const { error: accountsErr } = await supabase.from("integration_accounts").upsert(
     {
       provider: "microsoft",
       account_type: "oauth",
@@ -237,6 +237,14 @@ async function handleCallback(
     } as any,
     { onConflict: "provider,owner_user_id", ignoreDuplicates: false },
   );
+
+  if (accountsErr) {
+    console.error("Failed to store integration account:", accountsErr);
+    return Response.redirect(
+      `${frontendUrl}/settings?ms_error=account_storage_failed`,
+      302,
+    );
+  }
 
   return Response.redirect(`${frontendUrl}/settings?ms_connected=1`, 302);
 }
