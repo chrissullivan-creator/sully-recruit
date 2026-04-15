@@ -65,6 +65,7 @@ const CompanyDetail = () => {
   const queryClient = useQueryClient();
   const contractInputRef = useRef<HTMLInputElement>(null);
   const [uploadingContract, setUploadingContract] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   const { data: company, isLoading } = useQuery({
     queryKey: ['company', id],
@@ -122,6 +123,24 @@ const CompanyDetail = () => {
       return data as any[];
     },
   });
+
+  // Pre-compute signed URLs for contracts (private bucket)
+  useEffect(() => {
+    const paths = contracts.map((ct: any) => ct.file_path).filter(Boolean) as string[];
+    if (paths.length === 0) return;
+    Promise.all(
+      paths.map(async (p) => {
+        const { data } = await supabase.storage.from('resumes').createSignedUrl(p, 3600);
+        return [p, data?.signedUrl ?? null] as const;
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const [path, url] of results) {
+        if (url) map[path] = url;
+      }
+      setSignedUrls(map);
+    });
+  }, [contracts]);
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
@@ -343,7 +362,7 @@ const CompanyDetail = () => {
                 ) : (
                   <div className="space-y-2">
                     {contracts.map((ct: any) => {
-                      const downloadUrl = ct.file_path ? supabase.storage.from('resumes').getPublicUrl(ct.file_path).data?.publicUrl : null;
+                      const downloadUrl = ct.file_path ? signedUrls[ct.file_path] : null;
                       return (
                         <div key={ct.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                           <div className="flex items-center gap-3 min-w-0">

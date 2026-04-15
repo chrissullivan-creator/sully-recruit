@@ -126,7 +126,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
       .maybeSingle();
 
     if (!resume) {
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(filePath);
+      const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(filePath, 3600);
       const mimeType = fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf'
         : fileName.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         : 'application/octet-stream';
@@ -134,7 +134,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
         candidate_id: candidateId,
         file_path: filePath,
         file_name: fileName,
-        file_url: urlData?.publicUrl || null,
+        file_url: urlData?.signedUrl || null,
         mime_type: mimeType,
         parse_status: 'pending',
       } as any).select('id').single();

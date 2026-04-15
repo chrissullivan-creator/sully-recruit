@@ -211,6 +211,7 @@ const CandidateDetail = () => {
   const [generatingJoe, setGeneratingJoe] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [compExpanded, setCompExpanded] = useState(false);
   const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
   const [educationOpen, setEducationOpen] = useState(false);
@@ -587,12 +588,12 @@ const CandidateDetail = () => {
       const path = `${session.user.id}/${id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
+      const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(path, 3600);
       const { error: dbErr } = await supabase.from('resumes').insert({
         candidate_id: id,
         file_name: file.name,
         file_path: path,
-        file_url: urlData.publicUrl,
+        file_url: urlData?.signedUrl ?? '',
         file_size: file.size,
         mime_type: file.type,
       } as any);
@@ -610,10 +611,10 @@ const CandidateDetail = () => {
     if (!id) return;
     supabase.from('resumes').select('file_path, created_at').eq('candidate_id', id)
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (data?.file_path) {
-          const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(data.file_path);
-          setResumeUrl(urlData?.publicUrl ?? null);
+          const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(data.file_path, 3600);
+          setResumeUrl(urlData?.signedUrl ?? null);
         }
       });
   }, [id]);
@@ -621,6 +622,25 @@ const CandidateDetail = () => {
   useEffect(() => {
     if (!resumeUrl && candidate?.resume_url) setResumeUrl(candidate.resume_url);
   }, [candidate?.resume_url]);
+
+  // Pre-compute signed URLs for all document lists (private bucket)
+  useEffect(() => {
+    const allDocs = [...candidateResumes, ...formattedResumes, ...otherDocs];
+    const paths = allDocs.map((d: any) => d.file_path).filter(Boolean) as string[];
+    if (paths.length === 0) return;
+    Promise.all(
+      paths.map(async (p) => {
+        const { data } = await supabase.storage.from('resumes').createSignedUrl(p, 3600);
+        return [p, data?.signedUrl ?? null] as const;
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const [path, url] of results) {
+        if (url) map[path] = url;
+      }
+      setSignedUrls(map);
+    });
+  }, [candidateResumes, formattedResumes, otherDocs]);
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
@@ -1581,7 +1601,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {candidateResumes.map((r: any) => {
-                          const downloadUrl = r.file_url || (r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null);
+                          const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
                             <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">
@@ -1654,7 +1674,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {formattedResumes.map((r: any) => {
-                          const downloadUrl = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                          const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
                             <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">
@@ -1721,7 +1741,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {otherDocs.map((d: any) => {
-                          const downloadUrl = d.file_path ? supabase.storage.from('resumes').getPublicUrl(d.file_path).data?.publicUrl : null;
+                          const downloadUrl = d.file_path ? signedUrls[d.file_path] : null;
                           return (
                             <div key={d.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">

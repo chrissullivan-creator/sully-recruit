@@ -260,6 +260,7 @@ export default function SendOut() {
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [jobPrompt, setJobPrompt] = useState('');
   const [usingExistingFormatted, setUsingExistingFormatted] = useState<any>(null);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   // Email state
   const [emailTo, setEmailTo] = useState('');
@@ -316,6 +317,24 @@ export default function SendOut() {
       return data ?? [];
     },
   });
+
+  // Pre-compute signed URLs for formatted resumes (private bucket)
+  useEffect(() => {
+    const paths = formattedResumes.map((r: any) => r.file_path).filter(Boolean) as string[];
+    if (paths.length === 0) return;
+    Promise.all(
+      paths.map(async (p) => {
+        const { data } = await supabase.storage.from('resumes').createSignedUrl(p, 3600);
+        return [p, data?.signedUrl ?? null] as const;
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const [path, url] of results) {
+        if (url) map[path] = url;
+      }
+      setSignedUrls(map);
+    });
+  }, [formattedResumes]);
 
   // Pre-fill from candidate
   useEffect(() => {
@@ -647,7 +666,7 @@ export default function SendOut() {
                   <p className="text-xs text-muted-foreground">A formatted resume already exists. Use it or create a new one below.</p>
                   <div className="space-y-2">
                     {formattedResumes.map((r: any) => {
-                      const url = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                      const url = r.file_path ? signedUrls[r.file_path] : null;
                       return (
                         <button
                           key={r.id}
@@ -986,7 +1005,7 @@ export default function SendOut() {
                       </div>
                       {usingExistingFormatted.file_path && (
                         <a
-                          href={supabase.storage.from('resumes').getPublicUrl(usingExistingFormatted.file_path).data?.publicUrl || '#'}
+                          href={signedUrls[usingExistingFormatted.file_path] || '#'}
                           target="_blank" rel="noreferrer"
                           className="text-xs text-accent hover:underline shrink-0"
                         >
