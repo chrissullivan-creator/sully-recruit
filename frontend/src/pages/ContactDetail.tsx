@@ -396,7 +396,7 @@ const ContactDetail = () => {
     <MainLayout>
       {/* Top header bar */}
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/contacts')}>
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         {c.avatar_url ? (
@@ -412,8 +412,11 @@ const ContactDetail = () => {
             <Badge variant="secondary" className={cn('text-xs border shrink-0', statusCfg.className)}>
               {statusCfg.label}
             </Badge>
-            {c.is_client && (
+            {Array.isArray(c.roles) && c.roles.includes('client') && (
               <Badge variant="secondary" className="text-xs bg-accent/15 text-accent border-accent/30 shrink-0">Client</Badge>
+            )}
+            {Array.isArray(c.roles) && c.roles.includes('candidate') && (
+              <Badge variant="secondary" className="text-xs bg-green-500/10 text-green-600 border-green-500/20 shrink-0">Candidate</Badge>
             )}
           </div>
           <p className="text-sm text-muted-foreground truncate">
@@ -462,6 +465,32 @@ const ContactDetail = () => {
               <EditableField label="State" value={c.state} onSave={v => updateField('state', v)} placeholder="State / Province" />
               <EditableField label="Country" value={c.country} onSave={v => updateField('country', v)} placeholder="Country" />
               <EditableField label="Postal Code" value={c.postal_code} onSave={v => updateField('postal_code', v)} placeholder="Zip / Postal code" />
+              <EditableField
+                label="Work Email"
+                value={c.work_email}
+                onSave={async v => {
+                  await updateField('work_email', v);
+                  if (v) await updateField('email', v);
+                }}
+                type="email"
+                placeholder="work@firm.com"
+              />
+              <EditableField
+                label="Personal Email"
+                value={c.personal_email}
+                onSave={v => updateField('personal_email', v)}
+                type="email"
+                placeholder="personal@gmail.com"
+              />
+              <EditableField
+                label="Mobile Phone"
+                value={c.mobile_phone}
+                onSave={async v => {
+                  await updateField('mobile_phone', v);
+                  if (v) await updateField('phone', v);
+                }}
+                placeholder="+1 (212) 555-0000"
+              />
             </div>
 
             {/* Timestamps */}
@@ -651,8 +680,8 @@ const ContactDetail = () => {
                                 >
                                   {candName}
                                 </button>
-                                {so.status && (
-                                  <Badge variant="secondary" className="text-[10px] shrink-0">{so.status}</Badge>
+                                {so.stage && (
+                                  <Badge variant="secondary" className="text-[10px] shrink-0">{so.stage.replace(/_/g, ' ')}</Badge>
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">

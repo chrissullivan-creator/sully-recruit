@@ -401,15 +401,18 @@ export function useDashboardMetrics() {
         sentRes,
         interviewsRes,
       ] = await Promise.all([
-        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', weekStart),
-        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', monthStart),
+        supabase
+          .from('jobs')
+          .select('id, status', { count: 'exact' })
+          .not('status', 'in', '("lost","closed","closed_won","closed_lost")'),
+        supabase.from('candidates').select('id, job_status, owner_user_id').gte('created_at', weekStart),
+        supabase.from('candidates').select('id, job_status, owner_user_id').gte('created_at', monthStart),
         supabase.from('send_outs').select('id, stage, created_at'),
 
         // Back of resume — all candidates with this status updated this month
         supabase
           .from('candidates')
-          .select('id, full_name, first_name, last_name, current_title, current_company, owner_id, updated_at, status')
+          .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
           .eq('status', 'back_of_resume')
           .gte('updated_at', monthStart)
           .order('updated_at', { ascending: false }),
@@ -478,7 +481,7 @@ export function useDashboardMetrics() {
 
         // ── Week counts ──
         weekCandidates:      weekCandidates.length,
-        myWeekCandidates:    user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
+        myWeekCandidates:    user ? weekCandidates.filter(c => c.owner_user_id === user.id).length : 0,
         weekNew:             countWeek('new'),
         weekContacted:       countWeek('reached_out'),
         weekPitched:         countWeek('pitched'),
@@ -493,7 +496,7 @@ export function useDashboardMetrics() {
 
         // ── Month counts ──
         monthCandidates:     monthCandidates.length,
-        myMonthCandidates:   user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
+        myMonthCandidates:   user ? monthCandidates.filter(c => c.owner_user_id === user.id).length : 0,
         monthNew:            countMonth('new'),
         monthContacted:      countMonth('reached_out'),
         monthPitched:        countMonth('pitched'),

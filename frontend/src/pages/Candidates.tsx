@@ -182,7 +182,7 @@ const Candidates = () => {
       const matchesJobTag = filters.jobTag === 'all' || (c as any).job_id === filters.jobTag;
 
       // Owner filter
-      const matchesOwner = filters.owner === 'all' ? true : filters.owner === 'mine' ? c.owner_id === user?.id : c.owner_id === filters.owner;
+      const matchesOwner = filters.owner === 'all' ? true : filters.owner === 'mine' ? (c as any).owner_user_id === user?.id : (c as any).owner_user_id === filters.owner;
 
       // Location filter (text match or radius)
       const candLocation = ((c as any).location_text || (c as any).location || '').toLowerCase();
@@ -620,7 +620,7 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       {(() => {
-                        const ownerProfile = candidate.owner_id ? profileMap[candidate.owner_id] : null;
+                        const ownerProfile = (candidate as any).owner_user_id ? profileMap[(candidate as any).owner_user_id] : null;
                         const ownerName = ownerProfile?.full_name;
                         const ownerInitials = ownerName ? ownerName.split(' ').map((n: string) => n[0]).join('').slice(0, 2) : '';
                         return ownerName ? (
