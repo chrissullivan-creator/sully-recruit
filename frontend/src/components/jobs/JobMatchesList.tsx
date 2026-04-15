@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 
 interface CandidateMatch {
   id: string;
-  score: number;
-  blurb: string;
+  overall_score: number;
+  tier: string;
+  reasoning: string;
+  strengths: string[];
+  concerns: string[];
   vector_similarity: number;
-  matched_at: string;
+  created_at: string;
   candidate_id: string;
   candidates: {
     id: string;
@@ -68,13 +71,24 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetch("/api/trigger-match-job", {
+      const triggerRes = await fetch("/api/trigger-best-match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId }),
       });
-      // Wait a few seconds for the task to complete, then fetch
-      await new Promise((r) => setTimeout(r, 8000));
+      const { runId } = await triggerRes.json();
+
+      // Poll for completion (check every 4s, up to 2 minutes)
+      const maxAttempts = 30;
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        const pollRes = await fetch(`/api/jobs/${jobId}/match-run-status?runId=${runId}`);
+        if (pollRes.ok) {
+          const { status } = await pollRes.json();
+          if (status === "completed" || status === "failed") break;
+        }
+      }
+
       await fetchMatches(1);
       setPage(1);
     } catch (err) {
@@ -83,7 +97,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
     setRefreshing(false);
   };
 
-  const lastMatchedAt = matches[0]?.matched_at;
+  const lastMatchedAt = matches[0]?.created_at;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
@@ -209,15 +223,15 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
                       >
                         {c.full_name || "Unknown"}
                       </Link>
-                      <ScoreBadge score={m.score} />
+                      <ScoreBadge score={m.overall_score} />
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 truncate">
                       {c.current_title}
                       {c.current_company ? ` @ ${c.current_company}` : ""}
                     </p>
-                    {m.blurb && (
+                    {m.reasoning && (
                       <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                        {m.blurb}
+                        {m.reasoning}
                       </p>
                     )}
                   </div>

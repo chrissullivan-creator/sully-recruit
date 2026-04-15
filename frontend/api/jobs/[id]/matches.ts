@@ -36,10 +36,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select(
       `
       id,
-      score,
-      blurb,
+      overall_score,
+      tier,
+      reasoning,
+      strengths,
+      concerns,
       vector_similarity,
-      matched_at,
+      created_at,
       candidate_id,
       candidates!inner (
         id,
@@ -56,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
     )
     .eq("job_id", jobId)
-    .order("score", { ascending: false })
+    .order("overall_score", { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) {
