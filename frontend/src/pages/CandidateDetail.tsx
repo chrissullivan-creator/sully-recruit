@@ -173,7 +173,7 @@ const CandidateDetail = () => {
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
-  const openJobs = (jobs as any[]).filter(j => ['lead','hot','offer_made'].includes(j.status));
+  const openJobs = (jobs as any[]).filter(j => !['closed_lost','closed_won','lost','closed'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
   const { data: callNotes = [] } = useQuery({
@@ -320,7 +320,7 @@ const CandidateDetail = () => {
   // Permission checks
   const currentProfile = profiles.find(p => p.id === user?.id);
   const isAdmin = !!(currentProfile as any)?.is_admin;
-  const isOwner = !!(user && candidate && (candidate as any).owner_id === user.id);
+  const isOwner = !!(user && candidate && (candidate as any).owner_user_id === user.id);
   const canEdit = isOwner || isAdmin;
   const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
   const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
@@ -863,7 +863,7 @@ const CandidateDetail = () => {
     <MainLayout>
       {/* Top header bar — ContactDetail style */}
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4" /></Button>
         {c.avatar_url ? (
           <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
         ) : (
@@ -873,6 +873,23 @@ const CandidateDetail = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
             <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
+            {(() => {
+              const roles: string[] = c.roles ?? ['candidate'];
+              return (
+                <div className="flex items-center gap-1">
+                  {roles.includes('candidate') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
+                      Candidate
+                    </span>
+                  )}
+                  {roles.includes('client') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                      Client
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <p className="text-sm text-muted-foreground truncate">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
         </div>
@@ -905,29 +922,29 @@ const CandidateDetail = () => {
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (!id) return;
+              const currentRoles: string[] = c.roles ?? ['candidate'];
+              const newRoles = currentRoles.includes('client')
+                ? currentRoles.filter(r => r !== 'client')
+                : [...currentRoles, 'client'];
+              await supabase.from('candidates').update({ roles: newRoles } as any).eq('id', id);
+              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+              queryClient.invalidateQueries({ queryKey: ['candidates'] });
+              toast.success(newRoles.includes('client') ? 'Tagged as Client' : 'Client tag removed');
+            }}
+            title={((c.roles ?? ['candidate']) as string[]).includes('client') ? 'Remove Client tag' : 'Tag as Client'}
+          >
+            {((c.roles ?? ['candidate']) as string[]).includes('client') ? '− Client' : '+ Client'}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
           <Button variant="outline" size="sm" onClick={() => setActiveTab('joe')}>
             <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe
-          </Button>
-          <Button variant="outline" size="sm" onClick={async () => {
-            toast.info('Syncing activity across all channels…');
-            try {
-              const resp = await fetch('/api/trigger-sync-activity', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ entity_type: 'candidate', entity_id: id }),
-              });
-              const data = await resp.json();
-              if (data.error) throw new Error(data.error);
-              toast.success('Activity sync triggered — results will update shortly');
-              setTimeout(() => queryClient.invalidateQueries({ queryKey: ['candidate', id] }), 5000);
-            } catch (err: any) {
-              toast.error(err.message || 'Sync failed');
-            }
-          }}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1" />Sync Activity
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -1004,6 +1021,17 @@ const CandidateDetail = () => {
               <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Work Email" value={c.work_email} onSave={async v => {
+                await updateField('work_email', v);
+                // Keep legacy email in sync
+                if (v) await updateField('email', v);
+              }} type="email" placeholder="work@firm.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Personal Email" value={c.personal_email} onSave={v => updateField('personal_email', v)} type="email" placeholder="personal@gmail.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
+                await updateField('mobile_phone', v);
+                // Keep legacy phone in sync
+                if (v) await updateField('phone', v);
+              }} placeholder="+1 (212) 555-0000" disabled={!canEdit} highlight={editingInfo} />
             </div>
 
             {/* Compensation — collapsible */}
@@ -1048,14 +1076,14 @@ const CandidateDetail = () => {
             <div className="flex items-center gap-4 mt-4 flex-wrap">
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                <Select value={candidate.owner_id ?? 'none'} onValueChange={(val) => {
+                <Select value={(candidate as any).owner_user_id ?? 'none'} onValueChange={(val) => {
                   const newOwnerId = val === 'none' ? null : val;
                   if (newOwnerId && newOwnerId !== user?.id) {
                     setPendingOwnerId(newOwnerId);
                   } else {
                     (async () => {
                       try {
-                        const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                        const { error } = await supabase.from('candidates').update({ owner_user_id: newOwnerId }).eq('id', id!);
                         if (error) { toast.error('Failed to update owner'); return; }
                         queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                         queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -2116,7 +2144,7 @@ const CandidateDetail = () => {
             <AlertDialogAction onClick={async () => {
               const { error } = await supabase
                 .from('candidates')
-                .update({ owner_id: pendingOwnerId })
+                .update({ owner_user_id: pendingOwnerId })
                 .eq('id', id!);
               if (error) {
                 toast.error(error.message || 'Failed to transfer owner');

@@ -16,7 +16,7 @@ import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
   { value: "linkedin_message", label: "LinkedIn Message", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
-  { value: "linkedin_inmail", label: "LinkedIn InMail", icon: Linkedin, color: "bg-indigo-100 text-indigo-800" },
+  { value: "linkedin_inmail", label: "LinkedIn Recruiter InMail", icon: Linkedin, color: "bg-indigo-100 text-indigo-800" },
   { value: "email", label: "Email", icon: Mail, color: "bg-green-100 text-green-800" },
   { value: "sms", label: "SMS", icon: MessageSquare, color: "bg-yellow-100 text-yellow-800" },
   { value: "manual_call", label: "Manual Call", icon: Phone, color: "bg-orange-100 text-orange-800" },
@@ -313,7 +313,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
                         : action.channel === "sms"
                           ? "Skipped if candidate has no phone number"
                           : action.channel === "linkedin_inmail"
-                            ? "InMail — respects send window, no connection required"
+                            ? "Recruiter InMail — no connection required"
                             : null}
                 </p>
 
