@@ -323,7 +323,7 @@ const CandidateDetail = () => {
   // Permission checks
   const currentProfile = profiles.find(p => p.id === user?.id);
   const isAdmin = !!(currentProfile as any)?.is_admin;
-  const isOwner = !!(user && candidate && (candidate as any).owner_user_id === user.id);
+  const isOwner = !!(user && candidate && (candidate as any).owner_id === user.id);
   const canEdit = isOwner || isAdmin;
   const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
   const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
@@ -1101,14 +1101,14 @@ const CandidateDetail = () => {
             <div className="flex items-center gap-4 mt-4 flex-wrap">
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                <Select value={(candidate as any).owner_user_id ?? 'none'} onValueChange={(val) => {
+                <Select value={(candidate as any).owner_id ?? 'none'} onValueChange={(val) => {
                   const newOwnerId = val === 'none' ? null : val;
                   if (newOwnerId && newOwnerId !== user?.id) {
                     setPendingOwnerId(newOwnerId);
                   } else {
                     (async () => {
                       try {
-                        const { error } = await supabase.from('candidates').update({ owner_user_id: newOwnerId }).eq('id', id!);
+                        const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
                         if (error) { toast.error('Failed to update owner'); return; }
                         queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                         queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -1118,7 +1118,7 @@ const CandidateDetail = () => {
                       }
                     })();
                   }
-                }} disabled={!canEdit}>
+                }}>
                   <SelectTrigger className="h-7 text-xs w-44"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">— Unassigned —</SelectItem>
@@ -1140,7 +1140,7 @@ const CandidateDetail = () => {
                   } catch (err: any) {
                     toast.error(err?.message || 'Failed to update job assignment');
                   }
-                }} disabled={!canEdit}>
+                }}>
                   <SelectTrigger className="h-7 text-xs w-52"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">— None —</SelectItem>
@@ -1453,16 +1453,62 @@ const CandidateDetail = () => {
                   <p className="text-sm text-muted-foreground">No communications yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {(conversations as any[]).map((conv) => (
-                      <div key={conv.id} className="rounded-lg border border-border p-4">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-sm font-medium capitalize">{conv.channel}</span>
-                          <span className="text-xs text-muted-foreground">{conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}</span>
-                        </div>
-                        {conv.subject && <p className="text-sm mb-0.5">{conv.subject}</p>}
-                        {conv.last_message_preview && <p className="text-xs text-muted-foreground">{conv.last_message_preview}</p>}
-                      </div>
-                    ))}
+                    {(conversations as any[]).map((conv) => {
+                      const messages = (conv.messages || []).sort(
+                        (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
+                      );
+                      const channelLabel = (conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin'))
+                        ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1);
+                      return (
+                        <Collapsible key={conv.id}>
+                          <div className="rounded-lg border border-border">
+                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {!['email', 'sms'].includes(conv.channel) && !conv.channel?.startsWith('linkedin') && <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  <span className="text-sm font-medium">{channelLabel}</span>
+                                  <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
+                                </span>
+                              </div>
+                              {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
+                              {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
+                                {messages.map((msg: any) => (
+                                  <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
+                                    <div className={cn(
+                                      'max-w-[80%] rounded-lg px-3 py-2 text-sm',
+                                      msg.direction === 'outbound'
+                                        ? 'bg-accent/15 text-foreground'
+                                        : 'bg-muted text-foreground'
+                                    )}>
+                                      {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
+                                      <p className="text-xs whitespace-pre-wrap break-words">{
+                                        (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
+                                      }</p>
+                                      <p className="text-[10px] text-muted-foreground mt-1">
+                                        {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
+                                        {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                                {messages.length === 0 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
+                                )}
+                              </div>
+                            </CollapsibleContent>
+                          </div>
+                        </Collapsible>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -2169,7 +2215,7 @@ const CandidateDetail = () => {
             <AlertDialogAction onClick={async () => {
               const { error } = await supabase
                 .from('candidates')
-                .update({ owner_user_id: pendingOwnerId })
+                .update({ owner_id: pendingOwnerId })
                 .eq('id', id!);
               if (error) {
                 toast.error(error.message || 'Failed to transfer owner');

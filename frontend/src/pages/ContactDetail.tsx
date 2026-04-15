@@ -20,6 +20,7 @@ import {
   Sparkles, RefreshCw, Martini, Send as SendIcon,
   PhoneCall, PhoneIncoming, PhoneOutgoing,
 } from 'lucide-react';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -730,30 +731,55 @@ const ContactDetail = () => {
                     {filteredConversations.map((conv: any) => {
                       const channelLabel = COMM_CHANNEL_LABELS[conv.channel] || conv.channel || 'Unknown';
                       const messages = (conv.messages || []).sort(
-                        (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                        (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
                       );
-                      const latestMsg = messages[0];
                       return (
-                        <div key={conv.id} className="rounded-lg border border-border p-4 hover:border-accent/40 transition-all">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <div className="flex items-center gap-2">
-                              {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
-                              {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
-                              {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
-                              <span className="text-sm font-medium">{channelLabel}</span>
-                              <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
-                            </span>
+                        <Collapsible key={conv.id}>
+                          <div className="rounded-lg border border-border hover:border-accent/40 transition-all">
+                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  <span className="text-sm font-medium">{channelLabel}</span>
+                                  <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
+                                </span>
+                              </div>
+                              {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
+                              {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
+                                {messages.map((msg: any) => (
+                                  <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
+                                    <div className={cn(
+                                      'max-w-[80%] rounded-lg px-3 py-2 text-sm',
+                                      msg.direction === 'outbound'
+                                        ? 'bg-accent/15 text-foreground'
+                                        : 'bg-muted text-foreground'
+                                    )}>
+                                      {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
+                                      <p className="text-xs whitespace-pre-wrap break-words">{
+                                        (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
+                                      }</p>
+                                      <p className="text-[10px] text-muted-foreground mt-1">
+                                        {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
+                                        {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                                {messages.length === 0 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
+                                )}
+                              </div>
+                            </CollapsibleContent>
                           </div>
-                          {conv.subject && <p className="text-sm mb-0.5">{conv.subject}</p>}
-                          {(conv.last_message_preview || latestMsg?.body) && (
-                            <p className="text-xs text-muted-foreground line-clamp-2">
-                              {conv.last_message_preview || latestMsg?.body?.slice(0, 200)}
-                            </p>
-                          )}
-                        </div>
+                        </Collapsible>
                       );
                     })}
                   </div>
