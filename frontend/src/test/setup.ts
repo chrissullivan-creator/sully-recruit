@@ -13,3 +13,15 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => {},
   }),
 });
+
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, "crypto", {
+    value: {
+      randomUUID: () => `uuid-${Math.random().toString(36).slice(2)}`,
+    },
+  });
+} else if (!globalThis.crypto.randomUUID) {
+  Object.defineProperty(globalThis.crypto, "randomUUID", {
+    value: () => `uuid-${Math.random().toString(36).slice(2)}`,
+  });
+}

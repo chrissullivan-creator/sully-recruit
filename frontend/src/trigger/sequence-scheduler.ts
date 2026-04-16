@@ -11,6 +11,7 @@ import { getSupabaseAdmin } from "./lib/supabase";
 import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./lib/send-channels";
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./lib/merge-tags";
 import { calculateSendTime, incrementDailySend } from "./lib/send-time-calculator";
+import { compareSequenceNodes } from "@/components/sequences/sequenceBranches";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -70,21 +71,21 @@ export const sequenceEnrollmentInit = task({
     // Get ALL nodes with their actions
     const { data: nodes } = await supabase
       .from("sequence_nodes")
-      .select("id, node_order, sequence_actions(*)")
-      .eq("sequence_id", payload.sequenceId)
-      .order("node_order", { ascending: true });
+      .select("id, node_order, branch_id, branch_step_order, sequence_actions(*)")
+      .eq("sequence_id", payload.sequenceId);
 
     if (!nodes || nodes.length === 0) {
       return { action: "error", reason: "no_nodes" };
     }
 
+    const orderedNodes = [...nodes].sort(compareSequenceNodes);
     const senderUserId = sequence.sender_user_id || sequence.created_by || payload.enrolledBy;
     const enrolledAt = new Date(enrollment.enrolled_at);
     let scheduled = 0;
     let pendingConnection = 0;
 
     // Pre-schedule every action across all nodes
-    for (const node of nodes) {
+    for (const node of orderedNodes) {
       const actions = (node as any).sequence_actions || [];
       for (const action of actions) {
         if (action.channel === "linkedin_message") {
@@ -127,7 +128,7 @@ export const sequenceEnrollmentInit = task({
     // Set current_node_id to first node (for tracking)
     await supabase
       .from("sequence_enrollments")
-      .update({ current_node_id: nodes[0].id })
+      .update({ current_node_id: orderedNodes[0].id })
       .eq("id", payload.enrollmentId);
 
     logger.info("Enrollment initialized — all actions pre-scheduled", {

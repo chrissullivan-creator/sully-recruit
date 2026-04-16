@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, Save, Rocket } from "lucide-react";
-import type { FlowNodeData, FlowEdgeData } from "./FlowBuilder";
 import type { SequenceSetupData } from "./SequenceSetup";
+import type { SequenceBranch } from "./FlowBuilder";
+import { getBranchStats, getBranchLabel } from "./sequenceBranches";
 
 const CHANNEL_LIMITS: Record<string, number> = {
   linkedin_connection: 35,
@@ -18,36 +19,23 @@ const CHANNEL_LIMITS: Record<string, number> = {
 
 interface Props {
   setup: SequenceSetupData;
-  nodes: FlowNodeData[];
-  edges: FlowEdgeData[];
+  branches: SequenceBranch[];
   enrollmentCount?: number;
   onSaveDraft: () => void;
   onActivate: () => void;
   saving?: boolean;
 }
 
-export function SequenceReview({ setup, nodes, edges, enrollmentCount = 0, onSaveDraft, onActivate, saving }: Props) {
+export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDraft, onActivate, saving }: Props) {
   const stats = useMemo(() => {
-    const channelCounts: Record<string, number> = {};
-    let totalActions = 0;
-
-    for (const node of nodes) {
-      if (node.type === "action" && node.actions) {
-        for (const action of node.actions) {
-          channelCounts[action.channel] = (channelCounts[action.channel] || 0) + 1;
-          totalActions++;
-        }
-      }
-    }
-
-    return { channelCounts, totalActions };
-  }, [nodes]);
+    return getBranchStats(branches);
+  }, [branches]);
 
   const warnings = useMemo(() => {
     const warns: string[] = [];
     if (!setup.name) warns.push("Sequence name is required");
     if (!setup.senderUserId) warns.push("Select a sender (Send As) in Setup");
-    if (stats.totalActions === 0) warns.push("Add at least one action node in the Flow Builder");
+    if (stats.totalActions === 0) warns.push("Add at least one action step in the Builder");
 
     // Check if day-1 sends would exceed caps
     if (enrollmentCount > 0) {
@@ -99,6 +87,14 @@ export function SequenceReview({ setup, nodes, edges, enrollmentCount = 0, onSav
           <div>
             <span className="text-muted-foreground">Total Actions:</span>
             <p className="font-medium">{stats.totalActions}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{getBranchLabel("branch_a")}:</span>
+            <p className="font-medium">{stats.actionsPerBranch.branch_a} actions</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{getBranchLabel("branch_b")}:</span>
+            <p className="font-medium">{stats.actionsPerBranch.branch_b} actions</p>
           </div>
         </div>
 

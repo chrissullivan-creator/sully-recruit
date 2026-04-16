@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
 
 // Candidates — includes new work_email, personal_email, mobile_phone, roles fields
 export function useCandidates() {
@@ -263,14 +264,15 @@ export function useSequences() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sequences')
-        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
+        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
         .order('created_at', { ascending: false }) as any;
       if (error) throw error;
       return (data || []).map((sequence: any) => {
         if (sequence.sequence_steps?.length) return sequence;
+
         let derivedStepOrder = 0;
         const derivedSteps = (sequence.sequence_nodes || [])
-          .sort((a: any, b: any) => a.node_order - b.node_order)
+          .sort(compareSequenceNodes)
           .flatMap((node: any) =>
             ((node.sequence_actions || []) as any[]).map((action: any) => {
               derivedStepOrder += 1;
@@ -457,7 +459,6 @@ export function useDashboardMetrics() {
             ? ['interview', 'interviewing'].includes(c.job_status)
             : c.job_status === status
         ).length;
-
       const countMonth = (status: string) =>
         monthCandidates.filter((c) =>
           status === 'interviewing'
@@ -465,11 +466,10 @@ export function useDashboardMetrics() {
             : c.job_status === status
         ).length;
 
-      // Pre-filter to this week
-      const weekBackOfResume  = backOfResume.filter(
+      const weekBackOfResume = backOfResume.filter(
         (c) => new Date(c.updated_at) >= new Date(weekStart)
       );
-      const weekSentList      = sentList.filter(
+      const weekSentList = sentList.filter(
         (s) => new Date(s.sent_to_client_at || s.updated_at) >= new Date(weekStart)
       );
       const weekInterviewList = interviewList.filter(
@@ -478,48 +478,38 @@ export function useDashboardMetrics() {
 
       return {
         activeJobs: jobsRes.count ?? 0,
-
-        // ── Week counts ──
-        weekCandidates:      weekCandidates.length,
-        myWeekCandidates:    user ? weekCandidates.filter(c => c.owner_user_id === user.id).length : 0,
-        weekNew:             countWeek('new'),
-        weekContacted:       countWeek('reached_out'),
-        weekPitched:         countWeek('pitched'),
-        weekSendOut:         countWeek('send_out'),
-        weekSubmitted:       countWeek('submitted'),
-        weekInterviewing:    countWeek('interviewing'),
-        weekOffer:           countWeek('offer'),
-        weekPlaced:          countWeek('placed'),
-        weekBackOfResume:    weekBackOfResume.length,
-        weekSentCount:       weekSentList.length,
-        weekInterviewCount:  weekInterviewList.length,
-
-        // ── Month counts ──
-        monthCandidates:     monthCandidates.length,
-        myMonthCandidates:   user ? monthCandidates.filter(c => c.owner_user_id === user.id).length : 0,
-        monthNew:            countMonth('new'),
-        monthContacted:      countMonth('reached_out'),
-        monthPitched:        countMonth('pitched'),
-        monthSendOut:        countMonth('send_out'),
-        monthSubmitted:      countMonth('submitted'),
-        monthInterviewing:   countMonth('interviewing'),
-        monthOffer:          countMonth('offer'),
-        monthPlaced:         countMonth('placed'),
-        monthBackOfResume:   backOfResume.length,
-        monthSentCount:      sentList.length,
+        weekCandidates: weekCandidates.length,
+        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_user_id === user.id).length : 0,
+        weekNew: countWeek('new'),
+        weekContacted: countWeek('reached_out'),
+        weekPitched: countWeek('pitched'),
+        weekSendOut: countWeek('send_out'),
+        weekSubmitted: countWeek('submitted'),
+        weekInterviewing: countWeek('interviewing'),
+        weekOffer: countWeek('offer'),
+        weekPlaced: countWeek('placed'),
+        weekBackOfResume: weekBackOfResume.length,
+        weekSentCount: weekSentList.length,
+        weekInterviewCount: weekInterviewList.length,
+        monthCandidates: monthCandidates.length,
+        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_user_id === user.id).length : 0,
+        monthNew: countMonth('new'),
+        monthContacted: countMonth('reached_out'),
+        monthPitched: countMonth('pitched'),
+        monthSendOut: countMonth('send_out'),
+        monthSubmitted: countMonth('submitted'),
+        monthInterviewing: countMonth('interviewing'),
+        monthOffer: countMonth('offer'),
+        monthPlaced: countMonth('placed'),
+        monthBackOfResume: backOfResume.length,
+        monthSentCount: sentList.length,
         monthInterviewCount: interviewList.length,
-
-        // Legacy fields still used by existing MetricCards
-        interviewsThisWeek:  sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
-        offersOut:           sendOuts.filter((s) => s.stage === 'offer').length,
-
-        // ── Full lists (month scope) ──
-        backOfResumeList:  backOfResume,
+        interviewsThisWeek: sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
+        offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
+        backOfResumeList: backOfResume,
         sentList,
         interviewList,
-
-        // ── Pre-filtered week lists ──
-        weekBackOfResumeList:  weekBackOfResume,
+        weekBackOfResumeList: weekBackOfResume,
         weekSentList,
         weekInterviewList,
       };
