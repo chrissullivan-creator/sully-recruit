@@ -77,13 +77,26 @@ export const backfillCalendarEvents = task({
     // SOURCE 2: App-level client_credentials for team mailboxes
     // ════════════════════════════════════════════════════════════════
 
-    const appToken = await getAppLevelToken();
+    logger.info("Attempting app-level token for team mailbox scan...");
+    let appToken: string | null = null;
+    try {
+      appToken = await getAppLevelToken();
+      logger.info(appToken ? "Got app-level token" : "App-level token returned null");
+    } catch (err: any) {
+      logger.error("App-level token error", { error: err.message });
+    }
+
     if (appToken) {
       // Get all team members from profiles
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profileErr } = await supabase
         .from("profiles")
         .select("id, email, full_name")
         .not("email", "is", null);
+
+      logger.info(`Found ${(profiles || []).length} profiles with emails`, {
+        emails: (profiles || []).map((p: any) => p.email),
+        error: profileErr?.message,
+      });
 
       for (const profile of profiles || []) {
         const email = (profile.email || "").toLowerCase();
@@ -92,13 +105,11 @@ export const backfillCalendarEvents = task({
         // Use /users/{email}/calendarview with app-level token
         const baseUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/calendarview`;
 
-        logger.info(`Syncing calendar for ${email} via app credentials`);
+        logger.info(`Syncing calendar for ${email} (${profile.full_name}) via app credentials`);
         accountsProcessed++;
 
         const result = await syncCalendarForUser(supabase, profile.id, appToken, baseUrl, startDate, now);
-        if (result.synced > 0 || result.matched > 0) {
-          logger.info(`${email}: synced ${result.synced} events, matched ${result.matched} people`);
-        }
+        logger.info(`${email}: synced=${result.synced}, matched=${result.matched}`);
         eventsSynced += result.synced;
         eventsMatched += result.matched;
 
@@ -106,7 +117,7 @@ export const backfillCalendarEvents = task({
         await delay(1000);
       }
     } else {
-      logger.warn("No app-level token available — skipping team mailbox scan");
+      logger.error("No app-level token — cannot scan team mailboxes. Check MICROSOFT_GRAPH_CLIENT_ID/SECRET/TENANT_ID in app_settings or Trigger.dev env vars.");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -365,34 +376,30 @@ async function syncCalendarForUser(
 // ── App-level token (client_credentials grant) ─────────────────────────
 
 async function getAppLevelToken(): Promise<string | null> {
-  try {
-    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
+  const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
+  logger.info("Got Graph credentials", { clientId: clientId?.slice(0, 8) + "...", tenantId: tenantId?.slice(0, 8) + "..." });
 
-    const resp = await fetch(
-      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: "https://graph.microsoft.com/.default",
-          grant_type: "client_credentials",
-        }),
-      },
-    );
+  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  const resp = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    }),
+  });
 
-    if (!resp.ok) {
-      logger.error("App token request failed", { status: resp.status });
-      return null;
-    }
-
-    const data = await resp.json();
-    return data.access_token;
-  } catch (err: any) {
-    logger.error(`App token error: ${err.message}`);
+  if (!resp.ok) {
+    const errText = await resp.text();
+    logger.error("App token request failed", { status: resp.status, body: errText.slice(0, 500) });
     return null;
   }
+
+  const data = await resp.json();
+  logger.info("App-level token obtained successfully");
+  return data.access_token;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
