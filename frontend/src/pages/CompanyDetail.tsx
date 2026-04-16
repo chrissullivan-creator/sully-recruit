@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TaskSidebar } from '@/components/tasks/TaskSidebar';
@@ -14,7 +15,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft, Building, Globe, MapPin, Briefcase, FileText, Upload,
   Loader2, ExternalLink, Edit, Check, X, Linkedin, Users, Info, Plus,
-  FolderOpen,
+  FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,234 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
             {value || placeholder || '—'}
           </span>
           <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+        </div>
+      )}
+    </div>
+  );
+};
+
+const fmt = (n: number | null | undefined) =>
+  n != null ? `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 0 })}` : null;
+
+const ContractCard = ({ ct, downloadUrl, onUpdate }: {
+  ct: any;
+  downloadUrl: string | null;
+  onUpdate: (contractId: string, patch: Record<string, any>) => Promise<void>;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({
+    fee_type: ct.fee_type ?? '',
+    fee_pct: ct.fee_pct != null ? String(ct.fee_pct) : '',
+    base_salary: ct.base_salary != null ? String(ct.base_salary) : '',
+    total_comp: ct.total_comp != null ? String(ct.total_comp) : '',
+    payment_terms: ct.payment_terms ?? '',
+    other_notes: ct.other_notes ?? '',
+    contract_type: ct.contract_type ?? '',
+    status: ct.status ?? '',
+  });
+
+  useEffect(() => {
+    setDraft({
+      fee_type: ct.fee_type ?? '',
+      fee_pct: ct.fee_pct != null ? String(ct.fee_pct) : '',
+      base_salary: ct.base_salary != null ? String(ct.base_salary) : '',
+      total_comp: ct.total_comp != null ? String(ct.total_comp) : '',
+      payment_terms: ct.payment_terms ?? '',
+      other_notes: ct.other_notes ?? '',
+      contract_type: ct.contract_type ?? '',
+      status: ct.status ?? '',
+    });
+  }, [ct]);
+
+  const hasTerms = ct.fee_type || ct.fee_pct != null || ct.base_salary != null || ct.total_comp != null || ct.payment_terms;
+
+  const handleSave = async () => {
+    setSaving(true);
+    const patch: Record<string, any> = {
+      fee_type: draft.fee_type || null,
+      fee_pct: draft.fee_pct ? parseFloat(draft.fee_pct) : null,
+      base_salary: draft.base_salary ? parseFloat(draft.base_salary.replace(/,/g, '')) : null,
+      total_comp: draft.total_comp ? parseFloat(draft.total_comp.replace(/,/g, '')) : null,
+      payment_terms: draft.payment_terms || null,
+      other_notes: draft.other_notes || null,
+      contract_type: draft.contract_type || null,
+      status: draft.status || null,
+    };
+    await onUpdate(ct.id, patch);
+    setSaving(false);
+    setExpanded(false);
+  };
+
+  const handleCancel = () => {
+    setDraft({
+      fee_type: ct.fee_type ?? '',
+      fee_pct: ct.fee_pct != null ? String(ct.fee_pct) : '',
+      base_salary: ct.base_salary != null ? String(ct.base_salary) : '',
+      total_comp: ct.total_comp != null ? String(ct.total_comp) : '',
+      payment_terms: ct.payment_terms ?? '',
+      other_notes: ct.other_notes ?? '',
+      contract_type: ct.contract_type ?? '',
+      status: ct.status ?? '',
+    });
+    setExpanded(false);
+  };
+
+  const feePctNum = parseFloat(draft.fee_pct);
+  const baseNum = draft.base_salary ? parseFloat(draft.base_salary.replace(/,/g, '')) : NaN;
+  const totalNum = draft.total_comp ? parseFloat(draft.total_comp.replace(/,/g, '')) : NaN;
+  const salaryForCalc = !isNaN(totalNum) ? totalNum : baseNum;
+  const showEstimate = !isNaN(feePctNum) && !isNaN(salaryForCalc);
+  const estimatedFee = showEstimate ? (feePctNum / 100) * salaryForCalc : null;
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/30 overflow-hidden">
+      <div className="flex items-center justify-between p-3 gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <FileText className="h-4 w-4 text-accent shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground truncate">{ct.file_name}</p>
+            {hasTerms ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
+                {ct.fee_pct != null && <span className="font-medium text-accent">{ct.fee_pct}% fee</span>}
+                {ct.fee_type && <Badge variant="secondary" className="text-[9px] capitalize">{ct.fee_type.replace('_', ' ')}</Badge>}
+                {ct.base_salary != null && <span>Base: {fmt(ct.base_salary)}</span>}
+                {ct.total_comp != null && <span>Total: {fmt(ct.total_comp)}</span>}
+                {ct.payment_terms && <span>{ct.payment_terms}</span>}
+                {ct.created_at && <span>{format(new Date(ct.created_at), 'MMM d, yyyy')}</span>}
+                {ct.status && <Badge variant="secondary" className="text-[9px]">{ct.status}</Badge>}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground italic mt-0.5">No terms set</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {downloadUrl && (
+            <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1">
+              <ExternalLink className="h-3.5 w-3.5" /> View
+            </a>
+          )}
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExpanded(v => !v)}>
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-border bg-background/40 p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Fee Type</Label>
+              <Select value={draft.fee_type || 'none'} onValueChange={(v) => setDraft(d => ({ ...d, fee_type: v === 'none' ? '' : v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select type..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— None —</SelectItem>
+                  <SelectItem value="contingency">Contingency</SelectItem>
+                  <SelectItem value="retained">Retained</SelectItem>
+                  <SelectItem value="flat_fee">Flat Fee</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Fee Percentage</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  step="0.5"
+                  placeholder="e.g. 25"
+                  value={draft.fee_pct}
+                  onChange={(e) => setDraft(d => ({ ...d, fee_pct: e.target.value }))}
+                  className="h-8 text-sm pr-8"
+                />
+                <Percent className="h-3.5 w-3.5 text-muted-foreground absolute right-2 top-1/2 -translate-y-1/2" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Base Salary</Label>
+              <div className="relative">
+                <DollarSign className="h-3.5 w-3.5 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" />
+                <Input
+                  type="text"
+                  placeholder="150,000"
+                  value={draft.base_salary}
+                  onChange={(e) => setDraft(d => ({ ...d, base_salary: e.target.value }))}
+                  className="h-8 text-sm pl-7"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Total Comp</Label>
+              <div className="relative">
+                <DollarSign className="h-3.5 w-3.5 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" />
+                <Input
+                  type="text"
+                  placeholder="200,000"
+                  value={draft.total_comp}
+                  onChange={(e) => setDraft(d => ({ ...d, total_comp: e.target.value }))}
+                  className="h-8 text-sm pl-7"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Payment Terms</Label>
+              <Input
+                type="text"
+                placeholder="e.g. Net 30, Due on start"
+                value={draft.payment_terms}
+                onChange={(e) => setDraft(d => ({ ...d, payment_terms: e.target.value }))}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Contract Type</Label>
+              <Input
+                type="text"
+                placeholder="e.g. Master, SOW"
+                value={draft.contract_type}
+                onChange={(e) => setDraft(d => ({ ...d, contract_type: e.target.value }))}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1 col-span-2">
+              <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Status</Label>
+              <Select value={draft.status || 'none'} onValueChange={(v) => setDraft(d => ({ ...d, status: v === 'none' ? '' : v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select status..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— None —</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="expired">Expired</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="terminated">Terminated</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Other Notes</Label>
+            <Textarea
+              placeholder="Guarantee period, exclusivity clause, special terms..."
+              value={draft.other_notes}
+              onChange={(e) => setDraft(d => ({ ...d, other_notes: e.target.value }))}
+              className="text-sm min-h-[72px]"
+            />
+          </div>
+
+          {showEstimate && estimatedFee != null && (
+            <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-accent uppercase tracking-wide">Estimated Fee</span>
+              <span className="text-sm font-semibold text-accent">{fmt(estimatedFee)}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="ghost" size="sm" onClick={handleCancel} disabled={saving}>Cancel</Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+              Save Terms
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -148,6 +377,13 @@ const CompanyDetail = () => {
     if (error) { toast.error('Failed to update'); return; }
     queryClient.invalidateQueries({ queryKey: ['company', id] });
     queryClient.invalidateQueries({ queryKey: ['companies'] });
+  };
+
+  const updateContract = async (contractId: string, patch: Record<string, any>) => {
+    const { error } = await supabase.from('company_contracts').update(patch).eq('id', contractId);
+    if (error) { toast.error('Failed to save contract terms'); return; }
+    queryClient.invalidateQueries({ queryKey: ['company_contracts', id] });
+    toast.success('Contract terms saved');
   };
 
   const handleContractUpload = async (file: File) => {
@@ -263,7 +499,12 @@ const CompanyDetail = () => {
               <TabsList className="bg-secondary">
                 <TabsTrigger value="jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Jobs</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
-                <TabsTrigger value="contracts" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Contracts</TabsTrigger>
+                <TabsTrigger value="contracts" className="gap-1.5">
+                  <FolderOpen className="h-3.5 w-3.5" /> Contracts
+                  {contracts.length > 0 && (
+                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{contracts.length}</span>
+                  )}
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -323,7 +564,11 @@ const CompanyDetail = () => {
                 ) : (
                   <div className="space-y-2">
                     {contacts.map((ct: any) => (
-                      <div key={ct.id} className="rounded-lg border border-border bg-secondary/30 p-3">
+                      <div
+                        key={ct.id}
+                        className="rounded-lg border border-border bg-secondary/30 p-3 cursor-pointer hover:border-accent/40 transition-colors"
+                        onClick={() => navigate(`/contacts/${ct.id}`)}
+                      >
                         <p className="text-sm font-medium text-foreground">{ct.full_name || `${ct.first_name ?? ''} ${ct.last_name ?? ''}`.trim() || 'Unknown'}</p>
                         <p className="text-xs text-muted-foreground">
                           {ct.title && <span>{ct.title}</span>}
@@ -360,31 +605,15 @@ const CompanyDetail = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {contracts.map((ct: any) => {
-                      const downloadUrl = ct.file_path ? signedUrls[ct.file_path] : null;
-                      return (
-                        <div key={ct.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <FileText className="h-4 w-4 text-accent shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">{ct.file_name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {ct.contract_type && <span className="mr-2 capitalize">{ct.contract_type}</span>}
-                                {ct.file_size && <span className="mr-2">{(ct.file_size / 1024).toFixed(0)} KB</span>}
-                                {ct.created_at && format(new Date(ct.created_at), 'MMM d, yyyy')}
-                                {ct.status && <Badge variant="secondary" className="ml-2 text-[9px]">{ct.status}</Badge>}
-                              </p>
-                            </div>
-                          </div>
-                          {downloadUrl && (
-                            <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline text-sm flex items-center gap-1 shrink-0">
-                              <ExternalLink className="h-3.5 w-3.5" /> View
-                            </a>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="space-y-3">
+                    {contracts.map((ct: any) => (
+                      <ContractCard
+                        key={ct.id}
+                        ct={ct}
+                        downloadUrl={ct.file_path ? signedUrls[ct.file_path] ?? null : null}
+                        onUpdate={updateContract}
+                      />
+                    ))}
                   </div>
                 )}
               </TabsContent>
