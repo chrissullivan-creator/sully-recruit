@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getVoyageKey } from "./lib/supabase";
 import { buildProfileText } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 
@@ -107,45 +107,38 @@ export const resumeIngestion = task({
       await supabase.from("candidates").update(updates).eq("id", candidateId);
     }
 
-    // ── 6. Upload to LlamaCloud for search indexing ────────────────────
-    if (candidateId && rawText.length > 50) {
-      try {
-        const { data: candidate } = await supabase
-          .from("candidates")
-          .select("id, full_name, current_title, current_company, location_text, skills")
-          .eq("id", candidateId)
-          .single();
+    // ── 6. Embed full_profile with Voyage AI ──────────────────────────
+    if (candidateId) {
+      const { data: candidate } = await supabase
+        .from("candidates")
+        .select("id, full_name, current_title, current_company, location_text, skills")
+        .eq("id", candidateId)
+        .single();
 
-        if (candidate) {
-          const profileText = buildProfileText(candidate, rawText, parsedJson);
-          const { getOrCreateResumePipeline, uploadResumeToCloud } = await import("../../api/lib/llamaindex");
-          const pipelineId = await getOrCreateResumePipeline();
-          const candidateName = (candidate as any).full_name || "";
-
-          // Upload profile + resume chunks for richer retrieval
-          const chunks = [profileText.slice(0, 2000), ...chunkText(rawText, 512)].filter(c => c.trim().length > 30);
-          await uploadResumeToCloud(pipelineId, candidateId, resumeId, chunks, candidateName);
-
-          // Store profile summary in resume_embeddings for fallback text search
-          await supabase
-            .from("resume_embeddings")
-            .delete()
-            .eq("candidate_id", candidateId)
-            .eq("embed_type", "full_profile");
-          await supabase.from("resume_embeddings").insert({
-            candidate_id: candidateId,
-            resume_id: resumeId,
-            source_text: profileText.slice(0, 2000),
-            chunk_text: profileText.slice(0, 2000),
-            chunk_index: 0,
-            embed_type: "full_profile",
-            embed_model: "llamacloud",
-          });
-
-          logger.info("Uploaded to LlamaCloud", { chunks: chunks.length, pipelineId, candidateId });
+      if (candidate) {
+        const profileText = buildProfileText(candidate, rawText, parsedJson);
+        if (profileText.trim().length >= 50) {
+          const voyageKey = await getVoyageKey();
+          const embedding = await embedWithVoyage(profileText, voyageKey);
+          if (embedding) {
+            await supabase
+              .from("resume_embeddings")
+              .delete()
+              .eq("candidate_id", candidateId)
+              .eq("embed_type", "full_profile");
+            await supabase.from("resume_embeddings").insert({
+              candidate_id: candidateId,
+              resume_id: resumeId,
+              embedding: JSON.stringify(embedding),
+              source_text: profileText.slice(0, 2000),
+              chunk_text: profileText.slice(0, 2000),
+              chunk_index: 0,
+              embed_type: "full_profile",
+              embed_model: "voyage-finance-2",
+            });
+            logger.info("Stored full_profile embedding", { candidateId });
+          }
         }
-      } catch (err: any) {
-        logger.warn("LlamaCloud upload failed, will retry on next ingestion", { error: err.message });
       }
     }
 
@@ -284,18 +277,29 @@ async function parseWithClaude(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TEXT CHUNKING
+// VOYAGE AI EMBEDDING
 // ─────────────────────────────────────────────────────────────────────────────
-function chunkText(text: string, maxWords: number): string[] {
-  const words = text.split(/\s+/);
-  const chunks: string[] = [];
+async function embedWithVoyage(text: string, apiKey: string): Promise<number[] | null> {
+  const resp = await fetch("https://api.voyageai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "voyage-finance-2",
+      input: text,
+      input_type: "document",
+    }),
+  });
 
-  for (let i = 0; i < words.length; i += maxWords) {
-    // Overlap by 50 words for context continuity
-    const start = Math.max(0, i - 50);
-    chunks.push(words.slice(start, i + maxWords).join(" "));
+  if (!resp.ok) {
+    const errText = await resp.text();
+    logger.error("Voyage API error", { error: errText });
+    return null;
   }
 
-  return chunks.filter(c => c.trim().length > 20);
+  const data = await resp.json();
+  return data.data?.[0]?.embedding ?? null;
 }
 

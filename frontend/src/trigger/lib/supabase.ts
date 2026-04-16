@@ -135,13 +135,6 @@ export async function getVoyageKey(): Promise<string> {
 }
 
 /**
- * Get LlamaCloud API key from app_settings.
- */
-export async function getLlamaCloudKey(): Promise<string> {
-  return getAppSetting("LLAMA_CLOUD_API_KEY");
-}
-
-/**
  * Get Unipile base URL from app_settings.
  * Centralised so the DSN is configured once, not hardcoded in every file.
  */
