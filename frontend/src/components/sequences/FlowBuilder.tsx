@@ -283,25 +283,34 @@ export function FlowBuilder({ initialNodes, initialEdges, onChange, onAskJoe }: 
 
   const nodeTypes = useMemo(() => ({ actionNode: ActionNode, endNode: EndNode }), []);
 
+  // Use refs to read current nodes/edges without adding them to the effect dep array.
+  // This prevents a feedback loop: user edits → nodes change → we emit via onChange →
+  // parent re-passes same data as initialNodes → effect fires → resets nodes.
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; edgesRef.current = edges; });
+
   useEffect(() => {
     const incomingSnapshot = serializeFlowSnapshot(initialNodes, initialEdges);
     const currentSnapshot = serializeFlowSnapshot(
-      nodes.map((node, index) => ({
+      nodesRef.current.map((node, index) => ({
         id: node.id,
         type: node.type === "actionNode" ? "action" as const : "end" as const,
         label: (node.data as any).label || "",
         actions: (node.data as any).actions,
         nodeOrder: (node.data as any).nodeOrder || index + 1,
       })),
-      edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+      edgesRef.current.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
     );
+    // Only re-seed if parent state genuinely diverged from local state
+    // (e.g. initial load from DB, not our own emitted changes coming back).
     if (incomingSnapshot === currentSnapshot) return;
 
     const nextFlow = buildFlowState(initialNodes, initialEdges);
     setNodes(nextFlow.nodes);
     setEdges(nextFlow.edges);
     setNodeCounter(nextFlow.nodeCounter || 2);
-  }, [edges, initialEdges, initialNodes, nodes, setEdges, setNodes]);
+  }, [initialEdges, initialNodes, setEdges, setNodes]);
 
   const buildAskJoeHandler = useCallback((nodeId: string) => {
     return async (_actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string): Promise<string> => {
