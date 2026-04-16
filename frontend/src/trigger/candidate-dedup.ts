@@ -271,10 +271,17 @@ export const checkNewCandidateDedup = task({
       return { action: "none", candidateId };
     }
 
-    // If exactly ONE match with exact confidence, auto-merge
-    if (dedupedMatches.length === 1 && dedupedMatches[0].confidence >= 1.0) {
+    // Only auto-merge on a single EMAIL match with 100% confidence.
+    // Phone and LinkedIn single matches go to manual review because
+    // phones can be shared (office lines, family members) and LinkedIn
+    // slugs can occasionally collide.
+    if (
+      dedupedMatches.length === 1 &&
+      dedupedMatches[0].confidence >= 1.0 &&
+      dedupedMatches[0].matchType === "email"
+    ) {
       const match = dedupedMatches[0];
-      logger.info("Exact single match found, triggering auto-merge", {
+      logger.info("Exact single email match found, triggering auto-merge", {
         candidateId,
         matchId: match.id,
         matchType: match.matchType,
@@ -290,8 +297,8 @@ export const checkNewCandidateDedup = task({
       return { action: "auto_merged", candidateId, survivorId: match.id, matchType: match.matchType };
     }
 
-    // Multiple matches: insert into duplicate_candidates for manual review
-    logger.info("Multiple matches found, inserting for manual review", {
+    // All other matches (phone, linkedin, or multiple): insert for manual review
+    logger.info("Matches found, inserting for manual review", {
       candidateId,
       matchCount: dedupedMatches.length,
     });
@@ -423,71 +430,30 @@ export const mergeCandidates = task({
 
     // ── 4. Reassign related records ──────────────────────────────────
 
-    // conversations
-    const { count: convCount, error: convErr } = await supabase
-      .from("conversations")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (convErr) logger.warn("Error reassigning conversations", { error: convErr.message });
-    else tablesUpdated.conversations = convCount || 0;
-
-    // messages
-    const { count: msgCount, error: msgErr } = await supabase
-      .from("messages")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (msgErr) logger.warn("Error reassigning messages", { error: msgErr.message });
-    else tablesUpdated.messages = msgCount || 0;
-
-    // sequence_enrollments
-    const { count: seCount, error: seErr } = await supabase
-      .from("sequence_enrollments")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (seErr) logger.warn("Error reassigning sequence_enrollments", { error: seErr.message });
-    else tablesUpdated.sequence_enrollments = seCount || 0;
-
-    // candidate_channels — handle unique conflicts by deleting duplicates first
-    // First, find channels the survivor already has
-    const { data: survivorChannels } = await supabase
-      .from("candidate_channels")
-      .select("channel_type")
-      .eq("candidate_id", survivorId);
-    const survivorChannelTypes = new Set((survivorChannels || []).map((c: any) => c.channel_type));
-
-    // Delete merged candidate's channels that would conflict
-    if (survivorChannelTypes.size > 0) {
-      const { error: delChErr } = await supabase
-        .from("candidate_channels")
-        .delete()
-        .eq("candidate_id", mergedId)
-        .in("channel_type", Array.from(survivorChannelTypes));
-      if (delChErr) logger.warn("Error deleting conflicting channels", { error: delChErr.message });
+    // Helper: simple reassign for tables with a candidate_id FK
+    async function reassign(table: string, column = "candidate_id") {
+      const { count, error } = await supabase
+        .from(table)
+        .update({ [column]: survivorId })
+        .eq(column, mergedId);
+      if (error) logger.warn(`Error reassigning ${table}`, { error: error.message });
+      else tablesUpdated[table] = count || 0;
     }
 
-    // Now reassign remaining channels
-    const { count: chCount, error: chErr } = await supabase
-      .from("candidate_channels")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (chErr) logger.warn("Error reassigning candidate_channels", { error: chErr.message });
-    else tablesUpdated.candidate_channels = chCount || 0;
+    // conversations
+    await reassign("conversations");
+
+    // messages
+    await reassign("messages");
+
+    // sequence_enrollments
+    await reassign("sequence_enrollments");
 
     // resumes
-    const { count: resCount, error: resErr } = await supabase
-      .from("resumes")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (resErr) logger.warn("Error reassigning resumes", { error: resErr.message });
-    else tablesUpdated.resumes = resCount || 0;
+    await reassign("resumes");
 
-    // resume_chunks
-    const { count: chunkCount, error: chunkErr } = await supabase
-      .from("resume_chunks")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (chunkErr) logger.warn("Error reassigning resume_chunks", { error: chunkErr.message });
-    else tablesUpdated.resume_chunks = chunkCount || 0;
+    // resume_embeddings
+    await reassign("resume_embeddings");
 
     // notes (entity_type='candidate')
     const { count: noteCount, error: noteErr } = await supabase
@@ -498,22 +464,80 @@ export const mergeCandidates = task({
     if (noteErr) logger.warn("Error reassigning notes", { error: noteErr.message });
     else tablesUpdated.notes = noteCount || 0;
 
-    // call_logs (linked_entity_type='candidate')
-    const { count: callCount, error: callErr } = await supabase
+    // call_logs — linked_entity_id (polymorphic FK)
+    const { count: callLinkedCount, error: callLinkedErr } = await supabase
       .from("call_logs")
       .update({ linked_entity_id: survivorId })
       .eq("linked_entity_id", mergedId)
       .eq("linked_entity_type", "candidate");
-    if (callErr) logger.warn("Error reassigning call_logs", { error: callErr.message });
-    else tablesUpdated.call_logs = callCount || 0;
+    if (callLinkedErr) logger.warn("Error reassigning call_logs (linked_entity)", { error: callLinkedErr.message });
+    else tablesUpdated.call_logs_linked = callLinkedCount || 0;
+
+    // call_logs — direct candidate_id column
+    await reassign("call_logs");
 
     // send_outs
-    const { count: soCount, error: soErr } = await supabase
-      .from("send_outs")
-      .update({ candidate_id: survivorId })
-      .eq("candidate_id", mergedId);
-    if (soErr) logger.warn("Error reassigning send_outs", { error: soErr.message });
-    else tablesUpdated.send_outs = soCount || 0;
+    await reassign("send_outs");
+
+    // ai_call_notes
+    await reassign("ai_call_notes");
+
+    // candidate_work_history
+    await reassign("candidate_work_history");
+
+    // candidate_education
+    await reassign("candidate_education");
+
+    // call_processing_queue
+    await reassign("call_processing_queue");
+
+    // formatted_resumes
+    await reassign("formatted_resumes");
+
+    // candidate_documents
+    await reassign("candidate_documents");
+
+    // reply_sentiment
+    await reassign("reply_sentiment");
+
+    // interviews
+    await reassign("interviews");
+
+    // candidate_jobs — delete conflicts before reassigning
+    // (unique on candidate_id + job_id)
+    const { data: survivorJobs } = await supabase
+      .from("candidate_jobs")
+      .select("job_id")
+      .eq("candidate_id", survivorId);
+    const survivorJobIds = new Set((survivorJobs || []).map((r: any) => r.job_id));
+
+    if (survivorJobIds.size > 0) {
+      const { error: delCjErr } = await supabase
+        .from("candidate_jobs")
+        .delete()
+        .eq("candidate_id", mergedId)
+        .in("job_id", Array.from(survivorJobIds));
+      if (delCjErr) logger.warn("Error deleting conflicting candidate_jobs", { error: delCjErr.message });
+    }
+    await reassign("candidate_jobs");
+
+    // job_candidate_matches — delete conflicts before reassigning
+    // (unique on candidate_id + job_id)
+    const { data: survivorMatches } = await supabase
+      .from("job_candidate_matches")
+      .select("job_id")
+      .eq("candidate_id", survivorId);
+    const survivorMatchJobIds = new Set((survivorMatches || []).map((r: any) => r.job_id));
+
+    if (survivorMatchJobIds.size > 0) {
+      const { error: delJmErr } = await supabase
+        .from("job_candidate_matches")
+        .delete()
+        .eq("candidate_id", mergedId)
+        .in("job_id", Array.from(survivorMatchJobIds));
+      if (delJmErr) logger.warn("Error deleting conflicting job_candidate_matches", { error: delJmErr.message });
+    }
+    await reassign("job_candidate_matches");
 
     logger.info("Reassigned related records", { tablesUpdated });
 
