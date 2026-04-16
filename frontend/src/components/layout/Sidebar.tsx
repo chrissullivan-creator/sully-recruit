@@ -5,7 +5,7 @@ import { NotificationBell } from './NotificationBell';
 import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
-  Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch,
+  Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
 } from 'lucide-react';
 
 const navigation = [
@@ -18,6 +18,7 @@ const navigation = [
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calls',      href: '/calls',      icon: Phone           },
+  { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Settings',   href: '/settings',   icon: Settings        },
 ];
 
