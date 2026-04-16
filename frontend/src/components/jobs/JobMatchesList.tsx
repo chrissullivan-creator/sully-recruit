@@ -45,6 +45,7 @@ function ScoreBadge({ score }: { score: number }) {
 export default function JobMatchesList({ jobId }: { jobId: string }) {
   const [matches, setMatches] = useState<CandidateMatch[]>([]);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -53,7 +54,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
   const fetchMatches = useCallback(async (p: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${jobId}/matches?page=${p}`);
+      const res = await fetch(`/api/jobs/${jobId}/matches?page=${p}&per_page=${perPage}`);
       const data = await res.json();
       setMatches(data.matches || []);
       setTotalPages(data.totalPages || 0);
@@ -62,7 +63,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
       console.error("Failed to fetch matches:", err);
     }
     setLoading(false);
-  }, [jobId]);
+  }, [jobId, perPage]);
 
   useEffect(() => {
     fetchMatches(page);
@@ -185,7 +186,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
         <ul className="divide-y divide-gray-100">
           {matches.map((m, idx) => {
             const c = m.candidates;
-            const rank = (page - 1) * 10 + idx + 1;
+            const rank = (page - 1) * perPage + idx + 1;
             const avatarUrl = c.profile_picture_url || c.avatar_url;
 
             return (
@@ -260,29 +261,42 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
       )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {(totalPages > 1 || total > 0) && (
         <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
           <p className="text-xs text-gray-500">
             {total} matches
           </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+          <div className="flex items-center gap-3">
+            <select
+              value={perPage}
+              onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+              className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white"
             >
-              ←
-            </button>
-            <span className="text-xs text-gray-600 px-2">
-              {page} / {totalPages}
-            </span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
-            >
-              →
-            </button>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  ←
+                </button>
+                <span className="text-xs text-gray-600 px-2">
+                  {page} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  →
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
