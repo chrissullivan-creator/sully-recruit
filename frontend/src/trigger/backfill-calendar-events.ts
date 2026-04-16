@@ -79,12 +79,19 @@ export const backfillCalendarEvents = task({
 
     logger.info("Attempting app-level token for team mailbox scan...");
     let appToken: string | null = null;
+    let tokenError: string | null = null;
     try {
       appToken = await getAppLevelToken();
+      if (!appToken) tokenError = "Token request returned null (check credentials)";
       logger.info(appToken ? "Got app-level token" : "App-level token returned null");
     } catch (err: any) {
-      logger.error("App-level token error", { error: err.message });
+      tokenError = err.message || String(err);
+      logger.error("App-level token error", { error: tokenError });
     }
+
+    let profileCount = 0;
+    let profileEmails: string[] = [];
+    let profileError: string | null = null;
 
     if (appToken) {
       // Get all team members from profiles
@@ -93,10 +100,11 @@ export const backfillCalendarEvents = task({
         .select("id, email, full_name")
         .not("email", "is", null);
 
-      logger.info(`Found ${(profiles || []).length} profiles with emails`, {
-        emails: (profiles || []).map((p: any) => p.email),
-        error: profileErr?.message,
-      });
+      profileCount = (profiles || []).length;
+      profileEmails = (profiles || []).map((p: any) => p.email).filter(Boolean);
+      profileError = profileErr?.message || null;
+
+      logger.info(`Found ${profileCount} profiles with emails`, { emails: profileEmails });
 
       for (const profile of profiles || []) {
         const email = (profile.email || "").toLowerCase();
@@ -117,7 +125,7 @@ export const backfillCalendarEvents = task({
         await delay(1000);
       }
     } else {
-      logger.error("No app-level token — cannot scan team mailboxes. Check MICROSOFT_GRAPH_CLIENT_ID/SECRET/TENANT_ID in app_settings or Trigger.dev env vars.");
+      logger.error("No app-level token — cannot scan team mailboxes.");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -199,6 +207,13 @@ export const backfillCalendarEvents = task({
       events_matched: eventsMatched,
       existing_relinked: existingRelinked,
       months_back: monthsBack,
+      // Diagnostic info
+      user_integrations_count: (userIntegrations || []).length,
+      app_token_acquired: !!appToken,
+      token_error: tokenError,
+      profile_count: profileCount,
+      profile_emails: profileEmails,
+      profile_error: profileError,
     };
 
     logger.info("Calendar backfill complete", summary);
