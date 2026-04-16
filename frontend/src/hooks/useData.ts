@@ -1,22 +1,22 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
 
-// Candidates
+// Candidates — includes new work_email, personal_email, mobile_phone, roles fields
 export function useCandidates() {
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ['candidates'],
     queryFn: async () => {
-      // Supabase defaults to 1000 rows — paginate to fetch all candidates
       const PAGE_SIZE = 1000;
       let allData: any[] = [];
       let from = 0;
       while (true) {
         const { data, error } = await supabase
           .from('candidates')
-          .select('*')
+          .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
           .order('created_at', { ascending: false })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
@@ -34,23 +34,12 @@ export function useCandidates() {
   useEffect(() => {
     const channel = supabase
       .channel(candidatesChannelName.current)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'candidates',
-        },
-        (payload) => {
-          console.log('Candidates change detected:', payload);
-          queryClient.invalidateQueries({ queryKey: ['candidates'] });
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, (payload) => {
+        console.log('Candidates change detected:', payload);
+        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
   return query;
@@ -64,7 +53,7 @@ export function useCandidate(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('candidates')
-        .select('*')
+        .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;
@@ -193,7 +182,7 @@ export function useCompanies() {
   });
 }
 
-// Contacts with company
+// Contacts with company + new fields
 export function useContacts() {
   const queryClient = useQueryClient();
 
@@ -202,7 +191,7 @@ export function useContacts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('contacts')
-        .select('*, companies!left(name, domain)')
+        .select('*, companies!left(name, domain), work_email, personal_email, mobile_phone, roles, linked_candidate_id')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -214,23 +203,55 @@ export function useContacts() {
   useEffect(() => {
     const channel = supabase
       .channel(contactsChannelName.current)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'contacts',
-        },
-        (payload) => {
-          console.log('Contacts change detected:', payload);
-          queryClient.invalidateQueries({ queryKey: ['contacts'] });
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, (payload) => {
+        console.log('Contacts change detected:', payload);
+        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      })
       .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  return query;
+}
+
+// Unified people view — v_people (UNION ALL of candidates + contacts)
+export function usePeople() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: ['people'],
+    queryFn: async () => {
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await (supabase.from('v_people' as any) as any)
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      return allData;
+    },
+  });
+
+  const channelName = useRef(`people-changes-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  useEffect(() => {
+    const ch = supabase
+      .channel(channelName.current)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['people'] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['people'] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
   }, [queryClient]);
 
   return query;
@@ -243,7 +264,7 @@ export function useSequences() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sequences')
-        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
+        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
         .order('created_at', { ascending: false }) as any;
       if (error) throw error;
       return (data || []).map((sequence: any) => {
@@ -251,33 +272,29 @@ export function useSequences() {
 
         let derivedStepOrder = 0;
         const derivedSteps = (sequence.sequence_nodes || [])
-          .sort((a: any, b: any) => a.node_order - b.node_order)
+          .sort(compareSequenceNodes)
           .flatMap((node: any) =>
             ((node.sequence_actions || []) as any[]).map((action: any) => {
               derivedStepOrder += 1;
               return {
-              id: action.id,
-              step_order: derivedStepOrder,
-              channel: action.channel,
-              step_type: action.channel,
-              body: action.message_body || '',
-              delay_days: 0,
-              delay_hours: Number(action.base_delay_hours) || 0,
-              min_hours_after_connection: action.post_connection_hardcoded_hours || 4,
-            };
+                id: action.id,
+                step_order: derivedStepOrder,
+                channel: action.channel,
+                step_type: action.channel,
+                body: action.message_body || '',
+                delay_days: 0,
+                delay_hours: Number(action.base_delay_hours) || 0,
+                min_hours_after_connection: action.post_connection_hardcoded_hours || 4,
+              };
             }),
           );
-
-        return {
-          ...sequence,
-          sequence_steps: derivedSteps,
-        };
+        return { ...sequence, sequence_steps: derivedSteps };
       });
     },
   });
 }
 
-// Sequence list metrics (aggregated step execution counts per sequence)
+// Sequence list metrics
 export function useSequenceListMetrics() {
   return useQuery({
     queryKey: ['sequence_list_metrics'],
@@ -286,7 +303,6 @@ export function useSequenceListMetrics() {
         .from('sequence_step_executions')
         .select('status, sequence_enrollments!inner(sequence_id)');
       if (error) throw error;
-
       const metrics: Record<string, { sent: number; delivered: number; opened: number; replied: number; bounced: number }> = {};
       for (const row of data || []) {
         const seqId = (row as any).sequence_enrollments?.sequence_id;
@@ -337,8 +353,7 @@ export function useSendOutBoard() {
   });
 }
 
-
-// Messages (for Calls page - filter call type messages)
+// Messages (for Calls page)
 export function useMessages(channel?: string) {
   return useQuery({
     queryKey: ['messages', channel],
@@ -348,9 +363,7 @@ export function useMessages(channel?: string) {
         .select('*, candidates(full_name)')
         .order('created_at', { ascending: false })
         .limit(100);
-      if (channel) {
-        query = query.eq('channel', channel);
-      }
+      if (channel) query = query.eq('channel', channel);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -358,61 +371,115 @@ export function useMessages(channel?: string) {
   });
 }
 
-// Helper: get Monday 00:00 of current week (Mon–Sun)
 function getWeekStart(): string {
   const now = new Date();
-  const day = now.getDay(); // 0=Sun,1=Mon,...6=Sat
-  const diff = day === 0 ? 6 : day - 1; // days since Monday
+  const day = now.getDay();
+  const diff = day === 0 ? 6 : day - 1;
   const mon = new Date(now);
   mon.setDate(now.getDate() - diff);
   mon.setHours(0, 0, 0, 0);
   return mon.toISOString();
 }
 
-// Helper: get 1st of current month 00:00
 function getMonthStart(): string {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 }
 
-// Dashboard metrics — this week (Mon–Sun) + this month
 export function useDashboardMetrics() {
   return useQuery({
     queryKey: ['dashboard_metrics'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      const weekStart = getWeekStart();
+      const weekStart  = getWeekStart();
       const monthStart = getMonthStart();
 
-      const [jobsRes, candidatesWeekRes, candidatesMonthRes, sendOutsRes] = await Promise.all([
-        supabase.from('jobs').select('id, status', { count: 'exact' }).eq('status', 'open'),
-        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', weekStart),
-        supabase.from('candidates').select('id, job_status, owner_id').gte('created_at', monthStart),
+      const [
+        jobsRes,
+        candidatesWeekRes,
+        candidatesMonthRes,
+        sendOutsRes,
+        backOfResumeRes,
+        sentRes,
+        interviewsRes,
+      ] = await Promise.all([
+        supabase
+          .from('jobs')
+          .select('id, status', { count: 'exact' })
+          .not('status', 'in', '("lost","closed","closed_won","closed_lost")'),
+        supabase.from('candidates').select('id, job_status, owner_user_id').gte('created_at', weekStart),
+        supabase.from('candidates').select('id, job_status, owner_user_id').gte('created_at', monthStart),
         supabase.from('send_outs').select('id, stage, created_at'),
+
+        // Back of resume — all candidates with this status updated this month
+        supabase
+          .from('candidates')
+          .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
+          .eq('status', 'back_of_resume')
+          .gte('updated_at', monthStart)
+          .order('updated_at', { ascending: false }),
+
+        // Sent send_outs this month — join candidate + job
+        supabase
+          .from('send_outs')
+          .select(`
+            id, stage, sent_to_client_at, updated_at, created_at,
+            candidate_id, job_id, recruiter_id,
+            candidates!inner(id, full_name, first_name, last_name, current_title),
+            jobs!inner(title, company_name)
+          `)
+          .eq('stage', 'sent')
+          .gte('updated_at', monthStart)
+          .order('updated_at', { ascending: false }),
+
+        // Interviewing send_outs this month — join candidate + job
+        supabase
+          .from('send_outs')
+          .select(`
+            id, stage, interview_at, updated_at, created_at,
+            candidate_id, job_id, recruiter_id,
+            candidates!inner(id, full_name, first_name, last_name, current_title),
+            jobs!inner(title, company_name)
+          `)
+          .eq('stage', 'interviewing')
+          .gte('updated_at', monthStart)
+          .order('interview_at', { ascending: true, nullsFirst: false }),
       ]);
 
-      const weekCandidates = candidatesWeekRes.data ?? [];
+      const weekCandidates  = candidatesWeekRes.data  ?? [];
       const monthCandidates = candidatesMonthRes.data ?? [];
-      const sendOuts = sendOutsRes.data ?? [];
+      const sendOuts        = sendOutsRes.data        ?? [];
+      const backOfResume    = (backOfResumeRes.data   ?? []) as any[];
+      const sentList        = (sentRes.data           ?? []) as any[];
+      const interviewList   = (interviewsRes.data     ?? []) as any[];
 
       const countWeek = (status: string) =>
-        weekCandidates.filter((candidate) =>
+        weekCandidates.filter((c) =>
           status === 'interviewing'
-            ? ['interview', 'interviewing'].includes(candidate.job_status)
-            : candidate.job_status === status,
+            ? ['interview', 'interviewing'].includes(c.job_status)
+            : c.job_status === status
         ).length;
       const countMonth = (status: string) =>
-        monthCandidates.filter((candidate) =>
+        monthCandidates.filter((c) =>
           status === 'interviewing'
-            ? ['interview', 'interviewing'].includes(candidate.job_status)
-            : candidate.job_status === status,
+            ? ['interview', 'interviewing'].includes(c.job_status)
+            : c.job_status === status
         ).length;
+
+      const weekBackOfResume = backOfResume.filter(
+        (c) => new Date(c.updated_at) >= new Date(weekStart)
+      );
+      const weekSentList = sentList.filter(
+        (s) => new Date(s.sent_to_client_at || s.updated_at) >= new Date(weekStart)
+      );
+      const weekInterviewList = interviewList.filter(
+        (s) => new Date(s.interview_at || s.updated_at) >= new Date(weekStart)
+      );
 
       return {
         activeJobs: jobsRes.count ?? 0,
-        // This week (Mon–Sun)
         weekCandidates: weekCandidates.length,
-        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_id === user.id).length : 0,
+        myWeekCandidates: user ? weekCandidates.filter(c => c.owner_user_id === user.id).length : 0,
         weekNew: countWeek('new'),
         weekContacted: countWeek('reached_out'),
         weekPitched: countWeek('pitched'),
@@ -421,9 +488,11 @@ export function useDashboardMetrics() {
         weekInterviewing: countWeek('interviewing'),
         weekOffer: countWeek('offer'),
         weekPlaced: countWeek('placed'),
-        // This month
+        weekBackOfResume: weekBackOfResume.length,
+        weekSentCount: weekSentList.length,
+        weekInterviewCount: weekInterviewList.length,
         monthCandidates: monthCandidates.length,
-        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_id === user.id).length : 0,
+        myMonthCandidates: user ? monthCandidates.filter(c => c.owner_user_id === user.id).length : 0,
         monthNew: countMonth('new'),
         monthContacted: countMonth('reached_out'),
         monthPitched: countMonth('pitched'),
@@ -432,15 +501,22 @@ export function useDashboardMetrics() {
         monthInterviewing: countMonth('interviewing'),
         monthOffer: countMonth('offer'),
         monthPlaced: countMonth('placed'),
-        // Send outs (all-time, stage-based)
+        monthBackOfResume: backOfResume.length,
+        monthSentCount: sentList.length,
+        monthInterviewCount: interviewList.length,
         interviewsThisWeek: sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
         offersOut: sendOuts.filter((s) => s.stage === 'offer').length,
+        backOfResumeList: backOfResume,
+        sentList,
+        interviewList,
+        weekBackOfResumeList: weekBackOfResume,
+        weekSentList,
+        weekInterviewList,
       };
     },
   });
 }
 
-// Integration accounts (sender accounts — all team accounts visible)
 export function useIntegrationAccounts() {
   return useQuery({
     queryKey: ['integration_accounts'],
@@ -456,7 +532,6 @@ export function useIntegrationAccounts() {
   });
 }
 
-// Candidates linked to a specific job
 export function useJobCandidates(jobId: string | undefined) {
   return useQuery({
     queryKey: ['job_candidates', jobId],
@@ -473,7 +548,6 @@ export function useJobCandidates(jobId: string | undefined) {
   });
 }
 
-// Real activity feed — messages sent + notes added + enrollments, scoped to current user
 export function useActivityFeed(limit = 20) {
   return useQuery({
     queryKey: ['activity_feed'],
@@ -481,7 +555,6 @@ export function useActivityFeed(limit = 20) {
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
-
       const [messagesRes, notesRes, enrollmentsRes] = await Promise.all([
         supabase
           .from('messages')
@@ -502,9 +575,7 @@ export function useActivityFeed(limit = 20) {
           .order('enrolled_at', { ascending: false })
           .limit(limit),
       ]);
-
       const items: any[] = [];
-
       for (const msg of messagesRes.data ?? []) {
         const ts = msg.sent_at || msg.received_at;
         const personName = (msg.candidates as any)?.full_name || (msg.contacts as any)?.full_name || msg.recipient_address || msg.sender_address;
@@ -519,16 +590,14 @@ export function useActivityFeed(limit = 20) {
           contactId: msg.contact_id,
         });
       }
-
       for (const note of notesRes.data ?? []) {
         items.push({
           id: `note-${note.id}`,
           type: 'note_added',
-          description: `Note added on ${note.entity_type}: ${note.note.slice(0, 80)}${note.note.length > 80 ? '…' : ''}`,
+          description: `Note added on ${note.entity_type}: ${note.note.slice(0, 80)}${note.note.length > 80 ? '...' : ''}`,
           timestamp: new Date(note.created_at),
         });
       }
-
       for (const enr of enrollmentsRes.data ?? []) {
         const candName = (enr.candidates as any)?.full_name;
         const seqName = (enr.sequences as any)?.name;
@@ -540,7 +609,6 @@ export function useActivityFeed(limit = 20) {
           candidateId: enr.candidate_id,
         });
       }
-
       return items.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
     },
   });

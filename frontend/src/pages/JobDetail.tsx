@@ -9,7 +9,7 @@ import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
-import { useJob, useContacts, useJobSendOuts, useJobCandidates, useCompanies, useJobFunctions } from '@/hooks/useData';
+import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound,
+  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -30,6 +30,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 
@@ -71,6 +73,63 @@ const EditableField = ({
   </div>
 );
 
+// ── Inline role editor for job contacts ─────────────────────────────────────
+const InlineRoleEdit = ({ role, onSave }: { role: string | null; onSave: (v: string) => Promise<void> }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(role ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(draft.trim()); toast.success('Role updated'); }
+    catch (e: any) { toast.error(e.message || 'Failed to update role'); }
+    finally { setSaving(false); setEditing(false); }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <Input
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          className="h-6 text-[10px] w-28 px-1.5"
+          placeholder="e.g. Hiring Manager"
+        />
+        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Check className="h-2.5 w-2.5 text-green-400" />}
+        </Button>
+        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => { setDraft(role ?? ''); setEditing(false); }}>
+          <X className="h-2.5 w-2.5 text-red-400" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className={cn(
+        'text-[10px] px-1.5 py-0.5 rounded hover:bg-accent/10 transition-colors',
+        role ? 'text-muted-foreground bg-muted' : 'text-muted-foreground/50 border border-dashed border-border',
+      )}
+    >
+      {role || '+ Role'}
+    </button>
+  );
+};
+
+// Stages relevant to send outs (the submission pipeline)
+const SEND_OUT_STAGES = [
+  { value: 'submitted',    label: 'Submitted',    color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
+  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
+  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
+  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
+  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+];
+
 // ── Send-out card with inline submittal notes + resume upload ─────────────────
 const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) => {
   const queryClient = useQueryClient();
@@ -79,9 +138,30 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
   const [notes, setNotes] = useState(sendOut.submittal_notes ?? '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [changingStage, setChangingStage] = useState(false);
 
   const contact = contacts.find((c: any) => c.id === sendOut.contact_id);
-  const stageCfg = JOB_STATUSES.find(s => s.value === sendOut.stage);
+  const stageCfg = SEND_OUT_STAGES.find(s => s.value === sendOut.stage) ?? SEND_OUT_STAGES[0];
+
+  const handleStageChange = async (newStage: string) => {
+    setChangingStage(true);
+    try {
+      const updates: any = { stage: newStage };
+      if (newStage === 'interviewing') updates.interview_at = new Date().toISOString();
+      else if (newStage === 'offer') updates.offer_at = new Date().toISOString();
+      else if (newStage === 'placed') updates.placed_at = new Date().toISOString();
+
+      const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOut.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
+      toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === newStage)?.label}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChangingStage(false);
+    }
+  };
 
   const saveNotes = async () => {
     setSaving(true);
@@ -145,11 +225,27 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
           {sendOut.submittal_notes && (
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Notes</span>
           )}
-          {stageCfg && (
-            <span className={cn('px-2 py-0.5 rounded text-xs font-medium', stageCfg.color)}>
-              {stageCfg.label}
-            </span>
-          )}
+          <Select
+            value={sendOut.stage ?? 'submitted'}
+            onValueChange={handleStageChange}
+            disabled={changingStage}
+          >
+            <SelectTrigger
+              className={cn('h-7 w-auto min-w-[110px] border-0 text-xs font-medium rounded px-2 py-0.5 gap-1', stageCfg.color)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent onClick={(e) => e.stopPropagation()}>
+              {SEND_OUT_STAGES.map(s => (
+                <SelectItem key={s.value} value={s.value}>
+                  <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>
+                    {s.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {expanded
             ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
             : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
@@ -248,7 +344,6 @@ const JobDetail = () => {
   const { data: contacts = [] } = useContacts();
   const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
-  const { data: jobCandidates = [], isLoading: candidatesLoading } = useJobCandidates(id);
   const { data: jobFunctions = [] } = useJobFunctions();
 
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -259,6 +354,56 @@ const JobDetail = () => {
   const [assigning, setAssigning] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [deletingJob, setDeletingJob] = useState(false);
+
+  // Add candidate to send outs
+  const [addSendOutOpen, setAddSendOutOpen] = useState(false);
+  const [sendOutCandidateSearch, setSendOutCandidateSearch] = useState('');
+  const [sendOutCandidateResults, setSendOutCandidateResults] = useState<any[]>([]);
+  const [sendOutSearching, setSendOutSearching] = useState(false);
+  const [addingSendOut, setAddingSendOut] = useState(false);
+
+  const searchCandidatesForSendOut = async (query: string) => {
+    setSendOutCandidateSearch(query);
+    if (query.length < 2) { setSendOutCandidateResults([]); return; }
+    setSendOutSearching(true);
+    try {
+      const { data } = await supabase
+        .from('candidates')
+        .select('id, full_name, first_name, last_name, current_title, current_company, email')
+        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%,email.ilike.%${query}%`)
+        .limit(15);
+      // Filter out candidates already in send outs for this job
+      const existingIds = new Set((sendOuts as any[]).map((so: any) => so.candidate_id));
+      setSendOutCandidateResults((data ?? []).filter(c => !existingIds.has(c.id)));
+    } catch {
+      setSendOutCandidateResults([]);
+    } finally {
+      setSendOutSearching(false);
+    }
+  };
+
+  const addCandidateToSendOuts = async (candidateId: string) => {
+    if (!id) return;
+    setAddingSendOut(true);
+    try {
+      const { error } = await supabase.from('send_outs').insert({
+        candidate_id: candidateId,
+        job_id: id,
+        stage: 'submitted',
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
+      toast.success('Candidate added to send outs');
+      setAddSendOutOpen(false);
+      setSendOutCandidateSearch('');
+      setSendOutCandidateResults([]);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAddingSendOut(false);
+    }
+  };
 
   const handleDeleteJob = async () => {
     if (!id) return;
@@ -378,8 +523,9 @@ const JobDetail = () => {
   };
 
   const handleCompanySelect = (companyId: string) => {
-    if (companyId === 'none') {
+    if (!companyId) {
       setCompanyEditId('');
+      setCompanyEditName('');
       return;
     }
     const c = companies.find((co: any) => co.id === companyId);
@@ -724,6 +870,23 @@ const JobDetail = () => {
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><UsersRound className="h-3 w-3" /> Openings</Label>
                 <p className="text-sm text-foreground mt-0.5">{(job as any).num_openings ?? 1}</p>
               </EditableField>
+
+              <div className="flex items-center justify-between rounded-md px-2 py-1.5 -mx-2 -my-1.5">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Market Over</Label>
+                <Switch
+                  checked={!!(job as any).market_over}
+                  onCheckedChange={async (checked) => {
+                    try {
+                      const { error } = await supabase.from('jobs').update({ market_over: checked }).eq('id', id!);
+                      if (error) throw error;
+                      queryClient.invalidateQueries({ queryKey: ['job', id] });
+                      toast.success(checked ? 'Marked as market over' : 'Marked as not market over');
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to update');
+                    }
+                  }}
+                />
+              </div>
             </div>
 
             {/* Quick contacts preview */}
@@ -752,12 +915,12 @@ const JobDetail = () => {
               )}
             </div>
 
-            {/* Pipeline summary */}
+            {/* Send Outs summary */}
             <div className="space-y-2">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                <Briefcase className="h-3 w-3" /> Pipeline
+                <Send className="h-3 w-3" /> Send Outs
               </h3>
-              <p className="text-sm font-medium text-foreground">{jobCandidates.length} candidates</p>
+              <p className="text-sm font-medium text-foreground">{(sendOuts as any[]).length} candidates</p>
             </div>
           </div>
         </aside>
@@ -770,7 +933,6 @@ const JobDetail = () => {
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
-                <TabsTrigger value="pipeline" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
               </TabsList>
             </div>
@@ -861,17 +1023,25 @@ const JobDetail = () => {
                         <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-medium text-foreground">{c?.full_name}</p>
+                              <button
+                                onClick={() => navigate(`/contacts/${jc.contact_id}`)}
+                                className="font-medium text-foreground hover:text-accent transition-colors"
+                              >
+                                {c?.full_name}
+                              </button>
                               {jc.is_primary && (
                                 <span className="flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded font-medium">
                                   <Star className="h-2.5 w-2.5 fill-current" /> Primary
                                 </span>
                               )}
-                              {jc.role && (
-                                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                  {jc.role}
-                                </span>
-                              )}
+                              <InlineRoleEdit
+                                role={jc.role}
+                                onSave={async (role) => {
+                                  const { error } = await supabase.from('job_contacts').update({ role: role || null }).eq('id', jc.id);
+                                  if (error) throw error;
+                                  refetchJobContacts();
+                                }}
+                              />
                             </div>
                             {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
                             {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
@@ -1011,94 +1181,40 @@ const JobDetail = () => {
                 </div>
               </TabsContent>
 
-              {/* ── Pipeline Tab ───────────────────────────── */}
-              <TabsContent value="pipeline" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-4">
-                  <Users className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold text-foreground">Candidate Pipeline</h2>
-                  {jobCandidates.length > 0 && (
-                    <Badge variant="secondary" className="ml-1">{jobCandidates.length}</Badge>
-                  )}
-                </div>
-                {candidatesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading candidates…
-                  </div>
-                ) : jobCandidates.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No candidates linked yet</p>
-                    <p className="text-xs text-muted-foreground">Enroll candidates in a sequence tagged to this job.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <div className="flex gap-0 min-w-max">
-                      {JOB_STATUSES.map((stage, idx) => {
-                        const stageCandidates = (jobCandidates as any[]).filter(c => c.job_status === stage.value);
-                        const isLast = idx === JOB_STATUSES.length - 1;
-                        return (
-                          <div
-                            key={stage.value}
-                            className={cn(
-                              'flex flex-col min-w-[160px] w-[160px] border-r border-border',
-                              isLast && 'border-r-0'
-                            )}
-                          >
-                            <div className="px-3 py-2.5 border-b border-border flex items-center justify-between gap-1">
-                              <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', stage.color)}>
-                                {stage.label}
-                              </span>
-                              {stageCandidates.length > 0 && (
-                                <span className="text-xs text-muted-foreground font-medium">
-                                  {stageCandidates.length}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col gap-2 p-2 min-h-[80px] max-h-[420px] overflow-y-auto">
-                              {stageCandidates.map((c: any) => (
-                                <div
-                                  key={c.id}
-                                  onClick={() => navigate(`/candidates/${c.id}`)}
-                                  className="group rounded-md border border-border bg-card hover:border-accent/50 hover:bg-accent/5 p-2.5 cursor-pointer transition-colors"
-                                >
-                                  <p className="text-xs font-medium text-foreground group-hover:text-accent leading-snug truncate">
-                                    {c.first_name} {c.last_name}
-                                  </p>
-                                  {c.current_title && (
-                                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                      {c.current_title}
-                                    </p>
-                                  )}
-                                  {c.current_company && (
-                                    <p className="text-[10px] text-muted-foreground truncate">
-                                      {c.current_company}
-                                    </p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </TabsContent>
-
               {/* ── Send Outs Tab ──────────────────────────── */}
               <TabsContent value="send-outs" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-4">
-                  <FileText className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold text-foreground">Send Outs</h2>
-                  {(sendOuts as any[]).length > 0 && (
-                    <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
-                  )}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold text-foreground">Send Outs</h2>
+                    {(sendOuts as any[]).length > 0 && (
+                      <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={() => setAddSendOutOpen(true)}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Add Candidate
+                  </Button>
                 </div>
                 {(sendOuts as any[]).length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
                     <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No send outs yet</p>
-                    <p className="text-xs text-muted-foreground">Send outs will appear here once candidates are submitted.</p>
+                    <p className="text-xs text-muted-foreground mb-3">Send outs will appear here once candidates are submitted.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setAddSendOutOpen(true)}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Add Candidate
+                    </Button>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1115,6 +1231,62 @@ const JobDetail = () => {
       </div>
 
       {/* ── Dialogs & Panels ──────────────────────────────── */}
+      <Dialog open={addSendOutOpen} onOpenChange={(open) => {
+        setAddSendOutOpen(open);
+        if (!open) { setSendOutCandidateSearch(''); setSendOutCandidateResults([]); }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Candidate to Send Outs</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Search Candidates</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={sendOutCandidateSearch}
+                  onChange={(e) => searchCandidatesForSendOut(e.target.value)}
+                  placeholder="Search by name, title, or company..."
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            {sendOutSearching && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+              </div>
+            )}
+            {sendOutCandidateResults.length > 0 && (
+              <div className="border border-border rounded-lg divide-y divide-border max-h-[300px] overflow-y-auto">
+                {sendOutCandidateResults.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between px-3 py-2.5 hover:bg-muted/40 cursor-pointer transition-colors"
+                    onClick={() => addCandidateToSendOuts(c.id)}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed'}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {c.current_title}{c.current_company ? ` @ ${c.current_company}` : ''}{!c.current_title && c.email ? c.email : ''}
+                      </p>
+                    </div>
+                    {addingSendOut ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+                    ) : (
+                      <UserPlus className="h-4 w-4 text-muted-foreground shrink-0" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {sendOutCandidateSearch.length >= 2 && !sendOutSearching && sendOutCandidateResults.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No matching candidates found.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
       {taskPanel && (
         <TaskSlidePanel
@@ -1134,15 +1306,15 @@ const JobDetail = () => {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Select Company</Label>
-              <Select value={companyEditId || 'none'} onValueChange={handleCompanySelect}>
-                <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No company</SelectItem>
-                  {companies.map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                options={(companies as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                value={companyEditId}
+                onChange={handleCompanySelect}
+                placeholder="Select company"
+                searchPlaceholder="Search companies..."
+                clearLabel="No company"
+                emptyText="No company found."
+              />
             </div>
             <div className="space-y-2">
               <Label>Company Name</Label>
@@ -1171,17 +1343,19 @@ const JobDetail = () => {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Job Function</Label>
-              <Select value={functionEditId || 'none'} onValueChange={v => setFunctionEditId(v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Select function" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No function</SelectItem>
-                  {jobFunctions.map((fn: any) => (
-                    <SelectItem key={fn.id} value={fn.id}>
-                      {fn.name} ({fn.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                options={(jobFunctions as any[]).map((fn: any) => ({
+                  value: fn.id,
+                  label: `${fn.name} (${fn.code})`,
+                  sublabel: fn.examples?.length > 0 ? fn.examples.join(', ') : undefined,
+                }))}
+                value={functionEditId}
+                onChange={v => setFunctionEditId(v)}
+                placeholder="Select function"
+                searchPlaceholder="Search functions..."
+                clearLabel="No function"
+                emptyText="No function found."
+              />
               {(() => {
                 const selectedFn = jobFunctions.find((f: any) => f.id === functionEditId);
                 if (selectedFn?.examples?.length > 0) {

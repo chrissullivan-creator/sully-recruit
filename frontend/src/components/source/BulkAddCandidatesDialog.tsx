@@ -99,15 +99,14 @@ async function resolveUnipileInBackground(candidateId: string, linkedinUrl: stri
     if (resp.ok) {
       const result = await resp.json();
       if (result.unipile_id || result.provider_id) {
-        await supabase
-          .from('candidate_channels')
-          .upsert({
-            candidate_id: candidateId,
-            channel: 'linkedin',
-            unipile_id: result.unipile_id || null,
-            provider_id: result.provider_id || null,
-            is_connected: true,
-          }, { onConflict: 'candidate_id,channel' });
+        // Store Unipile classic ID directly on the candidate record (primary lookup)
+        const unipileClassicId = result.unipile_id || result.provider_id || null;
+        if (unipileClassicId) {
+          await supabase
+            .from('candidates')
+            .update({ unipile_classic_id: unipileClassicId } as any)
+            .eq('id', candidateId);
+        }
       }
     }
   } catch (err) {
@@ -127,7 +126,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
       .maybeSingle();
 
     if (!resume) {
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(filePath);
+      const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(filePath, 3600);
       const mimeType = fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf'
         : fileName.toLowerCase().endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         : 'application/octet-stream';
@@ -135,7 +134,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
         candidate_id: candidateId,
         file_path: filePath,
         file_name: fileName,
-        file_url: urlData?.publicUrl || null,
+        file_url: urlData?.signedUrl || null,
         mime_type: mimeType,
         parse_status: 'pending',
       } as any).select('id').single();
@@ -276,21 +275,30 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         }
 
         // Merge: parsed resume data wins for email/phone, LinkedIn profile wins for title/company
+        // parsedData.email = email found IN the resume = candidate's personal email
+        // applicant.email from LinkedIn profile = also personal/direct email
+        const resolvedEmail = parsedData.email || applicant.email || null;
+        const resolvedPhone = parsedData.phone || applicant.phone || null;
+
         const candidateData = {
           first_name: applicant.first_name || parsedData.first_name || null,
           last_name: applicant.last_name || parsedData.last_name || null,
           full_name: `${applicant.first_name || parsedData.first_name || ''} ${applicant.last_name || parsedData.last_name || ''}`.trim() || null,
-          email: parsedData.email || applicant.email || null,
-          phone: parsedData.phone || applicant.phone || null,
+          email: resolvedEmail,
+          personal_email: resolvedEmail,       // LinkedIn/resume email = personal email
+          phone: resolvedPhone,
+          mobile_phone: resolvedPhone,         // phone from LinkedIn/resume = mobile
           current_title: applicant.current_title || parsedData.current_title || null,
           current_company: applicant.current_company || parsedData.current_company || null,
           location_text: applicant.location || parsedData.location || null,
           linkedin_url: applicant.linkedin_url || parsedData.linkedin_url || null,
           avatar_url: applicant.profile_picture_url || null,
           status,
+          roles: ['candidate'],                // always a candidate from Source import
+          is_stub: false,                      // real person — not a stub
           source: 'linkedin_hiring_project',
           job_id: jobId,
-          owner_id: userId,
+          owner_user_id: userId,               // FIX: was owner_id (column doesn't exist)
         };
 
         const { data: inserted, error: insertErr } = await supabase

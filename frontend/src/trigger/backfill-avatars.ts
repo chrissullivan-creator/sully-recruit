@@ -52,8 +52,8 @@ export const backfillAvatars = schedules.task({
             .eq("id", candidate.id);
           localUpdated++;
         }
-      } catch {
-        // Skip parse errors
+      } catch (err: any) {
+        logger.warn("Avatar parse error", { candidateId: candidate.id, error: err.message });
       }
     }
 
@@ -112,8 +112,8 @@ export const backfillAvatars = schedules.task({
           }
 
           await delay(DELAY_MS);
-        } catch {
-          // Skip failures
+        } catch (err: any) {
+          logger.warn("Candidate avatar API fetch failed", { candidateId: candidate.id, error: err.message });
         }
       }
 
@@ -153,8 +153,8 @@ export const backfillAvatars = schedules.task({
           }
 
           await delay(DELAY_MS);
-        } catch {
-          // Skip failures
+        } catch (err: any) {
+          logger.warn("Contact avatar API fetch failed", { contactId: contact.id, error: err.message });
         }
       }
 
@@ -235,8 +235,8 @@ export const backfillAvatars = schedules.task({
               .eq("id", company.id);
             companiesUpdated++;
           }
-        } catch {
-          // Skip failures
+        } catch (err: any) {
+          logger.warn("Company logo fetch failed", { companyId: company.id, error: err.message });
         }
       }
     }

@@ -25,14 +25,16 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar,
+  Search, Calendar, Merge,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
+import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 
 const SEND_OUT_STAGES = [
@@ -173,7 +175,7 @@ const CandidateDetail = () => {
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
-  const openJobs = (jobs as any[]).filter(j => ['lead','hot','offer_made'].includes(j.status));
+  const openJobs = (jobs as any[]).filter(j => !['closed_lost','closed_won','lost','closed'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
   const { data: callNotes = [] } = useQuery({
@@ -210,6 +212,7 @@ const CandidateDetail = () => {
   const [generatingJoe, setGeneratingJoe] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [compExpanded, setCompExpanded] = useState(false);
   const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
   const [educationOpen, setEducationOpen] = useState(false);
@@ -225,6 +228,7 @@ const CandidateDetail = () => {
   const [activeTab, setActiveTab] = useState('joe');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const handleDeleteCandidate = async () => {
     if (!id) return;
@@ -585,12 +589,12 @@ const CandidateDetail = () => {
       const path = `${session.user.id}/${id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path);
+      const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(path, 3600);
       const { error: dbErr } = await supabase.from('resumes').insert({
         candidate_id: id,
         file_name: file.name,
         file_path: path,
-        file_url: urlData.publicUrl,
+        file_url: urlData?.signedUrl ?? '',
         file_size: file.size,
         mime_type: file.type,
       } as any);
@@ -608,10 +612,10 @@ const CandidateDetail = () => {
     if (!id) return;
     supabase.from('resumes').select('file_path, created_at').eq('candidate_id', id)
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (data?.file_path) {
-          const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(data.file_path);
-          setResumeUrl(urlData?.publicUrl ?? null);
+          const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(data.file_path, 3600);
+          setResumeUrl(urlData?.signedUrl ?? null);
         }
       });
   }, [id]);
@@ -619,6 +623,25 @@ const CandidateDetail = () => {
   useEffect(() => {
     if (!resumeUrl && candidate?.resume_url) setResumeUrl(candidate.resume_url);
   }, [candidate?.resume_url]);
+
+  // Pre-compute signed URLs for all document lists (private bucket)
+  useEffect(() => {
+    const allDocs = [...candidateResumes, ...formattedResumes, ...otherDocs];
+    const paths = allDocs.map((d: any) => d.file_path).filter(Boolean) as string[];
+    if (paths.length === 0) return;
+    Promise.all(
+      paths.map(async (p) => {
+        const { data } = await supabase.storage.from('resumes').createSignedUrl(p, 3600);
+        return [p, data?.signedUrl ?? null] as const;
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const [path, url] of results) {
+        if (url) map[path] = url;
+      }
+      setSignedUrls(map);
+    });
+  }, [candidateResumes, formattedResumes, otherDocs]);
 
   const updateField = async (field: string, value: string) => {
     if (!id) return;
@@ -863,7 +886,7 @@ const CandidateDetail = () => {
     <MainLayout>
       {/* Top header bar — ContactDetail style */}
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/candidates')}><ArrowLeft className="h-4 w-4" /></Button>
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4" /></Button>
         {c.avatar_url ? (
           <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
         ) : (
@@ -873,6 +896,23 @@ const CandidateDetail = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
             <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
+            {(() => {
+              const roles: string[] = c.roles ?? ['candidate'];
+              return (
+                <div className="flex items-center gap-1">
+                  {roles.includes('candidate') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
+                      Candidate
+                    </span>
+                  )}
+                  {roles.includes('client') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                      Client
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <p className="text-sm text-muted-foreground truncate">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
         </div>
@@ -905,29 +945,32 @@ const CandidateDetail = () => {
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (!id) return;
+              const currentRoles: string[] = c.roles ?? ['candidate'];
+              const newRoles = currentRoles.includes('client')
+                ? currentRoles.filter(r => r !== 'client')
+                : [...currentRoles, 'client'];
+              await supabase.from('candidates').update({ roles: newRoles } as any).eq('id', id);
+              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+              queryClient.invalidateQueries({ queryKey: ['candidates'] });
+              toast.success(newRoles.includes('client') ? 'Tagged as Client' : 'Client tag removed');
+            }}
+            title={((c.roles ?? ['candidate']) as string[]).includes('client') ? 'Remove Client tag' : 'Tag as Client'}
+          >
+            {((c.roles ?? ['candidate']) as string[]).includes('client') ? '− Client' : '+ Client'}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
             <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
           </Button>
           <Button variant="outline" size="sm" onClick={() => setActiveTab('joe')}>
             <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe
           </Button>
-          <Button variant="outline" size="sm" onClick={async () => {
-            toast.info('Syncing activity across all channels…');
-            try {
-              const resp = await fetch('/api/trigger-sync-activity', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ entity_type: 'candidate', entity_id: id }),
-              });
-              const data = await resp.json();
-              if (data.error) throw new Error(data.error);
-              toast.success('Activity sync triggered — results will update shortly');
-              setTimeout(() => queryClient.invalidateQueries({ queryKey: ['candidate', id] }), 5000);
-            } catch (err: any) {
-              toast.error(err.message || 'Sync failed');
-            }
-          }}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1" />Sync Activity
+          <Button variant="ghost" size="sm" onClick={() => setMergeOpen(true)} title="Merge with another candidate">
+            <Merge className="h-3.5 w-3.5 mr-1" />Merge
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -1004,6 +1047,17 @@ const CandidateDetail = () => {
               <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Work Email" value={c.work_email} onSave={async v => {
+                await updateField('work_email', v);
+                // Keep legacy email in sync
+                if (v) await updateField('email', v);
+              }} type="email" placeholder="work@firm.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Personal Email" value={c.personal_email} onSave={v => updateField('personal_email', v)} type="email" placeholder="personal@gmail.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
+                await updateField('mobile_phone', v);
+                // Keep legacy phone in sync
+                if (v) await updateField('phone', v);
+              }} placeholder="+1 (212) 555-0000" disabled={!canEdit} highlight={editingInfo} />
             </div>
 
             {/* Compensation — collapsible */}
@@ -1048,52 +1102,60 @@ const CandidateDetail = () => {
             <div className="flex items-center gap-4 mt-4 flex-wrap">
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                <Select value={candidate.owner_id ?? 'none'} onValueChange={(val) => {
-                  const newOwnerId = val === 'none' ? null : val;
-                  if (newOwnerId && newOwnerId !== user?.id) {
-                    setPendingOwnerId(newOwnerId);
-                  } else {
-                    (async () => {
-                      try {
-                        const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
-                        if (error) { toast.error('Failed to update owner'); return; }
-                        queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                        queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                        toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                      } catch (err: any) {
-                        toast.error(err?.message || 'Failed to update owner');
-                      }
-                    })();
-                  }
-                }} disabled={!canEdit}>
-                  <SelectTrigger className="h-7 text-xs w-44"><SelectValue placeholder="Assign owner…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Unassigned —</SelectItem>
-                    {profiles.filter(p => p.full_name).map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
+                  value={(candidate as any).owner_id ?? ''}
+                  onChange={(val) => {
+                    const newOwnerId = val || null;
+                    if (newOwnerId && newOwnerId !== user?.id) {
+                      setPendingOwnerId(newOwnerId);
+                    } else {
+                      (async () => {
+                        try {
+                          const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                          if (error) { toast.error('Failed to update owner'); return; }
+                          queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                          queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                          toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Failed to update owner');
+                        }
+                      })();
+                    }
+                  }}
+                  placeholder="Assign owner…"
+                  searchPlaceholder="Search team…"
+                  clearLabel="— Unassigned —"
+                  className="h-7 text-xs w-44"
+                />
               </div>
 
               <div className="space-y-1">
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Active Job</Label>
-                <Select value={candidate.job_id ?? 'none'} onValueChange={async (val) => {
-                  const newJobId = val === 'none' ? null : val;
-                  try {
-                    const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                    if (error) { toast.error('Failed to update job assignment'); return; }
-                    queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                    toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                  } catch (err: any) {
-                    toast.error(err?.message || 'Failed to update job assignment');
-                  }
-                }} disabled={!canEdit}>
-                  <SelectTrigger className="h-7 text-xs w-52"><SelectValue placeholder="Assign a job…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {openJobs.map((j: any) => <SelectItem key={j.id} value={j.id}>{j.title}{j.companies?.name ? ` — ${j.companies.name}` : ''}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={(openJobs as any[]).map((j: any) => ({
+                    value: j.id,
+                    label: j.title,
+                    sublabel: j.companies?.name || j.company_name || undefined,
+                  }))}
+                  value={candidate.job_id ?? ''}
+                  onChange={async (val) => {
+                    const newJobId = val || null;
+                    try {
+                      const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                      if (error) { toast.error('Failed to update job assignment'); return; }
+                      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                      toast.success(newJobId ? 'Job assigned' : 'Job removed');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to update job assignment');
+                    }
+                  }}
+                  placeholder="Assign a job…"
+                  searchPlaceholder="Search jobs…"
+                  clearLabel="— None —"
+                  className="h-7 text-xs w-52"
+                />
               </div>
 
               {candidate.job_id && (
@@ -1400,16 +1462,62 @@ const CandidateDetail = () => {
                   <p className="text-sm text-muted-foreground">No communications yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {(conversations as any[]).map((conv) => (
-                      <div key={conv.id} className="rounded-lg border border-border p-4">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-sm font-medium capitalize">{conv.channel}</span>
-                          <span className="text-xs text-muted-foreground">{conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}</span>
-                        </div>
-                        {conv.subject && <p className="text-sm mb-0.5">{conv.subject}</p>}
-                        {conv.last_message_preview && <p className="text-xs text-muted-foreground">{conv.last_message_preview}</p>}
-                      </div>
-                    ))}
+                    {(conversations as any[]).map((conv) => {
+                      const messages = (conv.messages || []).sort(
+                        (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
+                      );
+                      const channelLabel = (conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin'))
+                        ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1);
+                      return (
+                        <Collapsible key={conv.id}>
+                          <div className="rounded-lg border border-border">
+                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  {!['email', 'sms'].includes(conv.channel) && !conv.channel?.startsWith('linkedin') && <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  <span className="text-sm font-medium">{channelLabel}</span>
+                                  <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
+                                </span>
+                              </div>
+                              {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
+                              {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
+                                {messages.map((msg: any) => (
+                                  <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
+                                    <div className={cn(
+                                      'max-w-[80%] rounded-lg px-3 py-2 text-sm',
+                                      msg.direction === 'outbound'
+                                        ? 'bg-accent/15 text-foreground'
+                                        : 'bg-muted text-foreground'
+                                    )}>
+                                      {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
+                                      <p className="text-xs whitespace-pre-wrap break-words">{
+                                        (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
+                                      }</p>
+                                      <p className="text-[10px] text-muted-foreground mt-1">
+                                        {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
+                                        {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                                {messages.length === 0 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
+                                )}
+                              </div>
+                            </CollapsibleContent>
+                          </div>
+                        </Collapsible>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -1548,7 +1656,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {candidateResumes.map((r: any) => {
-                          const downloadUrl = r.file_url || (r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null);
+                          const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
                             <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">
@@ -1621,7 +1729,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {formattedResumes.map((r: any) => {
-                          const downloadUrl = r.file_path ? supabase.storage.from('resumes').getPublicUrl(r.file_path).data?.publicUrl : null;
+                          const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
                             <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">
@@ -1688,7 +1796,7 @@ const CandidateDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {otherDocs.map((d: any) => {
-                          const downloadUrl = d.file_path ? supabase.storage.from('resumes').getPublicUrl(d.file_path).data?.publicUrl : null;
+                          const downloadUrl = d.file_path ? signedUrls[d.file_path] : null;
                           return (
                             <div key={d.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
                               <div className="flex items-center gap-3 min-w-0">
@@ -1753,16 +1861,18 @@ const CandidateDetail = () => {
                 {addingSendOut && (
                   <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
                     <h4 className="text-sm font-semibold">Add Candidate to Job Pipeline</h4>
-                    <Select value={selectedJobForSendOut} onValueChange={setSelectedJobForSendOut}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a job..." /></SelectTrigger>
-                      <SelectContent>
-                        {openJobs.map((j: any) => (
-                          <SelectItem key={j.id} value={j.id}>
-                            {j.title}{j.companies?.name ? ` — ${j.companies.name}` : j.company_name ? ` — ${j.company_name}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      options={(openJobs as any[]).map((j: any) => ({
+                        value: j.id,
+                        label: j.title,
+                        sublabel: j.companies?.name || j.company_name || undefined,
+                      }))}
+                      value={selectedJobForSendOut}
+                      onChange={setSelectedJobForSendOut}
+                      placeholder="Select a job..."
+                      searchPlaceholder="Search jobs…"
+                      emptyText="No jobs found."
+                    />
                     <div className="flex gap-2">
                       <Button variant="gold" size="sm" className="h-7 text-xs" onClick={handleAddSendOut} disabled={savingSendOut || !selectedJobForSendOut}>
                         {savingSendOut && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Add
@@ -2134,6 +2244,21 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      {candidate && (
+        <MergeCandidateDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          currentCandidate={{
+            id: candidate.id,
+            first_name: candidate.first_name,
+            last_name: candidate.last_name,
+            email: candidate.email,
+            current_title: candidate.current_title,
+            current_company: candidate.current_company,
+          }}
+        />
+      )}
 
       {/* Edit meeting dialog */}
       {editingMeeting && (

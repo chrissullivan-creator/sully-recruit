@@ -22,8 +22,6 @@ const CHANNEL_CAPS: Record<string, ChannelCap> = {
 const EXEMPT_CHANNELS = new Set([
   "linkedin_recruiter",
   "recruiter_inmail",
-  "sales_nav",
-  "sales_nav_inmail",
 ]);
 
 /** Normalize channel to its rate-limit category. */

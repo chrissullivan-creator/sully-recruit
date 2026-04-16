@@ -328,7 +328,32 @@ export function AddPersonWizard({
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Save failed');
+        const msg = err.error || 'Save failed';
+
+        // Duplicate detected — re-search with enriched form data so user can link
+        if (msg.includes('duplicate') || msg.includes('unique')) {
+          const searchRes = await fetch('/api/search-person', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              type: personType,
+              name: `${form.first_name} ${form.last_name}`,
+              email: form.email || '',
+              phone: form.phone || '',
+              linkedin_url: form.linkedin_url || '',
+            }),
+          });
+          const searchData = await searchRes.json();
+          if (searchData.matches?.length > 0) {
+            setMatches(searchData.matches);
+            setStep('matches');
+            toast.info('A matching record already exists. You can link to it below.');
+            setSaving(false);
+            return;
+          }
+        }
+
+        throw new Error(msg);
       }
 
       const saved = await res.json();

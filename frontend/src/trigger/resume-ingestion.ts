@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { buildProfileText } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
@@ -40,7 +41,7 @@ export const resumeIngestion = task({
     // Update status to processing
     await supabase
       .from("resumes")
-      .update({ parsing_status: "processing" } as any)
+      .update({ parsing_status: "processing" })
       .eq("id", resumeId);
 
     // ── 1. Download file from Supabase Storage ──────────────────────
@@ -72,58 +73,79 @@ export const resumeIngestion = task({
         parsed_json: parsedJson,
         parsing_status: "completed",
         parser: "trigger-claude",
-      } as any)
+      })
       .eq("id", resumeId);
 
     // ── 5. Update candidate with parsed fields ──────────────────────
+    // parsedJson.email = email found IN the resume = candidate's personal email.
+    // Always tag as candidate and clear is_stub on successful resume parse.
     if (parsedJson && candidateId) {
-      const updates: any = {};
+      const updates: any = {
+        roles: ["candidate"],
+        is_stub: false,
+      };
       if (parsedJson.first_name) updates.first_name = parsedJson.first_name;
       if (parsedJson.last_name) updates.last_name = parsedJson.last_name;
       if (parsedJson.first_name && parsedJson.last_name) {
         updates.full_name = `${parsedJson.first_name} ${parsedJson.last_name}`;
       }
-      if (parsedJson.email) updates.email = parsedJson.email;
-      if (parsedJson.phone) updates.phone = parsedJson.phone;
+      if (parsedJson.email) {
+        // Email in resume = candidate's personal email
+        updates.email = parsedJson.email;
+        updates.personal_email = parsedJson.email;
+      }
+      if (parsedJson.phone) {
+        updates.phone = parsedJson.phone;
+        updates.mobile_phone = parsedJson.phone;
+      }
       if (parsedJson.current_company) updates.current_company = parsedJson.current_company;
       if (parsedJson.current_title) updates.current_title = parsedJson.current_title;
-      if (parsedJson.location) updates.location_text = parsedJson.location; // location → location_text
+      if (parsedJson.location) updates.location_text = parsedJson.location;
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
 
-      if (Object.keys(updates).length > 0) {
-        await supabase.from("candidates").update(updates).eq("id", candidateId);
-      }
+      await supabase.from("candidates").update(updates).eq("id", candidateId);
     }
 
     // ── 6. Upload to LlamaCloud for search indexing ────────────────────
-    if (rawText.length > 50) {
+    if (candidateId && rawText.length > 50) {
       try {
-        const { getOrCreateResumePipeline, uploadResumeToCloud } = await import("../../api/lib/llamaindex");
-        const chunks = chunkText(rawText, 512);
-        logger.info("Uploading chunks to LlamaCloud", { count: chunks.length });
+        const { data: candidate } = await supabase
+          .from("candidates")
+          .select("id, full_name, current_title, current_company, location_text, skills")
+          .eq("id", candidateId)
+          .single();
 
-        const pipelineId = await getOrCreateResumePipeline();
-        const candidateName = parsedJson
-          ? `${parsedJson.first_name || ""} ${parsedJson.last_name || ""}`.trim()
-          : "";
-        await uploadResumeToCloud(pipelineId, candidateId, resumeId, chunks, candidateName);
+        if (candidate) {
+          const profileText = buildProfileText(candidate, rawText, parsedJson);
+          const { getOrCreateResumePipeline, uploadResumeToCloud } = await import("../../api/lib/llamaindex");
+          const pipelineId = await getOrCreateResumePipeline();
+          const candidateName = (candidate as any).full_name || "";
 
-        logger.info("Uploaded to LlamaCloud", { chunks: chunks.length, pipelineId });
+          // Upload profile + resume chunks for richer retrieval
+          const chunks = [profileText.slice(0, 2000), ...chunkText(rawText, 512)].filter(c => c.trim().length > 30);
+          await uploadResumeToCloud(pipelineId, candidateId, resumeId, chunks, candidateName);
+
+          // Store profile summary in resume_embeddings for fallback text search
+          await supabase
+            .from("resume_embeddings")
+            .delete()
+            .eq("candidate_id", candidateId)
+            .eq("embed_type", "full_profile");
+          await supabase.from("resume_embeddings").insert({
+            candidate_id: candidateId,
+            resume_id: resumeId,
+            source_text: profileText.slice(0, 2000),
+            chunk_text: profileText.slice(0, 2000),
+            chunk_index: 0,
+            embed_type: "full_profile",
+            embed_model: "llamacloud",
+          });
+
+          logger.info("Uploaded to LlamaCloud", { chunks: chunks.length, pipelineId, candidateId });
+        }
       } catch (err: any) {
         logger.warn("LlamaCloud upload failed, will retry on next ingestion", { error: err.message });
-      }
-
-      // Also store chunks locally in resume_embeddings table (without embeddings) for fallback
-      const chunks = chunkText(rawText, 512);
-      await supabase.from("resume_embeddings").delete().eq("resume_id", resumeId);
-      for (let i = 0; i < chunks.length; i++) {
-        await supabase.from("resume_embeddings").insert({
-          resume_id: resumeId,
-          candidate_id: candidateId,
-          chunk_index: i,
-          chunk_text: chunks[i],
-        } as any);
       }
     }
 
@@ -276,3 +298,4 @@ function chunkText(text: string, maxWords: number): string[] {
 
   return chunks.filter(c => c.trim().length > 20);
 }
+

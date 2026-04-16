@@ -17,6 +17,7 @@ import Companies from "./pages/Companies";
 import CompanyDetail from "./pages/CompanyDetail";
 import Contacts from "./pages/Contacts";
 import ContactDetail from "./pages/ContactDetail";
+import People from "./pages/People";
 import Sequences from "./pages/Sequences";
 import SequenceBuilder from "./pages/SequenceBuilder";
 import SequenceScheduleView from "./pages/SequenceScheduleView";
@@ -30,6 +31,7 @@ import { ResumeSearch } from "./pages/ResumeSearch";
 import LinkedInSearch from "./components/LinkedInSearch";
 import Source from "./pages/Source";
 import SourceProject from "./pages/SourceProject";
+import DuplicatesReview from "./pages/DuplicatesReview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +58,7 @@ const App = () => (
             <Route path="/companies/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/contacts/:id" element={<ProtectedRoute><ContactDetail /></ProtectedRoute>} />
+            <Route path="/people" element={<ProtectedRoute><People /></ProtectedRoute>} />
             <Route path="/sequences" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
             <Route path="/sequences/new" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
             <Route path="/sequences/:id/edit" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
@@ -68,6 +71,7 @@ const App = () => (
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
+            <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -33,4 +33,4 @@ Read these before making changes:
 - Edge function secrets: `ANTHROPIC_API_KEY` (check lowercase fallback `anthropic_api_key`)
 - Frontend env vars must be `VITE_*` prefixed
 - Candidate statuses: `new`, `reached_out`, `back_of_resume`, `placed` — nothing else
-- Ashley has NO email and NO RingCentral — LinkedIn only
+- Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley

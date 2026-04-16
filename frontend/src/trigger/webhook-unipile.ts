@@ -101,8 +101,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   }
 
   // Match sender directly via candidates.unipile_id / contacts.unipile_id.
-  // (Mirrors backfill-linkedin-messages.ts findEntity — the previous
-  // candidate_channels/contact_channels tables don't exist in prod.)
+  // Primary lookup — candidate_channels is used as fallback in connection handler.
   let entityId: string | null = null;
   let entityType: "candidate" | "contact" = "candidate";
   let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
@@ -289,54 +288,95 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
     return { action: "skipped", reason: "no_provider_id" };
   }
 
-  // Find candidate with this provider_id
-  const { data: channelMatch } = await supabase
-    .from("candidate_channels")
-    .select("candidate_id")
-    .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-    .eq("channel", "linkedin")
-    .limit(1)
+  // Match entity using same approach as processLinkedInMessage:
+  // 1. Check candidates.unipile_id (primary match)
+  // 2. Check contacts.unipile_id
+  // 3. Fall back to candidate_channels/contact_channels (legacy)
+  let entityId: string | null = null;
+  let entityType: "candidate" | "contact" = "candidate";
+  let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
+
+  const { data: candMatch } = await supabase
+    .from("candidates")
+    .select("id")
+    .eq("unipile_id", providerId)
     .maybeSingle();
 
-  if (!channelMatch) {
+  if (candMatch) {
+    entityId = candMatch.id;
+  } else {
+    const { data: contactMatch } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("unipile_id", providerId)
+      .maybeSingle();
+
+    if (contactMatch) {
+      entityId = contactMatch.id;
+      entityType = "contact";
+      entityColumn = "contact_id";
+    }
+  }
+
+  // Fallback: check candidate_channels / contact_channels (legacy lookup)
+  if (!entityId) {
+    const { data: channelMatch } = await supabase
+      .from("candidate_channels")
+      .select("candidate_id")
+      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
+      .eq("channel", "linkedin")
+      .limit(1)
+      .maybeSingle();
+
+    if (channelMatch) {
+      entityId = channelMatch.candidate_id;
+    } else {
+      const { data: contactChannelMatch } = await supabase
+        .from("contact_channels")
+        .select("contact_id")
+        .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
+        .eq("channel", "linkedin")
+        .maybeSingle();
+
+      if (contactChannelMatch) {
+        entityId = contactChannelMatch.contact_id;
+        entityType = "contact";
+        entityColumn = "contact_id";
+      }
+    }
+  }
+
+  if (!entityId) {
     return { action: "no_match", providerId };
   }
 
-  const candidateId = channelMatch.candidate_id;
-
   if (status === "ACCEPTED" || status === "accepted" || status === "connected") {
-    // Update candidate_channels
-    await supabase
-      .from("candidate_channels")
-      .update({ is_connected: true } as any)
-      .eq("candidate_id", candidateId)
-      .eq("channel", "linkedin");
-
-    // V2: Find active enrollments for this candidate and advance via connection_accepted branch
-    await advanceOnConnectionAccepted(supabase, "candidate_id", candidateId, receivedAt);
-
-    // Also check contact_channels
-    const { data: contactChannel } = await supabase
-      .from("contact_channels")
-      .select("contact_id")
-      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-      .eq("channel", "linkedin")
-      .maybeSingle();
-
-    if (contactChannel?.contact_id) {
+    // Update candidate_channels if this is a candidate
+    if (entityType === "candidate") {
+      await supabase
+        .from("candidate_channels")
+        .upsert({
+          candidate_id: entityId,
+          channel: "linkedin",
+          provider_id: providerId,
+          is_connected: true,
+          connected_at: receivedAt,
+        } as any, { onConflict: "candidate_id,channel" });
+    } else {
       await supabase
         .from("contact_channels")
-        .update({ is_connected: true } as any)
-        .eq("contact_id", contactChannel.contact_id)
+        .update({ is_connected: true, connected_at: receivedAt } as any)
+        .eq("contact_id", entityId)
         .eq("channel", "linkedin");
-
-      await advanceOnConnectionAccepted(supabase, "contact_id", contactChannel.contact_id, receivedAt);
     }
+
+    // V2: Advance any enrollments waiting for connection acceptance
+    await advanceOnConnectionAccepted(supabase, entityColumn, entityId, receivedAt);
 
     // Log connection_accepted as a special message type
     await supabase.from("messages").insert({
-      conversation_id: `li_${candidateId}`,
-      candidate_id: candidateId,
+      conversation_id: `li_${entityId}`,
+      [entityColumn]: entityId,
       channel: "linkedin",
       direction: "inbound",
       body: "Connection request accepted",
@@ -345,11 +385,11 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
       provider: "unipile",
     } as any);
 
-    logger.info("Connection accepted", { candidateId });
-    return { action: "connection_accepted", candidateId };
+    logger.info("Connection accepted", { entityId, entityType });
+    return { action: "connection_accepted", entityId, entityType };
   }
 
-  return { action: "connection_update", status, candidateId };
+  return { action: "connection_update", status, entityId, entityType };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

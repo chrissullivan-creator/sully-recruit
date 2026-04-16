@@ -1182,7 +1182,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
           prefill={{
             name: senderName,
             email: senderAddress.includes('@') ? senderAddress : '',
-            phone: !senderAddress.includes('@') ? senderAddress : '',
+            phone: thread.channel === 'sms' ? senderAddress : '',
             linkedinUrl: thread.channel?.startsWith('linkedin') ? senderAddress : '',
           }}
           rawBody={firstInbound?.body || undefined}

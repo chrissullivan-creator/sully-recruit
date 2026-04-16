@@ -82,15 +82,13 @@ async function resolveUnipileInBackground(contactId: string, linkedinUrl: string
     if (resp.ok) {
       const result = await resp.json();
       if (result.unipile_id || result.provider_id) {
-        await supabase
-          .from('contact_channels')
-          .upsert({
-            contact_id: contactId,
-            channel: 'linkedin',
-            unipile_id: result.unipile_id || null,
-            provider_id: result.provider_id || null,
-            is_connected: true,
-          }, { onConflict: 'contact_id,channel' });
+        const unipileClassicId = result.unipile_id || result.provider_id || null;
+        if (unipileClassicId) {
+          await supabase
+            .from('contacts')
+            .update({ unipile_classic_id: unipileClassicId } as any)
+            .eq('id', contactId);
+        }
       }
     }
   } catch (err) {
@@ -215,7 +213,9 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           last_name: lastName || null,
           full_name: `${firstName} ${lastName}`.trim() || null,
           email: applicant.email || null,
+          work_email: applicant.email || null,  // LinkedIn email for contacts = work email
           phone: applicant.phone || null,
+          mobile_phone: applicant.phone || null,
           title: applicant.current_title || applicant.headline || null,
           department: department.trim() || null,
           company_id: companyId,
@@ -223,7 +223,9 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           linkedin_url: applicant.linkedin_url || null,
           avatar_url: applicant.profile_picture_url || null,
           status: 'active',
-          owner_id: userId,
+          roles: ['client'],                    // LinkedIn hiring project imports = clients/contacts
+          is_stub: false,
+          owner_user_id: userId,                // FIX: was owner_id
         };
 
         const { data: inserted, error: insertErr } = await supabase

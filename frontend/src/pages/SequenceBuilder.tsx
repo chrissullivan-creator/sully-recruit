@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
-import { FlowBuilder, type FlowNodeData, type FlowEdgeData } from "@/components/sequences/FlowBuilder";
+import { FlowBuilder, type SequenceBranch } from "@/components/sequences/FlowBuilder";
 import { SequenceReview } from "@/components/sequences/SequenceReview";
+import { compareSequenceNodes, createEmptyBranches, flattenBranchSteps, hydrateBranchesFromNodes, normalizeBranches } from "@/components/sequences/sequenceBranches";
 import { toast } from "sonner";
 
 function toTimeInput(value: unknown, fallback: string) {
@@ -16,15 +17,6 @@ function toTimeInput(value: unknown, fallback: string) {
     return `${String(value).padStart(2, "0")}:00`;
   }
   return fallback;
-}
-
-function buildSequenceEdges(nodes: FlowNodeData[]) {
-  const ordered = [...nodes].sort((a, b) => a.nodeOrder - b.nodeOrder);
-  return ordered.slice(0, -1).map((node, index) => ({
-    id: `edge-${node.id}-${ordered[index + 1].id}`,
-    source: node.id,
-    target: ordered[index + 1].id,
-  }));
 }
 
 export default function SequenceBuilder() {
@@ -44,10 +36,9 @@ export default function SequenceBuilder() {
     senderUserId: null,
   });
 
-  const [flowNodes, setFlowNodes] = useState<FlowNodeData[]>([]);
-  const [flowEdges, setFlowEdges] = useState<FlowEdgeData[]>([]);
+  const [branches, setBranches] = useState<SequenceBranch[]>(createEmptyBranches());
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("setup");
+  const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
 
   // Load existing sequence when editing
   useEffect(() => {
@@ -55,7 +46,7 @@ export default function SequenceBuilder() {
     (async () => {
       const { data: seq } = await supabase
         .from("sequences")
-        .select("*, sequence_nodes(id, node_order, node_type, label, sequence_actions(*)), sequence_steps(*)")
+        .select("*, sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_steps(*)")
         .eq("id", id)
         .single() as any;
       if (seq) {
@@ -70,57 +61,14 @@ export default function SequenceBuilder() {
           senderUserId: seq.sender_user_id || seq.created_by,
         });
 
-        const nodeRows = (seq.sequence_nodes || []) as any[];
-        if (nodeRows.length > 0) {
-          const mappedNodes: FlowNodeData[] = nodeRows
-            .sort((a: any, b: any) => a.node_order - b.node_order)
-            .map((node: any) => ({
-              id: node.id,
-              type: node.node_type === "end" ? "end" : "action",
-              label: node.label || "",
-              nodeOrder: node.node_order,
-              actions: (node.sequence_actions || []).map((action: any) => ({
-                id: action.id,
-                channel: action.channel,
-                messageBody: action.message_body || "",
-                baseDelayHours: Number(action.base_delay_hours) || 0,
-                delayIntervalMinutes: action.delay_interval_minutes || 0,
-                jiggleMinutes: action.jiggle_minutes || 0,
-                postConnectionHardcodedHours: action.post_connection_hardcoded_hours || 4,
-                respectSendWindow: action.respect_send_window !== false,
-              })),
-            }));
-          setFlowNodes(mappedNodes);
-          setFlowEdges(buildSequenceEdges(mappedNodes));
-        } else if (seq.sequence_steps?.length) {
-          const mappedNodes: FlowNodeData[] = (seq.sequence_steps as any[])
-            .sort((a: any, b: any) => a.step_order - b.step_order)
-            .map((step: any, index: number) => ({
-              id: step.id,
-              type: "action",
-              label: `Step ${index + 1}`,
-              nodeOrder: index + 1,
-              actions: [{
-                id: `${step.id}-action`,
-                channel: step.channel || step.step_type || "email",
-                messageBody: step.body || "",
-                baseDelayHours: Number(step.delay_hours) || 0,
-                delayIntervalMinutes: 0,
-                jiggleMinutes: 15,
-                postConnectionHardcodedHours: step.min_hours_after_connection || 4,
-                respectSendWindow: true,
-              }],
-            }));
-          setFlowNodes(mappedNodes);
-          setFlowEdges(buildSequenceEdges(mappedNodes));
-        }
+        const nodeRows = ((seq.sequence_nodes || []) as any[]).sort(compareSequenceNodes);
+        setBranches(hydrateBranchesFromNodes(nodeRows, seq.sequence_steps || []));
       }
     })();
   }, [id]);
 
-  const handleFlowChange = useCallback((nodes: FlowNodeData[], edges: FlowEdgeData[]) => {
-    setFlowNodes(nodes);
-    setFlowEdges(edges);
+  const handleFlowChange = useCallback((nextBranches: SequenceBranch[]) => {
+    setBranches(normalizeBranches(nextBranches));
   }, []);
 
   // Ask Joe to draft a message for an action
@@ -149,20 +97,24 @@ export default function SequenceBuilder() {
         if (setup.senderUserId) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("full_name, first_name, last_name")
+            .select("full_name, first_name, last_name, title")
             .eq("id", setup.senderUserId)
             .maybeSingle() as any;
           senderName =
             profile?.full_name ||
             `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
             "";
-          // Map sender to title (Emerald convention)
-          if (senderName.toLowerCase().includes("chris")) senderTitle = "President";
-          else if (senderName.toLowerCase().includes("nancy")) senderTitle = "Managing Director";
-          else if (senderName.toLowerCase().includes("ashley")) senderTitle = "Recruiter";
+          // Use title from profiles table if available, fall back to name-based lookup
+          senderTitle = profile?.title || "";
+          if (!senderTitle) {
+            const nameLower = senderName.toLowerCase();
+            if (nameLower.includes("chris")) senderTitle = "President";
+            else if (nameLower.includes("nancy")) senderTitle = "Managing Director";
+            else if (nameLower.includes("ashley")) senderTitle = "Recruiter";
+          }
         }
 
-        const totalSteps = flowNodes.filter((n) => n.type === "action").length;
+        const totalSteps = flattenBranchSteps(branches).length;
 
         toast.info("Joe is drafting...", { duration: 2000 });
 
@@ -202,7 +154,7 @@ export default function SequenceBuilder() {
         return "";
       }
     },
-    [setup, flowNodes],
+    [setup, branches],
   );
 
   const saveSequence = useCallback(async (status: "draft" | "active") => {
@@ -259,43 +211,39 @@ export default function SequenceBuilder() {
         await supabase.from("sequence_nodes").delete().eq("sequence_id", sequenceId);
       }
 
-      // 2. Create nodes
-      const nodeIdMap: Record<string, string> = {};
-      for (const node of flowNodes) {
+      // 2. Create nodes in deterministic branch order
+      for (const step of flattenBranchSteps(branches)) {
         const { data: dbNode, error } = await supabase
           .from("sequence_nodes")
           .insert({
             sequence_id: sequenceId,
-            node_order: node.nodeOrder,
-            node_type: node.type,
-            label: node.label,
+            node_order: step.nodeOrder,
+            node_type: "action",
+            label: step.label,
+            branch_id: step.branchId,
+            branch_step_order: step.branchStepOrder,
           } as any)
           .select("id")
           .single();
 
         if (error) throw error;
-        nodeIdMap[node.id] = dbNode.id;
 
         // 3. Create actions for action nodes
-        if (node.type === "action" && node.actions) {
-          for (const action of node.actions) {
-            const { error: actionErr } = await supabase.from("sequence_actions").insert({
-              node_id: dbNode.id,
-              channel: action.channel,
-              message_body: action.messageBody,
-              base_delay_hours: action.baseDelayHours,
-              delay_interval_minutes: action.delayIntervalMinutes,
-              jiggle_minutes: action.jiggleMinutes,
-              post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
-              respect_send_window: action.respectSendWindow,
-            } as any);
-            if (actionErr) throw new Error(`Action save failed (${node.label}): ${actionErr.message}`);
-          }
+        for (const action of step.actions || []) {
+          const { error: actionErr } = await supabase.from("sequence_actions").insert({
+            node_id: dbNode.id,
+            channel: action.channel,
+            message_body: action.messageBody,
+            base_delay_hours: action.baseDelayHours,
+            delay_interval_minutes: action.delayIntervalMinutes,
+            jiggle_minutes: action.jiggleMinutes,
+            post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
+            respect_send_window: action.respectSendWindow,
+            use_signature: action.channel === "email" ? (action.useSignature !== false) : false,
+          } as any);
+          if (actionErr) throw new Error(`Action save failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actionErr.message}`);
         }
       }
-
-      // No branches — flat delay-based model. All timing is on the actions.
-
       return sequenceId;
     } catch (err: any) {
       toast.error(`Save failed: ${err.message}`);
@@ -303,7 +251,7 @@ export default function SequenceBuilder() {
     } finally {
       setSaving(false);
     }
-  }, [setup, flowNodes, id, user]);
+  }, [setup, branches, id, user]);
 
   const handleSaveDraft = useCallback(async () => {
     const seqId = await saveSequence("draft");
@@ -348,17 +296,15 @@ export default function SequenceBuilder() {
 
           <TabsContent value="flow" className="mt-4">
             <FlowBuilder
-              initialNodes={flowNodes}
-              initialEdges={flowEdges}
+              initialBranches={branches}
               onChange={handleFlowChange}
               onAskJoe={handleAskJoe}
             />
             <div className="mt-4 flex justify-between items-center">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
               <div className="text-xs text-muted-foreground">
-                {flowNodes.filter((n) => n.type === "action").length} action node(s),{" "}
-                {flowNodes.filter((n) => n.type === "action").reduce((sum, n) => sum + (n.actions?.length || 0), 0)}{" "}
-                total action(s)
+                {flattenBranchSteps(branches).length} total step(s),{" "}
+                {flattenBranchSteps(branches).reduce((sum, step) => sum + (step.actions?.length || 0), 0)} total action(s)
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
@@ -373,8 +319,7 @@ export default function SequenceBuilder() {
             <div className="max-w-2xl">
               <SequenceReview
                 setup={setup}
-                nodes={flowNodes}
-                edges={flowEdges}
+                branches={branches}
                 onSaveDraft={handleSaveDraft}
                 onActivate={handleActivate}
                 saving={saving}
