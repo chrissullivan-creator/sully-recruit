@@ -2,12 +2,17 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
 
 /**
- * One-shot backfill: pull historical Outlook calendar events (past 6 months)
- * and sync them as meeting tasks with people tagging.
+ * One-shot backfill: pull historical Outlook calendar events and sync them
+ * as meeting tasks with people tagging.
  *
  * Trigger manually from Trigger.dev Dashboard or via API:
  *   Task: backfill-calendar-events
  *   Payload: { monthsBack?: number }  (default 6)
+ *
+ * Token sources (in order):
+ *   1. Per-user delegated tokens from user_integrations (microsoft_oauth)
+ *   2. App-level client_credentials → queries each team member's mailbox
+ *      via /users/{email}/calendarview
  *
  * Two passes:
  *   1. Pull historical events from Graph API → create meeting tasks + tag people
@@ -25,11 +30,17 @@ export const backfillCalendarEvents = task({
     let existingRelinked = 0;
     let accountsProcessed = 0;
 
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setMonth(startDate.getMonth() - monthsBack);
+
+    // Track which user emails we've already processed (avoid double-syncing)
+    const processedEmails = new Set<string>();
+
     // ════════════════════════════════════════════════════════════════
-    // PASS 1: Pull historical events from Microsoft Graph
+    // SOURCE 1: Per-user delegated tokens from user_integrations
     // ════════════════════════════════════════════════════════════════
 
-    // Get all active Microsoft OAuth users
     const { data: userIntegrations } = await supabase
       .from("user_integrations")
       .select("user_id, config, is_active")
@@ -52,81 +63,56 @@ export const backfillCalendarEvents = task({
         if (!accessToken) continue;
       }
 
+      // Track this email so we don't double-process with app credentials
+      if (config.email_address) processedEmails.add(config.email_address.toLowerCase());
+
       accountsProcessed++;
-      logger.info(`Processing calendar for user ${userId}`);
+      const baseUrl = `https://graph.microsoft.com/v1.0/me/calendarview`;
+      const result = await syncCalendarForUser(supabase, userId, accessToken, baseUrl, startDate, now);
+      eventsSynced += result.synced;
+      eventsMatched += result.matched;
+    }
 
-      // Pull events in monthly chunks to stay within Graph API limits
-      const now = new Date();
-      const startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - monthsBack);
+    // ════════════════════════════════════════════════════════════════
+    // SOURCE 2: App-level client_credentials for team mailboxes
+    // ════════════════════════════════════════════════════════════════
 
-      let nextLink: string | null = null;
-      let pageUrl =
-        `https://graph.microsoft.com/v1.0/me/calendarview` +
-        `?startDateTime=${startDate.toISOString()}&endDateTime=${now.toISOString()}` +
-        `&$select=id,iCalUId,subject,start,end,attendees,bodyPreview,location,onlineMeeting,isOnlineMeeting,onlineMeetingUrl` +
-        `&$top=100&$orderby=start/dateTime`;
+    const appToken = await getAppLevelToken();
+    if (appToken) {
+      // Get all team members from profiles
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, email, full_name")
+        .not("email", "is", null);
 
-      let totalEvents = 0;
+      for (const profile of profiles || []) {
+        const email = (profile.email || "").toLowerCase();
+        if (!email || processedEmails.has(email)) continue;
 
-      do {
-        const url = nextLink || pageUrl;
-        try {
-          const resp = await fetch(url, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
+        // Use /users/{email}/calendarview with app-level token
+        const baseUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/calendarview`;
 
-          if (resp.status === 401) {
-            // Try refresh once
-            if (refreshToken) {
-              accessToken = await refreshAccessToken(supabase, userId, refreshToken);
-              if (!accessToken) break;
-              // Retry this page
-              const retryResp = await fetch(url, {
-                headers: { Authorization: `Bearer ${accessToken}` },
-              });
-              if (!retryResp.ok) break;
-              const retryData = await retryResp.json();
-              nextLink = retryData["@odata.nextLink"] || null;
-              const result = await processEventBatch(supabase, userId, retryData.value || []);
-              eventsSynced += result.synced;
-              eventsMatched += result.matched;
-              totalEvents += (retryData.value || []).length;
-              continue;
-            }
-            break;
-          }
+        logger.info(`Syncing calendar for ${email} via app credentials`);
+        accountsProcessed++;
 
-          if (!resp.ok) {
-            logger.warn(`Graph API ${resp.status} for user ${userId}`);
-            break;
-          }
-
-          const data = await resp.json();
-          const events = data.value || [];
-          nextLink = data["@odata.nextLink"] || null;
-          totalEvents += events.length;
-
-          const result = await processEventBatch(supabase, userId, events);
-          eventsSynced += result.synced;
-          eventsMatched += result.matched;
-
-          // Rate limit: small delay between pages
-          if (nextLink) await delay(500);
-        } catch (err: any) {
-          logger.warn(`Graph error for user ${userId}: ${err.message}`);
-          break;
+        const result = await syncCalendarForUser(supabase, profile.id, appToken, baseUrl, startDate, now);
+        if (result.synced > 0 || result.matched > 0) {
+          logger.info(`${email}: synced ${result.synced} events, matched ${result.matched} people`);
         }
-      } while (nextLink);
+        eventsSynced += result.synced;
+        eventsMatched += result.matched;
 
-      logger.info(`User ${userId}: scanned ${totalEvents} events`);
+        // Rate limit between mailboxes
+        await delay(1000);
+      }
+    } else {
+      logger.warn("No app-level token available — skipping team mailbox scan");
     }
 
     // ════════════════════════════════════════════════════════════════
     // PASS 2: Re-link existing calendar tasks missing attendees
     // ════════════════════════════════════════════════════════════════
 
-    // Find tasks with external_id (came from calendar) but no meeting_attendees
     const { data: orphanTasks } = await supabase
       .from("tasks")
       .select("id, title, description, external_id, created_by")
@@ -312,6 +298,101 @@ async function processEventBatch(
   }
 
   return { synced, matched };
+}
+
+// ── Fetch all calendar events for a single user ──────────────────────────
+
+async function syncCalendarForUser(
+  supabase: any,
+  userId: string,
+  accessToken: string,
+  calendarBaseUrl: string,
+  startDate: Date,
+  endDate: Date,
+): Promise<{ synced: number; matched: number }> {
+  let synced = 0;
+  let matched = 0;
+  let totalEvents = 0;
+
+  const pageUrl =
+    `${calendarBaseUrl}` +
+    `?startDateTime=${startDate.toISOString()}&endDateTime=${endDate.toISOString()}` +
+    `&$select=id,iCalUId,subject,start,end,attendees,bodyPreview,location,onlineMeeting,isOnlineMeeting,onlineMeetingUrl` +
+    `&$top=100&$orderby=start/dateTime`;
+
+  let nextLink: string | null = null;
+
+  do {
+    const url = nextLink || pageUrl;
+    try {
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!resp.ok) {
+        const status = resp.status;
+        if (status === 404) {
+          logger.info(`Mailbox not found (404) — skipping`);
+          break;
+        }
+        logger.warn(`Graph API ${status} for calendar fetch`);
+        break;
+      }
+
+      const data = await resp.json();
+      const events = data.value || [];
+      nextLink = data["@odata.nextLink"] || null;
+      totalEvents += events.length;
+
+      const result = await processEventBatch(supabase, userId, events);
+      synced += result.synced;
+      matched += result.matched;
+
+      if (nextLink) await delay(300);
+    } catch (err: any) {
+      logger.warn(`Graph error: ${err.message}`);
+      break;
+    }
+  } while (nextLink);
+
+  if (totalEvents > 0) {
+    logger.info(`Scanned ${totalEvents} events, synced ${synced}, matched ${matched}`);
+  }
+
+  return { synced, matched };
+}
+
+// ── App-level token (client_credentials grant) ─────────────────────────
+
+async function getAppLevelToken(): Promise<string | null> {
+  try {
+    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
+
+    const resp = await fetch(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: "https://graph.microsoft.com/.default",
+          grant_type: "client_credentials",
+        }),
+      },
+    );
+
+    if (!resp.ok) {
+      logger.error("App token request failed", { status: resp.status });
+      return null;
+    }
+
+    const data = await resp.json();
+    return data.access_token;
+  } catch (err: any) {
+    logger.error(`App token error: ${err.message}`);
+    return null;
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
