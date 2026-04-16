@@ -73,11 +73,15 @@ function normalizeApplicant(raw: any): Applicant {
   };
 }
 
-const STAGE_ORDER = ['uncontacted', 'contacted', 'replied', 'unknown'];
+const STAGE_ORDER = ['uncontacted', 'contacted', 'replied', 'in_review', 'offer', 'hired', 'rejected', 'unknown'];
 const STAGE_COLORS: Record<string, string> = {
   uncontacted: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   contacted: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   replied: 'bg-green-500/10 text-green-400 border-green-500/20',
+  in_review: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  offer: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  hired: 'bg-success/10 text-success border-success/20',
+  rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
   unknown: 'bg-muted text-muted-foreground border-border',
 };
 

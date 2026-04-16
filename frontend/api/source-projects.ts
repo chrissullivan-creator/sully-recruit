@@ -110,32 +110,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
 
-      // Step 1: Fetch project metadata
+      // Fetch project detail — applicants are embedded in the response
       const metaParams = new URLSearchParams({ account_id });
       let projectData: any = null;
+      let applicants: any[] = [];
+
       try {
         const metaResp = await fetch(
           `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${metaParams}`,
-          { headers },
+          { headers }
         );
-        if (metaResp.ok) projectData = await metaResp.json();
-      } catch { /* project metadata is optional */ }
-
-      // Step 2: Fetch applicants via the paginated jobs/applicants endpoint
-      let applicants: any[] = [];
-      try {
-        applicants = await fetchAllPages(`${baseUrl}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants`);
-        if (res.headersSent) return;
+        if (metaResp.ok) {
+          projectData = await metaResp.json();
+          // Applicants come embedded in project detail
+          const embedded = projectData?.applicants ?? projectData?.candidates
+            ?? projectData?.members ?? projectData?.profiles ?? projectData?.items
+            ?? projectData?.results ?? [];
+          applicants = Array.isArray(embedded) ? embedded : [];
+        }
       } catch (err: any) {
-        // If jobs endpoint fails (e.g. 404), fall back to extracting from project detail
-        console.error(`Jobs applicants endpoint failed: ${err.message}`);
-        if (projectData) {
-          console.log("Falling back to project detail. Response keys:", Object.keys(projectData));
-          applicants = projectData.applicants ?? projectData.candidates ?? projectData.items
-            ?? projectData.members ?? projectData.profiles ?? projectData.results ?? [];
-          if (!Array.isArray(applicants)) applicants = [];
+        console.error("Failed to fetch project detail:", err.message);
+      }
+
+      // If no embedded applicants, try the dedicated applicants sub-endpoint
+      if (applicants.length === 0) {
+        try {
+          const appParams = new URLSearchParams({ account_id });
+          if (cursor) appParams.set("cursor", cursor);
+          const appResp = await fetch(
+            `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/applicants?${appParams}`,
+            { headers }
+          );
+          if (appResp.ok) {
+            const appData = await appResp.json();
+            applicants = appData?.items ?? appData?.results ?? (Array.isArray(appData) ? appData : []);
+          } else {
+            console.error("Applicants sub-endpoint failed:", appResp.status, await appResp.text());
+          }
+        } catch (err: any) {
+          console.error("Failed to fetch project applicants:", err.message);
         }
       }
+
+      // Normalize stage values from Recruiter pipeline stages to display stages
+      applicants = applicants.map((a: any) => {
+        const rawStage = (a.stage || a.status || a.pipeline_stage || a.pipelineStage || "unknown")
+          .toLowerCase().replace(/_/g, " ");
+        let stage = "unknown";
+        if (rawStage.includes("applied") || rawStage.includes("new") || rawStage.includes("uncontact")) stage = "uncontacted";
+        else if (rawStage.includes("contact") || rawStage.includes("reach") || rawStage.includes("sent") || rawStage.includes("inmail")) stage = "contacted";
+        else if (rawStage.includes("reply") || rawStage.includes("respond") || rawStage.includes("interest")) stage = "replied";
+        else if (rawStage.includes("screen") || rawStage.includes("interview") || rawStage.includes("review")) stage = "in_review";
+        else if (rawStage.includes("offer")) stage = "offer";
+        else if (rawStage.includes("hired") || rawStage.includes("place")) stage = "hired";
+        else if (rawStage.includes("reject") || rawStage.includes("decline") || rawStage.includes("withdrawn")) stage = "rejected";
+        return { ...a, stage };
+      });
 
       return res.status(200).json({ items: applicants, project: projectData });
     }

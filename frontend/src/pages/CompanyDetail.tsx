@@ -444,13 +444,31 @@ const CompanyDetail = () => {
         <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
-              {(company as any).logo_url ? (
-                <img src={(company as any).logo_url} alt={company.name} className="h-14 w-14 rounded-full object-cover mb-2" />
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">
-                  <Building className="h-6 w-6" />
+              {(() => {
+                const logoSrc = company.logo_url || (company.domain ? `https://logo.clearbit.com/${company.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}` : null);
+                return logoSrc ? (
+                  <img
+                    src={logoSrc}
+                    alt={company.name}
+                    className="h-14 w-14 rounded-full object-contain bg-white border border-border mb-2"
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">
+                    <Building className="h-6 w-6" />
+                  </div>
+                );
+              })()}
+              <div className="flex items-center justify-center gap-4 text-center mt-2">
+                <div>
+                  <p className="text-base font-bold text-foreground">{contacts.length}</p>
+                  <p className="text-[10px] text-muted-foreground">Contacts</p>
                 </div>
-              )}
+                <div>
+                  <p className="text-base font-bold text-foreground">{companyJobs.length}</p>
+                  <p className="text-[10px] text-muted-foreground">Jobs</p>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -467,6 +485,7 @@ const CompanyDetail = () => {
               <EditableField label="Domain" value={company.domain} onSave={v => updateField('domain', v)} placeholder="company.com" />
               <EditableField label="Website" value={company.website} onSave={v => updateField('website', v)} placeholder="https://..." />
               <EditableField label="LinkedIn" value={company.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/company/..." />
+              <EditableField label="Logo URL" value={company.logo_url} onSave={v => updateField('logo_url', v)} placeholder="https://..." />
             </div>
 
             <div className="space-y-2">

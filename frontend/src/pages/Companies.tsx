@@ -3,11 +3,10 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
-import { Plus, Search, Globe, MapPin, Briefcase, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -99,10 +98,24 @@ const Companies = () => {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <CompanyLogo domain={company.domain} name={company.name} size="md" />
+                    {(() => {
+                      const logoSrc = company.logo_url || (company.domain ? `https://logo.clearbit.com/${company.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}` : null);
+                      return logoSrc ? (
+                        <img
+                          src={logoSrc}
+                          alt=""
+                          className="h-7 w-7 rounded object-contain bg-white border border-border shrink-0"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="h-7 w-7 rounded bg-accent/10 flex items-center justify-center shrink-0">
+                          <Building className="h-4 w-4 text-accent" />
+                        </div>
+                      );
+                    })()}
                     <div>
                       <h3 className="text-sm font-semibold text-foreground">{company.name}</h3>
-                      <p className="text-xs text-muted-foreground">{company.company_type ?? '-'}</p>
+                      <p className="text-xs text-muted-foreground">{company.industry || company.company_type || '-'}</p>
                     </div>
                   </div>
                   {company.company_type && (
