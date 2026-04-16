@@ -1,16 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
-  getOrCreateResumePipeline,
-  retrieveFromCloud,
-  fallbackTextSearch,
   createSupabaseAdmin,
-} from "./lib/llamaindex";
+  enrichMatches,
+  searchResumeEmbeddings,
+} from "./lib/voyage";
 
 /**
  * POST /api/match-candidates-to-job
- * Streams candidate match results for a job using LlamaCloud retrieval + Claude scoring.
- * No Voyage dependency — all retrieval goes through LlamaCloud managed pipeline.
- * Response format: SSE with data.content chunks.
+ * Streams candidate match results for a job using Voyage + pgvector retrieval
+ * and Claude scoring. SSE response with data.content chunks.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -43,7 +41,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     write("Searching candidate database...\n\n");
 
-    // Build job context for matching
     const jobContext = [
       `Title: ${job_title}`,
       job_company && `Company: ${job_company}`,
@@ -52,60 +49,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       job_description && `Description: ${job_description.slice(0, 2000)}`,
     ].filter(Boolean).join("\n");
 
-    // ── LlamaCloud retrieval ───────────────────────────────────────────
-    let candidateContext = "";
-    try {
-      const pipelineId = await getOrCreateResumePipeline();
-      const searchText = `${job_title} ${job_company || ""} ${job_description || ""}`.slice(0, 4000);
-      const cloudResults = await retrieveFromCloud(pipelineId, searchText, 50);
+    const searchText = `${job_title} ${job_company || ""} ${job_description || ""}`.slice(0, 4000);
+    const matches = await searchResumeEmbeddings(supabase, searchText, 30);
+    const enriched = await enrichMatches(supabase, matches);
 
-      if (cloudResults.length > 0) {
-        // Deduplicate by candidate_id, keep best match
-        const seen = new Map<string, (typeof cloudResults)[0]>();
-        for (const result of cloudResults) {
-          const candId = result.metadata?.candidate_id;
-          if (candId && !seen.has(candId)) {
-            seen.set(candId, result);
-          }
-        }
-
-        const topIds = Array.from(seen.keys()).slice(0, 30);
-        const { data: candidates } = await supabase
-          .from("candidates")
-          .select("id, full_name, current_title, current_company, location, email, status, joe_says")
-          .in("id", topIds);
-
-        if (candidates?.length) {
-          candidateContext = candidates
-            .map((c) => {
-              const result = seen.get(c.id);
-              return `- ${c.full_name} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status}\n  Resume excerpt: ${result?.text?.slice(0, 300) || "N/A"}`;
-            })
-            .join("\n");
-
-          write(`Found ${candidates.length} potential matches. Analyzing...\n\n`);
-        }
-      }
-    } catch (err) {
-      console.warn("LlamaCloud retrieval failed, falling back:", (err as Error).message);
+    if (enriched.length === 0) {
+      write("No matching candidates found in the database.\n");
+      return res.end();
     }
 
-    // ── Fallback: text search ───────────────────────────────────────
-    if (!candidateContext) {
-      const results = await fallbackTextSearch(supabase, `${job_title} ${job_company || ""}`, 30);
+    write(`Found ${enriched.length} potential matches. Analyzing...\n\n`);
 
-      if (results.length > 0) {
-        candidateContext = results
-          .map((r) => `- ${r.content}`)
-          .join("\n");
-        write(`Found ${results.length} candidates. Analyzing...\n\n`);
-      } else {
-        write("No matching candidates found in the database.\n");
-        return res.end();
-      }
-    }
+    const candidateContext = enriched
+      .map((c) => {
+        return `- ${c.full_name || "Unknown"} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status || "?"}\n  Resume excerpt: ${(c.match.content || "").slice(0, 300)}`;
+      })
+      .join("\n");
 
-    // ── Stream Claude's ranking ────────────────────────────────────────
     const claudeResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -141,8 +101,7 @@ Be direct and opinionated. Skip candidates that are clearly not a fit.`,
     });
 
     if (!claudeResp.ok) {
-      const errText = await claudeResp.text();
-      writeError(`Claude API error: ${errText}`);
+      writeError(`Claude API error: ${await claudeResp.text()}`);
       return res.end();
     }
 
@@ -154,15 +113,12 @@ Be direct and opinionated. Skip candidates that are clearly not a fit.`,
 
     const decoder = new TextDecoder();
     let buffer = "";
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-
       for (const line of lines) {
         if (line.startsWith("data: ") && !line.includes("[DONE]")) {
           try {

@@ -1,6 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
-import { buildProfileText } from "./lib/resume-parsing";
+import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
@@ -107,7 +107,7 @@ export const resumeIngestion = task({
       await supabase.from("candidates").update(updates).eq("id", candidateId);
     }
 
-    // ── 6. Upload to LlamaCloud for search indexing ────────────────────
+    // ── 6. Embed full profile with Voyage and store in resume_embeddings ──
     if (candidateId && rawText.length > 50) {
       try {
         const { data: candidate } = await supabase
@@ -118,34 +118,29 @@ export const resumeIngestion = task({
 
         if (candidate) {
           const profileText = buildProfileText(candidate, rawText, parsedJson);
-          const { getOrCreateResumePipeline, uploadResumeToCloud } = await import("../../api/lib/llamaindex");
-          const pipelineId = await getOrCreateResumePipeline();
-          const candidateName = (candidate as any).full_name || "";
+          const embedding = await getVoyageEmbedding(profileText);
 
-          // Upload profile + resume chunks for richer retrieval
-          const chunks = [profileText.slice(0, 2000), ...chunkText(rawText, 512)].filter(c => c.trim().length > 30);
-          await uploadResumeToCloud(pipelineId, candidateId, resumeId, chunks, candidateName);
-
-          // Store profile summary in resume_embeddings for fallback text search
           await supabase
             .from("resume_embeddings")
             .delete()
             .eq("candidate_id", candidateId)
             .eq("embed_type", "full_profile");
+
           await supabase.from("resume_embeddings").insert({
             candidate_id: candidateId,
             resume_id: resumeId,
+            embedding: JSON.stringify(embedding),
             source_text: profileText.slice(0, 2000),
             chunk_text: profileText.slice(0, 2000),
             chunk_index: 0,
             embed_type: "full_profile",
-            embed_model: "llamacloud",
+            embed_model: "voyage-finance-2",
           });
 
-          logger.info("Uploaded to LlamaCloud", { chunks: chunks.length, pipelineId, candidateId });
+          logger.info("Embedded resume with Voyage", { candidateId });
         }
       } catch (err: any) {
-        logger.warn("LlamaCloud upload failed, will retry on next ingestion", { error: err.message });
+        logger.warn("Voyage embedding failed, will retry on next ingestion", { error: err.message });
       }
     }
 
@@ -281,21 +276,5 @@ async function parseWithClaude(
   }
 
   return null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TEXT CHUNKING
-// ─────────────────────────────────────────────────────────────────────────────
-function chunkText(text: string, maxWords: number): string[] {
-  const words = text.split(/\s+/);
-  const chunks: string[] = [];
-
-  for (let i = 0; i < words.length; i += maxWords) {
-    // Overlap by 50 words for context continuity
-    const start = Math.max(0, i - 50);
-    chunks.push(words.slice(start, i + maxWords).join(" "));
-  }
-
-  return chunks.filter(c => c.trim().length > 20);
 }
 
