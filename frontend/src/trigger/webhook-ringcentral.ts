@@ -30,9 +30,19 @@ export const processRingcentralEvent = task({
     const eventType = eventBody.type || eventBody.event || "";
 
     const fromPhone = eventBody.from?.phoneNumber || eventBody.from?.extensionNumber || "";
+    const fromExtension = eventBody.from?.extensionNumber || "";
     const toPhone = eventBody.to?.[0]?.phoneNumber || eventBody.to?.phoneNumber || "";
+    const toExtension = eventBody.to?.[0]?.extensionNumber || eventBody.to?.extensionNumber || "";
     const direction = eventBody.direction === "Inbound" ? "inbound" : "outbound";
     const otherPhone = direction === "inbound" ? fromPhone : toPhone;
+    // User-side identity (which Sully user this event belongs to)
+    const userPhone = direction === "inbound" ? toPhone : fromPhone;
+    const userExtension = direction === "inbound" ? toExtension : fromExtension;
+
+    const isSmsEvent = eventType.includes("SMS") || eventBody.messageType === "SMS";
+
+    // Resolve owner_id from integration_accounts (provider='sms', match extension or phone).
+    const ownerId = await lookupOwnerId(supabase, userExtension, userPhone);
 
     if (!otherPhone) {
       logger.info("No phone number in event — skipping");
@@ -42,12 +52,54 @@ export const processRingcentralEvent = task({
     const normalizedPhone = otherPhone.replace(/[^0-9+]/g, "");
     const match = await matchByPhone(supabase, normalizedPhone);
 
+    // ── CALL event with no match: still log as Unknown (never drop) ────
+    if (!match && !isSmsEvent) {
+      const { data: callLog, error: callLogError } = await supabase
+        .from("call_logs")
+        .insert({
+          linked_entity_id: null,
+          linked_entity_type: null,
+          linked_entity_name: "Unknown",
+          direction,
+          phone_number: otherPhone,
+          status: eventBody.result || eventBody.status || "completed",
+          duration_seconds: eventBody.duration || 0,
+          started_at: eventBody.startTime || payload.receivedAt,
+          ended_at: eventBody.endTime || null,
+          external_call_id: eventBody.id?.toString(),
+          owner_id: ownerId,
+        } as any)
+        .select("id")
+        .single();
+
+      if (callLogError) {
+        logger.error("Failed to insert unmatched call_log", { error: callLogError.message });
+      } else {
+        logger.info("Logged unmatched call", { callLogId: callLog?.id, phone: otherPhone, ownerId });
+      }
+
+      const isCompletedCall =
+        eventBody.result === "Completed" ||
+        eventBody.result === "Call connected" ||
+        (eventBody.duration && eventBody.duration > 30);
+
+      if (isCompletedCall && callLog?.id) {
+        await processCallDeepgram.trigger(
+          { call_log_id: callLog.id },
+          { delay: "30s" },
+        );
+      }
+
+      return { action: "logged_unknown", phone: otherPhone, callLogId: callLog?.id };
+    }
+
     if (!match) {
-      logger.info("No matching entity for phone", { phone: normalizedPhone });
+      // SMS with no match — can't attach to conversation; skip.
+      logger.info("No matching entity for SMS", { phone: normalizedPhone });
       return { action: "no_match", phone: normalizedPhone };
     }
 
-    if (eventType.includes("SMS") || eventBody.messageType === "SMS") {
+    if (isSmsEvent) {
       // ── SMS event ─────────────────────────────────────────────────
       await supabase.from("messages").insert({
         conversation_id: `rc_sms_${match.entityId}`,
@@ -121,6 +173,7 @@ export const processRingcentralEvent = task({
           started_at: eventBody.startTime || payload.receivedAt,
           ended_at: eventBody.endTime || null,
           external_call_id: eventBody.id?.toString(),
+          owner_id: ownerId,
         } as any)
         .select("id")
         .single();
@@ -129,7 +182,7 @@ export const processRingcentralEvent = task({
         logger.error("Failed to insert call_log", { error: callLogError.message });
       }
 
-      logger.info("Call logged", { entityId: match.entityId, callLogId: callLog?.id });
+      logger.info("Call logged", { entityId: match.entityId, callLogId: callLog?.id, ownerId });
 
       // ── Trigger Deepgram transcription for completed calls ≥ 30s ──
       const isCompletedCall =
@@ -180,6 +233,36 @@ export const processRingcentralEvent = task({
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OWNER LOOKUP — map RC extension or phone to Sully user_id
+// ─────────────────────────────────────────────────────────────────────────────
+async function lookupOwnerId(
+  supabase: any,
+  extension: string,
+  phone: string,
+): Promise<string | null> {
+  if (!extension && !phone) return null;
+
+  const filters: string[] = [];
+  if (extension) filters.push(`rc_extension.eq.${extension}`);
+  if (phone) filters.push(`rc_phone_number.eq.${phone}`);
+  if (filters.length === 0) return null;
+
+  const { data, error } = await supabase
+    .from("integration_accounts")
+    .select("owner_user_id")
+    .eq("provider", "sms")
+    .or(filters.join(","))
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    logger.warn("owner lookup failed", { error: error.message, extension, phone });
+    return null;
+  }
+  return data?.owner_user_id ?? null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PHONE MATCHING — uses SQL queries instead of fetching all records
