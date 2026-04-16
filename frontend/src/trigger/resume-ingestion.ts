@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey, getVoyageKey } from "./lib/supabase";
+import { buildProfileText } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
@@ -40,7 +41,7 @@ export const resumeIngestion = task({
     // Update status to processing
     await supabase
       .from("resumes")
-      .update({ parse_status: "processing" } as any)
+      .update({ parsing_status: "processing" })
       .eq("id", resumeId);
 
     // ── 1. Download file from Supabase Storage ──────────────────────
@@ -70,9 +71,9 @@ export const resumeIngestion = task({
       .update({
         raw_text: rawText,
         parsed_json: parsedJson,
-        parse_status: "completed",
+        parsing_status: "completed",
         parser: "trigger-claude",
-      } as any)
+      })
       .eq("id", resumeId);
 
     // ── 5. Update candidate with parsed fields ──────────────────────
@@ -106,28 +107,39 @@ export const resumeIngestion = task({
       await supabase.from("candidates").update(updates).eq("id", candidateId);
     }
 
-    // ── 6. Embed with Voyage AI ─────────────────────────────────────
-    if (rawText.length > 50) {
-      const voyageKey = await getVoyageKey();
-      const chunks = chunkText(rawText, 512); // ~512 token chunks
-      logger.info("Embedding chunks", { count: chunks.length });
+    // ── 6. Embed full_profile with Voyage AI ──────────────────────────
+    if (candidateId) {
+      const { data: candidate } = await supabase
+        .from("candidates")
+        .select("id, full_name, current_title, current_company, location_text, skills")
+        .eq("id", candidateId)
+        .single();
 
-      // Delete existing chunks for this resume (idempotent re-runs)
-      await supabase.from("resume_chunks").delete().eq("resume_id", resumeId);
-
-      for (let i = 0; i < chunks.length; i++) {
-        const embedding = await embedWithVoyage(chunks[i], voyageKey);
-        if (embedding) {
-          await supabase.from("resume_chunks").insert({
-            resume_id: resumeId,
-            candidate_id: candidateId,
-            chunk_index: i,
-            content: chunks[i],
-            embedding: embedding,
-          } as any);
+      if (candidate) {
+        const profileText = buildProfileText(candidate, rawText, parsedJson);
+        if (profileText.trim().length >= 50) {
+          const voyageKey = await getVoyageKey();
+          const embedding = await embedWithVoyage(profileText, voyageKey);
+          if (embedding) {
+            await supabase
+              .from("resume_embeddings")
+              .delete()
+              .eq("candidate_id", candidateId)
+              .eq("embed_type", "full_profile");
+            await supabase.from("resume_embeddings").insert({
+              candidate_id: candidateId,
+              resume_id: resumeId,
+              embedding: JSON.stringify(embedding),
+              source_text: profileText.slice(0, 2000),
+              chunk_text: profileText.slice(0, 2000),
+              chunk_index: 0,
+              embed_type: "full_profile",
+              embed_model: "voyage-finance-2",
+            });
+            logger.info("Stored full_profile embedding", { candidateId });
+          }
         }
       }
-      logger.info("Stored embeddings", { chunks: chunks.length });
     }
 
     // Chain-trigger Joe Says refresh after resume parsing
@@ -291,18 +303,3 @@ async function embedWithVoyage(text: string, apiKey: string): Promise<number[] |
   return data.data?.[0]?.embedding ?? null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TEXT CHUNKING
-// ─────────────────────────────────────────────────────────────────────────────
-function chunkText(text: string, maxWords: number): string[] {
-  const words = text.split(/\s+/);
-  const chunks: string[] = [];
-
-  for (let i = 0; i < words.length; i += maxWords) {
-    // Overlap by 50 words for context continuity
-    const start = Math.max(0, i - 50);
-    chunks.push(words.slice(start, i + maxWords).join(" "));
-  }
-
-  return chunks.filter(c => c.trim().length > 20);
-}
