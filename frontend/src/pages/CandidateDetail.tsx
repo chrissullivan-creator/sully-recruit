@@ -1293,6 +1293,13 @@ const CandidateDetail = () => {
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
+                <EditableTextarea label="Fun Facts / Personal" value={c.fun_facts} onSave={v => updateField('fun_facts', v)} placeholder="Hobbies, interests, personal connection points..." rows={2} />
+                <div className="grid grid-cols-2 gap-4">
+                  <EditableField label="Visa Status" value={c.visa_status} onSave={v => updateField('visa_status', v)} placeholder="e.g. US Citizen, H-1B, Green Card" />
+                  <EditableField label="Notice Period" value={c.notice_period} onSave={v => updateField('notice_period', v)} placeholder="e.g. 2 weeks, 30 days" />
+                </div>
+                <EditableTextarea label="Where Interviewed" value={c.where_interviewed} onSave={v => updateField('where_interviewed', v)} placeholder="Firms / companies currently interviewing at..." rows={2} />
+                <EditableTextarea label="Where Submitted" value={c.where_submitted} onSave={v => updateField('where_submitted', v)} placeholder="Firms / companies submitted to by other recruiters..." rows={2} />
 
                 {/* ── Work History ──────────────────────────────────────── */}
                 <div className="border-t border-border pt-5">

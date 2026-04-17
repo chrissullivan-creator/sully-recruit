@@ -225,15 +225,20 @@ export const processCallDeepgram = task({
             system: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
 
 Return ONLY valid JSON in this exact shape:
-{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null}
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null}
 
 Field rules:
 - summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a transcript dump.
 - action_items: bulleted list of concrete next steps for the recruiter. Use "- " prefix on each line. If genuinely none, return "- None".
-- notes: free-form recruiter color — verbatim quotes worth remembering, soft signals, personality observations, blockers. Different from summary. Null only if there is genuinely nothing to add.
+- notes: detailed back-of-resume intel — products, business lines, divisions, function, motivations, verbatim quotes worth remembering, soft signals, personality observations, blockers. Different from summary. Null only if there is genuinely nothing to add.
 - reason_for_leaving: short phrase, null if not discussed.
 - current_title / current_company: short strings, null if not stated.
-- current_base, current_bonus, target_base, target_bonus: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given (e.g. "160-170k"), return the midpoint as an integer (165000). If only a vague signal (e.g. "comfortable in the 200s"), return your best single-integer estimate. Null if not discussed at all.`,
+- current_base, current_bonus, target_base, target_bonus: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given (e.g. "160-170k"), return the midpoint as an integer (165000). If only a vague signal (e.g. "comfortable in the 200s"), return your best single-integer estimate. Null if not discussed at all.
+- fun_facts: hobbies, interests, personal details, family, connection points — anything to build rapport later. Null if nothing personal came up.
+- visa_status: e.g. "US Citizen", "H-1B", "Green Card", "F-1/OPT". Null if not discussed.
+- where_interviewed: firms/companies they mentioned currently interviewing at (comma-separated or short prose). Null if not discussed.
+- where_submitted: firms/companies they mentioned being submitted to by other recruiters. Null if not discussed.
+- notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.`,
             messages: [{ role: "user", content: `Transcript:\n${transcript.slice(0, 30000)}` }],
           }),
         });
@@ -308,9 +313,13 @@ Field rules:
       if (entityId) { clUpdate.linked_entity_type = entityType; clUpdate.linked_entity_id = entityId; }
       await supabase.from("call_logs").update(clUpdate).eq("id", cl.id);
 
-      // Update candidate fields
+      // Update candidate fields (only promote to back_of_resume for calls >= 60s)
       if (entityType === "candidate" && entityId) {
-        const updates: Record<string, any> = { updated_at: now, status: "back_of_resume" };
+        const updates: Record<string, any> = { updated_at: now };
+        if ((cl.duration_seconds ?? 0) >= 60) {
+          updates.status = "back_of_resume";
+          if (cl.owner_id) updates.owner_user_id = cl.owner_id;
+        }
         if (intel.reason_for_leaving) updates.reason_for_leaving = intel.reason_for_leaving;
         if (intel.current_base) updates.current_base_comp = intel.current_base;
         if (intel.current_bonus) updates.current_bonus_comp = intel.current_bonus;
@@ -319,8 +328,13 @@ Field rules:
         if (intel.current_title) updates.current_title = intel.current_title;
         if (intel.current_company) updates.current_company = intel.current_company;
         if (intel.notes) updates.back_of_resume_notes = intel.notes;
+        if (intel.fun_facts) updates.fun_facts = intel.fun_facts;
+        if (intel.visa_status) updates.visa_status = intel.visa_status;
+        if (intel.where_interviewed) updates.where_interviewed = intel.where_interviewed;
+        if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
+        if (intel.notice_period) updates.notice_period = intel.notice_period;
         await supabase.from("candidates").update(updates).eq("id", entityId);
-        logger.info("Updated candidate", { name: entityName });
+        logger.info("Updated candidate", { name: entityName, duration: cl.duration_seconds, statusFlip: (cl.duration_seconds ?? 0) >= 60 });
       }
 
       logger.info("Processed", {
