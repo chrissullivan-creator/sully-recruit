@@ -53,7 +53,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             email,
             phone,
             status: 'new',
-            owner_id: userId,
+            owner_user_id: userId,
           },
         ]);
 

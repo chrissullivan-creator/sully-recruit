@@ -324,7 +324,7 @@ const CandidateDetail = () => {
   // Permission checks
   const currentProfile = profiles.find(p => p.id === user?.id);
   const isAdmin = !!(currentProfile as any)?.is_admin;
-  const isOwner = !!(user && candidate && (candidate as any).owner_id === user.id);
+  const isOwner = !!(user && candidate && (candidate as any).owner_user_id === user.id);
   const canEdit = isOwner || isAdmin;
   const [pendingOwnerId, setPendingOwnerId] = useState<string | null>(null);
   const pendingOwnerName = pendingOwnerId ? profiles.find(p => p.id === pendingOwnerId)?.full_name ?? 'this user' : '';
@@ -1104,7 +1104,7 @@ const CandidateDetail = () => {
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
                 <SearchableSelect
                   options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
-                  value={(candidate as any).owner_id ?? ''}
+                  value={(candidate as any).owner_user_id ?? ''}
                   onChange={(val) => {
                     const newOwnerId = val || null;
                     if (newOwnerId && newOwnerId !== user?.id) {
@@ -1112,7 +1112,7 @@ const CandidateDetail = () => {
                     } else {
                       (async () => {
                         try {
-                          const { error } = await supabase.from('candidates').update({ owner_id: newOwnerId }).eq('id', id!);
+                          const { error } = await supabase.from('candidates').update({ owner_user_id: newOwnerId }).eq('id', id!);
                           if (error) { toast.error('Failed to update owner'); return; }
                           queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                           queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -2226,7 +2226,7 @@ const CandidateDetail = () => {
             <AlertDialogAction onClick={async () => {
               const { error } = await supabase
                 .from('candidates')
-                .update({ owner_id: pendingOwnerId })
+                .update({ owner_user_id: pendingOwnerId })
                 .eq('id', id!);
               if (error) {
                 toast.error(error.message || 'Failed to transfer owner');
