@@ -31,7 +31,7 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   if (!raw) return null;
   // Pull out email-shaped tokens and ignore the rest (handles HYPERLINK and
   // other trailing garbage that would otherwise fail domain parsing).
-  const matches = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  const matches = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,6}(?![A-Za-z0-9])/gi);
   if (!matches?.length) return null;
   const cleaned = matches.map((m) => m.trim().toLowerCase());
   const personal = cleaned.find((e) => isPersonalEmail(e));
