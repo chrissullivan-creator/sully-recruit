@@ -1,9 +1,10 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
+import { schedules, task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 import { processCallDeepgram } from "./process-call-deepgram";
 
 // Poll RingCentral call log as a safety net for missed webhooks.
-// Looks back 10 minutes, dedupes against call_logs table.
+// Default lookback is 10 minutes; the manual backfill task accepts a
+// `lookback_minutes` payload (e.g. 1440 for the last 24h).
 //
 // Schedule: every 5 minutes
 
@@ -58,63 +59,64 @@ async function findEntityByPhone(
   return null;
 }
 
-export const pollRcCalls = schedules.task({
-  id: "poll-rc-calls",
-  maxDuration: 120,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+async function runPoll(lookbackMinutes: number) {
+  const supabase = getSupabaseAdmin();
 
-    const { data: accounts } = await supabase
-      .from("integration_accounts")
-      .select("id, owner_user_id, account_label, rc_jwt, access_token, token_expires_at, metadata")
-      .eq("provider", "sms")
-      .eq("is_active", true)
-      .not("rc_jwt", "is", null);
+  const { data: accounts } = await supabase
+    .from("integration_accounts")
+    .select("id, owner_user_id, account_label, rc_jwt, access_token, token_expires_at, metadata")
+    .eq("provider", "sms")
+    .eq("is_active", true)
+    .not("rc_jwt", "is", null);
 
-    if (!accounts?.length) {
-      logger.info("No RC accounts found");
-      return { calls_scanned: 0, calls_inserted: 0 };
+  if (!accounts?.length) {
+    logger.info("No RC accounts found");
+    return { calls_scanned: 0, calls_inserted: 0, calls_skipped: 0, lookback_minutes: lookbackMinutes, results: [] };
+  }
+
+  const since = new Date(Date.now() - lookbackMinutes * 60 * 1000)
+    .toISOString().replace(/\.\d{3}Z$/, "Z");
+  let totalProcessed = 0, totalInserted = 0, totalSkipped = 0;
+  const results: any[] = [];
+
+  for (const acct of accounts) {
+    const token = await getToken(acct);
+    if (!token) {
+      logger.warn(`No token for ${acct.account_label}`);
+      continue;
     }
 
-    // Look back 10 minutes
-    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
-    let totalProcessed = 0, totalInserted = 0, totalSkipped = 0;
-    const results: any[] = [];
-
-    for (const acct of accounts) {
-      const token = await getToken(acct);
-      if (!token) {
-        logger.warn(`No token for ${acct.account_label}`);
-        continue;
-      }
-
+    // RC paginates at 100/page. Walk pages until we exhaust the window
+    // (matters for large lookbacks like the 24h backfill).
+    let page = 1;
+    while (page <= 30) {
       const params = new URLSearchParams({
         type: "Voice",
         view: "Detailed",
         dateFrom: since,
-        perPage: "50",
+        perPage: "100",
+        page: String(page),
       });
 
       const logRes = await fetch(
         `${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log?${params}`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) },
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
       );
 
       if (!logRes.ok) {
         logger.warn(`Call-log error ${logRes.status} for ${acct.account_label}`);
-        continue;
+        break;
       }
 
       const logData = await logRes.json();
       const records = logData.records ?? [];
-      logger.info(`${acct.account_label}: ${records.length} calls since ${since}`);
+      logger.info(`${acct.account_label} page ${page}: ${records.length} calls since ${since}`);
 
       for (const call of records) {
         totalProcessed++;
         const callId = call.id ?? call.sessionId;
         if (!callId) { totalSkipped++; continue; }
 
-        // Dedup
         const { data: existing } = await supabase
           .from("call_logs")
           .select("id")
@@ -171,9 +173,7 @@ export const pollRcCalls = schedules.task({
             account: acct.account_label,
           });
 
-          // Trigger Deepgram transcription for completed calls ≥ 30s
           if (duration >= 30 && status === "completed") {
-            // Find the call_log row we just inserted to get its UUID
             const { data: inserted } = await supabase
               .from("call_logs")
               .select("id")
@@ -186,9 +186,38 @@ export const pollRcCalls = schedules.task({
           }
         }
       }
-    }
 
-    logger.info("Poll RC calls complete", { totalProcessed, totalInserted, totalSkipped });
-    return { calls_scanned: totalProcessed, calls_inserted: totalInserted, calls_skipped: totalSkipped, results };
+      if (records.length < 100) break;
+      page++;
+    }
+  }
+
+  logger.info("Poll RC calls complete", { totalProcessed, totalInserted, totalSkipped, lookbackMinutes });
+  return {
+    calls_scanned: totalProcessed,
+    calls_inserted: totalInserted,
+    calls_skipped: totalSkipped,
+    lookback_minutes: lookbackMinutes,
+    results,
+  };
+}
+
+export const pollRcCalls = schedules.task({
+  id: "poll-rc-calls",
+  maxDuration: 120,
+  run: async () => runPoll(10),
+});
+
+/**
+ * One-shot backfill task. Trigger from the dashboard with:
+ *   { "lookback_minutes": 1440 }   // last 24h
+ * Defaults to 60 minutes if no payload provided.
+ */
+export const backfillRcCalls = task({
+  id: "backfill-rc-calls",
+  maxDuration: 600,
+  run: async (payload: { lookback_minutes?: number }) => {
+    const minutes = payload?.lookback_minutes ?? 60;
+    return runPoll(minutes);
   },
 });

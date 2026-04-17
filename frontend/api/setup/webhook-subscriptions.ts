@@ -224,41 +224,57 @@ async function createGraphSubscriptions(supabase: any): Promise<SubscriptionResu
 async function createRingCentralSubscriptions(supabase: any): Promise<SubscriptionResult[]> {
   const results: SubscriptionResult[] = [];
 
-  // Get all users with active RingCentral integrations
+  // Get all users with active RingCentral integrations.
+  // RC creds live in integration_accounts (provider='sms'), not user_integrations.
   const { data: integrations } = await supabase
-    .from("user_integrations")
-    .select("user_id, config")
-    .eq("integration_type", "ringcentral")
-    .eq("is_active", true);
+    .from("integration_accounts")
+    .select("owner_user_id, account_label, rc_jwt, metadata")
+    .eq("provider", "sms")
+    .eq("is_active", true)
+    .not("rc_jwt", "is", null);
 
   if (!integrations || integrations.length === 0) {
     return [{ service: "ringcentral", user: "all", resource: "none", status: "error", error: "No RingCentral integrations found" }];
   }
 
   for (const integration of integrations) {
-    const config = integration.config;
-    const serverUrl = config.server_url || "https://platform.ringcentral.com";
+    const meta = integration.metadata ?? {};
+    const serverUrl = meta.rc_server_url || "https://platform.ringcentral.com";
+    const clientId = meta.rc_client_id;
+    const clientSecret = meta.rc_client_secret;
+    const jwt = integration.rc_jwt;
 
     // Look up user name
     const { data: profile } = await supabase
       .from("profiles")
       .select("full_name, email")
-      .eq("id", integration.user_id)
+      .eq("id", integration.owner_user_id)
       .maybeSingle();
 
-    const userName = profile?.full_name || profile?.email || integration.user_id;
+    const userName = profile?.full_name || profile?.email || integration.account_label || integration.owner_user_id;
+
+    if (!clientId || !clientSecret || !jwt) {
+      results.push({
+        service: "ringcentral",
+        user: userName,
+        resource: "auth",
+        status: "error",
+        error: "Missing rc_client_id/rc_client_secret in metadata or rc_jwt",
+      });
+      continue;
+    }
 
     try {
       // Authenticate with JWT bearer flow
       const authResp = await fetch(`${serverUrl}/restapi/oauth/token`, {
         method: "POST",
         headers: {
-          Authorization: `Basic ${Buffer.from(`${config.client_id}:${config.client_secret}`).toString("base64")}`,
+          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
           grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          assertion: config.jwt_token,
+          assertion: jwt,
         }),
       });
 

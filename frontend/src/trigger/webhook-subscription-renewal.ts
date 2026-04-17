@@ -89,31 +89,44 @@ export const renewWebhookSubscriptions = schedules.task({
     // ── RingCentral ──────────────────────────────────────────────────────
     try {
       const { data: integrations } = await supabase
-        .from("user_integrations")
-        .select("user_id, config")
-        .eq("integration_type", "ringcentral")
-        .eq("is_active", true);
+        .from("integration_accounts")
+        .select("owner_user_id, account_label, rc_jwt, access_token, token_expires_at, metadata")
+        .eq("provider", "sms")
+        .eq("is_active", true)
+        .not("rc_jwt", "is", null);
+
+      const rcWebhookToken = process.env.RINGCENTRAL_WEBHOOK_TOKEN;
 
       for (const integration of integrations || []) {
-        const config = integration.config as any;
-        const serverUrl = config.server_url || "https://platform.ringcentral.com";
+        const meta = (integration.metadata as any) ?? {};
+        const userId = integration.owner_user_id;
+        const userLabel = integration.account_label || userId;
+        const serverUrl = meta.rc_server_url || "https://platform.ringcentral.com";
+        const clientId = meta.rc_client_id;
+        const clientSecret = meta.rc_client_secret;
+        const jwt = integration.rc_jwt;
+
+        if (!clientId || !clientSecret || !jwt) {
+          results.push({ service: "ringcentral", user: userLabel, status: "error", error: "Missing rc_client_id/secret or rc_jwt" });
+          continue;
+        }
 
         try {
           // Authenticate
           const authResp = await fetch(`${serverUrl}/restapi/oauth/token`, {
             method: "POST",
             headers: {
-              Authorization: `Basic ${Buffer.from(`${config.client_id}:${config.client_secret}`).toString("base64")}`,
+              Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
               "Content-Type": "application/x-www-form-urlencoded",
             },
             body: new URLSearchParams({
               grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-              assertion: config.jwt_token,
+              assertion: jwt,
             }),
           });
 
           if (!authResp.ok) {
-            results.push({ service: "ringcentral", user: integration.user_id, status: "error", error: "Auth failed" });
+            results.push({ service: "ringcentral", user: userLabel, status: "error", error: `Auth failed: ${await authResp.text()}` });
             continue;
           }
 
@@ -125,7 +138,7 @@ export const renewWebhookSubscriptions = schedules.task({
           });
 
           if (!listResp.ok) {
-            results.push({ service: "ringcentral", user: integration.user_id, status: "error", error: "List failed" });
+            results.push({ service: "ringcentral", user: userLabel, status: "error", error: "List failed" });
             continue;
           }
 
@@ -133,7 +146,8 @@ export const renewWebhookSubscriptions = schedules.task({
           const ourSub = (records || []).find(
             (s: any) =>
               s.deliveryMode?.transportType === "WebHook" &&
-              s.deliveryMode?.address?.includes("sullyrecruit.app"),
+              s.deliveryMode?.address?.includes("sullyrecruit.app") &&
+              s.status === "Active",
           );
 
           if (ourSub) {
@@ -146,43 +160,47 @@ export const renewWebhookSubscriptions = schedules.task({
             );
 
             if (renewResp.ok) {
-              results.push({ service: "ringcentral", user: integration.user_id, status: "renewed" });
-              logger.info("Renewed RingCentral subscription", { userId: integration.user_id });
-            } else {
-              results.push({ service: "ringcentral", user: integration.user_id, status: "error", error: "Renew failed" });
+              results.push({ service: "ringcentral", user: userLabel, status: "renewed" });
+              logger.info("Renewed RingCentral subscription", { userId, subId: ourSub.id });
+              continue;
             }
-          } else {
-            // No subscription found — create one
-            const createResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${access_token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                eventFilters: [
-                  "/restapi/v1.0/account/~/extension/~/telephony/sessions",
-                  "/restapi/v1.0/account/~/extension/~/message-store",
-                  "/restapi/v1.0/account/~/extension/~/voicemail",
-                ],
-                deliveryMode: {
-                  transportType: "WebHook",
-                  address: `${WEBHOOK_BASE_URL}/api/webhooks/ringcentral`,
-                },
-                expiresIn: 604800,
-              }),
-            });
+            // Fall through to create on renew failure
+            logger.warn("RC renew failed, creating new subscription", { userId, status: renewResp.status });
+          }
 
-            if (createResp.ok) {
-              results.push({ service: "ringcentral", user: integration.user_id, status: "created" });
-              logger.info("Created RingCentral subscription", { userId: integration.user_id });
-            } else {
-              const errText = await createResp.text();
-              results.push({ service: "ringcentral", user: integration.user_id, status: "error", error: errText });
-            }
+          // No (active) subscription found — create one
+          const deliveryMode: Record<string, string> = {
+            transportType: "WebHook",
+            address: `${WEBHOOK_BASE_URL}/api/webhooks/ringcentral`,
+          };
+          if (rcWebhookToken) deliveryMode.verificationToken = rcWebhookToken;
+
+          const createResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              eventFilters: [
+                "/restapi/v1.0/account/~/extension/~/telephony/sessions",
+                "/restapi/v1.0/account/~/extension/~/message-store",
+                "/restapi/v1.0/account/~/extension/~/voicemail",
+              ],
+              deliveryMode,
+              expiresIn: 604800,
+            }),
+          });
+
+          if (createResp.ok) {
+            results.push({ service: "ringcentral", user: userLabel, status: "created" });
+            logger.info("Created RingCentral subscription", { userId });
+          } else {
+            const errText = await createResp.text();
+            results.push({ service: "ringcentral", user: userLabel, status: "error", error: errText });
           }
         } catch (err: any) {
-          results.push({ service: "ringcentral", user: integration.user_id, status: "error", error: err.message });
+          results.push({ service: "ringcentral", user: userLabel, status: "error", error: err.message });
         }
       }
     } catch (err: any) {
