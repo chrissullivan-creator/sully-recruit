@@ -71,6 +71,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
       setOpen(false);
 
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to add candidate');
     } finally {

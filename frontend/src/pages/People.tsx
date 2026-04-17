@@ -5,11 +5,13 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
+import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { usePeople } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
-  MessageCircle, PhoneCall, RefreshCw,
+  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -89,6 +91,8 @@ const People = () => {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [addCandidateOpen, setAddCandidateOpen] = useState(false);
+  const [addContactOpen, setAddContactOpen] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 100;
 
@@ -225,6 +229,21 @@ const People = () => {
                 </AlertDialog>
               </>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="gold" size="sm">
+                  <Plus className="h-4 w-4 mr-1" /> Add Person
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={() => setAddCandidateOpen(true)}>
+                  <UserCheck className="h-3.5 w-3.5 mr-2" /> Add Candidate
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setAddContactOpen(true)}>
+                  <UserPlus className="h-3.5 w-3.5 mr-2" /> Add Contact
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         }
       />
@@ -486,6 +505,9 @@ const People = () => {
           return p?.full_name ?? id;
         })}
       />
+
+      <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} />
+      <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
     </MainLayout>
   );
 };
