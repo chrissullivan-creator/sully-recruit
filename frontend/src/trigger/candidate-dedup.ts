@@ -1,4 +1,4 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
+import { schedules, task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,8 +35,10 @@ function orderedPair(idA: string, idB: string): [string, string] {
 // Task A: scan-duplicate-candidates
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const scanDuplicateCandidates = task({
+export const scanDuplicateCandidates = schedules.task({
   id: "scan-duplicate-candidates",
+  cron: "0 3 * * *", // daily at 03:00 UTC
+  maxDuration: 600,
   retry: { maxAttempts: 2 },
   run: async () => {
     const supabase = getSupabaseAdmin();

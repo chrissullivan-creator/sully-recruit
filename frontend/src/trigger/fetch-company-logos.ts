@@ -1,8 +1,10 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
+import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 
-export const fetchCompanyLogos = task({
+export const fetchCompanyLogos = schedules.task({
   id: "fetch-company-logos",
+  cron: "0 * * * *", // hourly
+  maxDuration: 300,
   retry: { maxAttempts: 2 },
   run: async () => {
     const supabase = getSupabaseAdmin();
