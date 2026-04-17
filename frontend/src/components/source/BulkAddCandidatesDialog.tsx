@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
+import { classifyEmail } from '@/lib/email-classifier';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, Briefcase, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -285,7 +286,10 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           last_name: applicant.last_name || parsedData.last_name || null,
           full_name: `${applicant.first_name || parsedData.first_name || ''} ${applicant.last_name || parsedData.last_name || ''}`.trim() || null,
           email: resolvedEmail,
-          personal_email: resolvedEmail,       // LinkedIn/resume email = personal email
+          // Route via classifier — LinkedIn/resume usually surfaces a personal
+          // address, but corporate or .edu go to the right field (see
+          // email-classifier rules).
+          ...classifyEmail(resolvedEmail),
           phone: resolvedPhone,
           mobile_phone: resolvedPhone,         // phone from LinkedIn/resume = mobile
           current_title: applicant.current_title || parsedData.current_title || null,
