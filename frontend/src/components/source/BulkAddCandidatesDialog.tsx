@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
-import { classifyEmail } from '@/lib/email-classifier';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, Briefcase, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -278,7 +278,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         // Merge: parsed resume data wins for email/phone, LinkedIn profile wins for title/company
         // parsedData.email = email found IN the resume = candidate's personal email
         // applicant.email from LinkedIn profile = also personal/direct email
-        const resolvedEmail = parsedData.email || applicant.email || null;
+        const resolvedEmail = normalizeEmail(parsedData.email || applicant.email);
         const resolvedPhone = parsedData.phone || applicant.phone || null;
 
         const candidateData = {

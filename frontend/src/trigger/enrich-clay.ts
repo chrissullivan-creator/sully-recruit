@@ -1,6 +1,7 @@
 import { schedules, task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
 import { delay } from "./lib/resume-parsing";
+import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
 
 // ─── Clay API helper ────────────────────────────────────────────────────────
 
@@ -322,8 +323,11 @@ export const pullFromClay = schedules.task({
 
           // Clay enriched columns — "Email Address" and "Phone Number" are the final outputs
           if (!existing.email) {
-            const v = extractField(row, "Email Address", "email", "Personal Email", "personal_email", "work_email");
-            if (v) updates.email = v;
+            const v = normalizeEmail(extractField(row, "Email Address", "email", "Personal Email", "personal_email", "work_email"));
+            if (v) {
+              updates.email = v;
+              Object.assign(updates, classifyEmail(v));
+            }
           }
           if (!existing.phone) {
             const v = extractField(row, "Phone Number", "phone_number", "Mobile Phone", "mobile_phone", "phone");
@@ -392,8 +396,11 @@ export const pullFromClay = schedules.task({
           const updates: Record<string, string> = {};
 
           if (!existing.email) {
-            const v = extractField(row, "Work Email", "work_email", "Email Address", "email", "Personal Email");
-            if (v) updates.email = v;
+            const v = normalizeEmail(extractField(row, "Work Email", "work_email", "Email Address", "email", "Personal Email"));
+            if (v) {
+              updates.email = v;
+              Object.assign(updates, classifyEmail(v));
+            }
           }
           if (!existing.phone) {
             const v = extractField(row, "Phone Number", "phone_number", "Mobile Phone", "phone");

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
-import { classifyEmail } from '@/lib/email-classifier';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -213,10 +213,10 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           first_name: firstName || null,
           last_name: lastName || null,
           full_name: `${firstName} ${lastName}`.trim() || null,
-          email: applicant.email || null,
+          email: normalizeEmail(applicant.email),
           // Classify — contacts are typically client-side (work email), but
           // if only a personal/.edu address is surfaced route it correctly.
-          ...classifyEmail(applicant.email),
+          ...classifyEmail(normalizeEmail(applicant.email)),
           phone: applicant.phone || null,
           mobile_phone: applicant.phone || null,
           title: applicant.current_title || applicant.headline || null,

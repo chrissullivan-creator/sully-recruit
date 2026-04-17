@@ -18,6 +18,26 @@ function domainOf(email: string | null | undefined): string | null {
   return email.slice(at + 1).toLowerCase().trim();
 }
 
+/**
+ * Clean up raw email strings pulled from resumes/LinkedIn:
+ * - Strip Word "HYPERLINK" artifacts (docx extraction leaks these)
+ * - Strip mailto: prefixes, angle brackets, whitespace
+ * - If multiple addresses are present (comma/semicolon/space separated),
+ *   prefer the first personal-domain one so we don't stuff a corporate
+ *   and personal address into the same field.
+ * Returns null if nothing sensible can be extracted.
+ */
+export function normalizeEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  // Pull out email-shaped tokens and ignore the rest (handles HYPERLINK and
+  // other trailing garbage that would otherwise fail domain parsing).
+  const matches = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  if (!matches?.length) return null;
+  const cleaned = matches.map((m) => m.trim().toLowerCase());
+  const personal = cleaned.find((e) => isPersonalEmail(e));
+  return personal ?? cleaned[0];
+}
+
 export function isPersonalEmail(email: string | null | undefined): boolean {
   const d = domainOf(email);
   if (!d) return false;
