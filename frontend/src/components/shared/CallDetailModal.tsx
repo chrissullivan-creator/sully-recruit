@@ -31,7 +31,9 @@ export function CallDetailModal({ open, onOpenChange, call, aiNotes }: CallDetai
   const summary = aiNotes?.ai_summary || call.summary;
   const actionItems = aiNotes?.ai_action_items;
   const transcript = aiNotes?.transcript;
-  const notes = aiNotes?.extracted_notes || call.notes;
+  // Don't fall back to call.notes — it's RC's status string ("Call connected", "Missed", etc.)
+  // and just clutters the modal when there's no real note.
+  const notes = aiNotes?.extracted_notes ?? null;
   const audioUrl = aiNotes?.recording_url || call.audio_url;
 
   return (
