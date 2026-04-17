@@ -115,11 +115,12 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         department: form.department.trim() || null,
         company_id: form.company_id || null,
         status: form.status,
-        owner_id: userId,
+        owner_user_id: userId,
       } as any).select('id').single();
       if (error) throw error;
 
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
       toast.success('Contact created');
 
       // Resolve Unipile ID in background (non-blocking)

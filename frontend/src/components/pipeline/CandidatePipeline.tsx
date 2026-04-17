@@ -153,10 +153,10 @@ export function CandidatePipeline() {
                           <span className="truncate">{(candidate as any).phone}</span>
                         </p>
                       )}
-                      {visibleFields.has('owner') && candidate.owner_id && profileMap[candidate.owner_id] && (
+                      {visibleFields.has('owner') && (candidate as any).owner_user_id && profileMap[(candidate as any).owner_user_id] && (
                         <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                           <User className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{profileMap[candidate.owner_id].full_name?.split(' ')[0]}</span>
+                          <span className="truncate">{profileMap[(candidate as any).owner_user_id].full_name?.split(' ')[0]}</span>
                         </p>
                       )}
                       {visibleFields.has('updated') && (candidate as any).updated_at && (

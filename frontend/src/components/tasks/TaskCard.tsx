@@ -1,19 +1,21 @@
 import { useState } from 'react';
 import { Task, useUpdateTaskStatus, useAddTaskComment, useCompleteTaskWithNote } from '@/hooks/useTasks';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { format, isPast, isToday } from 'date-fns';
-import { Calendar, MessageSquare, ChevronDown, ChevronUp, Send, CheckCircle2, User } from 'lucide-react';
+import { Calendar, MessageSquare, ChevronDown, ChevronUp, Send, CheckCircle2, User, Pencil } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { EditMeetingDialog } from '@/components/tasks/EditMeetingDialog';
 
 export function TaskCard({ task }: { task: Task }) {
   const [expanded, setExpanded] = useState(false);
   const [comment, setComment] = useState('');
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completionNote, setCompletionNote] = useState('');
+  const [editMeetingOpen, setEditMeetingOpen] = useState(false);
+  const isMeeting = task.task_type === 'meeting';
   const updateStatus = useUpdateTaskStatus();
   const addComment = useAddTaskComment();
   const completeWithNote = useCompleteTaskWithNote();
@@ -106,6 +108,17 @@ export function TaskCard({ task }: { task: Task }) {
               )}
             </div>
           </div>
+          {isMeeting && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0"
+              onClick={() => setEditMeetingOpen(true)}
+              title="Edit meeting"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setExpanded(!expanded)}>
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </Button>
@@ -136,6 +149,14 @@ export function TaskCard({ task }: { task: Task }) {
           </div>
         )}
       </div>
+
+      {isMeeting && (
+        <EditMeetingDialog
+          open={editMeetingOpen}
+          onOpenChange={setEditMeetingOpen}
+          task={task}
+        />
+      )}
 
       {/* Complete with note dialog */}
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>

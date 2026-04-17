@@ -73,6 +73,7 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
   const [location, setLocation] = useState(task.location || '');
   const [meetingUrl, setMeetingUrl] = useState(task.meeting_url || '');
   const [reminder, setReminder] = useState(task.reminder || 'none');
+  const [assignedTo, setAssignedTo] = useState<string>(task.assigned_to || '');
 
   // Attendees
   const [attendees, setAttendees] = useState<Attendee[]>([]);
@@ -177,7 +178,14 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
   }, [open, companyId]);
 
   const handleSave = () => {
-    const updates: any = { title, location: location || null, meeting_url: meetingUrl || null, timezone, reminder: reminder === 'none' ? null : reminder };
+    const updates: any = {
+      title,
+      location: location || null,
+      meeting_url: meetingUrl || null,
+      timezone,
+      reminder: reminder === 'none' ? null : reminder,
+      assigned_to: assignedTo || null,
+    };
 
     if (date) {
       const dateStr = format(date, 'yyyy-MM-dd');
@@ -274,15 +282,29 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
             <Input value={meetingUrl} onChange={e => setMeetingUrl(e.target.value)} placeholder="Zoom / Teams / Google Meet URL" className="h-8 text-sm" />
           </div>
 
-          {/* Reminder */}
-          <div className="space-y-1.5">
-            <Label className="text-xs">Reminder</Label>
-            <Select value={reminder} onValueChange={setReminder}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {REMINDER_OPTIONS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          {/* Reminder + Owner */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reminder</Label>
+              <Select value={reminder} onValueChange={setReminder}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {REMINDER_OPTIONS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Owner</Label>
+              <Select value={assignedTo || 'unassigned'} onValueChange={v => setAssignedTo(v === 'unassigned' ? '' : v)}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {profiles.filter(p => p.full_name).map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Attendees */}
