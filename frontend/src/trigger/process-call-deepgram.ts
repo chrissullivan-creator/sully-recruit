@@ -221,8 +221,19 @@ export const processCallDeepgram = task({
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 1200,
-            system: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, terse, no fluff.\n\nReturn ONLY valid JSON:\n{"summary":"2-4 sentence punchy summary","action_items":"- bulleted next steps","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null}`,
+            max_tokens: 2000,
+            system: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
+
+Return ONLY valid JSON in this exact shape:
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null}
+
+Field rules:
+- summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a transcript dump.
+- action_items: bulleted list of concrete next steps for the recruiter. Use "- " prefix on each line. If genuinely none, return "- None".
+- notes: free-form recruiter color — verbatim quotes worth remembering, soft signals, personality observations, blockers. Different from summary. Null only if there is genuinely nothing to add.
+- reason_for_leaving: short phrase, null if not discussed.
+- current_title / current_company: short strings, null if not stated.
+- current_base, current_bonus, target_base, target_bonus: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given (e.g. "160-170k"), return the midpoint as an integer (165000). If only a vague signal (e.g. "comfortable in the 200s"), return your best single-integer estimate. Null if not discussed at all.`,
             messages: [{ role: "user", content: `Transcript:\n${transcript.slice(0, 30000)}` }],
           }),
         });
@@ -234,6 +245,26 @@ export const processCallDeepgram = task({
         stats.joe_error++;
         intel.summary = `Call with ${entityName} (${duration}). Transcript available.`;
       }
+
+      // Coerce comp values to integers; drop strings/ranges Joe might still emit.
+      const toInt = (v: any): number | null => {
+        if (v == null) return null;
+        if (typeof v === "number" && Number.isFinite(v)) return Math.round(v);
+        if (typeof v === "string") {
+          const nums = v.match(/\d[\d,]*/g);
+          if (!nums?.length) return null;
+          const parsed = nums.map((n) => parseInt(n.replace(/,/g, ""), 10)).filter(Number.isFinite);
+          if (!parsed.length) return null;
+          // If a range, take midpoint; else first value.
+          const avg = parsed.reduce((a, b) => a + b, 0) / parsed.length;
+          return Math.round(avg);
+        }
+        return null;
+      };
+      intel.current_base = toInt(intel.current_base);
+      intel.current_bonus = toInt(intel.current_bonus);
+      intel.target_base = toInt(intel.target_base);
+      intel.target_bonus = toInt(intel.target_bonus);
 
       // ── Write ai_call_notes ─────────────────────────────────────
       const now = new Date().toISOString();
