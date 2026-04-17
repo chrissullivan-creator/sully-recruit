@@ -19,7 +19,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Briefcase, Users, Calendar, FileText, Target, Mail,
-  TrendingUp, Plus, Sparkles, User, ChevronDown, ChevronUp,
+  Plus, Sparkles, User, ChevronDown, ChevronUp,
   Building, Send,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -201,7 +201,6 @@ const Dashboard = () => {
   const contacted       = period === 'week' ? m?.weekContacted       : m?.monthContacted;
   const pitched         = period === 'week' ? m?.weekPitched         : m?.monthPitched;
   const sendOut         = period === 'week' ? m?.weekSendOut         : m?.monthSendOut;
-  const submitted       = period === 'week' ? m?.weekSubmitted       : m?.monthSubmitted;
   const interviewing    = period === 'week' ? m?.weekInterviewing    : m?.monthInterviewing;
   const offer           = period === 'week' ? m?.weekOffer           : m?.monthOffer;
   const backOfResume    = period === 'week' ? m?.weekBackOfResume    : m?.monthBackOfResume;
@@ -313,9 +312,8 @@ const Dashboard = () => {
         </div>
 
         {/* ── Secondary pipeline counts ─────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <MetricCard label="Send Outs"   value={isLoading ? '…' : (sendOut ?? 0)}      icon={<FileText className="h-5 w-5" />} />
-          <MetricCard label="Submitted"   value={isLoading ? '…' : (submitted ?? 0)}    icon={<TrendingUp className="h-5 w-5" />} />
           <MetricCard label="Interviewing (cand)" value={isLoading ? '…' : (interviewing ?? 0)} icon={<Calendar className="h-5 w-5" />} />
           <MetricCard label="Offers Out"  value={isLoading ? '…' : (offer ?? 0)}        icon={<Briefcase className="h-5 w-5" />} />
         </div>
