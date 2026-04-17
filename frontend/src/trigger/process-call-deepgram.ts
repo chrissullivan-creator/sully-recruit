@@ -223,7 +223,7 @@ export const processCallDeepgram = task({
             model: "claude-sonnet-4-20250514",
             max_tokens: 1200,
             system: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, terse, no fluff.\n\nReturn ONLY valid JSON:\n{"summary":"2-4 sentence punchy summary","action_items":"- bulleted next steps","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null}`,
-            messages: [{ role: "user", content: `Transcript:\n${transcript.slice(0, 10000)}` }],
+            messages: [{ role: "user", content: `Transcript:\n${transcript.slice(0, 30000)}` }],
           }),
         });
         if (!resp.ok) throw new Error(`Claude ${resp.status}`);
