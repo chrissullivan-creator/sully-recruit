@@ -12,6 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Upload, Loader2, FileText, X } from 'lucide-react';
@@ -119,7 +120,8 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             first_name: firstName,
             last_name: lastName,
             full_name: `${firstName} ${lastName}`.trim() || null,
-            email: email || null,
+            email: normalizeEmail(email),
+            ...classifyEmail(normalizeEmail(email)),
             phone: phone || null,
             current_title: currentTitle || null,
             current_company: currentCompany || null,

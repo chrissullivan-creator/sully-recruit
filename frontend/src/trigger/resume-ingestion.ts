@@ -2,6 +2,7 @@ import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
+import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
 
 const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
 
@@ -90,9 +91,13 @@ export const resumeIngestion = task({
         updates.full_name = `${parsedJson.first_name} ${parsedJson.last_name}`;
       }
       if (parsedJson.email) {
-        // Email in resume = candidate's personal email
-        updates.email = parsedJson.email;
-        updates.personal_email = parsedJson.email;
+        // Word docx extraction leaks "HYPERLINK" garbage and sometimes a
+        // comma-joined pair of addresses; normalize first, then classify.
+        const cleaned = normalizeEmail(parsedJson.email);
+        if (cleaned) {
+          updates.email = cleaned;
+          Object.assign(updates, classifyEmail(cleaned));
+        }
       }
       if (parsedJson.phone) {
         updates.phone = parsedJson.phone;
