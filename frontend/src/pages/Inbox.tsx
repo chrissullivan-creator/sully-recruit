@@ -238,17 +238,25 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
   const handleSearch = async () => {
     if (!linkSearch.trim()) return;
     setLinkSearching(true);
-    const q = linkSearch.trim();
-    const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
-      supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
-    ]);
-    const results = [
-      ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
-      ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' })),
-    ];
-    setLinkResults(results);
-    setLinkSearching(false);
+    try {
+      const q = linkSearch.trim();
+      const [cRes, ctRes] = await Promise.all([
+        supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+        supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      ]);
+      if (cRes.error || ctRes.error) {
+        toast.error(`Search failed: ${(cRes.error || ctRes.error)?.message}`);
+        setLinkResults([]);
+        return;
+      }
+      const results = [
+        ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
+        ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' })),
+      ];
+      setLinkResults(results);
+    } finally {
+      setLinkSearching(false);
+    }
   };
 
   const handleLink = async (entityType: string, entityId: string, entityName: string) => {

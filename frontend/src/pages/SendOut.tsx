@@ -333,6 +333,9 @@ export default function SendOut() {
         if (url) map[path] = url;
       }
       setSignedUrls(map);
+    }).catch((err) => {
+      console.error('Failed to sign resume URLs', err);
+      toast.error('Failed to load resume links');
     });
   }, [formattedResumes]);
 

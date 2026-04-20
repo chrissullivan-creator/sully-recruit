@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Users, MessageSquare, Calendar, TrendingUp, PieChart } from "lucide-react";
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+import { toast } from "sonner";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   interested: "#22c55e",
@@ -38,16 +39,25 @@ export default function SequenceAnalyticsPage() {
   }, [id]);
 
   async function loadData() {
-    const [seqRes, enrollRes, logRes] = await Promise.all([
-      supabase.from("sequences").select("*, jobs(title)").eq("id", id).single(),
-      supabase.from("sequence_enrollments").select("*").eq("sequence_id", id),
-      supabase.from("sequence_step_logs").select("*, sequence_enrollments!inner(sequence_id)").eq("sequence_enrollments.sequence_id", id),
-    ]);
+    try {
+      const [seqRes, enrollRes, logRes] = await Promise.all([
+        supabase.from("sequences").select("*, jobs(title)").eq("id", id).single(),
+        supabase.from("sequence_enrollments").select("*").eq("sequence_id", id),
+        supabase.from("sequence_step_logs").select("*, sequence_enrollments!inner(sequence_id)").eq("sequence_enrollments.sequence_id", id),
+      ]);
 
-    setSequence((seqRes as any).data);
-    setEnrollments((enrollRes as any).data || []);
-    setStepLogs((logRes as any).data || []);
-    setLoading(false);
+      if ((seqRes as any).error) throw (seqRes as any).error;
+      if ((enrollRes as any).error) throw (enrollRes as any).error;
+      if ((logRes as any).error) throw (logRes as any).error;
+
+      setSequence((seqRes as any).data);
+      setEnrollments((enrollRes as any).data || []);
+      setStepLogs((logRes as any).data || []);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to load sequence analytics");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const metrics = useMemo(() => {

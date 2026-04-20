@@ -368,6 +368,9 @@ const CompanyDetail = () => {
         if (url) map[path] = url;
       }
       setSignedUrls(map);
+    }).catch((err) => {
+      console.error('Failed to sign contract URLs', err);
+      toast.error('Failed to load contract links');
     });
   }, [contracts]);
 

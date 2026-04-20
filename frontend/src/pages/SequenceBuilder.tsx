@@ -44,11 +44,15 @@ export default function SequenceBuilder() {
   useEffect(() => {
     if (!id) return;
     (async () => {
-      const { data: seq } = await supabase
+      const { data: seq, error } = await supabase
         .from("sequences")
         .select("*, sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_steps(*)")
         .eq("id", id)
         .single() as any;
+      if (error) {
+        toast.error(`Failed to load sequence: ${error.message}`);
+        return;
+      }
       if (seq) {
         setSetup({
           name: seq.name || "",

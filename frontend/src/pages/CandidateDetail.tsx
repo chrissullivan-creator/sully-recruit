@@ -640,6 +640,9 @@ const CandidateDetail = () => {
         if (url) map[path] = url;
       }
       setSignedUrls(map);
+    }).catch((err) => {
+      console.error('Failed to sign document URLs', err);
+      toast.error('Failed to load document links');
     });
   }, [candidateResumes, formattedResumes, otherDocs]);
 
@@ -705,15 +708,16 @@ const CandidateDetail = () => {
         let sendOutRecord = existingSendOut;
 
         if (existingSendOut) {
-          const { data: updated } = await supabase
+          const { data: updated, error: updateError } = await supabase
             .from('send_outs')
             .update({ stage: normalizedStatus, interview_at: interviewAt } as any)
             .eq('id', existingSendOut.id)
             .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
             .single();
+          if (updateError) throw updateError;
           sendOutRecord = updated;
         } else {
-          const { data: inserted } = await supabase
+          const { data: inserted, error: insertError } = await supabase
             .from('send_outs')
             .insert({
               candidate_id: id,
@@ -724,6 +728,7 @@ const CandidateDetail = () => {
             } as any)
             .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
             .single();
+          if (insertError) throw insertError;
           sendOutRecord = inserted;
         }
 
