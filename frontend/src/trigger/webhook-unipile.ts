@@ -18,6 +18,57 @@ interface UnipileWebhookPayload {
 }
 
 /**
+ * Strip HTML tags and decode common entities from a string.
+ * Used for Unipile body_html / text_html / inmail_body fields.
+ */
+function stripHtml(value: string): string {
+  return value
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+/**
+ * Extract the message body from a Unipile message payload.
+ * LinkedIn variants (classic, Recruiter, Sales Navigator, InMail) put the
+ * body on different fields — try them in order and strip HTML as needed.
+ */
+function extractMessageBody(messageData: any): string {
+  if (!messageData) return "";
+
+  const candidates = [
+    messageData.text,
+    messageData.body,
+    messageData.content,
+    messageData.message,
+    messageData.message_text,
+    messageData.body_html,
+    messageData.rendered_body,
+    messageData.text_html,
+    messageData.inmail_body,
+    messageData.inmail_text,
+    messageData.from?.message,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return stripHtml(candidate);
+    }
+  }
+
+  return "";
+}
+
+/**
  * Process Unipile webhook events (LinkedIn messages, connection updates).
  * Matches by provider_id in candidate_channels, logs activity,
  * runs sentiment analysis on replies via Claude Haiku.
@@ -48,7 +99,16 @@ export const processUnipileEvent = task({
 async function processLinkedInMessage(supabase: any, event: any, receivedAt: string) {
   const messageData = event.data || event.message || event;
   const senderId = messageData.sender_id || messageData.provider_id || messageData.from?.provider_id;
-  const messageBody = messageData.text || messageData.body || "";
+  const messageBody = extractMessageBody(messageData);
+  const hasAttachments = Array.isArray(messageData.attachments) && messageData.attachments.length > 0;
+
+  // Skip messages with no body text and no attachments (e.g. malformed or stub events)
+  if (!messageBody && !hasAttachments) {
+    logger.info("Skipping LinkedIn message with empty body and no attachments");
+    return { action: "skipped", reason: "empty_body" };
+  }
+
+  const finalBody = messageBody || "[Attachment]";
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
@@ -160,7 +220,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       contact_id: null,
       channel,
       direction: "inbound",
-      body: messageBody,
+      body: finalBody,
       sent_at: messageData.created_at || receivedAt,
       provider: "unipile",
       external_message_id: externalMessageId,
@@ -174,7 +234,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       .from("conversations")
       .update({
         last_message_at: receivedAt,
-        last_message_preview: messageBody.substring(0, 100),
+        last_message_preview: finalBody.substring(0, 100),
         is_read: false,
       })
       .eq("id", conversationId);
@@ -206,7 +266,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     [entityColumn]: entityId,
     channel,
     direction: "inbound",
-    body: messageBody,
+    body: finalBody,
     sent_at: messageData.created_at || receivedAt,
     provider: "unipile",
     external_message_id: externalMessageId,
@@ -219,7 +279,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     .from("conversations")
     .update({
       last_message_at: receivedAt,
-      last_message_preview: messageBody.substring(0, 100),
+      last_message_preview: finalBody.substring(0, 100),
       is_read: false,
     })
     .eq("id", conversationId);
@@ -235,8 +295,8 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     .eq("id", entityId);
 
   // Extract intelligence from inbound LinkedIn message
-  if (messageBody.length > 10) {
-    const intel = await extractMessageIntel(messageBody);
+  if (finalBody.length > 10) {
+    const intel = await extractMessageIntel(finalBody);
     if (intel) {
       const { data: enrollment } = await supabase
         .from("sequence_enrollments")
@@ -263,7 +323,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
 
   if (activeEnrollments && activeEnrollments.length > 0) {
     for (const enrollment of activeEnrollments) {
-      await stopEnrollment(supabase, enrollment, "reply_received", messageBody);
+      await stopEnrollment(supabase, enrollment, "reply_received", finalBody);
     }
     logger.info("Stopped enrollments on LinkedIn reply", { entityId, count: activeEnrollments.length });
   }
