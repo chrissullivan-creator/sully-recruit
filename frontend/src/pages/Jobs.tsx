@@ -71,9 +71,13 @@ const Jobs = () => {
         description="Track your active job requisitions through the pipeline."
         actions={
           <div className="flex items-center gap-2">
-            <div className="flex items-center border border-border rounded-lg overflow-hidden">
+            <div className="flex items-center border border-border rounded-lg overflow-hidden" role="group" aria-label="Jobs view">
               <button
+                type="button"
                 onClick={() => setView('pipeline')}
+                aria-label="Pipeline view"
+                aria-pressed={view === 'pipeline'}
+                title="Pipeline view"
                 className={cn(
                   'p-2 transition-colors',
                   view === 'pipeline' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -82,7 +86,11 @@ const Jobs = () => {
                 <LayoutGrid className="h-4 w-4" />
               </button>
               <button
+                type="button"
                 onClick={() => setView('list')}
+                aria-label="List view"
+                aria-pressed={view === 'list'}
+                title="List view"
                 className={cn(
                   'p-2 transition-colors',
                   view === 'list' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -175,7 +183,12 @@ const Jobs = () => {
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                          <button
+                            type="button"
+                            aria-label={`Open actions for ${job.title}`}
+                            title="Job actions"
+                            className="p-1 rounded hover:bg-muted transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                          >
                             <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                           </button>
                         </DropdownMenuTrigger>

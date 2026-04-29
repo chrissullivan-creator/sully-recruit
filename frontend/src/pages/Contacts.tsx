@@ -213,6 +213,10 @@ const Contacts = () => {
     setEnrollOpen(true);
   };
 
+  const stopRowNavigation = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+  };
+
   return (
     <MainLayout>
       <PageHeader 
@@ -425,6 +429,8 @@ const Contacts = () => {
                         {((contact as any).work_email || contact.email) && (
                           <a href={`mailto:${(contact as any).work_email || contact.email}`}
                             title={`Work: ${(contact as any).work_email || contact.email}`}
+                            aria-label={`Email ${contact.full_name ?? 'contact'}`}
+                            onClick={stopRowNavigation}
                             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Mail className="h-4 w-4" />
                           </a>
@@ -432,6 +438,8 @@ const Contacts = () => {
                         {(contact as any).personal_email && (
                           <a href={`mailto:${(contact as any).personal_email}`}
                             title={`Personal: ${(contact as any).personal_email}`}
+                            aria-label={`Email ${contact.full_name ?? 'contact'} personal`}
+                            onClick={stopRowNavigation}
                             className="p-1.5 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-colors">
                             <Mail className="h-4 w-4" />
                           </a>
@@ -439,12 +447,17 @@ const Contacts = () => {
                         {((contact as any).mobile_phone || contact.phone) && (
                           <a href={`tel:${(contact as any).mobile_phone || contact.phone}`}
                             title={(contact as any).mobile_phone || contact.phone}
+                            aria-label={`Call ${contact.full_name ?? 'contact'}`}
+                            onClick={stopRowNavigation}
                             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Phone className="h-4 w-4" />
                           </a>
                         )}
                         {contact.linkedin_url && (
                           <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
+                            title="LinkedIn profile"
+                            aria-label={`Open ${contact.full_name ?? 'contact'} LinkedIn profile`}
+                            onClick={stopRowNavigation}
                             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                             <Linkedin className="h-4 w-4" />
                           </a>
@@ -491,7 +504,12 @@ const Contacts = () => {
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                          <button
+                            type="button"
+                            aria-label={`Open actions for ${contact.full_name ?? 'contact'}`}
+                            title="Contact actions"
+                            className="p-1 rounded hover:bg-muted transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                          >
                             <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                           </button>
                         </DropdownMenuTrigger>
