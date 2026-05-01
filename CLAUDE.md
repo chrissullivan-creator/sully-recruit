@@ -32,5 +32,7 @@ Read these before making changes:
 - Unipile API key comes from `app_settings` table via `getAppSetting("UNIPILE_API_KEY")` — NOT from `integration_accounts.access_token`
 - Edge function secrets: `ANTHROPIC_API_KEY` (check lowercase fallback `anthropic_api_key`)
 - Frontend env vars must be `VITE_*` prefixed
-- Candidate statuses: `new`, `reached_out`, `back_of_resume`, `placed` — nothing else
+- **Unified person model:** `candidates` table holds BOTH candidates and clients via `type` column (`'candidate'` | `'client'`). The old `contacts` table is now a backwards-compat VIEW over `candidates WHERE type='client'` with INSTEAD OF triggers for writes.
+- Person statuses (shared candidate + client): `new`, `reached_out`, `engaged` — nothing else (CHECK constraint enforces this)
+- Pipeline stage tables: `pitches`, `send_outs`, `submissions`, `interviews`, `placements`, `rejections`
 - Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley
