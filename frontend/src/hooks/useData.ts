@@ -411,11 +411,11 @@ export function useDashboardMetrics() {
         supabase.from('candidates').select('id, job_status, owner_user_id').gte('created_at', monthStart),
         supabase.from('send_outs').select('id, stage, created_at'),
 
-        // Back of resume — all candidates with this status updated this month
+        // Engaged candidates updated this month (was "back_of_resume" pre-status-unification)
         supabase
           .from('candidates')
           .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
-          .eq('status', 'back_of_resume')
+          .eq('status', 'engaged')
           .gte('updated_at', monthStart)
           .order('updated_at', { ascending: false }),
 

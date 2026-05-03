@@ -58,19 +58,17 @@ const JOB_STATUS_COLORS: Record<string, string> = {
 type SortField = 'name' | 'title' | 'company' | 'status' | 'created' | 'updated';
 type SortDir = 'asc' | 'desc';
 
-const statusFilters = ['all', 'new', 'reached_out', 'back_of_resume', 'placed'] as const;
+const statusFilters = ['all', 'new', 'reached_out', 'engaged'] as const;
 const STATUS_LABELS: Record<string, string> = {
   all: 'All',
   new: 'New',
   reached_out: 'Reached Out',
-  back_of_resume: 'Back of Resume',
-  placed: 'Placed',
+  engaged: 'Engaged',
 };
 const statusColors: Record<string, string> = {
-  new:            'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  reached_out:    'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  back_of_resume: 'bg-muted text-muted-foreground border-border',
-  placed:         'bg-success/10 text-success border-success/20',
+  new:         'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  reached_out: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  engaged:     'bg-success/10 text-success border-success/20',
 };
 
 // Saved searches persisted to localStorage

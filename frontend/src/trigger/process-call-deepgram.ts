@@ -313,11 +313,12 @@ Field rules:
       if (entityId) { clUpdate.linked_entity_type = entityType; clUpdate.linked_entity_id = entityId; }
       await supabase.from("call_logs").update(clUpdate).eq("id", cl.id);
 
-      // Update candidate fields (only promote to back_of_resume for calls >= 60s)
+      // Update candidate fields (only promote to engaged for calls >= 60s).
+      // status enum is now (new|reached_out|engaged) — engaged replaces back_of_resume.
       if (entityType === "candidate" && entityId) {
         const updates: Record<string, any> = { updated_at: now };
         if ((cl.duration_seconds ?? 0) >= 60) {
-          updates.status = "back_of_resume";
+          updates.status = "engaged";
           if (cl.owner_id) updates.owner_user_id = cl.owner_id;
         }
         if (intel.reason_for_leaving) updates.reason_for_leaving = intel.reason_for_leaving;

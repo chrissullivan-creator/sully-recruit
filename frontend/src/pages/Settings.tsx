@@ -1473,13 +1473,8 @@ Senior Recruiter | Your Company
                     </div>
                     <div className="space-y-4">
                       {[
-                        { id: 'scan-duplicate-candidates', label: 'Scan Duplicates', desc: 'Scan all candidates for potential duplicates', endpoint: '/api/dedup/scan' },
-                        { id: 'backfill-avatars', label: 'Backfill Avatars', desc: 'Fetch missing candidate/contact avatars', endpoint: null },
                         { id: 'cleanup-stale-enrollments', label: 'Cleanup Enrollments', desc: 'Remove stale/abandoned sequence enrollments', endpoint: null },
                         { id: 'sync-conversations', label: 'Sync Conversations', desc: 'Sync conversations from Unipile', endpoint: null },
-                        { id: 'sync-outlook-events', label: 'Sync Outlook Events', desc: 'Sync calendar events from Outlook', endpoint: '/api/trigger-sync-outlook' },
-                        { id: 'run-nudge-check', label: 'Run Nudge Check', desc: 'Find stagnant candidates and create follow-up tasks', endpoint: '/api/trigger-nudge-check' },
-                        { id: 'backfill-companies', label: 'Backfill Companies', desc: 'Fetch missing company data from LinkedIn', endpoint: '/api/trigger-backfill-companies' },
                       ].map((task) => (
                         <div key={task.id} className="rounded-lg border border-border bg-card p-4 flex items-center justify-between">
                           <div>
