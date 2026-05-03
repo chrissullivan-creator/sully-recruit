@@ -34,6 +34,8 @@ import { Switch } from '@/components/ui/switch';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
+import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
+import type { CanonicalStage } from '@/lib/pipeline';
 
 const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -351,6 +353,7 @@ const JobDetail = () => {
 
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
+  const [funnelStage, setFunnelStage] = useState<CanonicalStage | null>(null);
   const [selectedContactId, setSelectedContactId] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
@@ -776,6 +779,13 @@ const JobDetail = () => {
           </AlertDialog>
         </div>
       </div>
+
+      {/* ── Funnel strip (live counts per pipeline_stage for this job) ── */}
+      <FunnelStrip
+        jobId={id!}
+        activeStage={funnelStage}
+        onStageClick={setFunnelStage}
+      />
 
       {/* ── Sidebar + Tabs Layout ──────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
