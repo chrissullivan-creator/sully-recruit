@@ -120,14 +120,17 @@ const InlineRoleEdit = ({ role, onSave }: { role: string | null; onSave: (v: str
   );
 };
 
-// Stages relevant to send outs (the submission pipeline)
+// Per-sendout micro-lifecycle (the `send_outs.stage` column). Labels align with the
+// canonical funnel (Submissions / Interviews / Placements / Rejections) so the dashboard
+// funnel and per-job view tell the same story. "Offer" and "Withdrew" are sub-states
+// not represented as their own funnel stages.
 const SEND_OUT_STAGES = [
-  { value: 'submitted',    label: 'Submissions',           color: 'bg-purple-500/15 text-purple-400' },
-  { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
-  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
-  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
-  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
-  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
+  { value: 'submitted',    label: 'Submission',  color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'interviewing', label: 'Interview',   color: 'bg-emerald-500/15 text-emerald-400' },
+  { value: 'offer',        label: 'Offer',       color: 'bg-amber-500/15 text-amber-400' },
+  { value: 'placed',       label: 'Placement',   color: 'bg-green-500/15 text-green-400' },
+  { value: 'rejected',     label: 'Rejection',   color: 'bg-red-500/15 text-red-400' },
+  { value: 'withdrew',     label: 'Withdrew',    color: 'bg-muted text-muted-foreground' },
 ];
 
 // ── Send-out card with inline submittal notes + resume upload ─────────────────
