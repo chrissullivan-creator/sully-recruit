@@ -91,7 +91,7 @@ export function AskJoeAdvancedSearch({ open, onOpenChange, mode = 'candidate_sea
 
           try {
             const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            const content = parsed.content as string | undefined;
             if (content) {
               assistantSoFar += content;
               const current = assistantSoFar;
