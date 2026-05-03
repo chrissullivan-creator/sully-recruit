@@ -343,7 +343,7 @@ serve(async (req) => {
                 'anthropic-version': '2023-06-01',
               },
               body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-6',
                 max_tokens: 2048,
                 stream: true,
                 system: systemPrompt,
@@ -363,10 +363,53 @@ serve(async (req) => {
             const blocks: any[] = [];
             const partialInputs = new Map<number, string>();
             let stopReason: string | null = null;
+            let evtCount = 0;
+            let textDeltaCount = 0;
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
+
+            const handleLine = (rawLine: string) => {
+              let line = rawLine;
+              if (line.endsWith('\r')) line = line.slice(0, -1);
+              if (!line.startsWith('data:')) return;
+              const jsonStr = line.slice(line.startsWith('data: ') ? 6 : 5).trim();
+              if (!jsonStr || jsonStr === '[DONE]') return;
+              let evt: any;
+              try { evt = JSON.parse(jsonStr); } catch { return; }
+              evtCount++;
+
+              if (evt.type === 'content_block_start') {
+                const idx = evt.index;
+                const cb = evt.content_block;
+                if (cb?.type === 'text') {
+                  blocks[idx] = { type: 'text', text: '' };
+                } else if (cb?.type === 'tool_use') {
+                  blocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, input: {} };
+                  partialInputs.set(idx, '');
+                }
+              } else if (evt.type === 'content_block_delta') {
+                const idx = evt.index;
+                const d = evt.delta;
+                if (d?.type === 'text_delta' && typeof d.text === 'string') {
+                  if (blocks[idx]?.type === 'text') blocks[idx].text += d.text;
+                  send(d.text);
+                  textDeltaCount++;
+                } else if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
+                  partialInputs.set(idx, (partialInputs.get(idx) ?? '') + d.partial_json);
+                }
+              } else if (evt.type === 'content_block_stop') {
+                const idx = evt.index;
+                if (blocks[idx]?.type === 'tool_use') {
+                  const json = partialInputs.get(idx) ?? '';
+                  try { blocks[idx].input = json ? JSON.parse(json) : {}; }
+                  catch { blocks[idx].input = {}; }
+                }
+              } else if (evt.type === 'message_delta') {
+                if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+              }
+            };
 
             while (true) {
               const { done, value } = await reader.read();
@@ -374,43 +417,10 @@ serve(async (req) => {
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
               buffer = lines.pop() ?? '';
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const jsonStr = line.slice(6);
-                if (!jsonStr) continue;
-                let evt: any;
-                try { evt = JSON.parse(jsonStr); } catch { continue; }
-
-                if (evt.type === 'content_block_start') {
-                  const idx = evt.index;
-                  const cb = evt.content_block;
-                  if (cb?.type === 'text') {
-                    blocks[idx] = { type: 'text', text: '' };
-                  } else if (cb?.type === 'tool_use') {
-                    blocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, input: {} };
-                    partialInputs.set(idx, '');
-                  }
-                } else if (evt.type === 'content_block_delta') {
-                  const idx = evt.index;
-                  const d = evt.delta;
-                  if (d?.type === 'text_delta' && typeof d.text === 'string') {
-                    if (blocks[idx]?.type === 'text') blocks[idx].text += d.text;
-                    send(d.text);
-                  } else if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
-                    partialInputs.set(idx, (partialInputs.get(idx) ?? '') + d.partial_json);
-                  }
-                } else if (evt.type === 'content_block_stop') {
-                  const idx = evt.index;
-                  if (blocks[idx]?.type === 'tool_use') {
-                    const json = partialInputs.get(idx) ?? '';
-                    try { blocks[idx].input = json ? JSON.parse(json) : {}; }
-                    catch { blocks[idx].input = {}; }
-                  }
-                } else if (evt.type === 'message_delta') {
-                  if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
-                }
-              }
+              for (const line of lines) handleLine(line);
             }
+            if (buffer.length > 0) handleLine(buffer);
+            console.log(`[ask-joe] iter ${iterations}: events=${evtCount} text_deltas=${textDeltaCount} stop_reason=${stopReason} blocks=${blocks.filter(Boolean).length}`);
 
             if (stopReason === 'tool_use') {
               const assistantContent = blocks.filter(Boolean);
