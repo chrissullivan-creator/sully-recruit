@@ -440,6 +440,69 @@ export const sequenceSweep = schedules.task({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pending-connection sweeper — LinkedIn invites that never get accepted
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PENDING_CONNECTION_TTL_DAYS = 21;
+
+/**
+ * Cancels any LinkedIn `pending_connection` step log that has been waiting
+ * longer than PENDING_CONNECTION_TTL_DAYS. Without this, an unaccepted
+ * invite leaves the enrollment perpetually "incomplete" — checkSequenceComplete
+ * counts pending_connection as not-done, so the enrollment row never closes
+ * out and the UI shows it as still active.
+ *
+ * Runs once a day at 02:00 UTC (off-hours so it doesn't compete with the
+ * 3-minute send sweep).
+ */
+export const pendingConnectionTimeout = schedules.task({
+  id: "sequence-pending-connection-timeout",
+  cron: "0 2 * * *",
+  run: async () => {
+    const supabase = getSupabaseAdmin();
+    const cutoff = new Date(Date.now() - PENDING_CONNECTION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    // Find every stale pending_connection log + the enrollment it belongs to,
+    // so we can advance the enrollment's progress + close it out if needed.
+    const { data: stale, error } = await supabase
+      .from("sequence_step_logs")
+      .select("id, enrollment_id, sequence_enrollments!inner(id, candidate_id, contact_id, status)")
+      .eq("status", "pending_connection")
+      .lte("created_at", cutoff)
+      .limit(200);
+
+    if (error) {
+      logger.error("Pending-connection sweep query failed", { error: error.message });
+      return { action: "error" };
+    }
+
+    if (!stale || stale.length === 0) return { action: "idle" };
+
+    logger.info(`Cancelling ${stale.length} pending_connection logs older than ${PENDING_CONNECTION_TTL_DAYS}d`);
+
+    const ids = stale.map((s: any) => s.id);
+    await supabase
+      .from("sequence_step_logs")
+      .update({ status: "cancelled", skip_reason: "connection_request_expired" } as any)
+      .in("id", ids);
+
+    // For each enrollment touched, advance the current_node_id pointer + run
+    // checkSequenceComplete so we either move to the next step or mark it
+    // completed. Dedup enrollments first.
+    const seen = new Set<string>();
+    for (const s of stale as any[]) {
+      const enr = s.sequence_enrollments;
+      if (!enr || seen.has(enr.id)) continue;
+      seen.add(enr.id);
+      await advanceCurrentNode(supabase, s.id);
+      await checkSequenceComplete(supabase, enr);
+    }
+
+    return { action: "expired", count: ids.length, enrollments: seen.size };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -574,8 +637,40 @@ async function markStepLog(supabase: any, stepLogId: string, status: string, sen
   const update: any = { status };
   if (sentAt) update.sent_at = sentAt.toISOString();
   await supabase.from("sequence_step_logs").update(update).eq("id", stepLogId);
+  await advanceCurrentNode(supabase, stepLogId);
 }
 
 async function markStepSkipped(supabase: any, stepLogId: string, reason: string): Promise<void> {
   await supabase.from("sequence_step_logs").update({ status: "skipped", skip_reason: reason } as any).eq("id", stepLogId);
+  await advanceCurrentNode(supabase, stepLogId);
+}
+
+/**
+ * Move the enrollment's `current_node_id` forward to the next not-yet-fired
+ * step (scheduled / in_flight / pending_connection), so the UI can show
+ * accurate progress like "step 3 of 5". If no more steps are pending the
+ * caller's checkSequenceComplete() handles the completion transition.
+ */
+async function advanceCurrentNode(supabase: any, stepLogId: string): Promise<void> {
+  const { data: log } = await supabase
+    .from("sequence_step_logs")
+    .select("enrollment_id")
+    .eq("id", stepLogId)
+    .maybeSingle();
+  if (!log?.enrollment_id) return;
+
+  const { data: nextLog } = await supabase
+    .from("sequence_step_logs")
+    .select("node_id")
+    .eq("enrollment_id", log.enrollment_id)
+    .in("status", ["scheduled", "in_flight", "pending_connection"])
+    .order("scheduled_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!nextLog?.node_id) return;
+
+  await supabase
+    .from("sequence_enrollments")
+    .update({ current_node_id: nextLog.node_id } as any)
+    .eq("id", log.enrollment_id);
 }
