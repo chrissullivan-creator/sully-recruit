@@ -417,10 +417,23 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const applyOwner = (q: any) =>
         ownedCandidateIds ? q.in('candidate_id', ownedCandidateIds) : q;
 
+      // Helper: people with a given status whose row was last updated inside the range.
+      const peopleByStatus = (status: string) => {
+        let q = supabase.from('people')
+          .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
+          .eq('status', status)
+          .gte('updated_at', fromIso).lte('updated_at', toIso)
+          .order('updated_at', { ascending: false });
+        if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
+        return q;
+      };
+
       const [
         jobsRes,
         candidatesCreatedRes,
-        // Engagement metric (person-level)
+        // Person-level statuses
+        newRes,
+        reachedOutRes,
         engagedRes,
         // 6 stage tables = the canonical funnel
         pitchesRes,
@@ -447,16 +460,10 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
           return q;
         })(),
 
-        // Engaged candidates updated in range
-        (() => {
-          let q = supabase.from('people')
-            .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
-            .eq('status', 'engaged')
-            .gte('updated_at', fromIso).lte('updated_at', toIso)
-            .order('updated_at', { ascending: false });
-          if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
-          return q;
-        })(),
+        // Person status counts (and lists) — updated in range
+        peopleByStatus('new'),
+        peopleByStatus('reached_out'),
+        peopleByStatus('engaged'),
 
         // Pitches stage table
         applyOwner(supabase.from('pitches').select('id, candidate_id, job_id, pitched_at')
@@ -509,28 +516,40 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
 
       const candidates       = candidatesCreatedRes.data ?? [];
       const sendOuts         = sendOutsAllRes.data       ?? [];
+      const newList          = (newRes.data              ?? []) as any[];
+      const reachedOutList   = (reachedOutRes.data       ?? []) as any[];
       const engagedList      = (engagedRes.data          ?? []) as any[];
       const sendOutsInRange  = (sendOutsInRangeRes.data  ?? []) as any[];
       const interviewList    = (interviewsInRangeRes.data?? []) as any[];
 
+      // Offers in range — derived from send_outs with stage='offer' updated in range.
+      const offerList = sendOutsInRange.filter((s: any) => s.stage === 'offer');
+
       return {
         activeJobs: jobsRes.count ?? 0,
         candidatesInRange: candidates.length,
+        // Person status counts
+        newCount: newList.length,
+        reachedOutCount: reachedOutList.length,
         engagedCount: engagedList.length,
         // 6-stage funnel — one card per stage table, no fallback
         pitchedCount:   (pitchesRes.data        ?? []).length,
         sendOutCount:   sendOutsInRange.length,
         submittedCount: (submissionsRes.data    ?? []).length,
         interviewCount: interviewList.length,
+        offerCount:     offerList.length,
         placedCount:    (placementsInRangeRes.data ?? []).length,
         rejectedCount:  (rejectionsInRangeRes.data ?? []).length,
         // In-flight (state-of-the-world)
         interviewsInFlight: sendOuts.filter((s: any) => ['interview', 'interviewing'].includes(s.stage)).length,
         offersOut:          sendOuts.filter((s: any) => s.stage === 'offer').length,
         // Detail lists
+        newList,
+        reachedOutList,
         engagedList,
         sendOutList: sendOutsInRange,
         interviewList,
+        offerList,
         placementList: (placementsInRangeRes.data ?? []) as any[],
         rejectionList: (rejectionsInRangeRes.data ?? []) as any[],
       };

@@ -205,17 +205,18 @@ const Dashboard = () => {
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
   const m = metrics;
 
-  // 6-stage funnel — one card per stage table. UI labels match table names exactly.
+  // 6-stage funnel — one card per stage table.
   const pitched     = m?.pitchedCount   ?? 0;
   const sendOuts    = m?.sendOutCount   ?? 0;
   const submissions = m?.submittedCount ?? 0;
   const interviews  = m?.interviewCount ?? 0;
-  const placements  = m?.placedCount    ?? 0;
+  const offers      = m?.offerCount     ?? 0;
   const rejections  = m?.rejectedCount  ?? 0;
 
-  // Person-level
-  const engaged       = m?.engagedCount      ?? 0;
-  const candidatesNew = m?.candidatesInRange ?? 0;
+  // Person-level statuses
+  const newPeople    = m?.newCount         ?? 0;
+  const reachedOut   = m?.reachedOutCount  ?? 0;
+  const engaged      = m?.engagedCount     ?? 0;
 
   const engagedList   = m?.engagedList   ?? [];
   const sendOutList   = m?.sendOutList   ?? [];
@@ -265,11 +266,9 @@ const Dashboard = () => {
                     {' · '}
                     <span className="font-semibold text-foreground">{sendOuts} send out{sendOuts !== 1 ? 's' : ''}</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{submissions} submission{submissions !== 1 ? 's' : ''}</span>
-                    {' · '}
                     <span className="font-semibold text-foreground">{interviews} interview{interviews !== 1 ? 's' : ''}</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{placements} placement{placements !== 1 ? 's' : ''}</span>
+                    <span className="font-semibold text-foreground">{offers} offer{offers !== 1 ? 's' : ''}</span>
                     {' · '}
                     <span className="text-muted-foreground/80">{range.label.toLowerCase()} · {ownerLabel.toLowerCase()}</span>
                   </>
@@ -304,27 +303,32 @@ const Dashboard = () => {
           </span>
         </div>
 
-        {/* ── Top-line metrics ────────────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard label="Active Jobs"   value={isLoading ? '…' : (m?.activeJobs ?? 0)}  icon={<Briefcase className="h-5 w-5" />} />
-          <MetricCard label="New People"    value={isLoading ? '…' : candidatesNew}         icon={<Users className="h-5 w-5" />} />
-          <MetricCard label="Engaged"       value={isLoading ? '…' : engaged}               icon={<User className="h-5 w-5" />} highlight />
-          <MetricCard label="Active Send-Outs" value={isLoading ? '…' : (m?.interviewsInFlight ?? 0)} icon={<Send className="h-5 w-5" />} />
+        {/* ── Person status (3 cards, click → People filtered by status) ─ */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-foreground">People — {range.label}</h2>
+            <span className="text-xs text-muted-foreground">Click any card to drill in</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <MetricCard label="New"         value={isLoading ? '…' : newPeople}  icon={<Users className="h-5 w-5" />}      onClick={() => navigate('/people?status=new')} />
+            <MetricCard label="Reached Out" value={isLoading ? '…' : reachedOut} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/people?status=reached_out')} />
+            <MetricCard label="Engaged"     value={isLoading ? '…' : engaged}    icon={<User className="h-5 w-5" />} highlight onClick={() => navigate('/people?status=engaged')} />
+          </div>
         </div>
 
-        {/* ── 6-stage funnel (one card per stage table) ───────────── */}
+        {/* ── 6-stage pipeline funnel (click → Send Outs by stage) ─── */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-foreground">Pipeline Funnel — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Sourced from stage tables</span>
+            <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <MetricCard label="Pitches"     value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />} />
-            <MetricCard label="Send Outs"   value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />} />
-            <MetricCard label="Submissions" value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />} />
-            <MetricCard label="Interviews"  value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight />
-            <MetricCard label="Placements"  value={isLoading ? '…' : placements}  icon={<Award className="h-5 w-5" />} highlight />
-            <MetricCard label="Rejections"  value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />} />
+            <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
+            <MetricCard label="Send Out"    value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />}   onClick={() => navigate('/send-outs?stage=sent')} />
+            <MetricCard label="Submission"  value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/send-outs?stage=submitted')} />
+            <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interviewing')} />
+            <MetricCard label="Offer"       value={isLoading ? '…' : offers}      icon={<Award className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=offer')} />
+            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=rejected')} />
           </div>
         </div>
 
