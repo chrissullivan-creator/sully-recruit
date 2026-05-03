@@ -582,7 +582,7 @@ const ContactDetail = () => {
                   <Briefcase className="h-3.5 w-3.5" /> Jobs ({linkedJobs.length})
                 </TabsTrigger>
                 <TabsTrigger value="candidates" className="gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> Candidates Pitched ({sendOuts.length})
+                  <Users className="h-3.5 w-3.5" /> Send Outs ({sendOuts.length})
                 </TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5">
                   <MessageSquare className="h-3.5 w-3.5" /> Communications ({(conversations as any[]).length})
