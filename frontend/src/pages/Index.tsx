@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/dashboard/MetricCard';
+import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { Button } from '@/components/ui/button';
@@ -161,11 +162,11 @@ const ListPanel = ({
 
 // ── Main Dashboard ────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { data: metrics, isLoading } = useDashboardMetrics();
+  const [range, setRange] = useState<DashboardRange>(() => defaultDashboardRange());
+  const { data: metrics, isLoading } = useDashboardMetrics(range);
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [period, setPeriod] = useState<'week' | 'month'>('week');
 
   const [addCandidateOpen, setAddCandidateOpen]   = useState(false);
   const [addJobOpen, setAddJobOpen]               = useState(false);
@@ -194,23 +195,20 @@ const Dashboard = () => {
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
   const m = metrics;
 
-  // Period-aware counts
-  const candidates      = period === 'week' ? m?.weekCandidates      : m?.monthCandidates;
-  const myCandidates    = period === 'week' ? m?.myWeekCandidates    : m?.myMonthCandidates;
-  const newCount        = period === 'week' ? m?.weekNew             : m?.monthNew;
-  const contacted       = period === 'week' ? m?.weekContacted       : m?.monthContacted;
-  const pitched         = period === 'week' ? m?.weekPitched         : m?.monthPitched;
-  const sendOut         = period === 'week' ? m?.weekSendOut         : m?.monthSendOut;
-  const interviewing    = period === 'week' ? m?.weekInterviewing    : m?.monthInterviewing;
-  const offer           = period === 'week' ? m?.weekOffer           : m?.monthOffer;
-  const backOfResume    = period === 'week' ? m?.weekBackOfResume    : m?.monthBackOfResume;
-  const sentCount       = period === 'week' ? m?.weekSentCount       : m?.monthSentCount;
-  const interviewCount  = period === 'week' ? m?.weekInterviewCount  : m?.monthInterviewCount;
+  const myCandidates    = m?.myCandidatesInRange ?? 0;
+  const newCount        = m?.newCount            ?? 0;
+  const contacted       = m?.contactedCount      ?? 0;
+  const pitched         = m?.pitchedCount        ?? 0;
+  const sendOut         = m?.sendOutCount        ?? 0;
+  const interviewing    = m?.interviewingCount   ?? 0;
+  const offer           = m?.offerCount          ?? 0;
+  const engaged         = m?.engagedCount        ?? 0;
+  const sentCount       = m?.sentCount           ?? 0;
+  const interviewCount  = m?.interviewCount      ?? 0;
 
-  // Period-aware lists
-  const borList       = period === 'week' ? (m?.weekBackOfResumeList  ?? []) : (m?.backOfResumeList  ?? []);
-  const sentList      = period === 'week' ? (m?.weekSentList          ?? []) : (m?.sentList          ?? []);
-  const interviewList = period === 'week' ? (m?.weekInterviewList     ?? []) : (m?.interviewList     ?? []);
+  const engagedList   = m?.engagedList   ?? [];
+  const sentList      = m?.sentList      ?? [];
+  const interviewList = m?.interviewList ?? [];
 
   return (
     <MainLayout>
@@ -247,12 +245,13 @@ const Dashboard = () => {
                   <>
                     <span className="font-semibold text-foreground">{m?.activeJobs ?? 0} active jobs</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{backOfResume ?? 0} back of resume</span>
+                    <span className="font-semibold text-foreground">{engaged} engaged</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{sentCount ?? 0} sent</span>
+                    <span className="font-semibold text-foreground">{sentCount} sent</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{interviewCount ?? 0} interview{interviewCount !== 1 ? 's' : ''}</span>
-                    {' '}{period === 'week' ? 'this week' : 'this month'}
+                    <span className="font-semibold text-foreground">{interviewCount} interview{interviewCount !== 1 ? 's' : ''}</span>
+                    {' · '}
+                    <span className="text-muted-foreground/80">{range.label.toLowerCase()}</span>
                   </>
                 )}
               </p>
@@ -262,22 +261,12 @@ const Dashboard = () => {
           <div className="absolute -right-2 -bottom-8 h-24 w-24 rounded-full bg-accent/5 blur-xl" />
         </div>
 
-        {/* Period Toggle */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPeriod('week')}
-            className={cn('px-4 py-1.5 rounded-full text-sm font-medium transition-colors',
-              period === 'week' ? 'bg-accent text-white' : 'bg-muted text-muted-foreground hover:text-foreground')}
-          >
-            This Week
-          </button>
-          <button
-            onClick={() => setPeriod('month')}
-            className={cn('px-4 py-1.5 rounded-full text-sm font-medium transition-colors',
-              period === 'month' ? 'bg-accent text-white' : 'bg-muted text-muted-foreground hover:text-foreground')}
-          >
-            This Month
-          </button>
+        {/* Date range picker */}
+        <div className="flex items-center justify-between gap-2">
+          <DateRangePicker value={range} onChange={setRange} />
+          <span className="text-xs text-muted-foreground">
+            {format(range.from, 'MMM d, yyyy')} → {format(range.to, 'MMM d, yyyy')}
+          </span>
         </div>
 
         {/* ── Primary pipeline counts ────────────────────────────────── */}
@@ -289,23 +278,23 @@ const Dashboard = () => {
           <MetricCard label="Pitched"        value={isLoading ? '…' : (pitched ?? 0)}          icon={<Target className="h-5 w-5" />} />
         </div>
 
-        {/* ── Key production metrics (the 3 you asked for) ─────────── */}
+        {/* ── Key production metrics ─────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MetricCard
-            label="Back of Resume"
-            value={isLoading ? '…' : (backOfResume ?? 0)}
+            label="Engaged"
+            value={isLoading ? '…' : engaged}
             icon={<FileText className="h-5 w-5" />}
             highlight
           />
           <MetricCard
             label="Sent to Client"
-            value={isLoading ? '…' : (sentCount ?? 0)}
+            value={isLoading ? '…' : sentCount}
             icon={<Send className="h-5 w-5" />}
             highlight
           />
           <MetricCard
             label="Interviews"
-            value={isLoading ? '…' : (interviewCount ?? 0)}
+            value={isLoading ? '…' : interviewCount}
             icon={<Calendar className="h-5 w-5" />}
             highlight
           />
@@ -313,26 +302,26 @@ const Dashboard = () => {
 
         {/* ── Secondary pipeline counts ─────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <MetricCard label="Send Outs"   value={isLoading ? '…' : (sendOut ?? 0)}      icon={<FileText className="h-5 w-5" />} />
-          <MetricCard label="Interviewing (cand)" value={isLoading ? '…' : (interviewing ?? 0)} icon={<Calendar className="h-5 w-5" />} />
-          <MetricCard label="Offers Out"  value={isLoading ? '…' : (offer ?? 0)}        icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="Send Outs"   value={isLoading ? '…' : sendOut}        icon={<FileText className="h-5 w-5" />} />
+          <MetricCard label="Interviewing (cand)" value={isLoading ? '…' : interviewing}  icon={<Calendar className="h-5 w-5" />} />
+          <MetricCard label="Offers Out"  value={isLoading ? '…' : offer}          icon={<Briefcase className="h-5 w-5" />} />
         </div>
 
         {/* ── THE THREE LISTS ───────────────────────────────────────── */}
         <div className="space-y-3">
           <h2 className="text-base font-semibold text-foreground">
-            {period === 'week' ? 'This Week' : 'This Month'} — Detail
+            {range.label} — Detail
           </h2>
 
-          {/* Back of Resume */}
+          {/* Engaged */}
           <ListPanel
-            title="Back of Resume"
-            count={borList.length}
+            title="Engaged"
+            count={engagedList.length}
             icon={<FileText className="h-4 w-4" />}
             accentColor="bg-indigo-500/10 text-indigo-400"
-            defaultOpen={borList.length > 0}
+            defaultOpen={engagedList.length > 0}
           >
-            {borList.map((c: any) => (
+            {engagedList.map((c: any) => (
               <CandidateRow
                 key={c.id}
                 candidate={c}

@@ -71,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         title: data.title?.trim() || null,
         company_name: data.company?.trim() || null,
         location: data.location?.trim() || null,
-        status: "active",
+        status: "new",
         owner_user_id: user.id,
       };
       if (data.company_id) payload.company_id = data.company_id;
