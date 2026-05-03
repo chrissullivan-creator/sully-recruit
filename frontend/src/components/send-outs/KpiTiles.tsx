@@ -1,7 +1,8 @@
+import { useDroppable } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
 import { Send, FileCheck, Calendar, Award } from 'lucide-react';
 import type { SendOutRow } from '@/lib/queries/send-outs';
-import { stageToCanonical } from '@/lib/pipeline';
+import { stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 
 interface KpiTilesProps {
   rows: SendOutRow[];
@@ -9,6 +10,17 @@ interface KpiTilesProps {
   onTileClick: (target: 'all' | 'submitted' | 'interviewing' | 'offer') => void;
   /** Estimated fee from offer-stage rows — passed in from the page once it can compute it. */
   offerFee?: number;
+}
+
+interface TileSpec {
+  key: 'all' | 'submitted' | 'interviewing' | 'offer';
+  label: string;
+  value: number;
+  icon: typeof Send;
+  gold: boolean;
+  /** Single canonical stage this tile drops onto. Active tile (=all) has no drop target. */
+  dropStage: CanonicalStage | null;
+  sub?: string;
 }
 
 export function KpiTiles({ rows, onTileClick, offerFee }: KpiTilesProps) {
@@ -23,52 +35,70 @@ export function KpiTiles({ rows, onTileClick, offerFee }: KpiTilesProps) {
     if (c === 'offer') offer++;
   }
 
-  const tiles = [
-    { key: 'all',          label: 'Active',       value: active,       icon: Send,      gold: false, onClick: () => onTileClick('all') },
-    { key: 'submitted',    label: 'Submitted',    value: submitted,    icon: FileCheck, gold: false, onClick: () => onTileClick('submitted') },
-    { key: 'interviewing', label: 'Interviewing', value: interviewing, icon: Calendar,  gold: false, onClick: () => onTileClick('interviewing') },
-    { key: 'offer',        label: 'Offer Stage',  value: offer,        icon: Award,     gold: true,  onClick: () => onTileClick('offer'), sub: offerFee ? `~$${Math.round(offerFee / 1000)}k est. fee` : undefined },
+  const tiles: TileSpec[] = [
+    { key: 'all',          label: 'Active',       value: active,       icon: Send,      gold: false, dropStage: null },
+    { key: 'submitted',    label: 'Submitted',    value: submitted,    icon: FileCheck, gold: false, dropStage: 'submitted' },
+    { key: 'interviewing', label: 'Interviewing', value: interviewing, icon: Calendar,  gold: false, dropStage: 'interview_round_1' },
+    { key: 'offer',        label: 'Offer Stage',  value: offer,        icon: Award,     gold: true,  dropStage: 'offer', sub: offerFee ? `~$${Math.round(offerFee / 1000)}k est. fee` : undefined },
   ];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {tiles.map((t) => {
-        const Icon = t.icon;
-        return (
-          <button
-            key={t.key}
-            onClick={t.onClick}
-            className={cn(
-              'group text-left rounded-xl border p-5 transition-all hover:shadow-md',
-              t.gold
-                ? 'bg-gold-bg border-gold/30 hover:border-gold/60'
-                : 'bg-white border-card-border hover:border-emerald/40',
-            )}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className={cn(
-                  'text-xs font-semibold uppercase tracking-wider',
-                  t.gold ? 'text-gold-deep' : 'text-muted-foreground',
-                )}>{t.label}</p>
-                <p className={cn(
-                  'text-3xl font-bold tabular-nums mt-2 font-display',
-                  t.gold ? 'text-gold-deep' : 'text-emerald-dark',
-                )}>{t.value}</p>
-                {t.sub && (
-                  <p className="text-xs text-gold-deep/80 font-medium mt-1">{t.sub}</p>
-                )}
-              </div>
-              <div className={cn(
-                'flex h-10 w-10 items-center justify-center rounded-lg shrink-0',
-                t.gold ? 'bg-gold/15 text-gold-deep' : 'bg-emerald-light text-emerald',
-              )}>
-                <Icon className="h-5 w-5" />
-              </div>
-            </div>
-          </button>
-        );
-      })}
+      {tiles.map((t) => (
+        <KpiTile
+          key={t.key}
+          spec={t}
+          onClick={() => onTileClick(t.key)}
+        />
+      ))}
     </div>
+  );
+}
+
+function KpiTile({ spec, onClick }: { spec: TileSpec; onClick: () => void }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: spec.dropStage ? `kpi-tile:${spec.dropStage}` : `kpi-tile:noop:${spec.key}`,
+    disabled: !spec.dropStage,
+  });
+  const Icon = spec.icon;
+  return (
+    <button
+      ref={setNodeRef}
+      onClick={onClick}
+      className={cn(
+        'group text-left rounded-xl border p-5 transition-all hover:shadow-md',
+        spec.gold
+          ? 'bg-gold-bg border-gold/30 hover:border-gold/60'
+          : 'bg-white border-card-border hover:border-emerald/40',
+        isOver && spec.dropStage && 'ring-2 ring-emerald shadow-md',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className={cn(
+            'text-xs font-semibold uppercase tracking-wider',
+            spec.gold ? 'text-gold-deep' : 'text-muted-foreground',
+          )}>{spec.label}</p>
+          <p className={cn(
+            'text-3xl font-bold tabular-nums mt-2 font-display',
+            spec.gold ? 'text-gold-deep' : 'text-emerald-dark',
+          )}>{spec.value}</p>
+          {spec.sub && (
+            <p className="text-xs text-gold-deep/80 font-medium mt-1">{spec.sub}</p>
+          )}
+          {isOver && spec.dropStage && (
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald mt-1">
+              Drop to move
+            </p>
+          )}
+        </div>
+        <div className={cn(
+          'flex h-10 w-10 items-center justify-center rounded-lg shrink-0',
+          spec.gold ? 'bg-gold/15 text-gold-deep' : 'bg-emerald-light text-emerald',
+        )}>
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+    </button>
   );
 }

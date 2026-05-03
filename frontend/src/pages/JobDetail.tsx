@@ -38,6 +38,8 @@ import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
 import { QuickStats } from '@/components/job-detail/QuickStats';
 import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
 import { JobPipelineKanban, useJobKanbanRows, type KanbanRow } from '@/components/job-detail/JobPipelineKanban';
+import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
+import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
 import {
@@ -1043,6 +1045,7 @@ const JobDetail = () => {
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5"><FileTextIcon className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
             </div>
 
@@ -1337,6 +1340,11 @@ const JobDetail = () => {
                     ))}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ── Notes Tab ─────────────────────────────── */}
+              <TabsContent value="notes" className="px-6 lg:px-8 py-5 mt-0">
+                <JobNotesTab jobId={job.id} />
               </TabsContent>
 
             </ScrollArea>
