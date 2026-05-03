@@ -117,9 +117,16 @@ export default function SourceProject() {
 
   // ---- Load project detail + applicants ----
   const fetchProject = useCallback(async () => {
-    if (!id || !accountId) return;
+    // Guards: if id or account_id are missing, surface that instead of hanging
+    // on the loading spinner forever. Both come from the URL — if the user
+    // navigated here without query params we want them to see why.
+    if (!id || !accountId) {
+      setLoading(false);
+      if (!accountId) toast.error('Missing account_id in URL — open this project from the Source list.');
+      return;
+    }
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) { setLoading(false); return; }
 
     setLoading(true);
     try {
