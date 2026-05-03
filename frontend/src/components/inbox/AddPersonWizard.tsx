@@ -139,13 +139,20 @@ export function AddPersonWizard({
     setPersonType(null);
     setMatches([]);
     enrichedRef.current = false;
+    // LinkedIn inbound senders carry a Unipile URN/provider_id (e.g. ACoAAA...,
+    // urn:li:fsd_profile:...) in sender_address, NOT a real linkedin.com URL.
+    // Only seed the linkedin_url field if it actually looks like one — otherwise
+    // we wait for /api/lookup-linkedin to resolve a real URL via Unipile.
+    const seedLinkedInUrl = /linkedin\.com\/in\//i.test(prefill.linkedinUrl ?? '')
+      ? prefill.linkedinUrl
+      : '';
     setForm({
       ...EMPTY_FORM,
       first_name: nameParts[0] || '',
       last_name: nameParts.slice(1).join(' ') || '',
       email: prefill.email || '',
       phone: prefill.phone || '',
-      linkedin_url: prefill.linkedinUrl || '',
+      linkedin_url: seedLinkedInUrl,
     });
   }, [open, prefill.name, prefill.email, prefill.phone, prefill.linkedinUrl]);
 

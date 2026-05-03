@@ -174,18 +174,10 @@ async function processAccount(
             continue;
           }
 
-          // Detect LinkedIn InMail notifications — re-tag as linkedin channel
-          const isInmailNotification =
-            !isOutbound &&
-            senderEmail === "messages-noreply@linkedin.com" &&
-            senderName?.includes("via LinkedIn");
-          // Block LinkedIn marketing emails (not real InMail replies)
-          const isLinkedInMarketing =
-            !isOutbound &&
-            senderEmail === "messages-noreply@linkedin.com" &&
-            !senderName?.includes("via LinkedIn");
-
-          if (isLinkedInMarketing) {
+          // Channel routing rule: Outlook ingestion ALWAYS produces channel='email'.
+          // Unipile is the only source that creates channel='linkedin' / 'linkedin_recruiter'.
+          // We still drop pure LinkedIn marketing/notification noise from messages-noreply@.
+          if (!isOutbound && senderEmail === "messages-noreply@linkedin.com") {
             skipped++;
             continue;
           }
@@ -217,7 +209,7 @@ async function processAccount(
               .insert({
                 candidate_id: candidateId,
                 contact_id: contactId,
-                channel: isInmailNotification ? "linkedin" : "email",
+                channel: "email",
                 integration_account_id: account.id,
                 external_conversation_id: externalConversationId,
                 subject,
@@ -242,9 +234,9 @@ async function processAccount(
             conversation_id: conversation.id,
             candidate_id: candidateId,
             contact_id: contactId,
-            channel: isInmailNotification ? "linkedin" : "email",
+            channel: "email",
             direction: isOutbound ? "outbound" : "inbound",
-            message_type: isInmailNotification ? "inmail" : "email",
+            message_type: "email",
             external_message_id: externalMessageId,
             external_conversation_id: externalConversationId,
             subject,
