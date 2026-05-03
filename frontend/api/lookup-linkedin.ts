@@ -183,13 +183,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileData.title ||
       profileData.headline ||
       "";
-    const currentCompany =
+    let currentCompany =
       currentExp?.company ||
       currentExp?.company_name ||
       profileData.current_company ||
       profileData.company ||
       profileData.company_name ||
       "";
+
+    // Fallback: many LinkedIn headlines embed the company as "Title at Company".
+    // For non-premium / attendee-synthesized profiles, that's our best shot.
+    if (!currentCompany && profileData.headline) {
+      const m = String(profileData.headline).match(/\s+(?:at|@|\|)\s+([^|·•]+?)\s*(?:\||·|•|$)/i);
+      if (m) currentCompany = m[1].trim();
+    }
+    // Also try work_experience (some Unipile responses use this name).
+    if (!currentCompany && Array.isArray(profileData.work_experience) && profileData.work_experience.length > 0) {
+      const w = profileData.work_experience[0];
+      currentCompany = w?.company || w?.company_name || w?.organization || "";
+    }
 
     // Normalize to form-compatible fields
     const result: Record<string, string> = {};
