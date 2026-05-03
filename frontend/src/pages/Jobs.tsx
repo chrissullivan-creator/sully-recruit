@@ -103,7 +103,7 @@ const Jobs = () => {
         }
       />
       
-      <div className="p-8">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <div className="relative max-w-md mb-6">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input

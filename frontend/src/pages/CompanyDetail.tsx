@@ -440,8 +440,8 @@ const CompanyDetail = () => {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
+      <div className="flex flex-1 overflow-hidden bg-page-bg">
+        <aside className="w-72 shrink-0 border-r border-card-border bg-white overflow-y-auto">
           <div className="p-5 space-y-5">
             <div className="flex flex-col items-center text-center">
               {(() => {
@@ -515,7 +515,7 @@ const CompanyDetail = () => {
         <div className="flex-1 flex flex-col overflow-hidden">
           <Tabs defaultValue="jobs" className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-4 border-b border-border">
-              <TabsList className="bg-secondary">
+              <TabsList className="bg-white border border-card-border">
                 <TabsTrigger value="jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Jobs</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="contracts" className="gap-1.5">

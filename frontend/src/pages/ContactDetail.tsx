@@ -21,6 +21,7 @@ import {
   PhoneCall, PhoneIncoming, PhoneOutgoing,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -507,7 +508,7 @@ const ContactDetail = () => {
       </div>
 
       {/* Main content: left panel + right sidebar */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-page-bg">
 
         {/* ============ LEFT PANEL (70-75%) ============ */}
         <div className="flex-1 flex flex-col overflow-hidden" style={{ flex: '3 1 0%' }}>
@@ -573,7 +574,7 @@ const ContactDetail = () => {
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-3 border-b border-border">
-              <TabsList className="bg-secondary">
+              <TabsList className="bg-white border border-card-border">
                 <TabsTrigger value="joe" className="gap-1.5">
                   <Sparkles className="h-3.5 w-3.5" /> Joe Says
                 </TabsTrigger>
@@ -588,6 +589,9 @@ const ContactDetail = () => {
                 </TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5">
                   <History className="h-3.5 w-3.5" /> Activity
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5">
+                  <FileText className="h-3.5 w-3.5" /> Notes
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -1025,6 +1029,10 @@ const ContactDetail = () => {
                     </div>
                   );
                 })()}
+              </TabsContent>
+
+              <TabsContent value="notes" className="px-8 py-5 mt-0">
+                <EntityNotesTab entityType="contact" entityId={id!} placeholder="Add a note about this contact — call summary, hiring preferences, anything the team should see…" />
               </TabsContent>
             </ScrollArea>
           </Tabs>

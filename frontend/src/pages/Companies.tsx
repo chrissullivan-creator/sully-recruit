@@ -66,7 +66,7 @@ const Companies = () => {
         }
       />
       
-      <div className="p-8">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
