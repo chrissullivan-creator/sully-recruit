@@ -52,6 +52,16 @@ function toE164(input: string): string | null {
 const typeToEntity = (t: string | null | undefined): 'candidate' | 'contact' =>
   t === 'client' ? 'contact' : 'candidate';
 
+interface PersonSearchRow {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  current_title: string | null;
+  title: string | null;
+  type: string | null;
+}
+
 // ---- Log Call Dialog ----
 function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { user } = useAuth();
@@ -74,7 +84,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       const e164 = toE164(phone);
       if (!e164) { setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null }); return; }
       const { data, error } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, full_name, type')
         .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
         .limit(1)
@@ -265,7 +275,7 @@ function LinkCallDialog({
     setSearching(true);
     const q = search.trim();
     const { data, error } = await supabase
-      .from('candidates')
+      .from('people')
       .select('id, full_name, email, phone, current_title, title, type')
       .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
       .limit(10);
@@ -274,7 +284,7 @@ function LinkCallDialog({
       setSearching(false);
       return;
     }
-    setResults((data ?? []).map((r: any) => ({
+    setResults((data ?? []).map((r: PersonSearchRow) => ({
       ...r,
       entity_type: typeToEntity(r.type),
       title: r.current_title ?? r.title ?? null,
@@ -289,11 +299,11 @@ function LinkCallDialog({
     const e164 = toE164(call.phone_number);
     if (!e164) { setResults([]); setSearching(false); return; }
     const { data } = await supabase
-      .from('candidates')
+      .from('people')
       .select('id, full_name, email, phone, current_title, title, type')
       .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
       .limit(10);
-    const matches = (data ?? []).map((r: any) => ({
+    const matches = (data ?? []).map((r: PersonSearchRow) => ({
       ...r,
       entity_type: typeToEntity(r.type),
       title: r.current_title ?? r.title ?? null,
@@ -447,7 +457,7 @@ const Calls = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('ai_call_notes' as any)
-        .select('*, candidates(id, type, first_name, last_name, full_name, current_title, current_company, title, company_name)')
+        .select('*, candidates:people!candidate_id(id, type, first_name, last_name, full_name, current_title, current_company, title, company_name)')
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;

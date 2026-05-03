@@ -277,7 +277,7 @@ async function matchByPhone(
 
   // Try exact match on candidates first (E.164 format)
   const { data: candidateExact } = await supabase
-    .from("candidates")
+    .from("people")
     .select("id")
     .eq("phone", normalizedPhone)
     .limit(1)
@@ -290,7 +290,7 @@ async function matchByPhone(
   // Try last-10-digit fuzzy match on candidates (handles format variations)
   if (last10.length === 10) {
     const { data: candidateFuzzy } = await supabase
-      .from("candidates")
+      .from("people")
       .select("id")
       .ilike("phone", `%${last10}`)
       .limit(1)

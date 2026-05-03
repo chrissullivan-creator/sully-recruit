@@ -104,7 +104,7 @@ async function resolveUnipileInBackground(candidateId: string, linkedinUrl: stri
         const unipileClassicId = result.unipile_id || result.provider_id || null;
         if (unipileClassicId) {
           await supabase
-            .from('candidates')
+            .from('people')
             .update({ unipile_classic_id: unipileClassicId } as any)
             .eq('id', candidateId);
         }
@@ -199,7 +199,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         let existing: any = null;
         if (applicant.linkedin_url) {
           const { data } = await supabase
-            .from('candidates')
+            .from('people')
             .select('id')
             .eq('linkedin_url', applicant.linkedin_url)
             .maybeSingle();
@@ -207,7 +207,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         }
         if (!existing && applicant.email) {
           const { data } = await supabase
-            .from('candidates')
+            .from('people')
             .select('id')
             .eq('email', applicant.email)
             .maybeSingle();
@@ -306,7 +306,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         };
 
         const { data: inserted, error: insertErr } = await supabase
-          .from('candidates')
+          .from('people')
           .insert(candidateData as any)
           .select('id')
           .single();

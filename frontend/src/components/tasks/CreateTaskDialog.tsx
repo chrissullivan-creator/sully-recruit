@@ -126,7 +126,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
       setSearching(true);
       const q = entitySearch.trim();
       const [candRes, jobRes, contactRes, companyRes] = await Promise.all([
-        supabase.from('candidates').select('id, full_name').ilike('full_name', `%${q}%`).limit(4),
+        supabase.from('people').select('id, full_name').ilike('full_name', `%${q}%`).limit(4),
         supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${q}%`).not('status', 'in', '("closed_won","closed_lost")').limit(4),
         supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${q}%`).limit(4),
         supabase.from('companies').select('id, name').ilike('name', `%${q}%`).limit(4),
@@ -150,7 +150,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
       setSearchingAttendees(true);
       const q = attendeeSearch.trim();
       const [cRes, ctRes, pRes] = await Promise.all([
-        supabase.from('candidates').select('id, full_name').ilike('full_name', `%${q}%`).limit(5),
+        supabase.from('people').select('id, full_name').ilike('full_name', `%${q}%`).limit(5),
         supabase.from('contacts').select('id, full_name').ilike('full_name', `%${q}%`).limit(5),
         supabase.from('profiles').select('id, full_name, email').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
       ]);

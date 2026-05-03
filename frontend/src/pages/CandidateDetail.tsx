@@ -234,7 +234,7 @@ const CandidateDetail = () => {
     if (!id) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('candidates').delete().eq('id', id);
+      const { error } = await supabase.from('people').delete().eq('id', id);
       if (error) { toast.error(error.message || 'Failed to delete candidate'); return; }
       toast.success('Candidate deleted');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -655,7 +655,7 @@ const CandidateDetail = () => {
         updates.full_name = `${first} ${last}`.trim() || null;
       }
 
-      const { error } = await supabase.from('candidates').update(updates).eq('id', id);
+      const { error } = await supabase.from('people').update(updates).eq('id', id);
       if (error) { toast.error(`Failed to update ${field.replace(/_/g, ' ')}`); return; }
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -676,7 +676,7 @@ const CandidateDetail = () => {
         toast.success('Compensation added — status moved to Back of Resume');
       }
 
-      const { error } = await supabase.from('candidates').update(updates).eq('id', id);
+      const { error } = await supabase.from('people').update(updates).eq('id', id);
       if (error) { toast.error('Failed to update compensation'); return; }
       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -690,7 +690,7 @@ const CandidateDetail = () => {
     setUpdatingJobStatus(true);
     try {
       const normalizedStatus = normalizeInterviewStage(newStatus);
-      const { error } = await supabase.from('candidates').update({ job_status: normalizedStatus }).eq('id', id);
+      const { error } = await supabase.from('people').update({ job_status: normalizedStatus }).eq('id', id);
       if (error) { toast.error('Failed to update status'); return; }
 
       if (normalizedStatus === 'interviewing' && candidate?.job_id) {
@@ -954,7 +954,7 @@ const CandidateDetail = () => {
               const newRoles = currentRoles.includes('client')
                 ? currentRoles.filter(r => r !== 'client')
                 : [...currentRoles, 'client'];
-              await supabase.from('candidates').update({ roles: newRoles } as any).eq('id', id);
+              await supabase.from('people').update({ roles: newRoles } as any).eq('id', id);
               queryClient.invalidateQueries({ queryKey: ['candidate', id] });
               queryClient.invalidateQueries({ queryKey: ['candidates'] });
               toast.success(newRoles.includes('client') ? 'Tagged as Client' : 'Client tag removed');
@@ -1112,7 +1112,7 @@ const CandidateDetail = () => {
                     } else {
                       (async () => {
                         try {
-                          const { error } = await supabase.from('candidates').update({ owner_user_id: newOwnerId }).eq('id', id!);
+                          const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
                           if (error) { toast.error('Failed to update owner'); return; }
                           queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                           queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -1142,7 +1142,7 @@ const CandidateDetail = () => {
                   onChange={async (val) => {
                     const newJobId = val || null;
                     try {
-                      const { error } = await supabase.from('candidates').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
+                      const { error } = await supabase.from('people').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
                       if (error) { toast.error('Failed to update job assignment'); return; }
                       queryClient.invalidateQueries({ queryKey: ['candidate', id] });
                       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -2232,7 +2232,7 @@ const CandidateDetail = () => {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               const { error } = await supabase
-                .from('candidates')
+                .from('people')
                 .update({ owner_user_id: pendingOwnerId })
                 .eq('id', id!);
               if (error) {

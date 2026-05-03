@@ -177,7 +177,7 @@ async function gatherCandidateContext(supabase: any, candidateId: string): Promi
 
   // 1. Candidate profile
   const { data: candidate } = await supabase
-    .from("candidates")
+    .from("people")
     .select("*")
     .eq("id", candidateId)
     .single();
@@ -429,7 +429,7 @@ Sentiment: ${contact.last_sequence_sentiment ?? "—"}`);
   // 5. Send-outs (as hiring manager)
   const { data: sendOuts } = await supabase
     .from("send_outs")
-    .select("stage, created_at, jobs(title, company_name), candidates(first_name, last_name)")
+    .select("stage, created_at, jobs(title, company_name), candidate:people!candidate_id(first_name, last_name)")
     .eq("contact_id", contactId)
     .order("created_at", { ascending: false })
     .limit(10);
@@ -437,7 +437,7 @@ Sentiment: ${contact.last_sequence_sentiment ?? "—"}`);
   if (sendOuts?.length) {
     const soLines = sendOuts.map(
       (s: any) =>
-        `- ${(s.candidates as any)?.first_name ?? ""} ${(s.candidates as any)?.last_name ?? ""} → ${(s.jobs as any)?.title ?? "?"} — Stage: ${s.stage}`,
+        `- ${(s.candidate as any)?.first_name ?? ""} ${(s.candidate as any)?.last_name ?? ""} → ${(s.jobs as any)?.title ?? "?"} — Stage: ${s.stage}`,
     );
     parts.push(`CANDIDATES SUBMITTED:\n${soLines.join("\n")}`);
   }

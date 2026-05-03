@@ -70,7 +70,7 @@ export const backfillResumeEmbeddings = schedules.task({
       try {
         // Fetch candidate data
         const { data: candidate } = await supabase
-          .from("candidates")
+          .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
           .eq("id", resume.candidate_id!)
           .single();

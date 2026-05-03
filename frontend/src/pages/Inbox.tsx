@@ -204,7 +204,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     queryKey: ['candidate', thread?.candidate_id],
     enabled: !!thread?.candidate_id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('candidates').select('*').eq('id', thread!.candidate_id!).single();
+      const { data, error } = await supabase.from('people').select('*').eq('id', thread!.candidate_id!).single();
       if (error) throw error;
       return data;
     },
@@ -240,7 +240,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('people').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     const results = [

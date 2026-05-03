@@ -182,7 +182,7 @@ const People = () => {
     try {
       const candIds = selectedKeys.filter(k => k.startsWith('candidate:')).map(k => k.split(':')[1]);
       const contIds = selectedKeys.filter(k => k.startsWith('contact:')).map(k => k.split(':')[1]);
-      if (candIds.length) await supabase.from('candidates').delete().in('id', candIds);
+      if (candIds.length) await supabase.from('people').delete().in('id', candIds);
       if (contIds.length) await supabase.from('contacts').delete().in('id', contIds);
       toast.success(`${selectedKeys.length} record${selectedKeys.length === 1 ? '' : 's'} deleted`);
       setSelectedKeys([]);

@@ -94,7 +94,7 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
       const loaded: Attendee[] = [];
       for (const a of data) {
         if (a.entity_type === 'candidate') {
-          const { data: c } = await supabase.from('candidates').select('full_name').eq('id', a.entity_id).maybeSingle();
+          const { data: c } = await supabase.from('people').select('full_name').eq('id', a.entity_id).maybeSingle();
           loaded.push({ ...a, name: c?.full_name || 'Unknown Candidate' });
         } else if (a.entity_type === 'contact') {
           const { data: c } = await supabase.from('contacts').select('full_name').eq('id', a.entity_id).maybeSingle();
@@ -136,7 +136,7 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
 
       // Search candidates
       const { data: candidates } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, full_name')
         .ilike('full_name', `%${attendeeSearch}%`)
         .limit(5);

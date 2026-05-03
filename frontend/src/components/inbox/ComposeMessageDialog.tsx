@@ -143,7 +143,7 @@ export function ComposeMessageDialog({
     setSearching(true);
     const q = searchQuery.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, linkedin_url, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('people').select('id, full_name, email, phone, linkedin_url, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, phone, linkedin_url, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     setSearchResults([

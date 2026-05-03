@@ -221,7 +221,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
           if (upsertRows.length > 0) {
             const { error } = await supabase
-              .from('candidates')
+              .from('people')
               .upsert(upsertRows as any, {
                 onConflict: 'normalized_email',
                 ignoreDuplicates: false,
@@ -231,7 +231,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
           if (insertRows.length > 0) {
             const { error } = await supabase
-              .from('candidates')
+              .from('people')
               .insert(insertRows as any);
             if (error) throw error;
           }

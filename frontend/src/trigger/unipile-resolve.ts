@@ -44,7 +44,7 @@ export const resolveUnipileIds = schedules.task({
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry
     //    Order by created_at DESC (newest first) as user requested
     const { data: candidates, error: queryErr } = await supabase
-      .from("candidates")
+      .from("people")
       .select(
         "id, linkedin_url, unipile_resolve_status"
       )
@@ -87,7 +87,7 @@ export const resolveUnipileIds = schedules.task({
             url: candidate.linkedin_url,
           });
           await supabase
-            .from("candidates")
+            .from("people")
             .update({ unipile_resolve_status: "invalid_url" } as any)
             .eq("id", candidate.id);
           skipped++;
@@ -112,7 +112,7 @@ export const resolveUnipileIds = schedules.task({
           if (status === 404) {
             // Profile not found on Unipile
             await supabase
-              .from("candidates")
+              .from("people")
               .update({ unipile_resolve_status: "not_found" } as any)
               .eq("id", candidate.id);
             skipped++;
@@ -179,7 +179,7 @@ export const resolveUnipileIds = schedules.task({
           }
 
           await supabase
-            .from("candidates")
+            .from("people")
             .update(enrichment as any)
             .eq("id", candidate.id);
 
@@ -192,7 +192,7 @@ export const resolveUnipileIds = schedules.task({
           });
         } else {
           await supabase
-            .from("candidates")
+            .from("people")
             .update({ unipile_resolve_status: "no_ids" } as any)
             .eq("id", candidate.id);
           skipped++;

@@ -45,16 +45,16 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   const li = normalizeLinkedIn(parsed.linkedin_url);
 
   if (email) {
-    const { data } = await supabase.from("candidates").select("id").ilike("email", email).maybeSingle();
+    const { data } = await supabase.from("people").select("id").ilike("email", email).maybeSingle();
     if (data) return data.id;
   }
   if (li) {
-    const { data } = await supabase.from("candidates").select("id").ilike("linkedin_url", `%${li}%`).maybeSingle();
+    const { data } = await supabase.from("people").select("id").ilike("linkedin_url", `%${li}%`).maybeSingle();
     if (data) return data.id;
   }
   if (parsed.first_name && parsed.last_name && parsed.current_company) {
     const { data } = await supabase
-      .from("candidates")
+      .from("people")
       .select("id")
       .ilike("first_name", parsed.first_name)
       .ilike("last_name", parsed.last_name)
@@ -179,7 +179,7 @@ export const reconcileOrphanedResumes = schedules.task({
         if (candidateId) {
           // Update existing candidate with missing fields
           const { data: existing } = await supabase
-            .from("candidates")
+            .from("people")
             .select("current_title, current_company, location_text, skills, resume_url")
             .eq("id", candidateId)
             .maybeSingle();
@@ -195,7 +195,7 @@ export const reconcileOrphanedResumes = schedules.task({
               updates.resume_url = pub.publicUrl;
             }
             if (Object.keys(updates).length > 1) {
-              await supabase.from("candidates").update(updates).eq("id", candidateId);
+              await supabase.from("people").update(updates).eq("id", candidateId);
             }
           }
           matched++;
@@ -203,7 +203,7 @@ export const reconcileOrphanedResumes = schedules.task({
           // Create new candidate
           const { data: pub } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
           const { data: newCand, error: insertErr } = await supabase
-            .from("candidates")
+            .from("people")
             .insert({
               first_name: parsed.first_name || null,
               last_name: parsed.last_name || null,

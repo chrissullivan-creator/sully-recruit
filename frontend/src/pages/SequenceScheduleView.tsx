@@ -67,8 +67,8 @@ export default function SequenceScheduleView() {
           id, enrollment_id, channel, scheduled_at, status,
           sequence_enrollments!inner(
             candidate_id, contact_id,
-            candidates(first_name, last_name),
-            contacts(first_name, last_name)
+            candidate:people!candidate_id(first_name, last_name),
+            contact:people!contact_id(first_name, last_name)
           )
         `)
         .eq("sequence_enrollments.sequence_id", id)
@@ -78,8 +78,8 @@ export default function SequenceScheduleView() {
 
       const mapped: ScheduledSend[] = (logs || []).map((log: any) => {
         const enrollment = log.sequence_enrollments;
-        const candidate = enrollment?.candidates;
-        const contact = enrollment?.contacts;
+        const candidate = enrollment?.candidate ?? enrollment?.candidates;
+        const contact = enrollment?.contact ?? enrollment?.contacts;
         const name = candidate
           ? `${candidate.first_name || ""} ${candidate.last_name || ""}`.trim()
           : contact

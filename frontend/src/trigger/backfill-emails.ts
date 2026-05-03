@@ -75,7 +75,7 @@ async function buildEmailLookup(
   const map = new Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>();
 
   const { data: candidates } = await supabase
-    .from("candidates")
+    .from("people")
     .select("id, email, owner_user_id")
     .not("email", "is", null)
     .neq("email", "");

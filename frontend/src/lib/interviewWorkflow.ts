@@ -48,7 +48,7 @@ export async function ensureInterviewArtifacts(payload: {
   if (candidateId) {
     requests.push(
       supabase
-        .from('candidates')
+        .from('people')
         .select('id, full_name, first_name, last_name, job_status')
         .eq('id', candidateId)
         .maybeSingle(),
@@ -205,7 +205,7 @@ export async function ensureInterviewArtifacts(payload: {
 
   if (candidateId) {
     await supabase
-      .from('candidates')
+      .from('people')
       .update({ job_status: 'interviewing' } as any)
       .eq('id', candidateId);
   }

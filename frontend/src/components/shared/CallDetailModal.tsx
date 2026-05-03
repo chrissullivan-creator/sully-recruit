@@ -26,7 +26,14 @@ export function CallDetailModal({ open, onOpenChange, call, aiNotes }: CallDetai
     ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}`
     : '--:--';
   const startedAt = call.started_at ? format(new Date(call.started_at), 'MMM d, yyyy · h:mm a') : '—';
-  const personName = call.linked_entity_name || aiNotes?.candidate_id || 'Unknown';
+  // Prefer the joined person name from ai_call_notes (post-rename: people table) over
+  // the legacy linked_entity_name. Never display a raw UUID.
+  const joinedPerson = aiNotes?.candidates ?? aiNotes?.people;
+  const joinedPersonName =
+    joinedPerson?.full_name ??
+    [joinedPerson?.first_name, joinedPerson?.last_name].filter(Boolean).join(' ') ??
+    null;
+  const personName = call.linked_entity_name || joinedPersonName || 'Unknown';
 
   const summary = aiNotes?.ai_summary || call.summary;
   const actionItems = aiNotes?.ai_action_items;

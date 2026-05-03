@@ -311,7 +311,7 @@ export default function SendOut() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_contacts')
-        .select('contact_id, contacts(full_name, email)')
+        .select('contact_id, contact:people!contact_id(full_name, email)')
         .eq('job_id', selectedJobId);
       if (error) throw error;
       return data ?? [];
@@ -369,7 +369,7 @@ export default function SendOut() {
 
       // Pre-fill ALL contacts' emails
       const contactEmails = jobContacts
-        .map((jc: any) => jc.contacts?.email)
+        .map((jc: any) => jc.contact?.email)
         .filter(Boolean);
       if (contactEmails.length) setEmailTo(contactEmails.join(', '));
     }
@@ -435,7 +435,7 @@ export default function SendOut() {
     setGeneratingEmail(true);
     try {
       const c = candidate as any;
-      const contactNames = jobContacts.map((jc: any) => jc.contacts?.full_name).filter(Boolean);
+      const contactNames = jobContacts.map((jc: any) => jc.contact?.full_name).filter(Boolean);
       const resp = await fetch(`${BACKEND_URL}/api/generate-sendout-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -569,7 +569,7 @@ export default function SendOut() {
       // Update candidate status
       if (id) {
         const { error: candErr } = await supabase
-          .from('candidates')
+          .from('people')
           .update({ job_status: 'send_out' } as any)
           .eq('id', id);
         if (candErr) {
@@ -926,19 +926,19 @@ export default function SendOut() {
                   <Input value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="client@company.com" />
                   {jobContacts.length > 0 && (
                     <div className="flex gap-1 flex-wrap mt-1">
-                      {jobContacts.map((jc: any) => jc.contacts?.email && (
+                      {jobContacts.map((jc: any) => jc.contact?.email && (
                         <button key={jc.contact_id} onClick={() => {
                           const current = emailTo.split(',').map(e => e.trim()).filter(Boolean);
-                          if (!current.includes(jc.contacts.email)) {
-                            setEmailTo(prev => prev ? `${prev}, ${jc.contacts.email}` : jc.contacts.email);
+                          if (!current.includes(jc.contact.email)) {
+                            setEmailTo(prev => prev ? `${prev}, ${jc.contact.email}` : jc.contact.email);
                           }
                         }} className={cn(
                           'text-[10px] px-2 py-0.5 rounded border transition-colors',
-                          emailTo.includes(jc.contacts.email)
+                          emailTo.includes(jc.contact.email)
                             ? 'border-accent/50 bg-accent/10 text-accent'
                             : 'border-border hover:border-accent/50 text-muted-foreground'
                         )}>
-                          {emailTo.includes(jc.contacts.email) ? '✓' : '+'} {jc.contacts.full_name}
+                          {emailTo.includes(jc.contact.email) ? '✓' : '+'} {jc.contact.full_name}
                         </button>
                       ))}
                     </div>

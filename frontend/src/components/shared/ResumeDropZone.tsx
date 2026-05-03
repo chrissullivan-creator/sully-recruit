@@ -284,7 +284,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
     if (entry.candidate_id) {
       // process-resume already created/updated the record — just apply user edits
       const { error } = await supabase
-        .from('candidates')
+        .from('people')
         .update({
           first_name:      entry.first_name.trim() || undefined,
           last_name:       entry.last_name.trim() || undefined,
@@ -304,7 +304,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       let existing: any = null;
       if (entry.email.trim()) {
         const { data } = await supabase
-          .from('candidates')
+          .from('people')
           .select('id')
           .eq('email', entry.email.trim())
           .maybeSingle();
@@ -313,7 +313,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
       if (existing) {
         // Update existing candidate
-        const { error } = await supabase.from('candidates').update({
+        const { error } = await supabase.from('people').update({
           first_name:      entry.first_name.trim() || undefined,
           last_name:       entry.last_name.trim() || undefined,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
@@ -328,7 +328,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         savedId = existing.id;
       } else {
         // Insert new candidate (owner_id is auto-set by DB trigger)
-        const { data: inserted, error } = await supabase.from('candidates').insert({
+        const { data: inserted, error } = await supabase.from('people').insert({
           first_name:      entry.first_name.trim() || null,
           last_name:       entry.last_name.trim() || null,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
