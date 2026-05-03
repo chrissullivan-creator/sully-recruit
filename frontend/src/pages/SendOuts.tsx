@@ -19,6 +19,7 @@ import { KpiTiles } from '@/components/send-outs/KpiTiles';
 import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBar';
 import { StageTable } from '@/components/send-outs/StageTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
+import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -53,6 +54,9 @@ export default function SendOuts() {
   const [openStages, setOpenStages] = useState<Set<CanonicalStage>>(new Set(CANONICAL_PIPELINE.slice(0, 5).map((s) => s.key)));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [drawerRow, setDrawerRow] = useState<SendOutRow | null>(null);
+  const [addModal, setAddModal] = useState<{ open: boolean; stage: CanonicalStage; jobId: string | null }>({
+    open: false, stage: 'pitch', jobId: null,
+  });
   const [activeDrag, setActiveDrag] = useState<SendOutRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
 
@@ -226,7 +230,7 @@ export default function SendOuts() {
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1">
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
-            <Button variant="gold" size="sm" onClick={() => toast.info('Add Send Out — modal lands in next pass.')} className="gap-1">
+            <Button variant="gold" size="sm" onClick={() => setAddModal({ open: true, stage: 'pitch', jobId: filters.jobId !== 'all' ? filters.jobId : null })} className="gap-1">
               <Plus className="h-3.5 w-3.5" /> New Send Out
             </Button>
           </div>
@@ -269,7 +273,7 @@ export default function SendOuts() {
                   onToggleSelect={toggleSelect}
                   onAdvance={handleAdvance}
                   onOpen={handleOpenRow}
-                  onAdd={() => toast.info(`Add to ${cfg.label} — modal lands in next pass.`)}
+                  onAdd={() => setAddModal({ open: true, stage: cfg.key, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
                 />
               ))}
             </div>
@@ -296,6 +300,13 @@ export default function SendOuts() {
         row={drawerRow}
         onClose={() => setDrawerRow(null)}
         invalidateKeys={[['send_outs_list'], ['dashboard_metrics']]}
+      />
+
+      <AddCandidateModal
+        open={addModal.open}
+        onOpenChange={(v) => setAddModal((prev) => ({ ...prev, open: v }))}
+        jobId={addModal.jobId}
+        stage={addModal.stage}
       />
     </MainLayout>
   );
