@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
+import { ListSkeleton } from '@/components/shared/EmptyState';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -279,9 +280,7 @@ export default function SendOuts() {
         />
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading send-outs…
-          </div>
+          <ListSkeleton rows={5} />
         ) : (
           <DndContext
             sensors={sensors}

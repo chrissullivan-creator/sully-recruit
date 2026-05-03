@@ -6,6 +6,7 @@ import { useCompanies } from '@/hooks/useData';
 import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
+import { CardGridSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { supabase } from '@/integrations/supabase/client';
@@ -88,7 +89,14 @@ const Companies = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading companies…</p>
+          <CardGridSkeleton cards={6} />
+        ) : filteredCompanies.length === 0 && !searchQuery ? (
+          <EmptyState
+            icon={Building}
+            title="No companies yet"
+            description="Track every client, target, and prospect. Add a company to start associating jobs and contacts."
+            action={{ label: 'Add Company', icon: Plus, onClick: () => setAddOpen(true) }}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCompanies.map((company) => (

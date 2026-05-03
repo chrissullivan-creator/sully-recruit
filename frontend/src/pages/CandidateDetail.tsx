@@ -25,9 +25,10 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge,
+  Search, Calendar, Merge, CalendarPlus,
 } from 'lucide-react';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -217,6 +218,7 @@ const CandidateDetail = () => {
   const [generatingJoe, setGeneratingJoe] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
+  const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [compExpanded, setCompExpanded] = useState(false);
   const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
@@ -625,9 +627,20 @@ const CandidateDetail = () => {
       });
   }, [id]);
 
+  // Pick a resume to preview. Priority: candidate.resume_url (legacy direct
+  // field) > most-recent formatted_resumes row > most-recent resumes row.
+  // This way every candidate with a resume on file gets the View Resume
+  // button — not just the ones with the legacy column populated.
   useEffect(() => {
-    if (!resumeUrl && candidate?.resume_url) setResumeUrl(candidate.resume_url);
-  }, [candidate?.resume_url]);
+    if (resumeUrl) return;
+    if (candidate?.resume_url) { setResumeUrl(candidate.resume_url); return; }
+    const latestFormatted = (formattedResumes as any[])[0];
+    const latest = (candidateResumes as any[])[0];
+    const pick = latestFormatted ?? latest;
+    if (!pick?.file_path) return;
+    const fromMap = signedUrls[pick.file_path];
+    if (fromMap) setResumeUrl(fromMap);
+  }, [candidate?.resume_url, candidateResumes, formattedResumes, signedUrls, resumeUrl]);
 
   // Pre-compute signed URLs for all document lists (private bucket)
   useEffect(() => {
@@ -944,6 +957,9 @@ const CandidateDetail = () => {
               <FileText className="h-3.5 w-3.5 mr-1" />{showResume ? 'Hide Resume' : 'View Resume'}
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={() => setScheduleMeetingOpen(true)}>
+            <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Schedule
+          </Button>
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
@@ -997,18 +1013,20 @@ const CandidateDetail = () => {
       </div>
 
       {showResume && resumeUrl && (
-        <div className="border-b border-border">
-          <div className="flex items-center justify-between px-8 py-2 bg-muted/30">
-            <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-accent" />
-              <span className="text-sm font-medium">Resume</span>
-              <a href={resumeUrl} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline flex items-center gap-1">
+        <div className="border-b border-card-border bg-page-bg/40">
+          <div className="flex items-center justify-between px-8 py-2.5 border-b border-card-border bg-white">
+            <div className="flex items-center gap-3">
+              <FileText className="h-4 w-4 text-emerald" />
+              <span className="text-sm font-display font-semibold text-emerald-dark">Resume preview</span>
+              <a href={resumeUrl} target="_blank" rel="noreferrer" className="text-xs text-emerald hover:text-emerald-dark hover:underline flex items-center gap-1">
                 Open in new tab <ExternalLink className="h-3 w-3" />
               </a>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowResume(false)}><X className="h-3.5 w-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowResume(false)} title="Hide preview">
+              <X className="h-3.5 w-3.5" />
+            </Button>
           </div>
-          <iframe src={resumeUrl} className="w-full h-[500px]" title="Resume" />
+          <iframe src={resumeUrl} className="w-full h-[80vh] bg-white" title="Resume" />
         </div>
       )}
 
@@ -2237,6 +2255,18 @@ const CandidateDetail = () => {
         onOpenChange={(v) => !v && setSelectedCall(null)}
         call={selectedCall?.call}
         aiNotes={selectedCall?.aiNote}
+      />
+
+      <ScheduleMeetingDialog
+        open={scheduleMeetingOpen}
+        onOpenChange={setScheduleMeetingOpen}
+        attendee={candidate ? {
+          id: candidate.id,
+          type: 'candidate',
+          name: candidate.full_name || `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`.trim() || 'Candidate',
+          email: (candidate as any).email ?? null,
+        } : undefined}
+        defaultSubject={candidate ? `Meeting w/ ${candidate.full_name || candidate.first_name || 'candidate'}` : undefined}
       />
 
       {/* Owner transfer confirmation */}

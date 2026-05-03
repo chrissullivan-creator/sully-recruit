@@ -18,8 +18,9 @@ import {
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
   Sparkles, RefreshCw, Martini, Send as SendIcon,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus,
 } from 'lucide-react';
+import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -243,6 +244,7 @@ const ContactDetail = () => {
   const [linkingJob, setLinkingJob] = useState(false);
   const [removingJobId, setRemovingJobId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
   const [deletingContact, setDeletingContact] = useState(false);
 
   const handleDeleteContact = async () => {
@@ -530,6 +532,13 @@ const ContactDetail = () => {
             </a>
           )}
           <button
+            onClick={() => setScheduleMeetingOpen(true)}
+            className="p-2 rounded-lg hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
+            title="Schedule meeting"
+          >
+            <CalendarPlus className="h-4 w-4" />
+          </button>
+          <button
             onClick={() => setConfirmDelete(true)}
             className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
             title="Delete contact"
@@ -538,6 +547,18 @@ const ContactDetail = () => {
           </button>
         </div>
       </div>
+
+      <ScheduleMeetingDialog
+        open={scheduleMeetingOpen}
+        onOpenChange={setScheduleMeetingOpen}
+        attendee={{
+          id: contact.id,
+          type: 'contact',
+          name: contact.full_name || `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim() || 'Contact',
+          email: contact.email,
+        }}
+        defaultSubject={`Meeting w/ ${contact.full_name || contact.first_name || 'contact'}`}
+      />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>

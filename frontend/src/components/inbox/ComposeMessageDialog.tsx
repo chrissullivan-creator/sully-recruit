@@ -9,6 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { invalidateCommsScope } from '@/lib/invalidate';
 import {
   Mail, MessageSquare, Linkedin, Search, Loader2, Send,
   UserCheck, Users, X, Paperclip,
@@ -257,7 +258,7 @@ export function ComposeMessageDialog({
       if (!data.success) throw new Error(data.error || 'Send failed');
 
       toast.success(`Message sent via ${channel === 'email' ? 'Email' : channel === 'sms' ? 'SMS' : 'LinkedIn'}`);
-      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      invalidateCommsScope(queryClient);
       resetForm();
       onOpenChange(false);
     } catch (err: any) {

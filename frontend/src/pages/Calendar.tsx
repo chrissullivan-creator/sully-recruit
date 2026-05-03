@@ -12,8 +12,9 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, RefreshCw,
-  MapPin, Video, Users as UsersIcon, ExternalLink, Clock,
+  MapPin, Video, Users as UsersIcon, ExternalLink, Clock, CalendarPlus,
 } from 'lucide-react';
+import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import {
   format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks,
   isSameDay, isToday, eachDayOfInterval, parseISO, isWithinInterval,
@@ -84,6 +85,7 @@ export default function CalendarPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [anchorDate, setAnchorDate] = useState(new Date());
   const [ownerFilter, setOwnerFilter] = useState<'me' | 'all' | string>('me');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   const ownerId = ownerFilter === 'me'
     ? (user?.id ?? null)
@@ -151,9 +153,14 @@ export default function CalendarPage() {
             <Button variant="outline" size="sm" onClick={handleSync} className="gap-1">
               <RefreshCw className="h-3.5 w-3.5" /> Sync Outlook
             </Button>
+            <Button variant="gold" size="sm" onClick={() => setScheduleOpen(true)} className="gap-1">
+              <CalendarPlus className="h-3.5 w-3.5" /> New meeting
+            </Button>
           </div>
         }
       />
+
+      <ScheduleMeetingDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-4">
         {/* Toolbar */}
@@ -191,8 +198,19 @@ export default function CalendarPage() {
 
         {/* Body */}
         {isLoading ? (
-          <div className="rounded-xl border border-card-border bg-white py-16 text-center text-sm text-muted-foreground">
-            Loading events…
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-card-border bg-white min-h-[180px] animate-pulse">
+                <div className="px-3 py-2 border-b border-card-border bg-page-bg/40 flex justify-between">
+                  <div className="h-3 w-8 bg-emerald-light/60 rounded" />
+                  <div className="h-3 w-4 bg-emerald-light/60 rounded" />
+                </div>
+                <div className="p-2 space-y-1.5">
+                  <div className="h-7 bg-emerald-light/30 rounded" />
+                  <div className="h-7 bg-emerald-light/30 rounded" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : viewMode === 'week' ? (
           <WeekGrid days={days} tasksByDay={tasksByDay} />

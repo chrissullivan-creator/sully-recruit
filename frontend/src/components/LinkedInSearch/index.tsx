@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSequences } from '@/hooks/useData';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { invalidatePersonScope } from '@/lib/invalidate';
 import {
   Search, Linkedin, Loader2, UserPlus, Contact, Play,
   Link as LinkIcon, MapPin, Building, Briefcase,
@@ -237,7 +238,7 @@ export default function LinkedInSearch() {
         owner_id: ownerId,
       } as any);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(queryClient);
       toast.success(`${r.first_name} ${r.last_name} added as candidate`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to add candidate');
@@ -263,7 +264,7 @@ export default function LinkedInSearch() {
         owner_id: userId,
       } as any);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      invalidatePersonScope(queryClient);
       toast.success(`${r.first_name} ${r.last_name} added as contact`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to add contact');
@@ -313,7 +314,7 @@ export default function LinkedInSearch() {
           .single();
         if (error) throw error;
         candidateId = inserted.id;
-        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        invalidatePersonScope(queryClient);
       }
 
       const userId = (await supabase.auth.getUser()).data.user?.id;

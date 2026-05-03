@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
+import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -290,9 +291,7 @@ const People = () => {
 
         {/* Table */}
         {isLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading people...
-          </div>
+          <TableSkeleton rows={8} cols={6} />
         ) : isError ? (
           <div className="text-center py-16">
             <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />

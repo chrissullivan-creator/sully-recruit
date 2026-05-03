@@ -12,6 +12,7 @@ import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Brief
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { invalidateJobScope } from '@/lib/invalidate';
+import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -117,7 +118,14 @@ const Jobs = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading jobs…</p>
+          <TableSkeleton rows={6} cols={6} />
+        ) : filteredJobs.length === 0 && !searchQuery ? (
+          <EmptyState
+            icon={Briefcase}
+            title="No jobs yet"
+            description="Track open roles, send candidates out, and manage the pipeline. Create your first job to get started."
+            action={{ label: 'Add Job', icon: Plus, onClick: () => setAddOpen(true) }}
+          />
         ) : view === 'pipeline' ? (
           <JobPipeline />
         ) : (

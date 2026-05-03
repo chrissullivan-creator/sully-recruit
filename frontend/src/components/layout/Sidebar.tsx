@@ -8,7 +8,7 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
-  Send, Martini, Calendar,
+  Send, Martini, Calendar, BarChart3,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -59,6 +59,7 @@ const navigation = [
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
   { name: 'Calls',      href: '/calls',      icon: Phone           },
+  { name: 'Reports',    href: '/reports',    icon: BarChart3       },
   { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Settings',   href: '/settings',   icon: Settings        },
 ];

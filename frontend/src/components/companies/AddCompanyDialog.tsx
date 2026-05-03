@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
+import { invalidateCompanyScope } from '@/lib/invalidate';
 
 interface Props {
   open: boolean;
@@ -35,7 +36,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
         company_type: form.company_type === 'none' ? null : form.company_type,
       });
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      invalidateCompanyScope(queryClient);
       toast.success('Company created');
       setForm({ name: '', domain: '', location: '', linkedin_url: '', company_type: 'none' });
       onOpenChange(false);

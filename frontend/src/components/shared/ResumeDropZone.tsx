@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import { invalidatePersonScope } from '@/lib/invalidate';
 
 interface Props {
   entityType: 'candidate';
@@ -364,7 +365,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       await saveCandidate(current);
       setQueue(prev => prev.map((item, i) => i === reviewIndex ? { ...item, saved: true } : item));
       setSavedCount(prev => prev + 1);
-      qc.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(qc);
 
       const label = current.candidate_id ? 'updated' : 'created';
       toast.success(`${current.first_name} ${current.last_name} ${label}`);

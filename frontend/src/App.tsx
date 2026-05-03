@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,38 +7,52 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
+import { Loader2 } from "lucide-react";
+
+// Index + Auth load eagerly — they're the landing surfaces.
 import Index from "./pages/Index";
-import Inbox from "./pages/Inbox";
-import Jobs from "./pages/Jobs";
-import JobDetail from "./pages/JobDetail";
-import Candidates from "./pages/Candidates";
-import CandidateDetail from "./pages/CandidateDetail";
-import SendOut from "./pages/SendOut";
-import SendOuts from "./pages/SendOuts";
-import AskJoe from "./pages/AskJoe";
-import Companies from "./pages/Companies";
-import CompanyDetail from "./pages/CompanyDetail";
-import Contacts from "./pages/Contacts";
-import ContactDetail from "./pages/ContactDetail";
-import People from "./pages/People";
-import Sequences from "./pages/Sequences";
-import SequenceBuilder from "./pages/SequenceBuilder";
-import SequenceScheduleView from "./pages/SequenceScheduleView";
-import SequenceAnalyticsPage from "./pages/SequenceAnalyticsPage";
-import Calls from "./pages/Calls";
-import Tasks from "./pages/Tasks";
-import Calendar from "./pages/Calendar";
-import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
-import MicrosoftCallback from "./pages/MicrosoftCallback";
-import { ResumeSearch } from "./pages/ResumeSearch";
-import LinkedInSearch from "./components/LinkedInSearch";
-import Source from "./pages/Source";
-import SourceProject from "./pages/SourceProject";
-import DuplicatesReview from "./pages/DuplicatesReview";
 import NotFound from "./pages/NotFound";
 
+// Everything else is lazy-loaded so /api hits don't pull in 2.8MB of JS.
+const Inbox = lazy(() => import("./pages/Inbox"));
+const Jobs = lazy(() => import("./pages/Jobs"));
+const JobDetail = lazy(() => import("./pages/JobDetail"));
+const Candidates = lazy(() => import("./pages/Candidates"));
+const CandidateDetail = lazy(() => import("./pages/CandidateDetail"));
+const SendOut = lazy(() => import("./pages/SendOut"));
+const SendOuts = lazy(() => import("./pages/SendOuts"));
+const AskJoe = lazy(() => import("./pages/AskJoe"));
+const Companies = lazy(() => import("./pages/Companies"));
+const CompanyDetail = lazy(() => import("./pages/CompanyDetail"));
+const Contacts = lazy(() => import("./pages/Contacts"));
+const ContactDetail = lazy(() => import("./pages/ContactDetail"));
+const People = lazy(() => import("./pages/People"));
+const Sequences = lazy(() => import("./pages/Sequences"));
+const SequenceBuilder = lazy(() => import("./pages/SequenceBuilder"));
+const SequenceScheduleView = lazy(() => import("./pages/SequenceScheduleView"));
+const SequenceAnalyticsPage = lazy(() => import("./pages/SequenceAnalyticsPage"));
+const Calls = lazy(() => import("./pages/Calls"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const Calendar = lazy(() => import("./pages/Calendar"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Settings = lazy(() => import("./pages/Settings"));
+const MicrosoftCallback = lazy(() => import("./pages/MicrosoftCallback"));
+const ResumeSearch = lazy(() => import("./pages/ResumeSearch").then((m) => ({ default: m.ResumeSearch })));
+const LinkedInSearch = lazy(() => import("./components/LinkedInSearch"));
+const Source = lazy(() => import("./pages/Source"));
+const SourceProject = lazy(() => import("./pages/SourceProject"));
+const DuplicatesReview = lazy(() => import("./pages/DuplicatesReview"));
+
 const queryClient = new QueryClient();
+
+function RouteFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-page-bg">
+      <Loader2 className="h-6 w-6 animate-spin text-emerald" />
+    </div>
+  );
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -47,6 +62,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <RouteErrorBoundary>
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/auth/microsoft/callback" element={<MicrosoftCallback />} />
@@ -75,12 +91,14 @@ const App = () => (
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
           </RouteErrorBoundary>
         </AuthProvider>
       </BrowserRouter>

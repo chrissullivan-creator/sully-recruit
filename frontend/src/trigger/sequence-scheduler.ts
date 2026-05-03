@@ -378,14 +378,48 @@ export const sequenceSweep = schedules.task({
       return { action: "error" };
     }
 
+    // First, recover any rows that were claimed >10 minutes ago and never
+    // resolved (action crashed / Trigger.dev died). Resetting them to
+    // 'scheduled' lets this sweep pick them up cleanly.
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await supabase
+      .from("sequence_step_logs")
+      .update({ status: "scheduled" } as any)
+      .eq("status", "in_flight")
+      .lt("updated_at", tenMinAgo);
+
     if (!dueLogs || dueLogs.length === 0) {
       return { action: "idle", due: 0 };
     }
 
     logger.info(`Sweep found ${dueLogs.length} due actions`);
 
+    // Atomically claim each row before dispatching. If the next sweep cycle
+    // overlaps (or this one retries), the UPDATE only matches rows still in
+    // 'scheduled', so a single physical send can only ever be triggered once.
+    // sequenceActionExecute moves the row to 'sent'/'failed'/'cancelled' or
+    // resets status back to 'scheduled' (rate-limited path), so it never
+    // strands. The 10-minute recovery above handles outright crashes.
+    const claimedIds: string[] = [];
+    const claimedById = new Map<string, any>(dueLogs.map((l: any) => [l.id, l]));
     for (const log of dueLogs) {
-      const enrollment = (log as any).sequence_enrollments;
+      const { data: claimed, error: claimErr } = await supabase
+        .from("sequence_step_logs")
+        .update({ status: "in_flight" } as any)
+        .eq("id", log.id)
+        .eq("status", "scheduled")
+        .select("id")
+        .maybeSingle();
+      if (claimErr) {
+        logger.warn("Claim failed (non-fatal, skipping row)", { id: log.id, error: claimErr.message });
+        continue;
+      }
+      if (claimed?.id) claimedIds.push(claimed.id);
+    }
+
+    for (const id of claimedIds) {
+      const log = claimedById.get(id)!;
+      const enrollment = log.sequence_enrollments;
       const sequence = enrollment?.sequences;
 
       await sequenceActionExecute.trigger({
@@ -401,7 +435,7 @@ export const sequenceSweep = schedules.task({
       });
     }
 
-    return { action: "dispatched", count: dueLogs.length };
+    return { action: "dispatched", count: claimedIds.length, found: dueLogs.length };
   },
 });
 
