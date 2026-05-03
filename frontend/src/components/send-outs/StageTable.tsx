@@ -1,3 +1,4 @@
+import { useDroppable } from '@dnd-kit/core';
 import { ChevronDown, ChevronRight, Plus, Star, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CandidateRow } from './CandidateRow';
@@ -8,6 +9,8 @@ interface StageTableProps {
   config: CanonicalStageConfig;
   rows: SendOutRow[];
   isOpen: boolean;
+  /** Drag-over highlight + auto-expand */
+  isOver?: boolean;
   onToggle: () => void;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
@@ -17,16 +20,20 @@ interface StageTableProps {
 }
 
 export function StageTable({
-  config, rows, isOpen, onToggle, selectedIds, onToggleSelect, onAdvance, onOpen, onAdd,
+  config, rows, isOpen, isOver = false, onToggle, selectedIds, onToggleSelect, onAdvance, onOpen, onAdd,
 }: StageTableProps) {
+  const { setNodeRef } = useDroppable({ id: `stage:${config.key}` });
   const isOffer = config.key === 'offer';
 
   return (
-    <div className={cn(
-      'rounded-xl border bg-white overflow-hidden',
-      isOffer ? 'border-gold/30 shadow-sm' : 'border-card-border',
-    )}>
-      {/* Header row */}
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'rounded-xl border bg-white overflow-hidden transition-all',
+        isOffer ? 'border-gold/30 shadow-sm' : 'border-card-border',
+        isOver && 'ring-2 ring-emerald border-emerald shadow-md',
+      )}
+    >
       <button
         onClick={onToggle}
         className={cn(
@@ -54,6 +61,11 @@ export function StageTable({
             <Star className="h-2.5 w-2.5 fill-current" /> Priority
           </span>
         )}
+        {isOver && (
+          <span className="ml-3 text-[10px] font-semibold uppercase tracking-wider text-emerald">
+            Drop here →
+          </span>
+        )}
 
         <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button
@@ -74,11 +86,13 @@ export function StageTable({
         </div>
       </button>
 
-      {/* Rows */}
       {isOpen && (
         rows.length === 0 ? (
-          <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-            No candidates in this stage yet — drop someone in.
+          <div className={cn(
+            'px-6 py-10 text-center text-sm transition-colors',
+            isOver ? 'text-emerald font-medium' : 'text-muted-foreground',
+          )}>
+            {isOver ? 'Drop here →' : 'No candidates in this stage yet — drop someone in.'}
           </div>
         ) : (
           <div className="overflow-x-auto">

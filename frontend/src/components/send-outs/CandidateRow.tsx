@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
-import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone } from 'lucide-react';
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -18,6 +20,10 @@ interface CandidateRowProps {
 
 export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAdvance, onOpen }: CandidateRowProps) {
   const navigate = useNavigate();
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: row.id,
+    data: { type: 'send-out-row', stage },
+  });
   const c = row.candidate;
   const j = row.job;
   const name = c?.full_name || `${c?.first_name ?? ''} ${c?.last_name ?? ''}`.trim() || '—';
@@ -34,20 +40,29 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
 
   return (
     <tr
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.4 : 1 }}
       onClick={() => onOpen(row)}
       className={cn(
         'cursor-pointer hover:bg-emerald-light/30 border-b border-card-border last:border-b-0 transition-colors',
         selected && 'bg-emerald-light/50',
       )}
     >
-      {/* Drag handle (placeholder — DnD wired in next pass) */}
-      <td className="w-8 px-2 text-center text-muted-foreground/40 group-hover:text-muted-foreground">⋮⋮</td>
+      <td className="w-8 px-2" onClick={stop}>
+        <button
+          {...attributes}
+          {...listeners}
+          className="flex h-6 w-6 items-center justify-center text-muted-foreground/40 hover:text-emerald cursor-grab active:cursor-grabbing"
+          title="Drag to move stage"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+      </td>
 
       <td className="w-8 px-2" onClick={stop}>
         <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.id)} />
       </td>
 
-      {/* Candidate (avatar + name) */}
       <td className="px-3 py-2.5 min-w-[200px]">
         <div className="flex items-center gap-2.5">
           {c?.avatar_url ? (
@@ -71,42 +86,34 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
         </div>
       </td>
 
-      {/* Current role */}
       <td className="px-3 py-2.5 text-sm text-muted-foreground min-w-[160px]">
         <p className="truncate">{c?.current_title ?? '—'}</p>
         {c?.current_company && <p className="text-[11px] truncate text-muted-foreground/70">{c.current_company}</p>}
       </td>
 
-      {/* Target comp */}
       <td className="px-3 py-2.5 text-sm font-semibold text-gold-deep tabular-nums min-w-[100px]">
         {targetComp}
       </td>
 
-      {/* Last touch */}
       <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[110px]">
         {lastTouch ? format(new Date(lastTouch), 'MMM d') : '—'}
       </td>
 
-      {/* Days in stage (chip) */}
       <td className="px-3 py-2.5 min-w-[80px]">
         <span className={cn(
           'inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-medium',
-          daysInStage > 7
-            ? 'bg-amber-100 text-amber-800'
-            : 'bg-gold-bg text-gold-deep',
+          daysInStage > 7 ? 'bg-amber-100 text-amber-800' : 'bg-gold-bg text-gold-deep',
         )}>
           {daysInStage}d
         </span>
       </td>
 
-      {/* Next step */}
       <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[140px]">
         {row.submittal_notes ? (
           <span className="line-clamp-1">{row.submittal_notes}</span>
         ) : <span className="text-muted-foreground/50 italic">No next step</span>}
       </td>
 
-      {/* Action icons */}
       <td className="px-3 py-2.5 text-right min-w-[160px]" onClick={stop}>
         <div className="flex items-center justify-end gap-1">
           {(c as any)?.email && (

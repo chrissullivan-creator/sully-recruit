@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Plus, Loader2, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
+} from '@dnd-kit/core';
 import { useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useSendOuts, type SendOutRow } from '@/lib/queries/send-outs';
-import { CANONICAL_PIPELINE, stageToCanonical, nextStage, type CanonicalStage } from '@/lib/pipeline';
+import { CANONICAL_PIPELINE, stageToCanonical, nextStage, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
+import { moveStage } from '@/lib/mutations/move-stage';
 import { KpiTiles } from '@/components/send-outs/KpiTiles';
-import { FilterBar, EMPTY_FILTERS, type SendOutsFilters } from '@/components/send-outs/FilterBar';
+import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBar';
 import { StageTable } from '@/components/send-outs/StageTable';
+import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 
-// Pull filter state out of URL params on mount and write back when it changes —
-// makes filter state shareable.
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
     q:           sp.get('q') ?? '',
@@ -38,6 +42,7 @@ function writeFiltersToUrl(f: SendOutsFilters): URLSearchParams {
 
 export default function SendOuts() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: rows = [], isLoading } = useSendOuts();
   const { data: jobs = [] } = useJobs(true);
@@ -47,6 +52,11 @@ export default function SendOuts() {
   const [filters, setFilters] = useState<SendOutsFilters>(() => readFiltersFromUrl(searchParams));
   const [openStages, setOpenStages] = useState<Set<CanonicalStage>>(new Set(CANONICAL_PIPELINE.slice(0, 5).map((s) => s.key)));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [drawerRow, setDrawerRow] = useState<SendOutRow | null>(null);
+  const [activeDrag, setActiveDrag] = useState<SendOutRow | null>(null);
+  const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   // Honour ?stage= param from dashboard cards: open + scroll that stage.
   useEffect(() => {
@@ -64,7 +74,6 @@ export default function SendOuts() {
     setSearchParams(next, { replace: true });
   }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Apply filters to rows.
   const filteredRows = useMemo(() => {
     const q = filters.q.trim().toLowerCase();
     const fromMs = filters.from ? new Date(filters.from).getTime() : 0;
@@ -87,7 +96,6 @@ export default function SendOuts() {
     });
   }, [rows, filters]);
 
-  // Group by canonical stage.
   const rowsByStage = useMemo(() => {
     const map = new Map<CanonicalStage, SendOutRow[]>();
     for (const s of CANONICAL_PIPELINE) map.set(s.key, []);
@@ -98,7 +106,6 @@ export default function SendOuts() {
     return map;
   }, [filteredRows]);
 
-  // Estimated fee sum for the offer-stage tile (25% of target comp midpoint).
   const offerFee = useMemo(() => {
     const offers = rowsByStage.get('offer') ?? [];
     return offers.reduce((sum, r) => {
@@ -125,25 +132,68 @@ export default function SendOuts() {
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  // Optimistic stage advance — write to send_outs, log in status_change_log.
+  // Optimistic stage move with rollback on error. Used by the Advance arrow.
   const handleAdvance = async (row: SendOutRow) => {
     const current = stageToCanonical(row.stage);
     if (!current) return;
     const nextK = nextStage(current);
     if (!nextK) { toast.info('Already at the final stage.'); return; }
-    // Optimistic — TODO: full optimistic UI in the next pass once DnD is in.
-    const { error } = await supabase.from('send_outs').update({ stage: nextK }).eq('id', row.id);
-    if (error) { toast.error(error.message); return; }
-    toast.success(`Advanced to ${nextK.replace(/_/g, ' ')}`);
-    // React-query invalidation handled by parent next pass; for now reload via refetch.
-    window.location.reload();
+    await commitMove(row, nextK, 'advance');
   };
 
-  const handleOpenRow = (row: SendOutRow) => {
-    // Drawer comes in next pass — for now navigate to the candidate page.
-    if (row.candidate?.id) {
-      navigate(row.candidate.type === 'client' ? `/contacts/${row.candidate.id}` : `/candidates/${row.candidate.id}`);
+  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string) => {
+    // Optimistic patch — react-query cache update.
+    queryClient.setQueryData<SendOutRow[]>(['send_outs_list'], (prev = []) =>
+      prev.map((r) => (r.id === row.id ? { ...r, stage: target } : r)),
+    );
+    const res = await moveStage({
+      sendOutId: row.id,
+      candidateJobId: (row as any).candidate_job_id ?? null,
+      fromStage: row.stage,
+      toStage: target,
+      triggerSource: source,
+      entityId: row.candidate?.id ?? null,
+      entityType: 'send_out',
+    });
+    if (!res.ok) {
+      // Roll back.
+      queryClient.setQueryData<SendOutRow[]>(['send_outs_list'], (prev = []) =>
+        prev.map((r) => (r.id === row.id ? { ...r, stage: row.stage } : r)),
+      );
+      toast.error(res.error ?? 'Move failed');
+      return;
     }
+    toast.success(`Moved to ${canonicalConfig(target).label}`);
+    queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+  };
+
+  const handleOpenRow = (row: SendOutRow) => setDrawerRow(row);
+
+  // ── Drag & drop ──────────────────────────────────────────────────────
+  const handleDragStart = (e: DragStartEvent) => {
+    const row = filteredRows.find((r) => r.id === e.active.id);
+    setActiveDrag(row ?? null);
+  };
+  const handleDragOver = (e: DragOverEvent) => {
+    const overId = e.over?.id;
+    if (typeof overId === 'string' && overId.startsWith('stage:')) {
+      setOverStage(overId.slice('stage:'.length) as CanonicalStage);
+    } else {
+      setOverStage(null);
+    }
+  };
+  const handleDragEnd = async (e: DragEndEvent) => {
+    setActiveDrag(null);
+    setOverStage(null);
+    const overId = e.over?.id;
+    if (typeof overId !== 'string' || !overId.startsWith('stage:')) return;
+    const target = overId.slice('stage:'.length) as CanonicalStage;
+    const row = filteredRows.find((r) => r.id === e.active.id);
+    if (!row) return;
+    if (stageToCanonical(row.stage) === target) return;
+    // Auto-expand the destination so the user sees the drop.
+    setOpenStages((prev) => new Set([...prev, target]));
+    await commitMove(row, target, 'drag');
   };
 
   const exportCsv = () => {
@@ -166,7 +216,7 @@ export default function SendOuts() {
     <MainLayout>
       <PageHeader
         title="Send Outs"
-        description="Every active send-out across the team — group, filter, advance."
+        description="Every active send-out across the team — drag to advance, click to open."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
@@ -176,7 +226,7 @@ export default function SendOuts() {
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1">
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
-            <Button variant="gold" size="sm" onClick={() => toast.info('Add Send Out — wired in the next pass.')} className="gap-1">
+            <Button variant="gold" size="sm" onClick={() => toast.info('Add Send Out — modal lands in next pass.')} className="gap-1">
               <Plus className="h-3.5 w-3.5" /> New Send Out
             </Button>
           </div>
@@ -198,25 +248,42 @@ export default function SendOuts() {
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading send-outs…
           </div>
         ) : (
-          <div className="space-y-3">
-            {CANONICAL_PIPELINE.map((cfg) => (
-              <StageTable
-                key={cfg.key}
-                config={cfg}
-                rows={rowsByStage.get(cfg.key) ?? []}
-                isOpen={openStages.has(cfg.key)}
-                onToggle={() => toggleStageOpen(cfg.key)}
-                selectedIds={selectedIds}
-                onToggleSelect={toggleSelect}
-                onAdvance={handleAdvance}
-                onOpen={handleOpenRow}
-                onAdd={() => toast.info('Add to ' + cfg.label + ' — wired in the next pass.')}
-              />
-            ))}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => { setActiveDrag(null); setOverStage(null); }}
+          >
+            <div className="space-y-3">
+              {CANONICAL_PIPELINE.map((cfg) => (
+                <StageTable
+                  key={cfg.key}
+                  config={cfg}
+                  rows={rowsByStage.get(cfg.key) ?? []}
+                  isOpen={openStages.has(cfg.key) || overStage === cfg.key}
+                  isOver={overStage === cfg.key}
+                  onToggle={() => toggleStageOpen(cfg.key)}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onAdvance={handleAdvance}
+                  onOpen={handleOpenRow}
+                  onAdd={() => toast.info(`Add to ${cfg.label} — modal lands in next pass.`)}
+                />
+              ))}
+            </div>
+
+            <DragOverlay>
+              {activeDrag && (
+                <div className="rounded-lg border border-emerald bg-white shadow-xl px-3 py-2 text-sm font-medium text-emerald-dark">
+                  {activeDrag.candidate?.full_name ?? '—'}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
 
-        {/* Empty state */}
         {!isLoading && filteredRows.length === 0 && (
           <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
             <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
@@ -224,6 +291,12 @@ export default function SendOuts() {
           </div>
         )}
       </div>
+
+      <CandidateDrawer
+        row={drawerRow}
+        onClose={() => setDrawerRow(null)}
+        invalidateKeys={[['send_outs_list'], ['dashboard_metrics']]}
+      />
     </MainLayout>
   );
 }
