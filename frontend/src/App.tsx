@@ -13,6 +13,8 @@ import JobDetail from "./pages/JobDetail";
 import Candidates from "./pages/Candidates";
 import CandidateDetail from "./pages/CandidateDetail";
 import SendOut from "./pages/SendOut";
+import SendOuts from "./pages/SendOuts";
+import AskJoe from "./pages/AskJoe";
 import Companies from "./pages/Companies";
 import CompanyDetail from "./pages/CompanyDetail";
 import Contacts from "./pages/Contacts";
@@ -67,6 +69,8 @@ const App = () => (
             <Route path="/campaigns" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
             <Route path="/source" element={<ProtectedRoute><Source /></ProtectedRoute>} />
             <Route path="/source/:id" element={<ProtectedRoute><SourceProject /></ProtectedRoute>} />
+            <Route path="/send-outs" element={<ProtectedRoute><SendOuts /></ProtectedRoute>} />
+            <Route path="/ask-joe" element={<ProtectedRoute><AskJoe /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />

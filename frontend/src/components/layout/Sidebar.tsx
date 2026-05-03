@@ -6,15 +6,18 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
+  Send, Sparkles,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
   { name: 'Inbox',      href: '/inbox',      icon: Inbox           },
+  { name: 'Ask Joe',    href: '/ask-joe',    icon: Sparkles        },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
   { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
+  { name: 'Send Outs',  href: '/send-outs',  icon: Send            },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calls',      href: '/calls',      icon: Phone           },
