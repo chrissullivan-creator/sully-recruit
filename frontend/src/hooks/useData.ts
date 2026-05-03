@@ -214,7 +214,7 @@ export function useContacts() {
   return query;
 }
 
-// Unified people view — v_people (UNION ALL of candidates + contacts)
+// Unified people — backed by v_people view (candidates with type/title/company normalized)
 export function usePeople() {
   const queryClient = useQueryClient();
 
@@ -245,9 +245,6 @@ export function usePeople() {
     const ch = supabase
       .channel(channelName.current)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['people'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => {
         queryClient.invalidateQueries({ queryKey: ['people'] });
       })
       .subscribe();
@@ -372,9 +369,11 @@ export function useMessages(channel?: string) {
 }
 
 // Dashboard metrics — accepts an arbitrary [from, to] range AND an optional ownerUserId
-// filter ("me" view). Queries the canonical candidate_jobs.pipeline_stage and the 6 stage
-// tables (pitches, send_outs, submissions, interviews, placements, rejections) instead of
-// the deprecated candidates.job_status column.
+// filter ("me" view). Counts come from the 6 canonical stage tables (pitches, send_outs,
+// submissions, interviews, placements, rejections), each filtered by its own happened-at
+// timestamp inside the range. NOTE: this does NOT read candidate_jobs.pipeline_stage —
+// candidate_jobs holds CURRENT state per (candidate, job); the funnel reports EVENTS in
+// a window. To make a candidate appear in the funnel, write to the matching event table.
 export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId?: string | null) {
   const fromIso = range.from.toISOString();
   const toIso   = range.to.toISOString();

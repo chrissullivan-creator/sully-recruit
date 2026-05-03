@@ -1,26 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCandidates } from '@/hooks/useData';
+import { useQuery } from '@tanstack/react-query';
 import { useProfiles } from '@/hooks/useProfiles';
-import { PipelineColumn, candidateStageColors } from './PipelineColumn';
+import { supabase } from '@/integrations/supabase/client';
+import { PipelineColumn } from './PipelineColumn';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Building, MapPin, Mail, Phone, Settings2, User } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Building, MapPin, Mail, Phone, Settings2, User, Briefcase, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
-
-const stages = [
-  { key: 'new', label: 'Lead' },
-  { key: 'reached_out', label: 'Reached Out' },
-  { key: 'back_of_resume', label: 'Back of Resume' },
-  { key: 'pitched', label: 'Pitch' },
-  { key: 'send_out', label: 'Send Out' },
-  { key: 'submitted', label: 'Submissions' },
-  { key: 'interviewing', label: 'Interviewing' },
-  { key: 'offer', label: 'Offer' },
-  { key: 'placed', label: 'Placed' },
-];
+import { CANONICAL_PIPELINE, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 
 interface CardField {
   key: string;
@@ -29,13 +18,14 @@ interface CardField {
 }
 
 const CARD_FIELDS: CardField[] = [
-  { key: 'title', label: 'Job Title', default: true },
-  { key: 'company', label: 'Company', default: true },
-  { key: 'location', label: 'Location', default: false },
-  { key: 'email', label: 'Email', default: false },
-  { key: 'phone', label: 'Phone', default: false },
-  { key: 'owner', label: 'Owner', default: false },
-  { key: 'updated', label: 'Last Updated', default: false },
+  { key: 'job',      label: 'Job',          default: true  },
+  { key: 'title',    label: 'Title',        default: true  },
+  { key: 'company',  label: 'Company',      default: true  },
+  { key: 'location', label: 'Location',     default: false },
+  { key: 'email',    label: 'Email',        default: false },
+  { key: 'phone',    label: 'Phone',        default: false },
+  { key: 'owner',    label: 'Owner',        default: false },
+  { key: 'updated',  label: 'Last Updated', default: false },
 ];
 
 const STORAGE_KEY = 'sully-recruit-pipeline-card-fields';
@@ -52,9 +42,49 @@ function saveCardFields(fields: Set<string>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...fields]));
 }
 
+// Per-(candidate, job) row joined with candidate + job display fields.
+interface CandidateJobRow {
+  id: string;
+  pipeline_stage: string | null;
+  updated_at: string | null;
+  job: { id: string; title: string | null; company_name: string | null } | null;
+  candidate: {
+    id: string;
+    full_name: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    avatar_url: string | null;
+    current_title: string | null;
+    current_company: string | null;
+    location_text: string | null;
+    email: string | null;
+    phone: string | null;
+    owner_user_id: string | null;
+    updated_at: string | null;
+  } | null;
+}
+
+function useCandidateJobsForFunnel() {
+  return useQuery({
+    queryKey: ['candidate_jobs_funnel'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_jobs')
+        .select(
+          'id, pipeline_stage, updated_at, ' +
+          'job:jobs(id, title, company_name), ' +
+          'candidate:candidates(id, full_name, first_name, last_name, avatar_url, current_title, current_company, location_text, email, phone, owner_user_id, updated_at)',
+        )
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as CandidateJobRow[];
+    },
+  });
+}
+
 export function CandidatePipeline() {
   const navigate = useNavigate();
-  const { data: candidates = [] } = useCandidates();
+  const { data: rows = [], isLoading } = useCandidateJobsForFunnel();
   const { data: profiles = [] } = useProfiles();
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const [visibleFields, setVisibleFields] = useState<Set<string>>(loadCardFields);
@@ -67,13 +97,16 @@ export function CandidatePipeline() {
     saveCardFields(next);
   };
 
-  const getCandidatesByStage = (stage: string) =>
-    candidates.filter((c) => c.status === stage);
+  const getRowsByStage = (stage: CanonicalStage): CandidateJobRow[] =>
+    rows.filter((r) => stageToCanonical(r.pipeline_stage) === stage);
 
   return (
     <div>
-      {/* Card settings */}
-      <div className="flex justify-end mb-3">
+      {/* Header note + card field settings */}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-muted-foreground">
+          Showing per-(candidate, job) rows by pipeline stage. Matches dashboard funnel.
+        </p>
         <Popover>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
@@ -98,80 +131,95 @@ export function CandidatePipeline() {
         </Popover>
       </div>
 
-      {/* Pipeline columns */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => {
-          const stageCandidates = getCandidatesByStage(stage.key);
-          return (
-            <PipelineColumn
-              key={stage.key}
-              title={stage.label}
-              count={stageCandidates.length}
-              items={stageCandidates}
-              stageColor={candidateStageColors[stage.key as keyof typeof candidateStageColors] ?? 'bg-muted text-muted-foreground'}
-              renderItem={(candidate) => (
-                <div
-                  onClick={() => navigate(`/candidates/${candidate.id}`)}
-                  className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md"
-                >
-                  <div className="flex items-start gap-3">
-                    {candidate.avatar_url ? (
-                      <img src={candidate.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-                        {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+          <Loader2 className="h-5 w-5 animate-spin" /> Loading pipeline...
+        </div>
+      ) : (
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {CANONICAL_PIPELINE.map((stage) => {
+            const stageRows = getRowsByStage(stage.key);
+            return (
+              <PipelineColumn
+                key={stage.key}
+                title={stage.label}
+                count={stageRows.length}
+                items={stageRows}
+                stageColor={stage.color.split(' ')[0].replace('/15', '')}
+                renderItem={(row) => {
+                  const c = row.candidate;
+                  if (!c) return null;
+                  return (
+                    <div
+                      onClick={() => navigate(`/candidates/${c.id}`)}
+                      className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md"
+                    >
+                      <div className="flex items-start gap-3">
+                        {c.avatar_url ? (
+                          <img src={c.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                        ) : (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+                            {(c.first_name?.[0] ?? '')}{(c.last_name?.[0] ?? '')}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
+                            {c.full_name ?? (`${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '—')}
+                          </h4>
+                          {visibleFields.has('job') && row.job && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Briefcase className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{row.job.title ?? '—'}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('title') && c.current_title && (
+                            <p className="text-xs text-muted-foreground truncate">{c.current_title}</p>
+                          )}
+                          {visibleFields.has('company') && c.current_company && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Building className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{c.current_company}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('location') && c.location_text && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{c.location_text}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('email') && c.email && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Mail className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{c.email}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('phone') && c.phone && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Phone className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{c.phone}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('owner') && c.owner_user_id && profileMap[c.owner_user_id] && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <User className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{profileMap[c.owner_user_id].full_name?.split(' ')[0]}</span>
+                            </p>
+                          )}
+                          {visibleFields.has('updated') && row.updated_at && (
+                            <p className="text-[10px] text-muted-foreground/70 mt-1">
+                              {format(new Date(row.updated_at), 'MMM d')}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
-                        {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
-                      </h4>
-                      {visibleFields.has('title') && (
-                        <p className="text-xs text-muted-foreground truncate">{candidate.current_title ?? '-'}</p>
-                      )}
-                      {visibleFields.has('company') && candidate.current_company && (
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <Building className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{candidate.current_company}</span>
-                        </p>
-                      )}
-                      {visibleFields.has('location') && (candidate as any).location_text && (
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <MapPin className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{(candidate as any).location_text}</span>
-                        </p>
-                      )}
-                      {visibleFields.has('email') && candidate.email && (
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <Mail className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{candidate.email}</span>
-                        </p>
-                      )}
-                      {visibleFields.has('phone') && (candidate as any).phone && (
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <Phone className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{(candidate as any).phone}</span>
-                        </p>
-                      )}
-                      {visibleFields.has('owner') && (candidate as any).owner_user_id && profileMap[(candidate as any).owner_user_id] && (
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <User className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{profileMap[(candidate as any).owner_user_id].full_name?.split(' ')[0]}</span>
-                        </p>
-                      )}
-                      {visibleFields.has('updated') && (candidate as any).updated_at && (
-                        <p className="text-[10px] text-muted-foreground/70 mt-1">
-                          {format(new Date((candidate as any).updated_at), 'MMM d')}
-                        </p>
-                      )}
                     </div>
-                  </div>
-                </div>
-              )}
-            />
-          );
-        })}
-      </div>
+                  );
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

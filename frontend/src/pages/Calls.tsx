@@ -38,6 +38,20 @@ interface CallLog {
   owner_id: string | null;
 }
 
+// Normalize a US phone to E.164 (+1XXXXXXXXXX). Returns null if input has no digits.
+// candidates.phone is stored E.164 by the normalize_us_phone() trigger.
+function toE164(input: string): string | null {
+  const digits = input.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`;
+}
+
+// candidates.type → linked_entity_type (legacy column uses 'contact' for clients)
+const typeToEntity = (t: string | null | undefined): 'candidate' | 'contact' =>
+  t === 'client' ? 'contact' : 'candidate';
+
 // ---- Log Call Dialog ----
 function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { user } = useAuth();
@@ -57,20 +71,20 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     setMatching(true);
     setMatchResult(null);
     try {
-      // Normalize
-      const normalized = phone.replace(/[^0-9+]/g, '');
-      const [cRes, ctRes] = await Promise.all([
-        supabase.from('candidates').select('id, full_name, phone').not('phone', 'is', null),
-        supabase.from('contacts').select('id, full_name, phone').not('phone', 'is', null),
-      ]);
-      if (cRes.error) throw cRes.error;
-      if (ctRes.error) throw ctRes.error;
-      const normalize = (p: string) => p.replace(/[^0-9+]/g, '');
-      const candidate = cRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
-      if (candidate) { setMatchResult({ matched: true, entity_type: 'candidate', entity_id: candidate.id, entity_name: candidate.full_name }); return; }
-      const contact = ctRes.data?.find(r => r.phone && normalize(r.phone) === normalized);
-      if (contact) { setMatchResult({ matched: true, entity_type: 'contact', entity_id: contact.id, entity_name: contact.full_name }); return; }
-      setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null });
+      const e164 = toE164(phone);
+      if (!e164) { setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null }); return; }
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('id, full_name, type')
+        .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        setMatchResult({ matched: true, entity_type: typeToEntity(data.type), entity_id: data.id, entity_name: data.full_name });
+      } else {
+        setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null });
+      }
     } catch (err: any) {
       console.error('Phone lookup failed:', err);
       toast.error(err?.message || 'Phone lookup failed');
@@ -250,14 +264,21 @@ function LinkCallDialog({
     if (!search.trim()) return;
     setSearching(true);
     const q = search.trim();
-    const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, current_title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
-      supabase.from('contacts').select('id, full_name, email, phone, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(5),
-    ]);
-    setResults([
-      ...(cRes.data || []).map(r => ({ ...r, entity_type: 'candidate' })),
-      ...(ctRes.data || []).map(r => ({ ...r, entity_type: 'contact' })),
-    ]);
+    const { data, error } = await supabase
+      .from('candidates')
+      .select('id, full_name, email, phone, current_title, title, type')
+      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
+      .limit(10);
+    if (error) {
+      toast.error(error.message);
+      setSearching(false);
+      return;
+    }
+    setResults((data ?? []).map((r: any) => ({
+      ...r,
+      entity_type: typeToEntity(r.type),
+      title: r.current_title ?? r.title ?? null,
+    })));
     setSearching(false);
   };
 
@@ -265,21 +286,21 @@ function LinkCallDialog({
   const handleAutoTag = async () => {
     if (!call) return;
     setSearching(true);
-    const normalized = call.phone_number.replace(/[^0-9+]/g, '');
-    const [cRes, ctRes] = await Promise.all([
-      supabase.from('candidates').select('id, full_name, email, phone, current_title').not('phone', 'is', null),
-      supabase.from('contacts').select('id, full_name, email, phone, title').not('phone', 'is', null),
-    ]);
-    const norm = (p: string) => p.replace(/[^0-9+]/g, '');
-    const matches = [
-      ...(cRes.data || []).filter(r => r.phone && norm(r.phone) === normalized).map(r => ({ ...r, entity_type: 'candidate' })),
-      ...(ctRes.data || []).filter(r => r.phone && norm(r.phone) === normalized).map(r => ({ ...r, entity_type: 'contact' })),
-    ];
+    const e164 = toE164(call.phone_number);
+    if (!e164) { setResults([]); setSearching(false); return; }
+    const { data } = await supabase
+      .from('candidates')
+      .select('id, full_name, email, phone, current_title, title, type')
+      .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
+      .limit(10);
+    const matches = (data ?? []).map((r: any) => ({
+      ...r,
+      entity_type: typeToEntity(r.type),
+      title: r.current_title ?? r.title ?? null,
+    }));
     setResults(matches);
     setSearching(false);
-    if (matches.length === 0) {
-      setSearch(call.phone_number);
-    }
+    if (matches.length === 0) setSearch(call.phone_number);
   };
 
   const handleLink = async (entityType: string, entityId: string, entityName: string) => {
@@ -364,7 +385,7 @@ function LinkCallDialog({
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground truncate">{r.full_name}</p>
                     <p className="text-[10px] text-muted-foreground truncate capitalize">
-                      {r.entity_type} · {r.current_title || r.title || r.email || r.phone || ''}
+                      {r.entity_type} · {r.title || r.email || r.phone || ''}
                     </p>
                   </div>
                 </button>
@@ -418,13 +439,15 @@ const Calls = () => {
     },
   });
 
-  // Fetch ALL ai_call_notes (not just those with call_log_id, since most aren't linked yet)
+  // Fetch ALL ai_call_notes (not just those with call_log_id, since most aren't linked yet).
+  // Pull both candidate-side (current_title/current_company) and client-side (title/company_name)
+  // so the unified person model renders names correctly for both types.
   const { data: aiNotesList = [] } = useQuery({
     queryKey: ['ai_call_notes_all'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('ai_call_notes' as any)
-        .select('*, candidates(id, first_name, last_name, full_name, current_title, current_company)')
+        .select('*, candidates(id, type, first_name, last_name, full_name, current_title, current_company, title, company_name)')
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;
@@ -461,8 +484,19 @@ const Calls = () => {
 
   const getCandidateId = (call: CallLog) => {
     const ai = getAiNotes(call);
-    if (call.linked_entity_type === 'candidate' && call.linked_entity_id) return call.linked_entity_id;
+    if (call.linked_entity_id) return call.linked_entity_id;
     return ai?.candidates?.id ?? null;
+  };
+
+  // Derive entity type — prefer the joined candidates.type (unified person model),
+  // fall back to the legacy linked_entity_type.
+  const getEntityType = (call: CallLog): 'candidate' | 'contact' | null => {
+    const ai = getAiNotes(call);
+    if (ai?.candidates?.type) return typeToEntity(ai.candidates.type);
+    if (call.linked_entity_type === 'candidate' || call.linked_entity_type === 'contact') {
+      return call.linked_entity_type;
+    }
+    return null;
   };
 
   const getRecruiterName = (call: CallLog) =>
@@ -625,30 +659,27 @@ const Calls = () => {
                           {getRecruiterName(call) && (
                             <span className="text-xs text-muted-foreground/70">{getRecruiterName(call)?.split(' ')[0]}</span>
                           )}
-                          {personName && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const navId = call.linked_entity_id || candidateId;
-                                const navType = call.linked_entity_type || (candidateId ? 'candidate' : null);
-                                if (navId && navType) {
-                                  const path = navType === 'candidate'
-                                    ? `/candidates/${navId}`
-                                    : navType === 'contact'
-                                      ? `/contacts/${navId}`
-                                      : null;
-                                  if (path) navigate(path);
-                                }
-                              }}
-                              className={cn(
-                                'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity',
-                                entityColor(call.linked_entity_type || (candidateId ? 'candidate' : null))
-                              )}
-                            >
-                              {entityIcon(call.linked_entity_type || (candidateId ? 'candidate' : null))}
-                              {personName}
-                            </button>
-                          )}
+                          {personName && (() => {
+                            const entityType = getEntityType(call);
+                            const navId = candidateId;
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (navId && entityType) {
+                                    navigate(entityType === 'candidate' ? `/candidates/${navId}` : `/contacts/${navId}`);
+                                  }
+                                }}
+                                className={cn(
+                                  'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity',
+                                  entityColor(entityType)
+                                )}
+                              >
+                                {entityIcon(entityType)}
+                                {personName}
+                              </button>
+                            );
+                          })()}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {format(new Date(call.started_at), 'MMM d, yyyy · h:mm a')}
@@ -736,7 +767,7 @@ const Calls = () => {
                     )}
 
                     {/* Tag to record if not linked */}
-                    {!call.linked_entity_id && !candidateId && (
+                    {!candidateId && (
                       <div className="mt-2">
                         <Button
                           variant="outline"
