@@ -9,11 +9,23 @@ interface MetricCardProps {
   };
   icon?: React.ReactNode;
   highlight?: boolean;
+  onClick?: () => void;
 }
 
-export function MetricCard({ label, value, change, icon, highlight }: MetricCardProps) {
+export function MetricCard({ label, value, change, icon, highlight, onClick }: MetricCardProps) {
+  const interactive = !!onClick;
   return (
-    <div className={cn("metric-card hover-lift", highlight && "ring-1 ring-accent/30 bg-accent/5")}>
+    <div
+      onClick={onClick}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } } : undefined}
+      className={cn(
+        'metric-card hover-lift',
+        highlight && 'ring-1 ring-accent/30 bg-accent/5',
+        interactive && 'cursor-pointer hover:border-accent/40 transition-colors',
+      )}
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="metric-label">{label}</p>

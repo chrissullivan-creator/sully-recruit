@@ -75,7 +75,20 @@ export default {
   				interview: 'hsl(var(--stage-interview))',
   				offer: 'hsl(var(--stage-offer))',
   				hold: 'hsl(var(--stage-hold))'
-  			}
+  			},
+  			emerald: {
+  				DEFAULT: 'var(--emerald)',
+  				dark: 'var(--emerald-dark)',
+  				light: 'var(--emerald-light)'
+  			},
+  			gold: {
+  				DEFAULT: 'var(--gold)',
+  				deep: 'var(--gold-deep)',
+  				light: 'var(--gold-light)',
+  				bg: 'var(--gold-bg)'
+  			},
+  			'page-bg': 'var(--page-bg)',
+  			'card-border': 'var(--card-border)'
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
@@ -84,6 +97,7 @@ export default {
   		},
   		fontFamily: {
   			sans: [
+  				'Inter',
   				'ui-sans-serif',
   				'system-ui',
   				'sans-serif',
@@ -91,6 +105,13 @@ export default {
   				'Segoe UI Emoji',
   				'Segoe UI Symbol',
   				'Noto Color Emoji'
+  			],
+  			display: [
+  				'Sora',
+  				'Inter',
+  				'ui-sans-serif',
+  				'system-ui',
+  				'sans-serif'
   			],
   			mono: [
   				'ui-monospace',
