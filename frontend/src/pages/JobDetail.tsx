@@ -35,6 +35,8 @@ import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
+import { QuickStats } from '@/components/job-detail/QuickStats';
+import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
 import type { CanonicalStage } from '@/lib/pipeline';
 
 const JOB_STATUSES = [
@@ -939,7 +941,7 @@ const JobDetail = () => {
         </aside>
 
         {/* ── Tabs Area ────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-secondary">
@@ -1241,6 +1243,19 @@ const JobDetail = () => {
             </ScrollArea>
           </Tabs>
         </div>
+
+        {/* ── Right rail (sticky) ─────────────────────────── */}
+        <aside className="hidden xl:flex w-72 shrink-0 border-l border-card-border bg-page-bg/40 overflow-y-auto p-4 flex-col gap-4">
+          <QuickStats
+            jobId={id!}
+            compMin={(job as any).comp_min ?? null}
+            compMax={(job as any).comp_max ?? null}
+            feePct={(job as any).fee_pct ?? null}
+            createdAt={job.created_at}
+            closedAt={(job as any).closed_at ?? (job as any).filled_at ?? null}
+          />
+          <JobActivityFeed jobId={id!} limit={10} />
+        </aside>
       </div>
 
       {/* ── Dialogs & Panels ──────────────────────────────── */}
