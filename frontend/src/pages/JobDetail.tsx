@@ -37,8 +37,13 @@ import DOMPurify from 'dompurify';
 import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
 import { QuickStats } from '@/components/job-detail/QuickStats';
 import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
-import { JobPipelineKanban } from '@/components/job-detail/JobPipelineKanban';
-import type { CanonicalStage } from '@/lib/pipeline';
+import { JobPipelineKanban, useJobKanbanRows, type KanbanRow } from '@/components/job-detail/JobPipelineKanban';
+import { stageToCanonical, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
+import { moveStage } from '@/lib/mutations/move-stage';
+import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
+} from '@dnd-kit/core';
 
 const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -357,6 +362,83 @@ const JobDetail = () => {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [funnelStage, setFunnelStage] = useState<CanonicalStage | null>(null);
+  const [activeDrag, setActiveDrag] = useState<KanbanRow | null>(null);
+  const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const { data: kanbanRows = [] } = useJobKanbanRows(id ?? '');
+
+  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage) => {
+    queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
+      prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
+    );
+    const res = row.send_out_id
+      ? await moveStage({
+          sendOutId: row.send_out_id,
+          candidateJobId: row.id,
+          fromStage: row.pipeline_stage,
+          toStage: target,
+          triggerSource: 'drag',
+          entityId: row.candidate_id,
+          entityType: 'candidate_job',
+        })
+      : (async () => {
+          const { error } = await supabase
+            .from('candidate_jobs')
+            .update({ pipeline_stage: target, stage_updated_at: new Date().toISOString() })
+            .eq('id', row.id);
+          if (error) return { ok: false, error: error.message };
+          await supabase.from('stage_transitions').insert({
+            entity_type: 'candidate_job', entity_id: row.id,
+            from_stage: row.pipeline_stage, to_stage: target,
+            trigger_source: 'drag',
+          });
+          return { ok: true };
+        })();
+
+    if (!res.ok) {
+      queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
+        prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: row.pipeline_stage } : r)),
+      );
+      toast.error(res.error ?? 'Move failed');
+      return;
+    }
+    toast.success(`Moved to ${canonicalConfig(target).label}`);
+    queryClient.invalidateQueries({ queryKey: ['job_funnel', id] });
+    queryClient.invalidateQueries({ queryKey: ['job_quick_stats', id] });
+    queryClient.invalidateQueries({ queryKey: ['job_activity', id] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+  };
+
+  const onDndDragStart = (e: DragStartEvent) => {
+    const row = kanbanRows.find((r) => r.id === e.active.id);
+    setActiveDrag(row ?? null);
+  };
+  const onDndDragOver = (e: DragOverEvent) => {
+    const overId = e.over?.id;
+    if (typeof overId !== 'string') { setOverStage(null); return; }
+    if (overId.startsWith('kanban-col:')) {
+      setOverStage(overId.slice('kanban-col:'.length) as CanonicalStage);
+    } else if (overId.startsWith('funnel-tile:')) {
+      setOverStage(overId.slice('funnel-tile:'.length) as CanonicalStage);
+    } else {
+      setOverStage(null);
+    }
+  };
+  const onDndDragEnd = async (e: DragEndEvent) => {
+    setActiveDrag(null);
+    setOverStage(null);
+    const overId = e.over?.id;
+    if (typeof overId !== 'string') return;
+    const target = overId.startsWith('kanban-col:')
+      ? (overId.slice('kanban-col:'.length) as CanonicalStage)
+      : overId.startsWith('funnel-tile:')
+        ? (overId.slice('funnel-tile:'.length) as CanonicalStage)
+        : null;
+    if (!target) return;
+    const row = kanbanRows.find((r) => r.id === e.active.id);
+    if (!row || stageToCanonical(row.pipeline_stage) === target) return;
+    await commitKanbanMove(row, target);
+  };
   const [selectedContactId, setSelectedContactId] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
@@ -783,16 +865,22 @@ const JobDetail = () => {
         </div>
       </div>
 
-      {/* ── Funnel strip (live counts per pipeline_stage for this job).
-          Tiles double as filter buttons for the Pipeline tab kanban. The
-          drop-target wiring (useDroppable) only takes effect when both
-          tiles + draggables share a DndContext — needs a context-lift to
-          turn on cross-tab drops; landing in a follow-up pass. ── */}
-      <FunnelStrip
-        jobId={id!}
-        activeStage={funnelStage}
-        onStageClick={setFunnelStage}
-      />
+      <DndContext
+        sensors={dndSensors}
+        collisionDetection={pointerWithin}
+        onDragStart={onDndDragStart}
+        onDragOver={onDndDragOver}
+        onDragEnd={onDndDragEnd}
+        onDragCancel={() => { setActiveDrag(null); setOverStage(null); }}
+      >
+        {/* ── Funnel strip + tabs share a DndContext, so a kanban card can be
+              dragged onto a funnel tile to move stages. Tiles also click-to-filter. */}
+        <FunnelStrip
+          jobId={id!}
+          activeStage={funnelStage}
+          onStageClick={setFunnelStage}
+          dropTargets
+        />
 
       {/* ── Sidebar + Tabs Layout ──────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
@@ -1018,9 +1106,9 @@ const JobDetail = () => {
                 )}
               </TabsContent>
 
-              {/* ── Pipeline Tab (kanban with DnD) ─────────── */}
+              {/* ── Pipeline Tab (kanban with DnD; DndContext is at page-level) ─ */}
               <TabsContent value="pipeline" className="px-6 lg:px-8 py-5 mt-0">
-                <JobPipelineKanban jobId={job.id} filterStage={funnelStage} />
+                <JobPipelineKanban jobId={job.id} filterStage={funnelStage} overStage={overStage} />
               </TabsContent>
 
               {/* ── AI Matches Tab ─────────────────────────── */}
@@ -1268,6 +1356,15 @@ const JobDetail = () => {
           <JobActivityFeed jobId={id!} limit={10} />
         </aside>
       </div>
+
+        <DragOverlay>
+          {activeDrag && (
+            <div className="rounded-lg border border-emerald bg-white shadow-xl px-3 py-2 text-sm font-medium text-emerald-dark">
+              {activeDrag.candidate?.full_name ?? '—'}
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
 
       {/* ── Dialogs & Panels ──────────────────────────────── */}
       <Dialog open={addSendOutOpen} onOpenChange={(open) => {
