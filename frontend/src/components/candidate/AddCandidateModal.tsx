@@ -75,6 +75,11 @@ export function AddCandidateModal({
       const pickedCompany = companies.find((c) => c.id === form.company_id);
       const companyName = pickedCompany?.name || form.company_name.trim() || null;
 
+      // RLS requires created_by_user_id = auth.uid() for non-admin inserts;
+      // send_outs.insert requires recruiter_id = auth.uid(). Pull it once.
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id ?? null;
+
       // Create the person.
       const { data: person, error: personErr } = await supabase
         .from('people')
@@ -89,6 +94,8 @@ export function AddCandidateModal({
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
           status: 'new',
+          created_by_user_id: userId,
+          owner_user_id: userId,
         })
         .select('id')
         .single();
@@ -113,14 +120,21 @@ export function AddCandidateModal({
             candidate_id: person.id, job_id: jobId,
             candidate_job_id: cj?.id ?? null,
             stage,
+            recruiter_id: userId,
           });
         if (soErr) throw soErr;
       }
 
       toast.success(`${fullName} added` + (jobId ? ` to ${stage.replace(/_/g, ' ')}` : ''));
+      // Invalidate every surface that renders this person + send-outs.
       queryClient.invalidateQueries({ queryKey: ['send_outs_list'] });
       queryClient.invalidateQueries({ queryKey: ['job_funnel'] });
       queryClient.invalidateQueries({ queryKey: ['job_quick_stats'] });
+      queryClient.invalidateQueries({ queryKey: ['job_pipeline_kanban'] });
+      queryClient.invalidateQueries({ queryKey: ['job_activity'] });
+      queryClient.invalidateQueries({ queryKey: ['candidate_jobs_funnel'] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
       onCreated?.(person!.id);
       reset();
