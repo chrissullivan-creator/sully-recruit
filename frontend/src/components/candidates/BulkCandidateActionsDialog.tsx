@@ -37,7 +37,7 @@ const sendOutStages = [
   { value: 'lead', label: 'Lead' },
   { value: 'back_of_resume', label: 'Back of Resume' },
   { value: 'reached_out', label: 'Reached Out' },
-  { value: 'pitch', label: 'Pitch / Send Out' },
+  { value: 'pitch', label: 'Pitch / Ready to Send' },
   { value: 'sent', label: 'Sent' },
   { value: 'interview', label: 'Interview' },
   { value: 'offer', label: 'Offer' },

@@ -612,7 +612,7 @@ export default function SendOut() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-lg font-semibold text-foreground">Send Out — {fullName}</h1>
+          <h1 className="text-lg font-semibold text-foreground">Ready to Send — {fullName}</h1>
           <p className="text-sm text-muted-foreground">
             Format resume, generate email, send to client
           </p>
@@ -900,7 +900,7 @@ export default function SendOut() {
           {step === 'email' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2"><Mail className="h-5 w-5 text-accent" /> Send Out Email</h2>
+                <h2 className="text-lg font-semibold flex items-center gap-2"><Mail className="h-5 w-5 text-accent" /> Send Email</h2>
                 <Button variant="outline" onClick={() => usingExistingFormatted ? setStep('pick_resume') : setStep('template')}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Back
                 </Button>

@@ -402,19 +402,16 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const [
         jobsRes,
         candidatesCreatedRes,
-        cjReachedOutRes,
-        cjPitchedRes,
-        cjReadyToSendRes,
-        cjSentRes,
-        cjInterviewingRes,
-        cjRejectedRes,
+        // Engagement metric (person-level)
         engagedRes,
+        // 6 stage tables = the canonical funnel
         pitchesRes,
         sendOutsInRangeRes,
         submissionsRes,
         interviewsInRangeRes,
         placementsInRangeRes,
         rejectionsInRangeRes,
+        // State-of-the-world send_outs for in-flight metric
         sendOutsAllRes,
       ] = await Promise.all([
         // Active jobs (state-of-the-world, not range-bound, owner-agnostic)
@@ -432,20 +429,6 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
           return q;
         })(),
 
-        // Pipeline stage counts — entry events keyed by per-stage timestamp columns
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('reached_out_at',  fromIso).lte('reached_out_at',  toIso)),
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('pitched_at',      fromIso).lte('pitched_at',      toIso)),
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('ready_to_send_at',fromIso).lte('ready_to_send_at',toIso)),
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('sent_at',         fromIso).lte('sent_at',         toIso)),
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('interviewing_at', fromIso).lte('interviewing_at', toIso)),
-        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
-          .gte('rejected_at',     fromIso).lte('rejected_at',     toIso)),
-
         // Engaged candidates updated in range
         (() => {
           let q = supabase.from('candidates')
@@ -457,87 +440,78 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
           return q;
         })(),
 
-        // Stage-table event counts in range (owner-filtered via candidates IN-list)
+        // Pitches stage table
         applyOwner(supabase.from('pitches').select('id, candidate_id, job_id, pitched_at')
           .gte('pitched_at', fromIso).lte('pitched_at', toIso)),
 
-        // Sent send_outs in range with joins for the list panel
+        // Send-outs stage table — joined for the list panel; matches sent OR interviewing stages in range
         (() => {
           let q = supabase.from('send_outs')
-            .select(`id, stage, sent_to_client_at, updated_at, created_at,
+            .select(`id, stage, sent_to_client_at, interview_at, updated_at, created_at,
               candidate_id, job_id, recruiter_id,
               candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
               jobs!inner(title, company_name)`)
-            .eq('stage', 'sent')
             .gte('updated_at', fromIso).lte('updated_at', toIso)
             .order('updated_at', { ascending: false });
           if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
           return q;
         })(),
 
+        // Submissions stage table
         applyOwner(supabase.from('submissions').select('id, candidate_id, job_id, submitted_at')
           .gte('submitted_at', fromIso).lte('submitted_at', toIso)),
 
-        // Interviews scheduled in range with joins for the list panel
+        // Interviews stage table — joined for the list panel
         (() => {
-          let q = supabase.from('send_outs')
-            .select(`id, stage, interview_at, updated_at, created_at,
-              candidate_id, job_id, recruiter_id,
+          let q = supabase.from('interviews')
+            .select(`id, candidate_id, job_id, scheduled_at, end_at, stage, round, interviewer_name, interviewer_company, location, meeting_link, calendar_event_id,
               candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
               jobs!inner(title, company_name)`)
-            .eq('stage', 'interviewing')
-            .gte('updated_at', fromIso).lte('updated_at', toIso)
-            .order('interview_at', { ascending: true, nullsFirst: false });
+            .gte('scheduled_at', fromIso).lte('scheduled_at', toIso)
+            .order('scheduled_at', { ascending: true, nullsFirst: false });
           if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
           return q;
         })(),
 
+        // Placements stage table
         applyOwner(supabase.from('placements').select('id, candidate_id, job_id, placed_at, salary')
           .gte('placed_at', fromIso).lte('placed_at', toIso)),
 
-        applyOwner(supabase.from('rejections').select('id, candidate_id, job_id, rejected_at, rejected_by_party, prior_stage')
+        // Rejections stage table
+        applyOwner(supabase.from('rejections').select('id, candidate_id, job_id, rejected_at, rejected_by_party, prior_stage, rejection_reason')
           .gte('rejected_at', fromIso).lte('rejected_at', toIso)),
 
-        // Send-outs (state-of-the-world, for in-flight metrics)
+        // Send-outs (state-of-the-world, for in-flight metric)
         (() => {
           let q = supabase.from('send_outs').select('id, stage, candidate_id');
-          // owner filter: best-effort via candidate ownership
           if (ownedCandidateIds) q = q.in('candidate_id', ownedCandidateIds);
           return q;
         })(),
       ]);
 
-      const candidates    = candidatesCreatedRes.data ?? [];
-      const sendOuts      = sendOutsAllRes.data       ?? [];
-      const engagedList   = (engagedRes.data          ?? []) as any[];
-      const sentList      = (sendOutsInRangeRes.data  ?? []) as any[];
-      const interviewList = (interviewsInRangeRes.data?? []) as any[];
+      const candidates       = candidatesCreatedRes.data ?? [];
+      const sendOuts         = sendOutsAllRes.data       ?? [];
+      const engagedList      = (engagedRes.data          ?? []) as any[];
+      const sendOutsInRange  = (sendOutsInRangeRes.data  ?? []) as any[];
+      const interviewList    = (interviewsInRangeRes.data?? []) as any[];
 
       return {
         activeJobs: jobsRes.count ?? 0,
         candidatesInRange: candidates.length,
-        // Canonical per-job pipeline counts (entry events in range)
-        reachedOutCount:    cjReachedOutRes.count    ?? 0,
-        pitchedCount:       cjPitchedRes.count       ?? 0,
-        readyToSendCount:   cjReadyToSendRes.count   ?? 0,
-        sentToClientCount:  cjSentRes.count          ?? 0,
-        interviewingCount:  cjInterviewingRes.count  ?? 0,
-        rejectedCount:      cjRejectedRes.count      ?? 0,
-        // Engagement metric (person-level)
-        engagedCount:       engagedList.length,
-        // Stage-table event counts
-        pitchEvents:       (pitchesRes.data       ?? []).length,
-        sendoutEvents:     sentList.length,
-        submissionEvents:  (submissionsRes.data   ?? []).length,
-        interviewEvents:   interviewList.length,
-        placementEvents:   (placementsInRangeRes.data ?? []).length,
-        rejectionEvents:   (rejectionsInRangeRes.data ?? []).length,
+        engagedCount: engagedList.length,
+        // 6-stage funnel — one card per stage table, no fallback
+        pitchedCount:   (pitchesRes.data        ?? []).length,
+        sendOutCount:   sendOutsInRange.length,
+        submittedCount: (submissionsRes.data    ?? []).length,
+        interviewCount: interviewList.length,
+        placedCount:    (placementsInRangeRes.data ?? []).length,
+        rejectedCount:  (rejectionsInRangeRes.data ?? []).length,
         // In-flight (state-of-the-world)
         interviewsInFlight: sendOuts.filter((s: any) => ['interview', 'interviewing'].includes(s.stage)).length,
         offersOut:          sendOuts.filter((s: any) => s.stage === 'offer').length,
         // Detail lists
         engagedList,
-        sentList,
+        sendOutList: sendOutsInRange,
         interviewList,
         placementList: (placementsInRangeRes.data ?? []) as any[],
         rejectionList: (rejectionsInRangeRes.data ?? []) as any[],

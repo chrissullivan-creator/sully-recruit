@@ -130,12 +130,19 @@ UNIQUE (candidate_id, channel)
 
 ### Stage tables (per-job pipeline events)
 Each row = one entry into a stage. `candidate_jobs.pipeline_stage` tracks current state; stage tables are the EVENT log.
-- `pitches` — pre-sendout outreach
-- `send_outs` — formally sent to client
-- `submissions` — formal submission
-- `interviews` — interview scheduled/completed (with calendar fields)
-- `placements` — candidate placed
-- `rejections` — rejected at any stage (records prior_stage + rejected_by_party)
+
+**⚠️ Table names ≠ UI labels.** Always use the UI label in user-facing strings:
+
+| UI label (use this) | Table name (legacy) |
+|---|---|
+| **Pitched** | `pitches` |
+| **Ready to Send** | `send_outs` |
+| **Sent** | `submissions` |
+| **Interviews** | `interviews` |
+| **Placements** | `placements` |
+| **Rejections** | `rejections` |
+
+`pitches`, `send_outs`, `submissions`, `placements`, `rejections` carry rich detail: rejection_reason, salary, prior_stage, interviewer_name, etc.
 
 ### `v_person_activity` view — record of truth
 Unified per-person timeline that joins 13 activity sources. Filter by `person_id` for a chronological feed.
