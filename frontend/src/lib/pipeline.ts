@@ -1,76 +1,97 @@
 // Canonical pipeline funnel — single source of truth for stage labels and groupings.
-// Matches the 6 event tables (pitches, send_outs, submissions, interviews, placements,
-// rejections) that useDashboardMetrics counts. Use this everywhere a pipeline funnel
-// renders so the dashboard ties to per-job and per-candidate views.
+// Per the Send Outs / Job Detail spec, the canonical stage list is:
+//   pitch → ready_to_send → submitted → interview_round_1 → interview_round_2_plus
+//   → offer → placed → withdrawn
 //
-// candidate_jobs.pipeline_stage allows multiple synonym values per canonical stage
-// (e.g. "pitch" and "pitched" both mean Pitches). Map them with stageToCanonical().
+// Existing data uses synonym values (sent, send_out, interviewing, etc.) — the
+// stageToCanonical() mapper normalises them so the UI can group cleanly.
+// Rejected rows fold into withdrawn for now (final-exit lane).
 
 export type CanonicalStage =
-  | 'pitches'
-  | 'send_outs'
-  | 'submissions'
-  | 'interviews'
-  | 'placements'
-  | 'rejections';
+  | 'pitch'
+  | 'ready_to_send'
+  | 'submitted'
+  | 'interview_round_1'
+  | 'interview_round_2_plus'
+  | 'offer'
+  | 'placed'
+  | 'withdrawn';
 
 export interface CanonicalStageConfig {
   key: CanonicalStage;
   label: string;
   shortLabel: string;
-  table: string;
   pipelineStageValues: string[];
+  /** Tailwind classes for the stage chip / dot. Gold for offer, emerald for placed. */
   color: string;
+  dotColor: string;
 }
 
 export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
   {
-    key: 'pitches',
-    label: 'Pitches',
+    key: 'pitch',
+    label: 'Pitch',
     shortLabel: 'Pitch',
-    table: 'pitches',
-    pipelineStageValues: ['pitch', 'pitched'],
-    color: 'bg-stage-warm/15 text-stage-warm border-stage-warm/20',
+    pipelineStageValues: ['pitch', 'pitched', 'new'],
+    color: 'bg-stage-warm/10 text-stage-warm border-stage-warm/30',
+    dotColor: 'bg-stage-warm',
   },
   {
-    key: 'send_outs',
-    label: 'Send Outs',
-    shortLabel: 'Send Out',
-    table: 'send_outs',
-    pipelineStageValues: ['sendout', 'sent', 'ready_to_send'],
-    color: 'bg-yellow-500/15 text-yellow-500 border-yellow-500/20',
+    key: 'ready_to_send',
+    label: 'Ready to Send',
+    shortLabel: 'Ready',
+    pipelineStageValues: ['ready_to_send', 'send_out', 'sendout'],
+    color: 'bg-yellow-600/10 text-yellow-700 border-yellow-600/30',
+    dotColor: 'bg-yellow-600',
   },
   {
-    key: 'submissions',
-    label: 'Submissions',
-    shortLabel: 'Submission',
-    table: 'submissions',
-    pipelineStageValues: ['submitted'],
-    color: 'bg-purple-500/15 text-purple-400 border-purple-500/20',
+    key: 'submitted',
+    label: 'Submitted',
+    shortLabel: 'Submitted',
+    pipelineStageValues: ['submitted', 'sent'],
+    color: 'bg-purple-600/10 text-purple-700 border-purple-600/30',
+    dotColor: 'bg-purple-600',
   },
   {
-    key: 'interviews',
-    label: 'Interviews',
-    shortLabel: 'Interview',
-    table: 'interviews',
-    pipelineStageValues: ['interview', 'interviewing'],
-    color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+    key: 'interview_round_1',
+    label: 'Interview R1',
+    shortLabel: 'R1',
+    pipelineStageValues: ['interview_round_1', 'interview', 'interviewing'],
+    color: 'bg-emerald/10 text-emerald border-emerald/30',
+    dotColor: 'bg-emerald',
   },
   {
-    key: 'placements',
-    label: 'Placements',
-    shortLabel: 'Placement',
-    table: 'placements',
+    key: 'interview_round_2_plus',
+    label: 'Interview R2+',
+    shortLabel: 'R2+',
+    pipelineStageValues: ['interview_round_2_plus'],
+    color: 'bg-emerald-dark/10 text-emerald-dark border-emerald-dark/30',
+    dotColor: 'bg-emerald-dark',
+  },
+  {
+    key: 'offer',
+    label: 'Offer',
+    shortLabel: 'Offer',
+    pipelineStageValues: ['offer'],
+    // Offer is gold per spec — premium UI moment.
+    color: 'bg-gold/10 text-gold-deep border-gold/40',
+    dotColor: 'bg-gold',
+  },
+  {
+    key: 'placed',
+    label: 'Placed',
+    shortLabel: 'Placed',
     pipelineStageValues: ['placed'],
-    color: 'bg-green-600/15 text-green-500 border-green-600/30',
+    color: 'bg-emerald/15 text-emerald-dark border-emerald/40',
+    dotColor: 'bg-emerald',
   },
   {
-    key: 'rejections',
-    label: 'Rejections',
-    shortLabel: 'Rejection',
-    table: 'rejections',
-    pipelineStageValues: ['rejected', 'withdrew', 'withdrawn'],
-    color: 'bg-red-500/15 text-red-400 border-red-500/20',
+    key: 'withdrawn',
+    label: 'Withdrawn',
+    shortLabel: 'Withdrawn',
+    pipelineStageValues: ['withdrawn', 'withdrew', 'rejected', 'declined'],
+    color: 'bg-muted text-muted-foreground border-border',
+    dotColor: 'bg-muted-foreground',
   },
 ];
 
@@ -82,13 +103,35 @@ const STAGE_TO_CANONICAL: Record<string, CanonicalStage> = (() => {
   return map;
 })();
 
-// Map a candidate_jobs.pipeline_stage value to the canonical funnel key (or null
-// if the stage is pre-funnel like "new" or "reached_out").
-export function stageToCanonical(pipelineStage: string | null | undefined): CanonicalStage | null {
-  if (!pipelineStage) return null;
-  return STAGE_TO_CANONICAL[pipelineStage] ?? null;
+export function stageToCanonical(value: string | null | undefined): CanonicalStage | null {
+  if (!value) return null;
+  return STAGE_TO_CANONICAL[value] ?? null;
 }
 
 export function canonicalConfig(key: CanonicalStage): CanonicalStageConfig {
   return CANONICAL_PIPELINE.find((s) => s.key === key)!;
+}
+
+/** Order index of a stage (0-based) — useful for "advance" / "back" buttons. */
+export function stageOrder(key: CanonicalStage): number {
+  return CANONICAL_PIPELINE.findIndex((s) => s.key === key);
+}
+
+export function nextStage(key: CanonicalStage): CanonicalStage | null {
+  const i = stageOrder(key);
+  if (i < 0 || i >= CANONICAL_PIPELINE.length - 1) return null;
+  return CANONICAL_PIPELINE[i + 1].key;
+}
+
+export function prevStage(key: CanonicalStage): CanonicalStage | null {
+  const i = stageOrder(key);
+  if (i <= 0) return null;
+  return CANONICAL_PIPELINE[i - 1].key;
+}
+
+/** Days between a timestamp and now. Returns 0 if invalid. */
+export function daysSince(ts: string | null | undefined): number {
+  if (!ts) return 0;
+  const ms = Date.now() - new Date(ts).getTime();
+  return Math.max(0, Math.floor(ms / 86_400_000));
 }
