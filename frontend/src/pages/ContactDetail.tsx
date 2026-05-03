@@ -521,7 +521,20 @@ const ContactDetail = () => {
               <EditableField label="Title" value={contact.title} onSave={v => updateField('title', v)} placeholder="e.g. VP, Talent Acquisition" />
               <EditableField label="Email" value={contact.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" />
               <EditableField label="Phone" value={contact.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
-              <EditableField label="Company" value={companyName} onSave={v => updateField('company_name', v)} placeholder="Company name" />
+              <div className="flex items-end gap-2">
+                <div className="flex-1 min-w-0">
+                  <EditableField label="Company" value={companyName} onSave={v => updateField('company_name', v)} placeholder="Company name" />
+                </div>
+                {(c as any).company_id && (
+                  <button
+                    onClick={() => navigate(`/companies/${(c as any).company_id}`)}
+                    title="View company"
+                    className="shrink-0 mb-1 p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
               <EditableField label="LinkedIn URL" value={contact.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." />
               <EditableField label="Address" value={c.address} onSave={v => updateField('address', v)} placeholder="Street address" />
               <EditableField label="City" value={c.city} onSave={v => updateField('city', v)} placeholder="City" />

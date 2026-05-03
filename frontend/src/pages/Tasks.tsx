@@ -273,7 +273,7 @@ export default function Tasks() {
         </div>
       } />
 
-      <div className="p-6 space-y-4">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 space-y-4">
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">

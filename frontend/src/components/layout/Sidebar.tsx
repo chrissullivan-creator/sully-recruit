@@ -2,12 +2,49 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
   Send, Martini,
 } from 'lucide-react';
+
+// Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
+// 30s — cheap pings that keep the badge fresh without thrashing the DB.
+function useSidebarCounts(userId: string | undefined) {
+  const inbox = useQuery({
+    queryKey: ['sidebar_inbox_unread'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('inbox_threads')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_read', false)
+        .eq('is_archived', false);
+      return count ?? 0;
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const tasks = useQuery({
+    queryKey: ['sidebar_tasks_due', userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('tasks')
+        .select('id', { count: 'exact', head: true })
+        .neq('status', 'completed')
+        .or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
+      return count ?? 0;
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  return { inboxUnread: inbox.data ?? 0, tasksOpen: tasks.data ?? 0 };
+}
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
@@ -29,6 +66,12 @@ export function Sidebar() {
   const location  = useLocation();
   const navigate  = useNavigate();
   const { user, signOut } = useAuth();
+  const { inboxUnread, tasksOpen } = useSidebarCounts(user?.id);
+  const badgeFor = (href: string): number | null => {
+    if (href === '/inbox') return inboxUnread > 0 ? inboxUnread : null;
+    if (href === '/tasks') return tasksOpen > 0 ? tasksOpen : null;
+    return null;
+  };
 
   const initials = user?.user_metadata?.display_name
     ? user.user_metadata.display_name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -85,9 +128,25 @@ export function Sidebar() {
                 )}
               />
               <span className="truncate">{item.name}</span>
-              {isActive && (
-                <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary shrink-0" />
-              )}
+              {(() => {
+                const n = badgeFor(item.href);
+                if (n) {
+                  return (
+                    <span className={cn(
+                      'ml-auto inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold tabular-nums shrink-0',
+                      isActive
+                        ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                        : 'bg-sidebar-primary/30 text-sidebar-primary',
+                    )}>
+                      {n > 99 ? '99+' : n}
+                    </span>
+                  );
+                }
+                if (isActive) {
+                  return <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary shrink-0" />;
+                }
+                return null;
+              })()}
             </Link>
           );
         })}

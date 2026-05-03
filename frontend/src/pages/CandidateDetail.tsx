@@ -1041,7 +1041,20 @@ const CandidateDetail = () => {
               <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
+              <div className="flex items-end gap-2">
+                <div className="flex-1 min-w-0">
+                  <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
+                </div>
+                {(candidate as any).company_id && (
+                  <button
+                    onClick={() => navigate(`/companies/${(candidate as any).company_id}`)}
+                    title="View company"
+                    className="shrink-0 mb-1 p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
               <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />

@@ -562,7 +562,7 @@ const Calls = () => {
         }
       />
 
-      <div className="p-8">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         {/* Search + Recruiter Filter */}
         <div className="flex items-center gap-4 mb-6">
           <div className="relative max-w-md flex-1">

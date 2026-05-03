@@ -1343,13 +1343,15 @@ const JobDetail = () => {
               </TabsContent>
 
               {/* ── Send Outs Tab ──────────────────────────── */}
-              <TabsContent value="send-outs" className="px-8 py-5 mt-0">
+              <TabsContent value="send-outs" className="px-6 lg:px-8 py-5 mt-0">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold text-foreground">Send Outs</h2>
+                    <FileText className="h-5 w-5 text-emerald" />
+                    <h2 className="text-base font-display font-semibold text-emerald-dark">Send Outs</h2>
                     {(sendOuts as any[]).length > 0 && (
-                      <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
+                      <span className="inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums bg-emerald-light text-emerald-dark ml-1">
+                        {(sendOuts as any[]).length}
+                      </span>
                     )}
                   </div>
                   <Button
