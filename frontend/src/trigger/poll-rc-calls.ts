@@ -49,7 +49,7 @@ async function findEntityByPhone(
   ].filter(Boolean) as string[];
 
   for (const v of variants) {
-    const { data: c } = await supabase.from("candidates").select("id, full_name").eq("phone", v).maybeSingle();
+    const { data: c } = await supabase.from("people").select("id, full_name").eq("phone", v).maybeSingle();
     if (c) return { id: c.id, name: c.full_name, type: "candidate" };
   }
   for (const v of variants) {

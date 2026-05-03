@@ -107,7 +107,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
 
   const { data: candMatch } = await supabase
-    .from("candidates")
+    .from("people")
     .select("id")
     .eq("unipile_id", senderId)
     .maybeSingle();
@@ -297,7 +297,7 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
   let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
 
   const { data: candMatch } = await supabase
-    .from("candidates")
+    .from("people")
     .select("id")
     .eq("unipile_id", providerId)
     .maybeSingle();

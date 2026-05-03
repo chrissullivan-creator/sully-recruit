@@ -83,7 +83,7 @@ function useDuplicates() {
       for (let i = 0; i < idArr.length; i += 100) {
         const chunk = idArr.slice(i, i + 100);
         const { data: cands, error: candErr } = await supabase
-          .from("candidates")
+          .from("people")
           .select("id, first_name, last_name, email, phone, current_company, current_title, created_at")
           .in("id", chunk);
 

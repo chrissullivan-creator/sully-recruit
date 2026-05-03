@@ -96,7 +96,7 @@ export const reparseResumes = schedules.task({
 
         // Update candidate with missing fields
         const { data: candidate } = await supabase
-          .from("candidates")
+          .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
           .eq("id", resume.candidate_id)
           .single();
@@ -113,7 +113,7 @@ export const reparseResumes = schedules.task({
             updates.full_name = [parsed.first_name, parsed.last_name].filter(Boolean).join(" ");
           }
           if (Object.keys(updates).length > 1) {
-            await supabase.from("candidates").update(updates).eq("id", resume.candidate_id);
+            await supabase.from("people").update(updates).eq("id", resume.candidate_id);
           }
 
           // Embed

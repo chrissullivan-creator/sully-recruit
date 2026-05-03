@@ -229,14 +229,14 @@ export async function applyExtractedIntel(
 
       // Fetch current notes and append
       const { data: entity } = await supabase
-        .from("candidates")
+        .from("people")
         .select("back_of_resume_notes")
         .eq("id", entityId)
         .single();
 
       const existing = entity?.back_of_resume_notes || "";
       await supabase
-        .from("candidates")
+        .from("people")
         .update({ back_of_resume_notes: existing + note } as any)
         .eq("id", entityId);
 

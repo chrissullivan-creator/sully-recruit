@@ -534,7 +534,7 @@ async function matchByEmail(
   const normalizedEmail = email.toLowerCase().trim();
 
   const [candidateRes, contactRes] = await Promise.all([
-    supabase.from("candidates").select("id").ilike("email", normalizedEmail).limit(1),
+    supabase.from("people").select("id").ilike("email", normalizedEmail).limit(1),
     supabase.from("contacts").select("id").ilike("email", normalizedEmail).limit(1),
   ]);
 

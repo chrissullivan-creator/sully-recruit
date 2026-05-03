@@ -109,14 +109,14 @@ export const resumeIngestion = task({
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
 
-      await supabase.from("candidates").update(updates).eq("id", candidateId);
+      await supabase.from("people").update(updates).eq("id", candidateId);
     }
 
     // ── 6. Embed full profile with Voyage and store in resume_embeddings ──
     if (candidateId && rawText.length > 50) {
       try {
         const { data: candidate } = await supabase
-          .from("candidates")
+          .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
           .eq("id", candidateId)
           .single();

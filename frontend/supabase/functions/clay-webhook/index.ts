@@ -92,7 +92,7 @@ Deno.serve(async (req: Request) => {
 
       if (entityType === "candidate") {
         const { data: existing } = await supabase
-          .from("candidates")
+          .from("people")
           .select(
             "email, phone, linkedin_url, current_title, current_company, location_text"
           )
@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
 
         if (Object.keys(updates).length > 0) {
           await supabase
-            .from("candidates")
+            .from("people")
             .update(updates)
             .eq("id", entityId);
           updated++;

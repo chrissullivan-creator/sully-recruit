@@ -301,7 +301,7 @@ const Candidates = () => {
   const handleQuickStatusChange = async (candidateId: string, newStatus: string) => {
     try {
       const { error } = await supabase
-        .from('candidates')
+        .from('people')
         .update({ status: newStatus })
         .eq('id', candidateId);
       if (error) throw new Error(error.message);
@@ -320,7 +320,7 @@ const Candidates = () => {
     setDeleting(true);
     try {
       const { error } = await supabase
-        .from('candidates')
+        .from('people')
         .delete()
         .in('id', selectedIds);
 

@@ -169,7 +169,7 @@ export const BulkCandidateActionsDialog = ({
 
       // Update job_id and job_status on candidates (fix: was using tagged_job_id)
       const { error: updateError } = await supabase
-        .from('candidates')
+        .from('people')
         .update({ job_id: selectedJobId, job_status: normalizedStage } as CandidateUpdate)
         .in('id', candidateIds);
 

@@ -19,7 +19,7 @@ async function findEntity(
   // Match by any Unipile ID column (recruiter, classic, or provider_id)
   if (unipileId) {
     const { data } = await supabase
-      .from("candidates")
+      .from("people")
       .select("id, owner_user_id")
       .or(
         `unipile_recruiter_id.eq.${unipileId},unipile_classic_id.eq.${unipileId},unipile_provider_id.eq.${unipileId}`,
@@ -31,7 +31,7 @@ async function findEntity(
     const slug = normalizeLinkedIn(linkedinUrl);
     if (slug) {
       const { data } = await supabase
-        .from("candidates")
+        .from("people")
         .select("id, owner_user_id")
         .ilike("linkedin_url", `%${slug}%`)
         .maybeSingle();

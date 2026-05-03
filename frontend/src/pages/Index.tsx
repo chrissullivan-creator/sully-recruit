@@ -82,7 +82,7 @@ const SendOutRow = ({
   dateLabel?: string | null;
   onClick?: () => void;
 }) => {
-  const cand = sendOut.candidates as any;
+  const cand = (sendOut.candidate ?? sendOut.candidates) as any;
   const job  = sendOut.jobs as any;
   const name = cand?.full_name ||
     `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim() || '—';

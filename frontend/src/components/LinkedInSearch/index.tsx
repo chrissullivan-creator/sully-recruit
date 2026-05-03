@@ -224,7 +224,7 @@ export default function LinkedInSearch() {
     setActionLoading((prev) => ({ ...prev, [`cand-${r.id}`]: true }));
     try {
       const ownerId = activeAccount?.ownerUserId || user?.id || null;
-      const { error } = await supabase.from('candidates').insert({
+      const { error } = await supabase.from('people').insert({
         first_name: r.first_name,
         last_name: r.last_name,
         current_title: r.current_title || null,
@@ -287,7 +287,7 @@ export default function LinkedInSearch() {
     try {
       // First insert as candidate if not already
       const { data: existing } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id')
         .eq('linkedin_url', r.linkedin_url)
         .maybeSingle();
@@ -296,7 +296,7 @@ export default function LinkedInSearch() {
       if (!candidateId) {
         const ownerId = activeAccount?.ownerUserId || user?.id || null;
         const { data: inserted, error } = await supabase
-          .from('candidates')
+          .from('people')
           .insert({
             first_name: r.first_name,
             last_name: r.last_name,

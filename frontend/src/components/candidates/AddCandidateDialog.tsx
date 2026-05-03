@@ -114,7 +114,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const { data: inserted, error } = await supabase
-        .from('candidates')
+        .from('people')
         .insert([
           {
             first_name: firstName,

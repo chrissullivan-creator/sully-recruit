@@ -3,7 +3,9 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
 
-// Candidates — includes new work_email, personal_email, mobile_phone, roles fields
+// Candidates — queries the people table (was renamed from candidates) and filters
+// to type='candidate'. The `candidates` backwards-compat view still exists for
+// untouched edge functions / Trigger.dev tasks.
 export function useCandidates() {
   const queryClient = useQueryClient();
 
@@ -15,8 +17,9 @@ export function useCandidates() {
       let from = 0;
       while (true) {
         const { data, error } = await supabase
-          .from('candidates')
+          .from('people')
           .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
+          .eq('type', 'candidate')
           .order('created_at', { ascending: false })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
@@ -34,8 +37,8 @@ export function useCandidates() {
   useEffect(() => {
     const channel = supabase
       .channel(candidatesChannelName.current)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, (payload) => {
-        console.log('Candidates change detected:', payload);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, (payload) => {
+        console.log('People change detected:', payload);
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
       })
       .subscribe();
@@ -45,14 +48,15 @@ export function useCandidates() {
   return query;
 }
 
-// Single candidate by ID
+// Single person by ID — queries people table directly. Keep export name 'useCandidate'
+// for now; callers don't care about the rename.
 export function useCandidate(id: string | undefined) {
   return useQuery({
     queryKey: ['candidate', id],
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('candidates')
+        .from('people')
         .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
         .eq('id', id!)
         .maybeSingle();
@@ -214,7 +218,9 @@ export function useContacts() {
   return query;
 }
 
-// Unified people — backed by v_people view (candidates with type/title/company normalized)
+// Unified people — queries the people table directly (was renamed from candidates).
+// Title/company normalized in JS since both candidate-side (current_title, current_company)
+// and client-side (title, company_name) columns coexist on the unified row.
 export function usePeople() {
   const queryClient = useQueryClient();
 
@@ -225,8 +231,16 @@ export function usePeople() {
       let allData: any[] = [];
       let from = 0;
       while (true) {
-        const { data, error } = await (supabase.from('v_people' as any) as any)
-          .select('*')
+        const { data, error } = await supabase
+          .from('people')
+          .select(
+            'id, type, full_name, first_name, last_name, ' +
+            'title, current_title, company_name, current_company, ' +
+            'work_email, personal_email, email, mobile_phone, phone, linkedin_url, ' +
+            'avatar_url, roles, status, ' +
+            'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +
+            'owner_user_id, created_at, updated_at',
+          )
           .order('updated_at', { ascending: false })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
@@ -235,7 +249,12 @@ export function usePeople() {
         if (data.length < PAGE_SIZE) break;
         from += PAGE_SIZE;
       }
-      return allData;
+      return allData.map((p: any) => ({
+        ...p,
+        source_table: p.type === 'client' ? 'contact' : 'candidate',
+        title: p.title ?? p.current_title ?? null,
+        company_name: p.company_name ?? p.current_company ?? null,
+      }));
     },
   });
 
@@ -244,7 +263,7 @@ export function usePeople() {
   useEffect(() => {
     const ch = supabase
       .channel(channelName.current)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, () => {
         queryClient.invalidateQueries({ queryKey: ['people'] });
       })
       .subscribe();
@@ -357,7 +376,7 @@ export function useMessages(channel?: string) {
     queryFn: async () => {
       let query = supabase
         .from('messages')
-        .select('*, candidates(full_name)')
+        .select('*, people!candidate_id(full_name)')
         .order('created_at', { ascending: false })
         .limit(100);
       if (channel) query = query.eq('channel', channel);
@@ -386,7 +405,7 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       let ownedCandidateIds: string[] | null = null;
       if (ownerUserId) {
         const { data: ownedCands } = await supabase
-          .from('candidates')
+          .from('people')
           .select('id')
           .eq('owner_user_id', ownerUserId);
         ownedCandidateIds = (ownedCands ?? []).map((c: any) => c.id);
@@ -421,7 +440,7 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
 
         // Candidates created in range (owner-filtered)
         (() => {
-          let q = supabase.from('candidates')
+          let q = supabase.from('people')
             .select('id, owner_user_id, created_at')
             .gte('created_at', fromIso).lte('created_at', toIso);
           if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
@@ -430,7 +449,7 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
 
         // Engaged candidates updated in range
         (() => {
-          let q = supabase.from('candidates')
+          let q = supabase.from('people')
             .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
             .eq('status', 'engaged')
             .gte('updated_at', fromIso).lte('updated_at', toIso)
@@ -448,11 +467,11 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
           let q = supabase.from('send_outs')
             .select(`id, stage, sent_to_client_at, interview_at, updated_at, created_at,
               candidate_id, job_id, recruiter_id,
-              candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
+              candidate:people!candidate_id!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
               jobs!inner(title, company_name)`)
             .gte('updated_at', fromIso).lte('updated_at', toIso)
             .order('updated_at', { ascending: false });
-          if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
+          if (ownerUserId) q = q.eq('candidate.owner_user_id', ownerUserId);
           return q;
         })(),
 
@@ -464,11 +483,11 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
         (() => {
           let q = supabase.from('interviews')
             .select(`id, candidate_id, job_id, scheduled_at, end_at, stage, round, interviewer_name, interviewer_company, location, meeting_link, calendar_event_id,
-              candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
+              candidate:people!candidate_id!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
               jobs!inner(title, company_name)`)
             .gte('scheduled_at', fromIso).lte('scheduled_at', toIso)
             .order('scheduled_at', { ascending: true, nullsFirst: false });
-          if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
+          if (ownerUserId) q = q.eq('candidate.owner_user_id', ownerUserId);
           return q;
         })(),
 
@@ -556,7 +575,7 @@ export function useJobCandidates(jobId: string | undefined) {
     enabled: !!jobId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, first_name, last_name, full_name, current_title, current_company, job_status, status, email')
         .eq('job_id', jobId!)
         .order('created_at', { ascending: false });
@@ -576,7 +595,7 @@ export function useActivityFeed(limit = 20) {
       const [messagesRes, notesRes, enrollmentsRes] = await Promise.all([
         supabase
           .from('messages')
-          .select('id, channel, direction, body, subject, sender_address, recipient_address, sent_at, received_at, candidate_id, contact_id, candidates(full_name), contacts(full_name)')
+          .select('id, channel, direction, body, subject, sender_address, recipient_address, sent_at, received_at, candidate_id, contact_id, candidate:people!candidate_id(full_name), contact:people!contact_id(full_name)')
           .eq('owner_id', user.id)
           .order('sent_at', { ascending: false, nullsFirst: false })
           .limit(limit),
@@ -588,7 +607,7 @@ export function useActivityFeed(limit = 20) {
           .limit(limit),
         supabase
           .from('sequence_enrollments')
-          .select('id, enrolled_at, candidate_id, sequence_id, candidates(full_name), sequences(name)')
+          .select('id, enrolled_at, candidate_id, sequence_id, people!candidate_id(full_name), sequences(name)')
           .eq('enrolled_by', user.id)
           .order('enrolled_at', { ascending: false })
           .limit(limit),
@@ -596,7 +615,7 @@ export function useActivityFeed(limit = 20) {
       const items: any[] = [];
       for (const msg of messagesRes.data ?? []) {
         const ts = msg.sent_at || msg.received_at;
-        const personName = (msg.candidates as any)?.full_name || (msg.contacts as any)?.full_name || msg.recipient_address || msg.sender_address;
+        const personName = (msg.candidate as any)?.full_name || (msg.contact as any)?.full_name || msg.recipient_address || msg.sender_address;
         const channelLabel = msg.channel === 'email' ? 'Email' : msg.channel === 'sms' ? 'SMS' : 'LinkedIn';
         const direction = msg.direction === 'outbound' ? 'sent' : 'received';
         items.push({
@@ -617,7 +636,7 @@ export function useActivityFeed(limit = 20) {
         });
       }
       for (const enr of enrollmentsRes.data ?? []) {
-        const candName = (enr.candidates as any)?.full_name;
+        const candName = (enr.people as any)?.full_name;
         const seqName = (enr.sequences as any)?.name;
         items.push({
           id: `enr-${enr.id}`,

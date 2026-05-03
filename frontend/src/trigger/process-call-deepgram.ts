@@ -189,7 +189,7 @@ export const processCallDeepgram = task({
       if (!entityId && cl.phone_number) {
         const last10 = cl.phone_number.replace(/\D/g, "").slice(-10);
         if (last10.length === 10) {
-          const { data: cands } = await supabase.from("candidates").select("id, full_name, phone").not("phone", "is", null);
+          const { data: cands } = await supabase.from("people").select("id, full_name, phone").not("phone", "is", null);
           const match = (cands ?? []).find((c: any) => c.phone?.replace(/\D/g, "").slice(-10) === last10);
           if (match) {
             entityId = match.id; entityType = "candidate"; entityName = match.full_name;
@@ -334,7 +334,7 @@ Field rules:
         if (intel.where_interviewed) updates.where_interviewed = intel.where_interviewed;
         if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
         if (intel.notice_period) updates.notice_period = intel.notice_period;
-        await supabase.from("candidates").update(updates).eq("id", entityId);
+        await supabase.from("people").update(updates).eq("id", entityId);
         logger.info("Updated candidate", { name: entityName, duration: cl.duration_seconds, statusFlip: (cl.duration_seconds ?? 0) >= 60 });
       }
 

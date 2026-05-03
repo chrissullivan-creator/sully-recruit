@@ -197,7 +197,7 @@ export function DuplicateReviewDialog({
 
     const fetchOne = async (id: string): Promise<CandidateInfo | null> => {
       const { data: candidate } = await supabase
-        .from('candidates')
+        .from('people')
         .select('*')
         .eq('id', id)
         .maybeSingle();

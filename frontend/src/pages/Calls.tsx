@@ -84,7 +84,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       const e164 = toE164(phone);
       if (!e164) { setMatchResult({ matched: false, entity_type: null, entity_id: null, entity_name: null }); return; }
       const { data, error } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, full_name, type')
         .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
         .limit(1)
@@ -275,7 +275,7 @@ function LinkCallDialog({
     setSearching(true);
     const q = search.trim();
     const { data, error } = await supabase
-      .from('candidates')
+      .from('people')
       .select('id, full_name, email, phone, current_title, title, type')
       .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
       .limit(10);
@@ -299,7 +299,7 @@ function LinkCallDialog({
     const e164 = toE164(call.phone_number);
     if (!e164) { setResults([]); setSearching(false); return; }
     const { data } = await supabase
-      .from('candidates')
+      .from('people')
       .select('id, full_name, email, phone, current_title, title, type')
       .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
       .limit(10);
@@ -457,7 +457,7 @@ const Calls = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('ai_call_notes' as any)
-        .select('*, candidates(id, type, first_name, last_name, full_name, current_title, current_company, title, company_name)')
+        .select('*, candidates:people!candidate_id(id, type, first_name, last_name, full_name, current_title, current_company, title, company_name)')
         .order('created_at', { ascending: false })
         .limit(1000);
       if (error) throw error;

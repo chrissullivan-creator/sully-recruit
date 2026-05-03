@@ -135,7 +135,7 @@ export function MergeCandidateDialog({
     try {
       const q = searchQuery.trim();
       const { data, error } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, first_name, last_name, email, phone, linkedin_url, current_title, current_company, location_text, status, created_at')
         .neq('id', currentCandidate.id)
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,current_company.ilike.%${q}%,linkedin_url.ilike.%${q}%`)

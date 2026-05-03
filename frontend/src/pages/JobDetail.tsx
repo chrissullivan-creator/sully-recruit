@@ -212,7 +212,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
         <div className="flex items-center gap-3 min-w-0">
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground truncate">
-              {sendOut.candidate_name ?? sendOut.candidates?.full_name ?? 'Unknown Candidate'}
+              {sendOut.candidate_name ?? sendOut.candidate?.full_name ?? sendOut.candidates?.full_name ?? 'Unknown Candidate'}
             </p>
             {contact && (
               <p className="text-xs text-muted-foreground">Contact: {contact.full_name}</p>
@@ -371,7 +371,7 @@ const JobDetail = () => {
     setSendOutSearching(true);
     try {
       const { data } = await supabase
-        .from('candidates')
+        .from('people')
         .select('id, full_name, first_name, last_name, current_title, current_company, email')
         .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%,email.ilike.%${query}%`)
         .limit(15);
@@ -583,7 +583,7 @@ const JobDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_contacts')
-        .select('id, contact_id, is_primary, role, contacts(id, full_name, email, phone, title)')
+        .select('id, contact_id, is_primary, role, contact:people!contact_id(id, full_name, email, phone, title)')
         .eq('job_id', id!)
         .order('is_primary', { ascending: false });
       if (error) throw error;
@@ -906,9 +906,9 @@ const JobDetail = () => {
                 <div className="space-y-1.5">
                   {(jobContacts as any[]).slice(0, 3).map(jc => (
                     <div key={jc.id} className="text-xs">
-                      <span className="text-foreground font-medium">{jc.contacts?.full_name}</span>
+                      <span className="text-foreground font-medium">{jc.contact?.full_name}</span>
                       {jc.is_primary && <span className="text-accent ml-1 text-[9px]">★</span>}
-                      {jc.contacts?.title && <p className="text-muted-foreground truncate">{jc.contacts.title}</p>}
+                      {jc.contact?.title && <p className="text-muted-foreground truncate">{jc.contact.title}</p>}
                     </div>
                   ))}
                   {(jobContacts as any[]).length > 3 && (
@@ -1021,7 +1021,7 @@ const JobDetail = () => {
                 ) : (
                   <div className="space-y-2">
                     {(jobContacts as any[]).map(jc => {
-                      const c = jc.contacts;
+                      const c = jc.contact ?? jc.contacts;
                       return (
                         <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
                           <div className="flex-1 min-w-0 text-sm">
