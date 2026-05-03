@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const [candRes, notesRes, msgsRes, enrollRes, resumeRes] = await Promise.all([
-      sb.from("candidates").select(`
+      sb.from("people").select(`
         id, first_name, last_name, full_name, current_title, current_company,
         location_text, email, phone, linkedin_url, status, job_status,
         current_base_comp, current_bonus_comp, current_total_comp,
@@ -144,7 +144,7 @@ Rules:
     const data = await res.json();
     const joeSays = data.content?.[0]?.text?.trim() ?? "";
 
-    await sb.from("candidates").update({
+    await sb.from("people").update({
       joe_says: joeSays,
       joe_says_updated_at: new Date().toISOString(),
     }).eq("id", candidate_id);

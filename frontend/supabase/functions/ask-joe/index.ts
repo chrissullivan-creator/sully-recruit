@@ -183,7 +183,7 @@ const TOOLS = [
 
 async function searchCandidates(supabase: any, filters: any) {
   let query = supabase
-    .from('candidates')
+    .from('people')
     .select('id, first_name, last_name, current_title, current_company, status, stage, no_answer, email, skills, resume_url, created_at')
     .order('created_at', { ascending: false })
     .limit(filters.limit ?? 25);
@@ -254,7 +254,7 @@ async function semanticSearchCandidates(supabase: any, input: any) {
 
 async function getCandidateContext(supabase: any, candidateId: string) {
   const { data: candidate, error } = await supabase
-    .from('candidates')
+    .from('people')
     .select('id, first_name, last_name, full_name, current_title, current_company, email, phone, linkedin_url, location_text, status, stage, skills, notes, resume_url, candidate_summary, last_sequence_sentiment, last_sequence_sentiment_note, created_at')
     .eq('id', candidateId).maybeSingle();
   if (error || !candidate) throw new Error(`Candidate not found: ${candidateId}`);
