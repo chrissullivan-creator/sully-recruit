@@ -86,20 +86,20 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
         </div>
       </td>
 
-      <td className="px-3 py-2.5 text-sm text-muted-foreground min-w-[160px]">
+      <td className="hidden md:table-cell px-3 py-2.5 text-sm text-muted-foreground min-w-[160px]">
         <p className="truncate">{c?.current_title ?? '—'}</p>
         {c?.current_company && <p className="text-[11px] truncate text-muted-foreground/70">{c.current_company}</p>}
       </td>
 
-      <td className="px-3 py-2.5 text-sm font-semibold text-gold-deep tabular-nums min-w-[100px]">
+      <td className="px-3 py-2.5 text-sm font-semibold text-gold-deep tabular-nums min-w-[80px]">
         {targetComp}
       </td>
 
-      <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[110px]">
+      <td className="hidden lg:table-cell px-3 py-2.5 text-xs text-muted-foreground min-w-[110px]">
         {lastTouch ? format(new Date(lastTouch), 'MMM d') : '—'}
       </td>
 
-      <td className="px-3 py-2.5 min-w-[80px]">
+      <td className="px-3 py-2.5 min-w-[60px]">
         <span className={cn(
           'inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-medium',
           daysInStage > 7 ? 'bg-amber-100 text-amber-800' : 'bg-gold-bg text-gold-deep',
@@ -108,7 +108,7 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
         </span>
       </td>
 
-      <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[140px]">
+      <td className="hidden xl:table-cell px-3 py-2.5 text-xs text-muted-foreground min-w-[140px]">
         {row.submittal_notes ? (
           <span className="line-clamp-1">{row.submittal_notes}</span>
         ) : <span className="text-muted-foreground/50 italic">No next step</span>}

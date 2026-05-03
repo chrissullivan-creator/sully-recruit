@@ -102,11 +102,11 @@ export function StageTable({
                   <th className="w-8" />
                   <th className="w-8" />
                   <th className="px-3 py-2">Candidate</th>
-                  <th className="px-3 py-2">Current Role</th>
-                  <th className="px-3 py-2">Target Comp</th>
-                  <th className="px-3 py-2">Last Touch</th>
+                  <th className="hidden md:table-cell px-3 py-2">Current Role</th>
+                  <th className="px-3 py-2">Comp</th>
+                  <th className="hidden lg:table-cell px-3 py-2">Last Touch</th>
                   <th className="px-3 py-2">Days</th>
-                  <th className="px-3 py-2">Next Step</th>
+                  <th className="hidden xl:table-cell px-3 py-2">Next Step</th>
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
