@@ -37,6 +37,7 @@ import DOMPurify from 'dompurify';
 import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
 import { QuickStats } from '@/components/job-detail/QuickStats';
 import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
+import { JobPipelineKanban } from '@/components/job-detail/JobPipelineKanban';
 import type { CanonicalStage } from '@/lib/pipeline';
 
 const JOB_STATUSES = [
@@ -782,7 +783,11 @@ const JobDetail = () => {
         </div>
       </div>
 
-      {/* ── Funnel strip (live counts per pipeline_stage for this job) ── */}
+      {/* ── Funnel strip (live counts per pipeline_stage for this job).
+          Tiles double as filter buttons for the Pipeline tab kanban. The
+          drop-target wiring (useDroppable) only takes effect when both
+          tiles + draggables share a DndContext — needs a context-lift to
+          turn on cross-tab drops; landing in a follow-up pass. ── */}
       <FunnelStrip
         jobId={id!}
         activeStage={funnelStage}
@@ -946,6 +951,7 @@ const JobDetail = () => {
             <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-secondary">
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
+                <TabsTrigger value="pipeline" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
@@ -1010,6 +1016,11 @@ const JobDetail = () => {
                     />
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ── Pipeline Tab (kanban with DnD) ─────────── */}
+              <TabsContent value="pipeline" className="px-6 lg:px-8 py-5 mt-0">
+                <JobPipelineKanban jobId={job.id} filterStage={funnelStage} />
               </TabsContent>
 
               {/* ── AI Matches Tab ─────────────────────────── */}
