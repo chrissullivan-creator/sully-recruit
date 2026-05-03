@@ -169,39 +169,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!profileData) return res.status(200).json({});
 
-    // Unipile profiles bundle the current role in experience[0] (the array is
-    // ordered most-recent-first). Pull title + company from there if present,
-    // falling back to flat fields when we only have attendee-synthesized data.
-    const currentExp = Array.isArray(profileData.experience) && profileData.experience.length > 0
-      ? profileData.experience[0]
-      : null;
+    // Pull current title + company straight from Unipile's structured fields.
+    // Order: experience[0] / work_experience[0] (most-recent-first array) →
+    // flat current_* fields → flat title/company fields. We do NOT parse the
+    // headline string; the headline is a marketing tagline, not the job title.
+    const expArray =
+      (Array.isArray(profileData.experience) && profileData.experience) ||
+      (Array.isArray(profileData.work_experience) && profileData.work_experience) ||
+      [];
+    const currentExp = expArray.length > 0 ? expArray[0] : null;
     const currentTitle =
       currentExp?.title ||
       currentExp?.position ||
       profileData.current_position ||
       profileData.current_title ||
       profileData.title ||
-      profileData.headline ||
       "";
-    let currentCompany =
+    const currentCompany =
       currentExp?.company ||
       currentExp?.company_name ||
+      currentExp?.organization ||
       profileData.current_company ||
       profileData.company ||
       profileData.company_name ||
       "";
-
-    // Fallback: many LinkedIn headlines embed the company as "Title at Company".
-    // For non-premium / attendee-synthesized profiles, that's our best shot.
-    if (!currentCompany && profileData.headline) {
-      const m = String(profileData.headline).match(/\s+(?:at|@|\|)\s+([^|·•]+?)\s*(?:\||·|•|$)/i);
-      if (m) currentCompany = m[1].trim();
-    }
-    // Also try work_experience (some Unipile responses use this name).
-    if (!currentCompany && Array.isArray(profileData.work_experience) && profileData.work_experience.length > 0) {
-      const w = profileData.work_experience[0];
-      currentCompany = w?.company || w?.company_name || w?.organization || "";
-    }
 
     // Normalize to form-compatible fields
     const result: Record<string, string> = {};

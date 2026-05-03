@@ -268,7 +268,7 @@ export function AddPersonWizard({
       last_name: profile.last_name || prev.last_name,
       email: profile.email || prev.email,
       phone: profile.phone || prev.phone,
-      title: profile.title || profile.headline || prev.title,
+      title: profile.title || prev.title,
       company: profile.company_name || profile.company || prev.company,
       location: profile.location || prev.location,
       linkedin_url: profile.linkedin_url || prev.linkedin_url,
