@@ -10,10 +10,13 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
-import { useDashboardMetrics } from '@/hooks/useData';
+import { useDashboardMetrics, useTeamMembers } from '@/hooks/useData';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,7 +24,7 @@ import { toast } from 'sonner';
 import {
   Briefcase, Users, Calendar, FileText, Target, Mail,
   Plus, Sparkles, User, ChevronDown, ChevronUp,
-  Building, Send,
+  Building, Send, Award, XCircle, Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -162,9 +165,16 @@ const ListPanel = ({
 
 // ── Main Dashboard ────────────────────────────────────────────────────
 const Dashboard = () => {
-  const [range, setRange] = useState<DashboardRange>(() => defaultDashboardRange());
-  const { data: metrics, isLoading } = useDashboardMetrics(range);
   const { user } = useAuth();
+  const [range, setRange]    = useState<DashboardRange>(() => defaultDashboardRange());
+  const [ownerScope, setOwnerScope] = useState<string>('all'); // 'all' | 'me' | <user_id>
+  const ownerUserId =
+    ownerScope === 'all' ? null :
+    ownerScope === 'me'  ? (user?.id ?? null) :
+    ownerScope;
+  const { data: metrics, isLoading } = useDashboardMetrics(range, ownerUserId);
+  const { data: team = [] } = useTeamMembers();
+
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -195,20 +205,34 @@ const Dashboard = () => {
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
   const m = metrics;
 
-  const myCandidates    = m?.myCandidatesInRange ?? 0;
-  const newCount        = m?.newCount            ?? 0;
-  const contacted       = m?.contactedCount      ?? 0;
-  const pitched         = m?.pitchedCount        ?? 0;
-  const sendOut         = m?.sendOutCount        ?? 0;
-  const interviewing    = m?.interviewingCount   ?? 0;
-  const offer           = m?.offerCount          ?? 0;
-  const engaged         = m?.engagedCount        ?? 0;
-  const sentCount       = m?.sentCount           ?? 0;
-  const interviewCount  = m?.interviewCount      ?? 0;
+  // Pipeline-stage event counts (from candidate_jobs.<stage>_at within range)
+  const reachedOut    = m?.reachedOutCount    ?? 0;
+  const pitched       = m?.pitchedCount       ?? 0;
+  const readyToSend   = m?.readyToSendCount   ?? 0;
+  const sentToClient  = m?.sentToClientCount  ?? 0;
+  const interviewing  = m?.interviewingCount  ?? 0;
+  const rejected      = m?.rejectedCount      ?? 0;
+
+  // Person-level engagement
+  const engaged       = m?.engagedCount       ?? 0;
+  const candidatesNew = m?.candidatesInRange  ?? 0;
+
+  // Stage-table event counts (one row per ENTRY into the stage)
+  const pitchEvents      = m?.pitchEvents      ?? 0;
+  const sendoutEvents    = m?.sendoutEvents    ?? 0;
+  const submissionEvents = m?.submissionEvents ?? 0;
+  const interviewEvents  = m?.interviewEvents  ?? 0;
+  const placementEvents  = m?.placementEvents  ?? 0;
+  const rejectionEvents  = m?.rejectionEvents  ?? 0;
 
   const engagedList   = m?.engagedList   ?? [];
   const sentList      = m?.sentList      ?? [];
   const interviewList = m?.interviewList ?? [];
+
+  const ownerLabel =
+    ownerScope === 'all' ? 'Whole Team' :
+    ownerScope === 'me'  ? 'Me' :
+    team.find((t: any) => t.id === ownerScope)?.full_name || 'User';
 
   return (
     <MainLayout>
@@ -247,11 +271,11 @@ const Dashboard = () => {
                     {' · '}
                     <span className="font-semibold text-foreground">{engaged} engaged</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{sentCount} sent</span>
+                    <span className="font-semibold text-foreground">{sendoutEvents} sent</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{interviewCount} interview{interviewCount !== 1 ? 's' : ''}</span>
+                    <span className="font-semibold text-foreground">{interviewEvents} interview{interviewEvents !== 1 ? 's' : ''}</span>
                     {' · '}
-                    <span className="text-muted-foreground/80">{range.label.toLowerCase()}</span>
+                    <span className="text-muted-foreground/80">{range.label.toLowerCase()} · {ownerLabel.toLowerCase()}</span>
                   </>
                 )}
               </p>
@@ -261,50 +285,67 @@ const Dashboard = () => {
           <div className="absolute -right-2 -bottom-8 h-24 w-24 rounded-full bg-accent/5 blur-xl" />
         </div>
 
-        {/* Date range picker */}
-        <div className="flex items-center justify-between gap-2">
-          <DateRangePicker value={range} onChange={setRange} />
+        {/* Date range + owner filter */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <DateRangePicker value={range} onChange={setRange} />
+            <Select value={ownerScope} onValueChange={setOwnerScope}>
+              <SelectTrigger className="w-[180px] h-9">
+                <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="Filter by user" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Whole Team</SelectItem>
+                {user?.id && <SelectItem value="me">Me ({displayName})</SelectItem>}
+                {team.filter((t: any) => t.id !== user?.id).map((t: any) => (
+                  <SelectItem key={t.id} value={t.id}>{t.full_name || t.email}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <span className="text-xs text-muted-foreground">
             {format(range.from, 'MMM d, yyyy')} → {format(range.to, 'MMM d, yyyy')}
           </span>
         </div>
 
-        {/* ── Primary pipeline counts ────────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <MetricCard label="Active Jobs"    value={isLoading ? '…' : (m?.activeJobs ?? 0)}   icon={<Briefcase className="h-5 w-5" />} />
-          <MetricCard label="My Candidates"  value={isLoading ? '…' : (myCandidates ?? 0)}    icon={<User className="h-5 w-5" />} />
-          <MetricCard label="New"            value={isLoading ? '…' : (newCount ?? 0)}         icon={<Users className="h-5 w-5" />} />
-          <MetricCard label="Contacted"      value={isLoading ? '…' : (contacted ?? 0)}        icon={<Mail className="h-5 w-5" />} />
-          <MetricCard label="Pitched"        value={isLoading ? '…' : (pitched ?? 0)}          icon={<Target className="h-5 w-5" />} />
+        {/* ── Top-line metrics ────────────────────────────────────── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <MetricCard label="Active Jobs"   value={isLoading ? '…' : (m?.activeJobs ?? 0)}  icon={<Briefcase className="h-5 w-5" />} />
+          <MetricCard label="New People"    value={isLoading ? '…' : candidatesNew}         icon={<Users className="h-5 w-5" />} />
+          <MetricCard label="Engaged"       value={isLoading ? '…' : engaged}               icon={<User className="h-5 w-5" />} highlight />
+          <MetricCard label="Active Send-Outs" value={isLoading ? '…' : (m?.interviewsInFlight ?? 0)} icon={<Send className="h-5 w-5" />} />
         </div>
 
-        {/* ── Key production metrics ─────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <MetricCard
-            label="Engaged"
-            value={isLoading ? '…' : engaged}
-            icon={<FileText className="h-5 w-5" />}
-            highlight
-          />
-          <MetricCard
-            label="Sent to Client"
-            value={isLoading ? '…' : sentCount}
-            icon={<Send className="h-5 w-5" />}
-            highlight
-          />
-          <MetricCard
-            label="Interviews"
-            value={isLoading ? '…' : interviewCount}
-            icon={<Calendar className="h-5 w-5" />}
-            highlight
-          />
+        {/* ── Pipeline stage entry events (canonical: candidate_jobs) ─ */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-foreground">Pipeline Entries — {range.label}</h2>
+            <span className="text-xs text-muted-foreground">From candidate_jobs (canonical)</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+            <MetricCard label="Reached Out"   value={isLoading ? '…' : reachedOut}    icon={<Mail className="h-5 w-5" />} />
+            <MetricCard label="Pitched"       value={isLoading ? '…' : pitched}       icon={<Target className="h-5 w-5" />} />
+            <MetricCard label="Ready to Send" value={isLoading ? '…' : readyToSend}   icon={<FileText className="h-5 w-5" />} />
+            <MetricCard label="Sent"          value={isLoading ? '…' : sentToClient}  icon={<Send className="h-5 w-5" />} />
+            <MetricCard label="Interviewing"  value={isLoading ? '…' : interviewing}  icon={<Calendar className="h-5 w-5" />} />
+            <MetricCard label="Rejected"      value={isLoading ? '…' : rejected}      icon={<XCircle className="h-5 w-5" />} />
+          </div>
         </div>
 
-        {/* ── Secondary pipeline counts ─────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <MetricCard label="Send Outs"   value={isLoading ? '…' : sendOut}        icon={<FileText className="h-5 w-5" />} />
-          <MetricCard label="Interviewing (cand)" value={isLoading ? '…' : interviewing}  icon={<Calendar className="h-5 w-5" />} />
-          <MetricCard label="Offers Out"  value={isLoading ? '…' : offer}          icon={<Briefcase className="h-5 w-5" />} />
+        {/* ── Stage table events (one row per ENTRY into stage) ──── */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-foreground">Stage Activity — {range.label}</h2>
+            <span className="text-xs text-muted-foreground">From stage tables</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+            <MetricCard label="Pitches"      value={isLoading ? '…' : pitchEvents}      icon={<Target className="h-5 w-5" />} />
+            <MetricCard label="Send-Outs"    value={isLoading ? '…' : sendoutEvents}    icon={<Send className="h-5 w-5" />} highlight />
+            <MetricCard label="Submissions"  value={isLoading ? '…' : submissionEvents} icon={<FileText className="h-5 w-5" />} />
+            <MetricCard label="Interviews"   value={isLoading ? '…' : interviewEvents}  icon={<Calendar className="h-5 w-5" />} highlight />
+            <MetricCard label="Placements"   value={isLoading ? '…' : placementEvents}  icon={<Award className="h-5 w-5" />} highlight />
+            <MetricCard label="Rejections"   value={isLoading ? '…' : rejectionEvents}  icon={<XCircle className="h-5 w-5" />} />
+          </div>
         </div>
 
         {/* ── THE THREE LISTS ───────────────────────────────────────── */}

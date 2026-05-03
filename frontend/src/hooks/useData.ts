@@ -371,113 +371,194 @@ export function useMessages(channel?: string) {
   });
 }
 
-// Dashboard metrics — accepts an arbitrary [from, to] range. Re-runs whenever the range
-// changes (range key participates in queryKey).
-export function useDashboardMetrics(range: { from: Date; to: Date }) {
+// Dashboard metrics — accepts an arbitrary [from, to] range AND an optional ownerUserId
+// filter ("me" view). Queries the canonical candidate_jobs.pipeline_stage and the 6 stage
+// tables (pitches, send_outs, submissions, interviews, placements, rejections) instead of
+// the deprecated candidates.job_status column.
+export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId?: string | null) {
   const fromIso = range.from.toISOString();
   const toIso   = range.to.toISOString();
 
   return useQuery({
-    queryKey: ['dashboard_metrics', fromIso, toIso],
+    queryKey: ['dashboard_metrics', fromIso, toIso, ownerUserId ?? 'all'],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // Resolve which candidate_ids this owner has — used to filter pipeline + stage tables.
+      // If ownerUserId is null/undefined, no owner filter is applied (whole team view).
+      let ownedCandidateIds: string[] | null = null;
+      if (ownerUserId) {
+        const { data: ownedCands } = await supabase
+          .from('candidates')
+          .select('id')
+          .eq('owner_user_id', ownerUserId);
+        ownedCandidateIds = (ownedCands ?? []).map((c: any) => c.id);
+        // If the owner has no candidates, every downstream IN-filter would match nothing.
+        // Use a sentinel UUID list to short-circuit.
+        if (ownedCandidateIds.length === 0) ownedCandidateIds = ['00000000-0000-0000-0000-000000000000'];
+      }
+
+      const applyOwner = (q: any) =>
+        ownedCandidateIds ? q.in('candidate_id', ownedCandidateIds) : q;
 
       const [
         jobsRes,
-        candidatesInRangeRes,
-        sendOutsAllRes,
+        candidatesCreatedRes,
+        cjReachedOutRes,
+        cjPitchedRes,
+        cjReadyToSendRes,
+        cjSentRes,
+        cjInterviewingRes,
+        cjRejectedRes,
         engagedRes,
-        sentRes,
-        interviewsRes,
+        pitchesRes,
+        sendOutsInRangeRes,
+        submissionsRes,
+        interviewsInRangeRes,
+        placementsInRangeRes,
+        rejectionsInRangeRes,
+        sendOutsAllRes,
       ] = await Promise.all([
-        // Active jobs (state-of-the-world, not range-bound)
+        // Active jobs (state-of-the-world, not range-bound, owner-agnostic)
         supabase
           .from('jobs')
           .select('id, status', { count: 'exact' })
           .not('status', 'in', '("lost","closed","closed_won","closed_lost")'),
 
-        // Candidates created in range
-        supabase
-          .from('candidates')
-          .select('id, job_status, owner_user_id, created_at')
-          .gte('created_at', fromIso)
-          .lte('created_at', toIso),
+        // Candidates created in range (owner-filtered)
+        (() => {
+          let q = supabase.from('candidates')
+            .select('id, owner_user_id, created_at')
+            .gte('created_at', fromIso).lte('created_at', toIso);
+          if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
+          return q;
+        })(),
 
-        // Send-outs (used for interview-in-flight + offer-out counts; state-of-the-world)
-        supabase.from('send_outs').select('id, stage, created_at'),
+        // Pipeline stage counts — entry events keyed by per-stage timestamp columns
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('reached_out_at',  fromIso).lte('reached_out_at',  toIso)),
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('pitched_at',      fromIso).lte('pitched_at',      toIso)),
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('ready_to_send_at',fromIso).lte('ready_to_send_at',toIso)),
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('sent_at',         fromIso).lte('sent_at',         toIso)),
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('interviewing_at', fromIso).lte('interviewing_at', toIso)),
+        applyOwner(supabase.from('candidate_jobs').select('id', { count: 'exact', head: true })
+          .gte('rejected_at',     fromIso).lte('rejected_at',     toIso)),
 
-        // Engaged candidates updated in range (was "back_of_resume" pre-status-unification)
-        supabase
-          .from('candidates')
-          .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
-          .eq('status', 'engaged')
-          .gte('updated_at', fromIso)
-          .lte('updated_at', toIso)
-          .order('updated_at', { ascending: false }),
+        // Engaged candidates updated in range
+        (() => {
+          let q = supabase.from('candidates')
+            .select('id, full_name, first_name, last_name, current_title, current_company, owner_user_id, updated_at, status')
+            .eq('status', 'engaged')
+            .gte('updated_at', fromIso).lte('updated_at', toIso)
+            .order('updated_at', { ascending: false });
+          if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
+          return q;
+        })(),
 
-        // Sent send_outs in range — join candidate + job
-        supabase
-          .from('send_outs')
-          .select(`
-            id, stage, sent_to_client_at, updated_at, created_at,
-            candidate_id, job_id, recruiter_id,
-            candidates!inner(id, full_name, first_name, last_name, current_title),
-            jobs!inner(title, company_name)
-          `)
-          .eq('stage', 'sent')
-          .gte('updated_at', fromIso)
-          .lte('updated_at', toIso)
-          .order('updated_at', { ascending: false }),
+        // Stage-table event counts in range (owner-filtered via candidates IN-list)
+        applyOwner(supabase.from('pitches').select('id, candidate_id, job_id, pitched_at')
+          .gte('pitched_at', fromIso).lte('pitched_at', toIso)),
 
-        // Interviewing send_outs in range — join candidate + job
-        supabase
-          .from('send_outs')
-          .select(`
-            id, stage, interview_at, updated_at, created_at,
-            candidate_id, job_id, recruiter_id,
-            candidates!inner(id, full_name, first_name, last_name, current_title),
-            jobs!inner(title, company_name)
-          `)
-          .eq('stage', 'interviewing')
-          .gte('updated_at', fromIso)
-          .lte('updated_at', toIso)
-          .order('interview_at', { ascending: true, nullsFirst: false }),
+        // Sent send_outs in range with joins for the list panel
+        (() => {
+          let q = supabase.from('send_outs')
+            .select(`id, stage, sent_to_client_at, updated_at, created_at,
+              candidate_id, job_id, recruiter_id,
+              candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
+              jobs!inner(title, company_name)`)
+            .eq('stage', 'sent')
+            .gte('updated_at', fromIso).lte('updated_at', toIso)
+            .order('updated_at', { ascending: false });
+          if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
+          return q;
+        })(),
+
+        applyOwner(supabase.from('submissions').select('id, candidate_id, job_id, submitted_at')
+          .gte('submitted_at', fromIso).lte('submitted_at', toIso)),
+
+        // Interviews scheduled in range with joins for the list panel
+        (() => {
+          let q = supabase.from('send_outs')
+            .select(`id, stage, interview_at, updated_at, created_at,
+              candidate_id, job_id, recruiter_id,
+              candidates!inner(id, full_name, first_name, last_name, current_title, owner_user_id),
+              jobs!inner(title, company_name)`)
+            .eq('stage', 'interviewing')
+            .gte('updated_at', fromIso).lte('updated_at', toIso)
+            .order('interview_at', { ascending: true, nullsFirst: false });
+          if (ownerUserId) q = q.eq('candidates.owner_user_id', ownerUserId);
+          return q;
+        })(),
+
+        applyOwner(supabase.from('placements').select('id, candidate_id, job_id, placed_at, salary')
+          .gte('placed_at', fromIso).lte('placed_at', toIso)),
+
+        applyOwner(supabase.from('rejections').select('id, candidate_id, job_id, rejected_at, rejected_by_party, prior_stage')
+          .gte('rejected_at', fromIso).lte('rejected_at', toIso)),
+
+        // Send-outs (state-of-the-world, for in-flight metrics)
+        (() => {
+          let q = supabase.from('send_outs').select('id, stage, candidate_id');
+          // owner filter: best-effort via candidate ownership
+          if (ownedCandidateIds) q = q.in('candidate_id', ownedCandidateIds);
+          return q;
+        })(),
       ]);
 
-      const candidates    = candidatesInRangeRes.data  ?? [];
-      const sendOuts      = sendOutsAllRes.data        ?? [];
-      const engagedList   = (engagedRes.data           ?? []) as any[];
-      const sentList      = (sentRes.data              ?? []) as any[];
-      const interviewList = (interviewsRes.data        ?? []) as any[];
-
-      const count = (status: string) =>
-        candidates.filter((c) =>
-          status === 'interviewing'
-            ? ['interview', 'interviewing'].includes(c.job_status)
-            : c.job_status === status
-        ).length;
+      const candidates    = candidatesCreatedRes.data ?? [];
+      const sendOuts      = sendOutsAllRes.data       ?? [];
+      const engagedList   = (engagedRes.data          ?? []) as any[];
+      const sentList      = (sendOutsInRangeRes.data  ?? []) as any[];
+      const interviewList = (interviewsInRangeRes.data?? []) as any[];
 
       return {
         activeJobs: jobsRes.count ?? 0,
         candidatesInRange: candidates.length,
-        myCandidatesInRange: user ? candidates.filter(c => c.owner_user_id === user.id).length : 0,
-        newCount:        count('new'),
-        contactedCount:  count('reached_out'),
-        pitchedCount:    count('pitched'),
-        sendOutCount:    count('send_out'),
-        interviewingCount: count('interviewing'),
-        offerCount:      count('offer'),
-        placedCount:     count('placed'),
-        engagedCount:    engagedList.length,
-        sentCount:       sentList.length,
-        interviewCount:  interviewList.length,
-        interviewsInFlight: sendOuts.filter((s) => ['interview', 'interviewing'].includes(s.stage)).length,
-        offersOut:        sendOuts.filter((s) => s.stage === 'offer').length,
+        // Canonical per-job pipeline counts (entry events in range)
+        reachedOutCount:    cjReachedOutRes.count    ?? 0,
+        pitchedCount:       cjPitchedRes.count       ?? 0,
+        readyToSendCount:   cjReadyToSendRes.count   ?? 0,
+        sentToClientCount:  cjSentRes.count          ?? 0,
+        interviewingCount:  cjInterviewingRes.count  ?? 0,
+        rejectedCount:      cjRejectedRes.count      ?? 0,
+        // Engagement metric (person-level)
+        engagedCount:       engagedList.length,
+        // Stage-table event counts
+        pitchEvents:       (pitchesRes.data       ?? []).length,
+        sendoutEvents:     sentList.length,
+        submissionEvents:  (submissionsRes.data   ?? []).length,
+        interviewEvents:   interviewList.length,
+        placementEvents:   (placementsInRangeRes.data ?? []).length,
+        rejectionEvents:   (rejectionsInRangeRes.data ?? []).length,
+        // In-flight (state-of-the-world)
+        interviewsInFlight: sendOuts.filter((s: any) => ['interview', 'interviewing'].includes(s.stage)).length,
+        offersOut:          sendOuts.filter((s: any) => s.stage === 'offer').length,
+        // Detail lists
         engagedList,
         sentList,
         interviewList,
+        placementList: (placementsInRangeRes.data ?? []) as any[],
+        rejectionList: (rejectionsInRangeRes.data ?? []) as any[],
       };
     },
+  });
+}
+
+// Team members for the dashboard "user filter" picker.
+export function useTeamMembers() {
+  return useQuery({
+    queryKey: ['team_members'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .order('full_name', { ascending: true });
+      if (error) throw error;
+      return (data ?? []).filter((p: any) => p.full_name || p.email);
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
