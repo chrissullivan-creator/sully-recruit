@@ -20,6 +20,7 @@ import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBa
 import { StageTable } from '@/components/send-outs/StageTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
+import { BulkActionBar } from '@/components/send-outs/BulkActionBar';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -180,8 +181,11 @@ export default function SendOuts() {
   };
   const handleDragOver = (e: DragOverEvent) => {
     const overId = e.over?.id;
-    if (typeof overId === 'string' && overId.startsWith('stage:')) {
+    if (typeof overId !== 'string') { setOverStage(null); return; }
+    if (overId.startsWith('stage:')) {
       setOverStage(overId.slice('stage:'.length) as CanonicalStage);
+    } else if (overId.startsWith('kpi-tile:') && !overId.startsWith('kpi-tile:noop:')) {
+      setOverStage(overId.slice('kpi-tile:'.length) as CanonicalStage);
     } else {
       setOverStage(null);
     }
@@ -190,13 +194,16 @@ export default function SendOuts() {
     setActiveDrag(null);
     setOverStage(null);
     const overId = e.over?.id;
-    if (typeof overId !== 'string' || !overId.startsWith('stage:')) return;
-    const target = overId.slice('stage:'.length) as CanonicalStage;
+    if (typeof overId !== 'string') return;
+    let target: CanonicalStage | null = null;
+    if (overId.startsWith('stage:'))                                       target = overId.slice('stage:'.length) as CanonicalStage;
+    else if (overId.startsWith('kpi-tile:') && !overId.startsWith('kpi-tile:noop:')) target = overId.slice('kpi-tile:'.length) as CanonicalStage;
+    if (!target) return;
     const row = filteredRows.find((r) => r.id === e.active.id);
     if (!row) return;
     if (stageToCanonical(row.stage) === target) return;
     // Auto-expand the destination so the user sees the drop.
-    setOpenStages((prev) => new Set([...prev, target]));
+    setOpenStages((prev) => new Set([...prev, target!]));
     await commitMove(row, target, 'drag');
   };
 
@@ -295,6 +302,11 @@ export default function SendOuts() {
           </div>
         )}
       </div>
+
+      <BulkActionBar
+        selectedRows={filteredRows.filter((r) => selectedIds.has(r.id))}
+        onClear={() => setSelectedIds(new Set())}
+      />
 
       <CandidateDrawer
         row={drawerRow}
