@@ -164,7 +164,7 @@ export function CandidatePipeline() {
                         )}
                         <div className="flex-1 min-w-0">
                           <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
-                            {c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '—'}
+                            {c.full_name ?? (`${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '—')}
                           </h4>
                           {visibleFields.has('job') && row.job && (
                             <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
