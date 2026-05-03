@@ -824,24 +824,63 @@ const JobDetail = () => {
   return (
     <MainLayout>
       {/* ── Top Header Bar ─────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
+      <div className="flex items-center gap-3 px-6 lg:px-8 py-4 border-b border-card-border bg-white">
         <Button variant="ghost" size="icon" onClick={() => navigate('/jobs')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          {companyLogoUrl ? (
-            <img src={companyLogoUrl} alt="" className="h-6 w-6 rounded object-contain shrink-0" />
-          ) : (
-            <Briefcase className="h-5 w-5 text-accent shrink-0" />
-          )}
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-foreground truncate">{job.title}</h1>
-            {companyName && (
-              <p className="text-sm text-muted-foreground truncate">at {companyName}</p>
+        {companyLogoUrl ? (
+          <img src={companyLogoUrl} alt="" className="h-10 w-10 rounded-lg object-contain shrink-0 bg-gold-bg border border-gold/30 p-1" />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-bg border border-gold/30 shrink-0">
+            <Briefcase className="h-5 w-5 text-gold-deep" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg font-display font-semibold text-emerald-dark truncate">{job.title}</h1>
+            {/* Status pill */}
+            <span className={cn(
+              'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border',
+              job.status === 'open'        && 'bg-emerald-light text-emerald border-emerald/30',
+              job.status === 'hot'         && 'bg-gold-bg text-gold-deep border-gold/40',
+              job.status === 'on_hold'     && 'bg-amber-50 text-amber-800 border-amber-200',
+              job.status === 'filled'      && 'bg-emerald-light text-emerald-dark border-emerald/40',
+              job.status === 'closed'      && 'bg-muted text-muted-foreground border-border',
+              job.status === 'closed_won'  && 'bg-emerald text-white border-emerald',
+              job.status === 'closed_lost' && 'bg-red-100 text-red-700 border-red-200',
+            )}>
+              {(job.status ?? 'open').replace(/_/g, ' ')}
+            </span>
+            {/* Priority badge — gold treatment */}
+            {(job as any).priority && (job as any).priority !== 'normal' && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gold/15 text-gold-deep text-[10px] font-semibold uppercase tracking-wider border border-gold/30">
+                <Sparkles className="h-2.5 w-2.5 fill-current" /> {(job as any).priority}
+              </span>
             )}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
+            {companyName && <span className="truncate">{companyName}</span>}
+            {((job as any).comp_min || (job as any).comp_max) && (
+              <span className="text-gold-deep font-semibold">
+                ${Math.round(((job as any).comp_min ?? 0) / 1000)}k–${Math.round(((job as any).comp_max ?? 0) / 1000)}k
+              </span>
+            )}
+            {(job as any).location && <span>{(job as any).location}</span>}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              navigator.clipboard.writeText(window.location.href);
+              toast.success('Link copied');
+            }}
+            className="border-card-border gap-1.5"
+            title="Copy link to this job"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Share
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
             <ListTodo className="h-3.5 w-3.5 mr-1" /> Tasks
           </Button>

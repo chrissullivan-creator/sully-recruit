@@ -23,7 +23,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Briefcase, Users, Calendar, FileText, Target, Mail,
-  Plus, Sparkles, User, ChevronDown, ChevronUp,
+  Plus, Martini, User, ChevronDown, ChevronUp,
   Building, Send, Award, XCircle, Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -253,7 +253,7 @@ const Dashboard = () => {
         <div className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-sidebar via-card to-card p-6">
           <div className="relative z-10 flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gold/10 border border-gold/20">
-              <Sparkles className="h-7 w-7 text-gold" />
+              <Martini className="h-7 w-7 text-gold" />
             </div>
             <div>
               <h2 className="text-xl font-bold text-foreground">{getGreeting()}, {displayName}</h2>
