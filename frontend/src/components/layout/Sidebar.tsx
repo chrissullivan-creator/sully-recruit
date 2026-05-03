@@ -6,13 +6,13 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
-  Send, Sparkles,
+  Send, Martini,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
   { name: 'Inbox',      href: '/inbox',      icon: Inbox           },
-  { name: 'Ask Joe',    href: '/ask-joe',    icon: Sparkles        },
+  { name: 'Ask Joe',    href: '/ask-joe',    icon: Martini         },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
   { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
