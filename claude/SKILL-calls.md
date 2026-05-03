@@ -6,14 +6,16 @@ RingCentral calls flow through this pipeline:
 
 1. **RingCentral webhook** fires on call events → writes to `call_logs`
 2. **poll-rc-calls** (cron) catches any missed webhooks → backfills `call_logs`
-3. **process-call-recording** edge function:
+3. **process-call-deepgram** Trigger.dev task:
    - Fetches recording from RingCentral API → stores `audio_url` + `recording_url`
-   - Transcribes via Deepgram/Whisper → stores `transcript` in `ai_call_notes`
+   - Transcribes via Deepgram → stores `transcript` in `ai_call_notes`
    - Claude analyzes transcript → extracts summary, action items, comp intel, reason for leaving
    - Upserts `ai_call_notes` row (keyed on `external_call_id`)
    - Updates candidate fields: `current_title`, `current_company`, comp fields
-   - Sets candidate `status = 'back_of_resume'` (phone screen = qualified)
+   - For calls ≥60s on a candidate: sets `status = 'engaged'` (was `back_of_resume` before status enum tightening) + `back_of_resume=true` (boolean column) via the `intel-extraction` lib
    - Logs to `messages` table with `channel = 'call'` for unified inbox
+
+**⚠️ Don't write `status='back_of_resume'` — that violates the CHECK constraint. Use `status='engaged'` for the engagement promotion, and `back_of_resume=true` for the boolean flag separately.**
 
 ---
 

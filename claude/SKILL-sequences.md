@@ -2,7 +2,9 @@
 
 ## Sequence Engine Overview
 
-The engine runs via `run-sequences` edge function, triggered by cron every 60 seconds. It processes all active enrollments where `next_step_at <= NOW()`.
+The engine runs as the **`sequence-scheduler`** Trigger.dev task (NOT a cron edge function). It processes active enrollments. `send-message` is the per-channel send task.
+
+**Post Pass 5a unification:** `sequence_enrollments.candidate_id` and `.contact_id` BOTH now FK to `candidates(id)`. The engine handles both candidate-type and client-type enrollees uniformly — no special casing needed for clients. UI may still show separate "candidates" and "contacts" enrollment dropdowns; both write to the same underlying table.
 
 ---
 

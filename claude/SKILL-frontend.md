@@ -12,6 +12,26 @@
 
 ---
 
+## Unified Person Model (Pass 5a, 2026-05-03)
+
+**Frontend code can keep using `from('contacts')` — it now hits a backwards-compat view, not a real table.** The view + INSTEAD OF triggers redirect reads/writes to `candidates WHERE type='client'`. New code should prefer:
+
+```ts
+// Preferred for clients
+supabase.from('candidates').select(...).eq('type', 'client')
+supabase.from('candidates').insert({ type: 'client', ... })
+
+// Still works (via view + INSTEAD OF triggers, slightly slower)
+supabase.from('contacts').select(...)
+supabase.from('contacts').insert({ ... })  // type='client' set by trigger
+```
+
+The `Tables<'people'>`, `Tables<'candidate_profiles'>`, `Tables<'contact_profiles'>`, `Tables<'person_*'>` types are GONE — those tables were dropped. Don't import them.
+
+**Dashboard date range:** `useDashboardMetrics(range)` requires a `{ from: Date, to: Date }` arg. Use `<DateRangePicker>` from `components/dashboard/DateRangePicker.tsx` with `defaultDashboardRange()` for the initial value.
+
+---
+
 ## ⚠️ Vite Env Vars — CRITICAL
 
 Only `VITE_` prefixed vars work. `REACT_APP_*` is ALWAYS undefined.
@@ -46,11 +66,14 @@ import.meta.env.REACT_APP_BACKEND_URL  // ❌ never use
 
 ### Status Badge Colors
 ```ts
-// Candidate statuses
-new:            'bg-blue-500/10 text-blue-400'
-reached_out:    'bg-yellow-500/10 text-yellow-400'
-back_of_resume: 'bg-muted text-muted-foreground'
-placed:         'bg-green-500/10 text-green-400'
+// Candidate / client status enum (post Pass 5a — same enum for both types)
+new:         'bg-blue-500/10 text-blue-400'
+reached_out: 'bg-yellow-500/10 text-yellow-400'
+engaged:     'bg-success/10 text-success'
+
+// Old status values back_of_resume, placed, dnc, stale, active are NO LONGER VALID.
+// The CHECK constraint will reject them.
+// `back_of_resume` is now a BOOLEAN column (filter checkbox), not a status badge.
 
 // Sentiment colors
 interested:     emerald green

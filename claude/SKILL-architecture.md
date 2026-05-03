@@ -33,18 +33,28 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 
 ## Database — Critical Column Names
 
+### Unified person model (Pass 5a, 2026-05-03)
+
+**The `candidates` table now holds BOTH candidates and clients via the `type` column.** The old `contacts` table is a backwards-compat VIEW filtered by `type='client'` with INSTEAD OF triggers for writes. See `TERMINOLOGY.md` at repo root for the canonical naming guide.
+
+- 11,331 type='candidate' + 1,868 type='client' = 13,199 total rows
+- `from('contacts').insert/update/delete(...)` still works via INSTEAD OF triggers — but new code should write directly to `candidates` with `type='client'`
+- Frontend `from('contacts')` queries return clients via the view (slightly slower but correct)
+
 ### `candidates` table
 ```
-id, first_name, last_name, full_name, email, phone
-linkedin_url, unipile_id
-current_title, current_company
+id, type, first_name, last_name, full_name, email, phone
+linkedin_url, unipile_provider_id, unipile_recruiter_id, unipile_classic_id, unipile_sales_nav_id
+current_title, current_company        ← used for type='candidate'
+title, department, company_id, company_name   ← used for type='client'
 location_text          ← NOT "location" (that column doesn't exist)
-status                 ← ENUM: new | reached_out | back_of_resume | placed
-owner_id, owner_user_id
-job_id, job_status
+status                 ← ENUM: new | reached_out | engaged   (CHECK-constrained)
+owner_user_id, created_by_user_id
+job_id, job_status     ← job_status is DEPRECATED, use candidate_jobs.pipeline_stage
 resume_url
 skills (text[])
 candidate_summary, back_of_resume_notes
+back_of_resume         ← BOOLEAN, separate from status enum
 reason_for_leaving
 current_base_comp, current_bonus_comp, current_total_comp
 target_base_comp, target_total_comp, comp_notes
@@ -53,10 +63,13 @@ last_contacted_at, last_responded_at, last_spoken_at
 last_comm_channel
 last_sequence_sentiment, last_sequence_sentiment_note
 joe_says, joe_says_updated_at
+linkedin_headline, linkedin_current_company, linkedin_current_title, linkedin_location, linkedin_profile_text, linkedin_last_synced_at, ai_search_text
+linked_contact_id      ← self-reference to a counterpart row (same person both candidate AND client)
 ```
 
 **⚠️ NEVER use `location` — it's `location_text`**
-**⚠️ Valid statuses ONLY: `new`, `reached_out`, `back_of_resume`, `placed` — NOT `engaged`, `contacted`, or anything else**
+**⚠️ Valid statuses ONLY: `new`, `reached_out`, `engaged` — NOT `back_of_resume`, `placed`, `dnc`, `stale`, `active`. CHECK constraint enforces this.**
+**⚠️ `back_of_resume` is a BOOLEAN column now, not a status value. Set `back_of_resume=true` when comp is added + resume exists.**
 
 ### `resumes` table
 ```
@@ -105,6 +118,32 @@ last_message_preview, last_message_at
 is_read, is_archived, assigned_user_id
 ```
 
+### `candidate_channels` table (Pass 6, 2026-05-03)
+Per-candidate per-channel cache for Unipile/provider IDs. **This was missing before Pass 6 and was the root cause of "so many errors" on Trigger.dev tasks.**
+```
+id, candidate_id, channel (linkedin|linkedin_recruiter|linkedin_classic|linkedin_sales_nav|email|sms),
+account_id, unipile_id, provider_id, external_conversation_id,
+is_connected, connection_status, last_synced_at
+UNIQUE (candidate_id, channel)
+```
+`contact_channels` is a backwards-compat view filtered to type='client' with INSTEAD OF triggers.
+
+### Stage tables (per-job pipeline events)
+Each row = one entry into a stage. `candidate_jobs.pipeline_stage` tracks current state; stage tables are the EVENT log.
+- `pitches` — pre-sendout outreach
+- `send_outs` — formally sent to client
+- `submissions` — formal submission
+- `interviews` — interview scheduled/completed (with calendar fields)
+- `placements` — candidate placed
+- `rejections` — rejected at any stage (records prior_stage + rejected_by_party)
+
+### `v_person_activity` view — record of truth
+Unified per-person timeline that joins 13 activity sources. Filter by `person_id` for a chronological feed.
+```sql
+SELECT * FROM v_person_activity WHERE person_id = '<uuid>' ORDER BY happened_at DESC;
+```
+Activity types: `message | call | ai_note | status_change | stage_change | note | meeting | pitch | sendout | submission | interview | placement | rejection | merge`.
+
 ---
 
 ## Triggers — Known Issues & Fixes
@@ -116,12 +155,16 @@ is_read, is_archived, assigned_user_id
 
 ### `update_candidate_status_from_inbound()`
 - On inbound message, moves `new` → `reached_out` ONLY
-- Does NOT set `engaged` (not a valid status)
 - Updates `last_responded_at`, `last_spoken_at`
 
-### `auto_back_of_resume()`
+### `fn_candidate_status_from_timestamps()`
+- Auto-promotes `new`/`reached_out` → `engaged` when last_responded_at lands
+- Auto-promotes `new` → `reached_out` when last_contacted_at first set
+
+### `auto_back_of_resume()` (Pass 8, fixed 2026-05-03)
 - References `resumes` table (NOT `candidate_resumes`)
-- Moves candidate to `back_of_resume` when comp is added and resume exists
+- Sets `back_of_resume=true` (the BOOLEAN column) when comp is added + resume exists
+- DO NOT set `status='back_of_resume'` — that violates the new CHECK constraint
 
 ### `trg_update_candidate_last_contact` / `trg_update_contact_last_contact`
 - Fire on every message INSERT
@@ -248,20 +291,25 @@ const resp = await fetch(
 
 ## Domain Model & Pipeline
 
-### Candidate Pipeline
-`new` → `reached_out` → `back_of_resume` → `placed`
+### Person Engagement Status (`candidates.status`)
+`new` → `reached_out` → `engaged`. CHECK-constrained. Same enum applies to both candidate-type and client-type rows.
 
-### Candidate Job Status (separate from candidate status)
+### Per-Job Pipeline (`candidate_jobs.pipeline_stage`)
 `new` → `reached_out` → `pitched` → `send_out` → `submitted` → `interviewing` → `offer` → `placed` | `rejected` | `withdrew`
 
-### Sequence Pipeline
-`Warm` → `Hot` → `Interviewing` → `Offer` → `Accepted` | `Declined` | `Lost` | `On Hold`
+### Sequence Enrollment Lifecycle (`sequence_enrollments.status`)
+`active` | `paused` | `stopped` | `completed`
+
+### Job Lifecycle (`jobs.status`)
+`open` | `on_hold` | `filled` | `closed`
 
 ### Four Conversion Paths
 - Opportunities → Jobs
-- Lead Candidates → Candidates
-- Contacts → Clients
+- Lead Candidates → Candidates (type='candidate')
+- Contacts → Clients (type='client')
 - Target Companies → Client Companies
+
+See `TERMINOLOGY.md` for the full list of status/stage columns and what each means.
 
 ---
 
@@ -312,7 +360,10 @@ Three MCP servers are configured for Claude Code:
 |---|---|
 | `candidate_resumes` table | `resumes` table |
 | `location` column | `location_text` column |
-| Status `engaged` or `contacted` | `reached_out` |
+| Status `back_of_resume`, `placed`, `dnc`, `stale`, `active` | Only `new`, `reached_out`, `engaged` |
+| Set `status='back_of_resume'` | Set boolean `back_of_resume=true` |
+| Insert into `contacts` with `company` or `source` columns | Use the unified candidates schema (company_name, no source col) |
+| Query `from('people')`, `from('candidate_profiles')`, `from('contact_profiles')`, `from('person_emails')` etc | All dropped in Pass 1; use `candidates` table |
 | `NEW.metadata` in triggers | `NEW.message_type` |
 | `REACT_APP_*` env vars in frontend | `VITE_*` env vars |
 | Call `/functions/v1/parse-resume` | Call `/functions/v1/process-resume` |
@@ -321,6 +372,8 @@ Three MCP servers are configured for Claude Code:
 | Mix `MICROSOFT_GRAPH_*` with house account | House account uses `MICROSOFT_CLIENT_*` |
 | Spread operator base64 on large files | Use `Buffer.from(buffer).toString("base64")` |
 | SMS for Ashley | Ashley has no RingCentral — don't route SMS to her |
+| Add `candidate_id`+`contact_id` pair on a new table | Use single `person_id` (FK candidates) — see TERMINOLOGY.md |
+| Set `search_path = pg_catalog, public` on a function that calls `digest()` | Include `extensions` schema (where pgcrypto lives): `SET search_path = pg_catalog, public, extensions` |
 
 ---
 
@@ -338,3 +391,30 @@ Three MCP servers are configured for Claude Code:
 Push to `main` → Vercel auto-deploys. No manual step. Claude Code commits directly to `main`.
 
 **Claude Code is the preferred way to make frontend changes.** The GitHub MCP connector in claude.ai is read-only — useful for inspecting code, not writing it.
+
+---
+
+## Trigger.dev — 25 active tasks (post Pass 6 cleanup)
+
+Down from 43 in Friday-pre-cleanup state. Categories:
+
+**Inbox sync:** backfill-emails, backfill-linkedin-messages, sync-conversations, purge-marketing-emails, renew-webhook-subscriptions
+**Webhook handlers:** webhook-microsoft, webhook-unipile, webhook-ringcentral
+**Sequence engine:** sequence-scheduler, send-message, cleanup-stale-enrollments, check-connections
+**Resumes:** resume-ingestion, reparse-resumes, reconcile-orphaned-resumes, backfill-resume-embeddings
+**Calls:** poll-rc-calls, drain-call-queue, process-call-deepgram
+**Calendar:** sync-outlook-events (every 15min), backfill-calendar-events (manual one-shot)
+**Plumbing:** unipile-resolve (every 30min), generate-joe-says (called by 5 tasks), fetch-entity-history
+
+**Cut tasks (do NOT recreate):** match-jobs, best-match-job, backfill-avatars, backfill-companies, enrich-linkedin, fetch-company-logos, linkedin-lookup, linkedin-profile-viewers, linkedin-inmail-monitor, sync-outlook-contact, backfill-outlook-contacts, enrich-clay, run-nudge-check, candidate-dedup, sync-activity-timestamps, linkedin-auto-accept, linkedin-engagement, backfill-resume-links.
+
+If a Trigger.dev cron is failing with "task not found" — check the dashboard against this list and delete the orphan schedule.
+
+---
+
+## Reference Docs
+
+- `TERMINOLOGY.md` (repo root) — canonical naming for owner_*, status/stage, person reference columns
+- `TRIGGER_DEV_TODO.md` (repo root) — manual cleanup steps from the Pass 6 cleanup
+- `claude/SKILL-architecture.md` — this file
+- `claude/SKILL-frontend.md`, `SKILL-sequences.md`, `SKILL-webhooks.md`, `SKILL-joe.md`, `SKILL-calls.md`
