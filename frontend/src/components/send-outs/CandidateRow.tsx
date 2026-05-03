@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical } from 'lucide-react';
+import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical, Trash2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -16,9 +16,10 @@ interface CandidateRowProps {
   onToggleSelect: (id: string) => void;
   onAdvance: (row: SendOutRow) => void;
   onOpen: (row: SendOutRow) => void;
+  onDelete?: (row: SendOutRow) => void;
 }
 
-export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAdvance, onOpen }: CandidateRowProps) {
+export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAdvance, onOpen, onDelete }: CandidateRowProps) {
   const navigate = useNavigate();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: row.id,
@@ -156,6 +157,15 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
+          {onDelete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(row); }}
+              title="Remove from pipeline"
+              className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </td>
     </tr>

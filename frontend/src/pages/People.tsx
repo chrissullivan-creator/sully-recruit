@@ -14,6 +14,7 @@ import {
   MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { invalidatePersonScope } from '@/lib/invalidate';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -186,9 +187,7 @@ const People = () => {
       if (contIds.length) await supabase.from('contacts').delete().in('id', contIds);
       toast.success(`${selectedKeys.length} record${selectedKeys.length === 1 ? '' : 's'} deleted`);
       setSelectedKeys([]);
-      queryClient.invalidateQueries({ queryKey: ['people'] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Delete failed');
     } finally {
@@ -472,7 +471,7 @@ const People = () => {
                                 const table = person.source_table === 'candidate' ? 'candidates' : 'contacts';
                                 await supabase.from(table).delete().eq('id', person.id);
                                 toast.success('Deleted');
-                                queryClient.invalidateQueries({ queryKey: ['people'] });
+                                invalidatePersonScope(queryClient);
                               }}
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete

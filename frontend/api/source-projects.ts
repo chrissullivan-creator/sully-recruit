@@ -110,45 +110,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
 
-      // Fetch project detail — applicants are embedded in the response
+      // Track what we tried so the UI can surface a meaningful error if the
+      // applicants list comes back empty. Unipile's LinkedIn-Recruiter routes
+      // have moved more than once — keep multiple endpoint shapes in play
+      // and return the first one that yields rows.
       const metaParams = new URLSearchParams({ account_id });
       let projectData: any = null;
       let applicants: any[] = [];
+      const tries: { url: string; status?: number; ok: boolean; count?: number; error?: string }[] = [];
 
+      // 1) project detail — applicants may come embedded (varied field names)
+      const projectUrl = `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${metaParams}`;
       try {
-        const metaResp = await fetch(
-          `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}?${metaParams}`,
-          { headers }
-        );
+        const metaResp = await fetch(projectUrl, { headers });
+        const t: any = { url: projectUrl, status: metaResp.status, ok: metaResp.ok };
         if (metaResp.ok) {
           projectData = await metaResp.json();
-          // Applicants come embedded in project detail
           const embedded = projectData?.applicants ?? projectData?.candidates
             ?? projectData?.members ?? projectData?.profiles ?? projectData?.items
-            ?? projectData?.results ?? [];
+            ?? projectData?.results ?? projectData?.matched_candidates ?? [];
           applicants = Array.isArray(embedded) ? embedded : [];
+          t.count = applicants.length;
+          t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
+        } else {
+          t.error = (await metaResp.text()).slice(0, 500);
         }
+        tries.push(t);
       } catch (err: any) {
-        console.error("Failed to fetch project detail:", err.message);
+        tries.push({ url: projectUrl, ok: false, error: err.message });
       }
 
-      // If no embedded applicants, try the dedicated applicants sub-endpoint
-      if (applicants.length === 0) {
+      // 2) Try every known applicants sub-endpoint in turn until one yields rows.
+      // Unipile has used at least three URL shapes for LinkedIn Recruiter
+      // candidates over time — try each and stop at the first match.
+      const candidateEndpoints = [
+        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/applicants`,
+        `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/candidates`,
+        `${baseUrl}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}/candidates`,
+        `${baseUrl}/linkedin/hiring/projects/${encodeURIComponent(job_id)}/candidates`,
+      ];
+
+      for (const ep of candidateEndpoints) {
+        if (applicants.length > 0) break;
         try {
-          const appParams = new URLSearchParams({ account_id });
+          const appParams = new URLSearchParams({ account_id, limit: "100" });
           if (cursor) appParams.set("cursor", cursor);
-          const appResp = await fetch(
-            `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/applicants?${appParams}`,
-            { headers }
-          );
+          const appResp = await fetch(`${ep}?${appParams}`, { headers });
+          const t: any = { url: ep, status: appResp.status, ok: appResp.ok };
           if (appResp.ok) {
             const appData = await appResp.json();
-            applicants = appData?.items ?? appData?.results ?? (Array.isArray(appData) ? appData : []);
+            applicants = appData?.items ?? appData?.results ?? appData?.candidates
+              ?? appData?.applicants ?? (Array.isArray(appData) ? appData : []);
+            t.count = applicants.length;
           } else {
-            console.error("Applicants sub-endpoint failed:", appResp.status, await appResp.text());
+            t.error = (await appResp.text()).slice(0, 500);
           }
+          tries.push(t);
         } catch (err: any) {
-          console.error("Failed to fetch project applicants:", err.message);
+          tries.push({ url: ep, ok: false, error: err.message });
         }
       }
 
@@ -167,7 +186,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return { ...a, stage };
       });
 
-      return res.status(200).json({ items: applicants, project: projectData });
+      // Return tries[] when empty so the UI can show why nothing came back.
+      return res.status(200).json({
+        items: applicants,
+        project: projectData,
+        debug: applicants.length === 0 ? { tries } : undefined,
+      });
     }
 
     if (action === "download_resume") {

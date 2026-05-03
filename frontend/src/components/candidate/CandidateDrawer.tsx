@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
   Mail, Phone, MessageSquare, Linkedin, ArrowLeft, ArrowRight, ExternalLink,
-  Clock, Briefcase, DollarSign,
+  Clock, Briefcase, DollarSign, Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -15,6 +20,8 @@ import {
 } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
 import { type SendOutRow, formatComp, lastTouchAt } from '@/lib/queries/send-outs';
+import { supabase } from '@/integrations/supabase/client';
+import { invalidateSendOutScope } from '@/lib/invalidate';
 
 interface CandidateDrawerProps {
   row: SendOutRow | null;
@@ -26,6 +33,8 @@ interface CandidateDrawerProps {
 export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: CandidateDrawerProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const open = !!row;
   const c = row?.candidate;
   const j = row?.job;
@@ -51,8 +60,27 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
     });
     if (!res.ok) { toast.error(res.error ?? 'Move failed'); return; }
     toast.success(`Moved to ${canonicalConfig(target).label}`);
+    invalidateSendOutScope(queryClient);
     invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));
     onClose();
+  };
+
+  const handleDelete = async () => {
+    if (!row) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('send_outs').delete().eq('id', row.id);
+      if (error) throw error;
+      toast.success('Removed from pipeline');
+      invalidateSendOutScope(queryClient);
+      invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));
+      setConfirmDelete(false);
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -179,10 +207,36 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
               >
                 <ExternalLink className="h-3.5 w-3.5" /> Open full profile
               </Button>
+
+              <Button
+                variant="outline" size="sm"
+                className="w-full gap-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Remove from pipeline
+              </Button>
             </div>
           </>
         )}
       </SheetContent>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove from pipeline?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes <span className="font-semibold">{name}</span>
+              {' '}from the {j?.title ?? 'job'} pipeline. The person record stays — only this send-out is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-red-600 hover:bg-red-700">
+              {deleting ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

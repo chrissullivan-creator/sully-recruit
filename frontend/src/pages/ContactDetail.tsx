@@ -18,12 +18,17 @@ import {
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
   Sparkles, RefreshCw, Martini, Send as SendIcon,
-  PhoneCall, PhoneIncoming, PhoneOutgoing,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2,
 } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { invalidatePersonScope } from '@/lib/invalidate';
 
 /* ------------------------------------------------------------------ */
 /*  Inline hooks                                                       */
@@ -237,6 +242,27 @@ const ContactDetail = () => {
   const [selectedJobId, setSelectedJobId] = useState('');
   const [linkingJob, setLinkingJob] = useState(false);
   const [removingJobId, setRemovingJobId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletingContact, setDeletingContact] = useState(false);
+
+  const handleDeleteContact = async () => {
+    if (!id) return;
+    setDeletingContact(true);
+    try {
+      // contacts is a backwards-compat VIEW over people WHERE type='client'
+      // — delete from people for clean cascade.
+      const { error } = await supabase.from('people').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Contact deleted');
+      invalidatePersonScope(queryClient);
+      navigate('/contacts');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete contact');
+    } finally {
+      setDeletingContact(false);
+      setConfirmDelete(false);
+    }
+  };
 
   const { data: allJobs = [] } = useJobs();
 
@@ -504,8 +530,32 @@ const ContactDetail = () => {
               <Linkedin className="h-4 w-4" />
             </a>
           )}
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+            title="Delete contact"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this contact?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes <span className="font-semibold">{contact.first_name} {contact.last_name}</span> and all associated send-outs, notes, and job links. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingContact}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteContact} disabled={deletingContact} className="bg-red-600 hover:bg-red-700">
+              {deletingContact ? 'Deleting…' : 'Delete contact'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Main content: left panel + right sidebar */}
       <div className="flex flex-1 overflow-hidden bg-page-bg">

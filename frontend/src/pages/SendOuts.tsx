@@ -21,6 +21,12 @@ import { StageTable } from '@/components/send-outs/StageTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 import { BulkActionBar } from '@/components/send-outs/BulkActionBar';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { supabase } from '@/integrations/supabase/client';
+import { invalidateSendOutScope } from '@/lib/invalidate';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -60,6 +66,8 @@ export default function SendOuts() {
   });
   const [activeDrag, setActiveDrag] = useState<SendOutRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
+  const [deleteRow, setDeleteRow] = useState<SendOutRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -174,6 +182,22 @@ export default function SendOuts() {
 
   const handleOpenRow = (row: SendOutRow) => setDrawerRow(row);
 
+  const handleDeleteRow = async () => {
+    if (!deleteRow) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from('send_outs').delete().eq('id', deleteRow.id);
+      if (error) throw error;
+      toast.success('Removed from pipeline');
+      invalidateSendOutScope(queryClient);
+      setDeleteRow(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ── Drag & drop ──────────────────────────────────────────────────────
   const handleDragStart = (e: DragStartEvent) => {
     const row = filteredRows.find((r) => r.id === e.active.id);
@@ -281,6 +305,7 @@ export default function SendOuts() {
                   onAdvance={handleAdvance}
                   onOpen={handleOpenRow}
                   onAdd={() => setAddModal({ open: true, stage: cfg.key, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
+                  onDelete={(row) => setDeleteRow(row)}
                 />
               ))}
             </div>
@@ -320,6 +345,24 @@ export default function SendOuts() {
         jobId={addModal.jobId}
         stage={addModal.stage}
       />
+
+      <AlertDialog open={!!deleteRow} onOpenChange={(v) => { if (!v) setDeleteRow(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove from pipeline?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes <span className="font-semibold">{deleteRow?.candidate?.full_name ?? 'this candidate'}</span>
+              {' '}from the {deleteRow?.job?.title ?? 'job'} pipeline. The person record stays — only this send-out is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteRow} disabled={deleting} className="bg-red-600 hover:bg-red-700">
+              {deleting ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }
