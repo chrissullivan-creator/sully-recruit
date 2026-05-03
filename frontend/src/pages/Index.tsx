@@ -352,21 +352,21 @@ const Dashboard = () => {
             ))}
           </ListPanel>
 
-          {/* Sent to Client */}
+          {/* Send Outs */}
           <ListPanel
-            title="Sent to Client"
-            count={sentList.length}
+            title="Send Outs"
+            count={sendOutList.length}
             icon={<Send className="h-4 w-4" />}
             accentColor="bg-blue-500/10 text-blue-400"
-            defaultOpen={sentList.length > 0}
+            defaultOpen={sendOutList.length > 0}
           >
-            {sentList.map((so: any) => {
-              const sentDate = so.sent_to_client_at || so.updated_at;
+            {sendOutList.map((so: any) => {
+              const date = so.sent_to_client_at || so.updated_at;
               return (
                 <SendOutRow
                   key={so.id}
                   sendOut={so}
-                  dateLabel={sentDate ? `Sent ${format(new Date(sentDate), 'MMM d, yyyy')}` : undefined}
+                  dateLabel={date ? `${so.stage === 'sent' ? 'Sent' : 'Updated'} ${format(new Date(date), 'MMM d, yyyy')}` : undefined}
                   onClick={() => navigate(`/candidates/${so.candidate_id}`)}
                 />
               );
