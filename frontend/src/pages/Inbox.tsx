@@ -879,9 +879,20 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                   onAdd={() => setCreateDialogOpen(true)}
                 />
               ) : (
-                <h2 className="text-sm font-semibold text-foreground truncate">
-                  {entityName}
-                </h2>
+                (() => {
+                  const target = thread.candidate_id
+                    ? `/candidates/${thread.candidate_id}`
+                    : thread.contact_id
+                      ? `/contacts/${thread.contact_id}`
+                      : null;
+                  return target ? (
+                    <Link to={target} className="text-sm font-semibold text-foreground truncate hover:text-emerald hover:underline transition-colors">
+                      {entityName}
+                    </Link>
+                  ) : (
+                    <h2 className="text-sm font-semibold text-foreground truncate">{entityName}</h2>
+                  );
+                })()
               )}
               <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
                 {CHANNEL_LABELS[thread.channel] || thread.channel}

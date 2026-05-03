@@ -1150,7 +1150,12 @@ const JobDetail = () => {
 
               {/* ── Pipeline Tab (kanban with DnD; DndContext is at page-level) ─ */}
               <TabsContent value="pipeline" className="px-6 lg:px-8 py-5 mt-0">
-                <JobPipelineKanban jobId={job.id} filterStage={funnelStage} overStage={overStage} />
+                <JobPipelineKanban
+                  jobId={job.id}
+                  filterStage={funnelStage}
+                  overStage={overStage}
+                  onCardClick={(row) => { if (row.candidate?.id) navigate(`/candidates/${row.candidate.id}`); }}
+                />
               </TabsContent>
 
               {/* ── AI Matches Tab ─────────────────────────── */}
@@ -1399,6 +1404,7 @@ const JobDetail = () => {
             feePct={(job as any).fee_pct ?? null}
             createdAt={job.created_at}
             closedAt={(job as any).closed_at ?? (job as any).filled_at ?? null}
+            onStageClick={(s) => setFunnelStage(s)}
           />
           <JobActivityFeed jobId={id!} limit={10} />
         </aside>
