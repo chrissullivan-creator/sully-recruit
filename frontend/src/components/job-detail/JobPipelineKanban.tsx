@@ -1,24 +1,17 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
-  pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
-} from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Briefcase, Plus } from 'lucide-react';
-import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import {
-  CANONICAL_PIPELINE, stageToCanonical, canonicalConfig,
-  daysSince, type CanonicalStage,
+  CANONICAL_PIPELINE, stageToCanonical, daysSince, type CanonicalStage,
 } from '@/lib/pipeline';
-import { moveStage } from '@/lib/mutations/move-stage';
 import { formatComp } from '@/lib/queries/send-outs';
-import { Button } from '@/components/ui/button';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 
-interface KanbanRow {
+export interface KanbanRow {
   id: string;                       // candidate_jobs id
   candidate_id: string;
   job_id: string;
@@ -38,25 +31,12 @@ interface KanbanRow {
   } | null;
 }
 
-interface JobPipelineKanbanProps {
-  jobId: string;
-  /** When set, only render that column (used by the funnel-strip filter). */
-  filterStage?: CanonicalStage | null;
-}
-
-export function JobPipelineKanban({ jobId, filterStage = null }: JobPipelineKanbanProps) {
-  const queryClient = useQueryClient();
-  const [activeRow, setActiveRow] = useState<KanbanRow | null>(null);
-  const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
-  const [addModal, setAddModal] = useState<{ open: boolean; stage: CanonicalStage }>({ open: false, stage: 'pitch' });
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const { data: rows = [], isLoading } = useQuery({
+/** Shared fetcher for both the kanban grid and any dnd controller in a parent. */
+export function useJobKanbanRows(jobId: string) {
+  return useQuery({
     queryKey: ['job_pipeline_kanban', jobId],
     enabled: !!jobId,
     queryFn: async () => {
-      // Pull candidate_jobs joined to people. Then in a second hop, find any
-      // matching send_outs row (so moveStage can update both).
       const { data: cjData, error: cjErr } = await supabase
         .from('candidate_jobs')
         .select(`
@@ -88,6 +68,19 @@ export function JobPipelineKanban({ jobId, filterStage = null }: JobPipelineKanb
       })) as KanbanRow[];
     },
   });
+}
+
+interface JobPipelineKanbanProps {
+  jobId: string;
+  /** When set, only render that column (used by the funnel-strip filter). */
+  filterStage?: CanonicalStage | null;
+  /** Stage that's currently being hovered during a drag — column gets emerald highlight. */
+  overStage?: CanonicalStage | null;
+}
+
+export function JobPipelineKanban({ jobId, filterStage = null, overStage = null }: JobPipelineKanbanProps) {
+  const { data: rows = [], isLoading } = useJobKanbanRows(jobId);
+  const [addModal, setAddModal] = useState<{ open: boolean; stage: CanonicalStage }>({ open: false, stage: 'pitch' });
 
   const rowsByStage = useMemo(() => {
     const map = new Map<CanonicalStage, KanbanRow[]>();
@@ -103,90 +96,12 @@ export function JobPipelineKanban({ jobId, filterStage = null }: JobPipelineKanb
     ? CANONICAL_PIPELINE.filter((s) => s.key === filterStage)
     : CANONICAL_PIPELINE;
 
-  // Optimistic move via the shared moveStage helper.
-  const commitMove = async (row: KanbanRow, target: CanonicalStage) => {
-    queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', jobId], (prev = []) =>
-      prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
-    );
-    const res = row.send_out_id
-      ? await moveStage({
-          sendOutId: row.send_out_id,
-          candidateJobId: row.id,
-          fromStage: row.pipeline_stage,
-          toStage: target,
-          triggerSource: 'drag',
-          entityId: row.candidate_id,
-          entityType: 'candidate_job',
-        })
-      // No matching send_out — update candidate_jobs directly.
-      : (async () => {
-          const { error } = await supabase
-            .from('candidate_jobs')
-            .update({ pipeline_stage: target, stage_updated_at: new Date().toISOString() })
-            .eq('id', row.id);
-          if (error) return { ok: false, error: error.message };
-          await supabase.from('stage_transitions').insert({
-            entity_type: 'candidate_job', entity_id: row.id,
-            from_stage: row.pipeline_stage, to_stage: target,
-            trigger_source: 'drag',
-          });
-          return { ok: true };
-        })();
-
-    if (!res.ok) {
-      queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', jobId], (prev = []) =>
-        prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: row.pipeline_stage } : r)),
-      );
-      toast.error(res.error ?? 'Move failed');
-      return;
-    }
-    toast.success(`Moved to ${canonicalConfig(target).label}`);
-    queryClient.invalidateQueries({ queryKey: ['job_funnel', jobId] });
-    queryClient.invalidateQueries({ queryKey: ['job_quick_stats', jobId] });
-    queryClient.invalidateQueries({ queryKey: ['job_activity', jobId] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
-  };
-
-  const onDragStart = (e: DragStartEvent) => {
-    const row = rows.find((r) => r.id === e.active.id);
-    setActiveRow(row ?? null);
-  };
-  const onDragOver = (e: DragOverEvent) => {
-    const id = e.over?.id;
-    if (typeof id === 'string' && id.startsWith('kanban-col:')) {
-      setOverStage(id.slice('kanban-col:'.length) as CanonicalStage);
-    } else if (typeof id === 'string' && id.startsWith('funnel-tile:')) {
-      // Honour funnel-strip drop target IDs too.
-      setOverStage(id.slice('funnel-tile:'.length) as CanonicalStage);
-    } else {
-      setOverStage(null);
-    }
-  };
-  const onDragEnd = async (e: DragEndEvent) => {
-    setActiveRow(null);
-    setOverStage(null);
-    const id = e.over?.id;
-    if (typeof id !== 'string') return;
-    const target = id.startsWith('kanban-col:')
-      ? id.slice('kanban-col:'.length) as CanonicalStage
-      : id.startsWith('funnel-tile:')
-        ? id.slice('funnel-tile:'.length) as CanonicalStage
-        : null;
-    if (!target) return;
-    const row = rows.find((r) => r.id === e.active.id);
-    if (!row) return;
-    if (stageToCanonical(row.pipeline_stage) === target) return;
-    await commitMove(row, target);
-  };
-
   if (isLoading) {
     return <div className="p-8 text-sm text-muted-foreground">Loading pipeline…</div>;
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={pointerWithin}
-                onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
-                onDragCancel={() => { setActiveRow(null); setOverStage(null); }}>
+    <>
       <div className={cn(
         'grid gap-3',
         filterStage ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-4 xl:grid-cols-4',
@@ -202,21 +117,13 @@ export function JobPipelineKanban({ jobId, filterStage = null }: JobPipelineKanb
         ))}
       </div>
 
-      <DragOverlay>
-        {activeRow && (
-          <div className="rounded-lg border border-emerald bg-white shadow-xl px-3 py-2 text-sm font-medium text-emerald-dark">
-            {activeRow.candidate?.full_name ?? '—'}
-          </div>
-        )}
-      </DragOverlay>
-
       <AddCandidateModal
         open={addModal.open}
         onOpenChange={(v) => setAddModal((prev) => ({ ...prev, open: v }))}
         jobId={jobId}
         stage={addModal.stage}
       />
-    </DndContext>
+    </>
   );
 }
 
@@ -233,7 +140,6 @@ function KanbanColumn({
       isOffer ? 'border-gold/30' : 'border-card-border',
       isOver && 'ring-2 ring-emerald border-emerald shadow-md bg-emerald-light/30',
     )}>
-      {/* Column header */}
       <div className={cn(
         'flex items-center justify-between gap-2 px-3 py-2 border-b border-card-border',
         isOffer ? 'bg-gold-bg' : 'bg-page-bg/40',
@@ -259,7 +165,6 @@ function KanbanColumn({
         </button>
       </div>
 
-      {/* Cards */}
       <div className="flex-1 p-2 space-y-2">
         {rows.length === 0 ? (
           <div className={cn(
@@ -280,7 +185,7 @@ function KanbanColumn({
 function KanbanCard({ row }: { row: KanbanRow }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: row.id,
-    data: { type: 'kanban-card' },
+    data: { type: 'kanban-card', row },
   });
   const c = row.candidate;
   const name = c?.full_name || `${c?.first_name ?? ''} ${c?.last_name ?? ''}`.trim() || '—';
