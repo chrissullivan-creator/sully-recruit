@@ -28,7 +28,7 @@ import {
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { invalidatePersonScope } from '@/lib/invalidate';
+import { invalidatePersonScope, invalidateNoteScope, invalidateJobScope } from '@/lib/invalidate';
 
 /* ------------------------------------------------------------------ */
 /*  Inline hooks                                                       */
@@ -298,7 +298,7 @@ const ContactDetail = () => {
         .eq('job_id', jobId)
         .eq('contact_id', id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['contact_jobs', id] });
+      invalidateJobScope(queryClient);
       toast.success('Job removed');
     } catch (err: any) {
       toast.error(err.message || 'Failed to remove job');
@@ -319,8 +319,7 @@ const ContactDetail = () => {
     }
     const { error } = await supabase.from('contacts').update(updates).eq('id', id);
     if (error) { toast.error('Failed to update'); return; }
-    queryClient.invalidateQueries({ queryKey: ['contact', id] });
-    queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    invalidatePersonScope(queryClient);
   };
 
   const handleSaveNote = async () => {
@@ -335,7 +334,7 @@ const ContactDetail = () => {
     else {
       toast.success('Note saved');
       setNoteText('');
-      queryClient.invalidateQueries({ queryKey: ['notes', 'contact', id] });
+      invalidateNoteScope(queryClient);
     }
     setSavingNote(false);
   };

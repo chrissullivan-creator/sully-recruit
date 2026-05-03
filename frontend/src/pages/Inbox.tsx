@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { invalidateCommsScope } from '@/lib/invalidate';
 import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import {
@@ -265,8 +266,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
       // Backfill messages in this conversation
       await supabase.from('messages').update(update).eq('conversation_id', thread.id).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
       toast.success(`Linked to ${entityName}`);
-      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-      queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
+      invalidateCommsScope(queryClient);
       setLinkSearch('');
       setLinkResults([]);
     }
@@ -452,8 +452,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
         externalConversationId={thread.external_conversation_id}
         integrationAccountId={thread.integration_account_id}
         onPersonLinked={() => {
-          queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-          queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
+          invalidateCommsScope(queryClient);
         }}
       />
     </div>
@@ -602,7 +601,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
         throw new Error(err.error || 'Failed to delete thread');
       }
       toast.success('Conversation deleted');
-      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      invalidateCommsScope(queryClient);
       onDeleted?.();
     } catch (err: any) {
       toast.error(err?.message || 'Failed to delete thread');
@@ -649,8 +648,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
   const handleMarkRead = async () => {
     if (!threadId || thread?.is_read) return;
     await supabase.from('conversations').update({ is_read: true }).eq('id', threadId);
-    queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-    queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
+    invalidateCommsScope(queryClient);
   };
 
   const handlePickFiles = () => fileInputRef.current?.click();
@@ -808,8 +806,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
       setReplyHtml('');
       setPendingAttachments([]);
       if (editorRef.current) editorRef.current.innerHTML = '';
-      queryClient.invalidateQueries({ queryKey: ['messages', threadId] });
-      queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+      invalidateCommsScope(queryClient);
     } catch (err: any) {
       console.error('Send error:', err);
       toast.error(err.message || 'Failed to send reply');
@@ -1200,8 +1197,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
           externalConversationId={thread.external_conversation_id}
           integrationAccountId={thread.integration_account_id}
           onPersonLinked={() => {
-            queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
-            queryClient.invalidateQueries({ queryKey: ['inbox_thread', thread.id] });
+            invalidateCommsScope(queryClient);
           }}
         />
       )}

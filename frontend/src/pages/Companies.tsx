@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
 import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { invalidateCompanyScope } from '@/lib/invalidate';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { supabase } from '@/integrations/supabase/client';
@@ -29,7 +30,7 @@ const Companies = () => {
       const { error } = await supabase.from('companies').update({ company_type: newType }).eq('id', companyId);
       if (error) throw new Error(error.message);
       toast.success(`Company type updated to ${newType}`);
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      invalidateCompanyScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update type');
     }
@@ -40,7 +41,7 @@ const Companies = () => {
       const { error } = await supabase.from('companies').delete().eq('id', companyId);
       if (error) throw new Error(error.message);
       toast.success('Company deleted');
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      invalidateCompanyScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete company');
     }

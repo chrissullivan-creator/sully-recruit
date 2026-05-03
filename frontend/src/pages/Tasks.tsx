@@ -16,6 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { invalidateTaskScope } from '@/lib/invalidate';
 
 const ADMIN_EMAILS = [
   'chris.sullivan@emeraldrecruit.com',
@@ -245,7 +246,7 @@ export default function Tasks() {
               const data = await resp.json();
               if (data.error) { toast.error(data.error); return; }
               toast.success('Outlook sync triggered — events will appear shortly');
-              setTimeout(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }), 8000);
+              setTimeout(() => invalidateTaskScope(queryClient), 8000);
             } catch (err: any) { toast.error(err.message || 'Sync failed'); }
           }}>
             <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
@@ -258,7 +259,7 @@ export default function Tasks() {
                 const data = await resp.json();
                 if (data.error) { toast.error(data.error); return; }
                 toast.success('Nudge check triggered — tasks will be created shortly');
-                setTimeout(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }), 8000);
+                setTimeout(() => invalidateTaskScope(queryClient), 8000);
               } catch (err: any) { toast.error(err.message || 'Nudge check failed'); }
             }}>
               <Bell className="h-4 w-4 mr-1" /> Run Nudge

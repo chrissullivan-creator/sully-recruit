@@ -6,6 +6,7 @@ import { Loader2, FileText, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useProfiles } from '@/hooks/useProfiles';
+import { invalidateNoteScope } from '@/lib/invalidate';
 
 interface EntityNotesTabProps {
   /** Polymorphic notes target. Mirrors notes.entity_type values. */
@@ -61,7 +62,7 @@ export function EntityNotesTab({ entityType, entityId, placeholder }: EntityNote
       });
       if (error) throw error;
       setDraft('');
-      queryClient.invalidateQueries({ queryKey });
+      invalidateNoteScope(queryClient);
       if (activityKey) queryClient.invalidateQueries({ queryKey: activityKey });
       toast.success('Note added');
     } catch (err: any) {
@@ -74,7 +75,7 @@ export function EntityNotesTab({ entityType, entityId, placeholder }: EntityNote
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from('notes').delete().eq('id', id);
     if (error) { toast.error(error.message); return; }
-    queryClient.invalidateQueries({ queryKey });
+    invalidateNoteScope(queryClient);
     if (activityKey) queryClient.invalidateQueries({ queryKey: activityKey });
     toast.success('Note deleted');
   };

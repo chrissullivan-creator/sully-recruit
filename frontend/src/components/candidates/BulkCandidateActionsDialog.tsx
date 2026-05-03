@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Users, Loader2, Briefcase, Play } from 'lucide-react';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
+import { invalidateSendOutScope, invalidateTaskScope } from '@/lib/invalidate';
 
 interface BulkCandidateActionsDialogProps {
   open: boolean;
@@ -175,10 +176,8 @@ export const BulkCandidateActionsDialog = ({
 
       if (updateError) throw updateError;
 
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
-      queryClient.invalidateQueries({ queryKey: ['send_outs_job', selectedJobId] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      invalidateSendOutScope(queryClient);
+      invalidateTaskScope(queryClient);
       if (enrollInSequence) {
         queryClient.invalidateQueries({ queryKey: ['sequences'] });
         queryClient.invalidateQueries({ queryKey: ['sequence_enrollments'] });

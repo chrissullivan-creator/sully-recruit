@@ -40,7 +40,13 @@ const COMMS_KEYS = [
 
 const NOTES_KEYS = ['notes', 'job_notes'];
 
-const TASKS_KEYS = ['entity_tasks', 'tasks', 'sidebar_tasks_due'];
+const TASKS_KEYS = [
+  'entity_tasks', 'tasks', 'sidebar_tasks_due',
+  // Calendar surfaces pull meetings out of `tasks` (task_type='meeting').
+  // Any task/meeting mutation — Outlook sync, manual meeting, completion —
+  // must refresh both calendar views.
+  'calendar_tasks', 'dashboard_week_meetings',
+];
 
 const DASHBOARD_KEYS = ['dashboard_metrics'];
 

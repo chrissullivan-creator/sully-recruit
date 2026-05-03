@@ -37,6 +37,10 @@ import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
+import {
+  invalidatePersonScope, invalidateSendOutScope, invalidateNoteScope,
+  invalidateTaskScope,
+} from '@/lib/invalidate';
 
 const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -238,7 +242,7 @@ const CandidateDetail = () => {
       const { error } = await supabase.from('people').delete().eq('id', id);
       if (error) { toast.error(error.message || 'Failed to delete candidate'); return; }
       toast.success('Candidate deleted');
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(queryClient);
       navigate('/candidates');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to delete candidate');
@@ -658,8 +662,7 @@ const CandidateDetail = () => {
 
       const { error } = await supabase.from('people').update(updates).eq('id', id);
       if (error) { toast.error(`Failed to update ${field.replace(/_/g, ' ')}`); return; }
-      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update');
     }
@@ -679,8 +682,7 @@ const CandidateDetail = () => {
 
       const { error } = await supabase.from('people').update(updates).eq('id', id);
       if (error) { toast.error('Failed to update compensation'); return; }
-      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update compensation');
     }
@@ -741,10 +743,9 @@ const CandidateDetail = () => {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      invalidatePersonScope(queryClient);
+      invalidateSendOutScope(queryClient);
+      invalidateTaskScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update status');
     } finally {

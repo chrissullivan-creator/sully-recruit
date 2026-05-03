@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { invalidateTaskScope } from '@/lib/invalidate';
 
 export interface Task {
   id: string;
@@ -225,8 +226,7 @@ export function useCreateTask() {
       return task;
     },
     onSuccess: (_, payload) => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
       toast.success(payload.task_type === 'meeting' ? 'Meeting created' : 'Task created');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to create task'),
@@ -304,8 +304,7 @@ export function useCompleteTaskWithNote() {
       return task;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
       toast.success('Task completed');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to complete task'),
@@ -322,8 +321,7 @@ export function useUpdateTaskStatus() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
     },
   });
 }
@@ -349,8 +347,7 @@ export function useUpdateTask() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
       toast.success('Task updated');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to update task'),
@@ -366,8 +363,7 @@ export function useBulkUpdateTasks() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
     },
   });
 }
@@ -382,8 +378,7 @@ export function useBulkDeleteTasks() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
       toast.success('Tasks deleted');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to delete tasks'),
@@ -403,8 +398,7 @@ export function useAddTaskComment() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['entity_tasks'] });
+      invalidateTaskScope(qc);
     },
   });
 }

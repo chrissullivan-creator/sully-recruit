@@ -6,6 +6,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
+import { WeekCalendar } from '@/components/dashboard/WeekCalendar';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -398,6 +399,9 @@ const Dashboard = () => {
             })}
           </ListPanel>
         </div>
+
+        {/* ── This Week Calendar ────────────────────────────────────── */}
+        <WeekCalendar />
 
         {/* ── Tasks + Quick Actions ─────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

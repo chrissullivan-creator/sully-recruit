@@ -11,6 +11,7 @@ import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { invalidateJobScope } from '@/lib/invalidate';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -41,7 +42,7 @@ const Jobs = () => {
       const { error } = await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId);
       if (error) throw new Error(error.message);
       toast.success(`Job status updated to ${JOB_STATUS_OPTIONS.find(o => o.value === newStatus)?.label ?? newStatus}`);
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update status');
     }
@@ -52,7 +53,7 @@ const Jobs = () => {
       const { error } = await supabase.from('jobs').delete().eq('id', jobId);
       if (error) throw new Error(error.message);
       toast.success('Job deleted');
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete job');
     }

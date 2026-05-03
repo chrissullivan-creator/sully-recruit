@@ -14,11 +14,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { invalidateNoteScope } from '@/lib/invalidate';
 import {
   Phone, PhoneIncoming, PhoneOutgoing, Search, Clock,
   FileText, Plus, UserCheck, User, Users, Loader2,
-  CheckCircle2, AlertCircle, UserPlus, ListChecks, RefreshCw,
+  CheckCircle2, AlertCircle, UserPlus, ListChecks, RefreshCw, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 
 interface CallLog {
@@ -140,6 +145,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       }
 
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
+      invalidateNoteScope(queryClient);
       if (noteWarning) {
         toast.warning('Call logged, but the contact note failed to save');
       } else {
@@ -332,6 +338,7 @@ function LinkCallDialog({
         });
       }
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
+      invalidateNoteScope(queryClient);
       toast.success(`Tagged to ${entityName}`);
       onOpenChange(false);
     } catch (err: any) {
@@ -421,7 +428,25 @@ const Calls = () => {
   const [linkCall, setLinkCall] = useState<CallLog | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [detailCall, setDetailCall] = useState<{ call: CallLog; aiNotes?: any } | null>(null);
+  const [deleteCall, setDeleteCall] = useState<CallLog | null>(null);
+  const [deletingCall, setDeletingCall] = useState(false);
   const queryClient = useQueryClient();
+
+  const handleDeleteCall = async () => {
+    if (!deleteCall) return;
+    setDeletingCall(true);
+    try {
+      const { error } = await supabase.from('call_logs').delete().eq('id', deleteCall.id);
+      if (error) throw error;
+      toast.success('Call deleted');
+      queryClient.invalidateQueries({ queryKey: ['call_logs'] });
+      setDeleteCall(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete call');
+    } finally {
+      setDeletingCall(false);
+    }
+  };
 
   // Fetch recruiter profiles for filter
   const { data: recruiters = [] } = useQuery({
@@ -710,6 +735,13 @@ const Calls = () => {
                         >
                           {call.status}
                         </Badge>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteCall(call); }}
+                          title="Delete call"
+                          className="p-1 rounded text-muted-foreground/60 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
 
@@ -807,6 +839,24 @@ const Calls = () => {
         call={detailCall?.call}
         aiNotes={detailCall?.aiNotes}
       />
+
+      <AlertDialog open={!!deleteCall} onOpenChange={(v) => !v && setDeleteCall(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this call log?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the call record and any associated transcript.
+              Notes already saved to a candidate or contact will stay.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingCall}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteCall} disabled={deletingCall} className="bg-red-600 hover:bg-red-700">
+              {deletingCall ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 };

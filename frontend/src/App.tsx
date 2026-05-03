@@ -26,6 +26,7 @@ import SequenceScheduleView from "./pages/SequenceScheduleView";
 import SequenceAnalyticsPage from "./pages/SequenceAnalyticsPage";
 import Calls from "./pages/Calls";
 import Tasks from "./pages/Tasks";
+import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import MicrosoftCallback from "./pages/MicrosoftCallback";
@@ -73,6 +74,7 @@ const App = () => (
             <Route path="/ask-joe" element={<ProtectedRoute><AskJoe /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />
