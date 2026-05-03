@@ -27,6 +27,7 @@ import {
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
   Search, Calendar, Merge,
 } from 'lucide-react';
+import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -1011,7 +1012,7 @@ const CandidateDetail = () => {
       )}
 
       {/* Main content: left panel + right sidebar */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-page-bg">
 
         {/* ============ LEFT PANEL (70-75%) ============ */}
         <div className="flex-1 flex flex-col overflow-hidden" style={{ flex: '3 1 0%' }}>
@@ -1192,13 +1193,14 @@ const CandidateDetail = () => {
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-3 border-b border-border">
-              <TabsList className="bg-secondary">
+              <TabsList className="bg-white border border-card-border">
                 <TabsTrigger value="joe" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
                 <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
             </div>
 
@@ -2003,6 +2005,10 @@ const CandidateDetail = () => {
                     })}
                   </div>
                 )}
+              </TabsContent>
+
+              <TabsContent value="notes" className="px-8 py-5 mt-0">
+                <EntityNotesTab entityType="candidate" entityId={id!} placeholder="Add a note about this candidate — call summary, screening notes, anything the team should see…" />
               </TabsContent>
 
             </ScrollArea>
