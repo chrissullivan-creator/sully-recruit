@@ -52,6 +52,16 @@ function toE164(input: string): string | null {
 const typeToEntity = (t: string | null | undefined): 'candidate' | 'contact' =>
   t === 'client' ? 'contact' : 'candidate';
 
+interface PersonSearchRow {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  current_title: string | null;
+  title: string | null;
+  type: string | null;
+}
+
 // ---- Log Call Dialog ----
 function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { user } = useAuth();
@@ -274,7 +284,7 @@ function LinkCallDialog({
       setSearching(false);
       return;
     }
-    setResults((data ?? []).map((r: any) => ({
+    setResults((data ?? []).map((r: PersonSearchRow) => ({
       ...r,
       entity_type: typeToEntity(r.type),
       title: r.current_title ?? r.title ?? null,
@@ -293,7 +303,7 @@ function LinkCallDialog({
       .select('id, full_name, email, phone, current_title, title, type')
       .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
       .limit(10);
-    const matches = (data ?? []).map((r: any) => ({
+    const matches = (data ?? []).map((r: PersonSearchRow) => ({
       ...r,
       entity_type: typeToEntity(r.type),
       title: r.current_title ?? r.title ?? null,
