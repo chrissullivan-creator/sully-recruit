@@ -76,9 +76,11 @@ interface JobPipelineKanbanProps {
   filterStage?: CanonicalStage | null;
   /** Stage that's currently being hovered during a drag — column gets emerald highlight. */
   overStage?: CanonicalStage | null;
+  /** Click handler for a card. When provided, clicking opens the candidate's profile. */
+  onCardClick?: (row: KanbanRow) => void;
 }
 
-export function JobPipelineKanban({ jobId, filterStage = null, overStage = null }: JobPipelineKanbanProps) {
+export function JobPipelineKanban({ jobId, filterStage = null, overStage = null, onCardClick }: JobPipelineKanbanProps) {
   const { data: rows = [], isLoading } = useJobKanbanRows(jobId);
   const [addModal, setAddModal] = useState<{ open: boolean; stage: CanonicalStage }>({ open: false, stage: 'pitch' });
 
@@ -113,6 +115,7 @@ export function JobPipelineKanban({ jobId, filterStage = null, overStage = null 
             rows={rowsByStage.get(cfg.key) ?? []}
             isOver={overStage === cfg.key}
             onAdd={() => setAddModal({ open: true, stage: cfg.key })}
+            onCardClick={onCardClick}
           />
         ))}
       </div>
@@ -129,8 +132,14 @@ export function JobPipelineKanban({ jobId, filterStage = null, overStage = null 
 
 // ── Kanban column ───────────────────────────────────────────────────────
 function KanbanColumn({
-  cfg, rows, isOver, onAdd,
-}: { cfg: typeof CANONICAL_PIPELINE[number]; rows: KanbanRow[]; isOver: boolean; onAdd: () => void }) {
+  cfg, rows, isOver, onAdd, onCardClick,
+}: {
+  cfg: typeof CANONICAL_PIPELINE[number];
+  rows: KanbanRow[];
+  isOver: boolean;
+  onAdd: () => void;
+  onCardClick?: (row: KanbanRow) => void;
+}) {
   const { setNodeRef } = useDroppable({ id: `kanban-col:${cfg.key}` });
   const isOffer = cfg.key === 'offer';
 
@@ -174,7 +183,7 @@ function KanbanColumn({
             {isOver ? 'Drop here →' : 'No candidates'}
           </div>
         ) : (
-          rows.map((row) => <KanbanCard key={row.id} row={row} />)
+          rows.map((row) => <KanbanCard key={row.id} row={row} onClick={onCardClick} />)
         )}
       </div>
     </div>
@@ -182,7 +191,7 @@ function KanbanColumn({
 }
 
 // ── Kanban card ─────────────────────────────────────────────────────────
-function KanbanCard({ row }: { row: KanbanRow }) {
+function KanbanCard({ row, onClick }: { row: KanbanRow; onClick?: (row: KanbanRow) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: row.id,
     data: { type: 'kanban-card', row },
@@ -197,12 +206,14 @@ function KanbanCard({ row }: { row: KanbanRow }) {
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.4 : 1 }}
-      className="group rounded-lg border border-card-border bg-white p-2.5 hover:border-emerald/40 transition-colors"
+      onClick={() => { if (!isDragging) onClick?.(row); }}
+      className={`group rounded-lg border border-card-border bg-white p-2.5 hover:border-emerald/40 transition-colors ${onClick ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-start gap-2">
         <button
           {...attributes}
           {...listeners}
+          onClick={(e) => e.stopPropagation()}
           className="mt-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-emerald shrink-0"
         >
           <GripVertical className="h-3.5 w-3.5" />

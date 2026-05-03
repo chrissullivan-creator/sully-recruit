@@ -383,11 +383,21 @@ const People = () => {
                         <RoleBadges roles={person.roles} sourceTable={person.source_table} />
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{person.title ?? '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm text-muted-foreground flex items-center gap-2">
-                          <CompanyLogo name={person.company_name ?? ''} domain={null} size="xs" />
-                          {person.company_name ?? '—'}
-                        </span>
+                      <td className="px-4 py-3" onClick={e => { if (person.company_id) e.stopPropagation(); }}>
+                        {person.company_id && person.company_name ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); navigate(`/companies/${person.company_id}`); }}
+                            className="text-sm text-muted-foreground hover:text-emerald hover:underline flex items-center gap-2 transition-colors"
+                          >
+                            <CompanyLogo name={person.company_name ?? ''} domain={null} size="xs" />
+                            {person.company_name}
+                          </button>
+                        ) : (
+                          <span className="text-sm text-muted-foreground flex items-center gap-2">
+                            <CompanyLogo name={person.company_name ?? ''} domain={null} size="xs" />
+                            {person.company_name ?? '—'}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">

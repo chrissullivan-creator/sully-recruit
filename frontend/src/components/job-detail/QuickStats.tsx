@@ -15,9 +15,12 @@ interface QuickStatsProps {
   createdAt?: string | null;
   /** Job filled_at / closed_at — when set, "days open" is bounded by it. */
   closedAt?: string | null;
+  /** When provided, clicking the Submitted / Interview / Placed rows calls this with the
+   *  matching canonical stage so the parent can scroll to / highlight it. */
+  onStageClick?: (stage: 'submitted' | 'interview_round_1' | 'placed') => void;
 }
 
-export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedAt }: QuickStatsProps) {
+export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedAt, onStageClick }: QuickStatsProps) {
   const { data: rows = [] } = useQuery({
     queryKey: ['job_quick_stats', jobId],
     enabled: !!jobId,
@@ -72,19 +75,26 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
       <div className="bg-white divide-y divide-card-border">
         <StatRow icon={Calendar} label="Days Open"        value={`${daysOpen}d`} />
         <StatRow icon={Users}    label="Total Candidates" value={String(total)} />
-        <StatRow icon={FileCheck} label="Submission Rate" value={`${submissionRate}%`} />
-        <StatRow icon={Calendar} label="Interview Rate"   value={`${interviewRate}%`} />
-        {placed > 0 && <StatRow icon={Award} label="Placed" value={String(placed)} gold />}
+        <StatRow icon={FileCheck} label="Submission Rate" value={`${submissionRate}%`} onClick={onStageClick ? () => onStageClick('submitted') : undefined} />
+        <StatRow icon={Calendar} label="Interview Rate"   value={`${interviewRate}%`} onClick={onStageClick ? () => onStageClick('interview_round_1') : undefined} />
+        {placed > 0 && <StatRow icon={Award} label="Placed" value={String(placed)} gold onClick={onStageClick ? () => onStageClick('placed') : undefined} />}
       </div>
     </div>
   );
 }
 
 function StatRow({
-  icon: Icon, label, value, gold,
-}: { icon: any; label: string; value: string; gold?: boolean }) {
+  icon: Icon, label, value, gold, onClick,
+}: { icon: any; label: string; value: string; gold?: boolean; onClick?: () => void }) {
+  const interactive = !!onClick;
   return (
-    <div className="flex items-center justify-between px-4 py-2.5">
+    <div
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={interactive ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } } : undefined}
+      className={`flex items-center justify-between px-4 py-2.5 ${interactive ? 'cursor-pointer hover:bg-emerald-light/30 transition-colors' : ''}`}
+    >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         <span>{label}</span>

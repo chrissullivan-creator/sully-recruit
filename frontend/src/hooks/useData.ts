@@ -235,7 +235,7 @@ export function usePeople() {
           .from('people')
           .select(
             'id, type, full_name, first_name, last_name, ' +
-            'title, current_title, company_name, current_company, ' +
+            'title, current_title, company_name, current_company, company_id, ' +
             'work_email, personal_email, email, mobile_phone, phone, linkedin_url, ' +
             'avatar_url, roles, status, ' +
             'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +

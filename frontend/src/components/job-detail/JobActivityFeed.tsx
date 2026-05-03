@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { History, ArrowRight, FileText, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
@@ -15,21 +16,28 @@ interface ActivityRow {
   at: string;
   label: string;
   detail: string | null;
+  /** Candidate the row is about (for stage/status rows) — used for click-through. */
+  candidateId: string | null;
 }
 
 export function JobActivityFeed({ jobId, limit = 10 }: JobActivityFeedProps) {
+  const navigate = useNavigate();
   const { data = [], isLoading } = useQuery({
     queryKey: ['job_activity', jobId, limit],
     enabled: !!jobId,
     queryFn: async () => {
       // Stage transitions where the candidate_job belongs to this job.
-      // We pull candidate_jobs row IDs first, then transitions referencing them.
       const { data: cjRows } = await supabase
         .from('candidate_jobs')
         .select('id, candidate_id')
         .eq('job_id', jobId);
       const cjIds = (cjRows ?? []).map((r) => r.id);
       const candidateIds = (cjRows ?? []).map((r) => r.candidate_id).filter(Boolean) as string[];
+      // Map candidate_jobs.id → candidate_id so stage rows can link back to the person.
+      const cjIdToCandidate = new Map<string, string>();
+      for (const r of (cjRows ?? [])) {
+        if (r.id && r.candidate_id) cjIdToCandidate.set(r.id, r.candidate_id);
+      }
 
       const transitions = cjIds.length > 0
         ? (await supabase
@@ -65,16 +73,19 @@ export function JobActivityFeed({ jobId, limit = 10 }: JobActivityFeedProps) {
           id: `stage-${t.id}`, kind: 'stage' as const, at: t.created_at,
           label: `Stage moved: ${t.from_stage ?? '—'} → ${t.to_stage}`,
           detail: t.trigger_source ?? null,
+          candidateId: cjIdToCandidate.get(t.entity_id) ?? null,
         })),
         ...(notes ?? []).map((n: any) => ({
           id: `note-${n.id}`, kind: 'note' as const, at: n.created_at,
           label: 'Note added',
           detail: (n.note ?? '').slice(0, 140),
+          candidateId: null,
         })),
         ...statusLog.map((s: any) => ({
           id: `status-${s.id}`, kind: 'status' as const, at: s.created_at,
           label: `Person status: ${s.from_status ?? '—'} → ${s.to_status}`,
           detail: s.triggered_by ?? null,
+          candidateId: s.entity_id ?? null,
         })),
       ];
       merged.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
@@ -97,8 +108,17 @@ export function JobActivityFeed({ jobId, limit = 10 }: JobActivityFeedProps) {
         <div className="divide-y divide-card-border">
           {data.map((row) => {
             const Icon = row.kind === 'stage' ? ArrowRight : row.kind === 'note' ? FileText : Calendar;
+            const interactive = !!row.candidateId;
+            const handleOpen = () => { if (row.candidateId) navigate(`/candidates/${row.candidateId}`); };
             return (
-              <div key={row.id} className="px-4 py-2.5 flex items-start gap-2.5 hover:bg-emerald-light/30 transition-colors">
+              <div
+                key={row.id}
+                role={interactive ? 'button' : undefined}
+                tabIndex={interactive ? 0 : undefined}
+                onClick={interactive ? handleOpen : undefined}
+                onKeyDown={interactive ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); } } : undefined}
+                className={`px-4 py-2.5 flex items-start gap-2.5 transition-colors ${interactive ? 'hover:bg-emerald-light/30 cursor-pointer' : ''}`}
+              >
                 <Icon className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-foreground truncate">{row.label}</p>
