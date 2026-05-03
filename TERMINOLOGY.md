@@ -96,20 +96,18 @@ The pipeline has two complementary models:
 
 **Rule:** "where is this candidate in this job?" → `candidate_jobs.pipeline_stage`. "show me all pitches this week" → `pitches` table.
 
-### CANONICAL stage labels (use these EXACT names in UI + docs)
-
-The stage TABLE names and the user-facing UI LABELS differ — this trips people up. Always use the UI label in user-facing strings; the table name is implementation detail.
+### CANONICAL stage labels (UI label matches the table name)
 
 | Funnel position | UI label | Source table |
 |---|---|---|
-| 1 | **Pitched** | `pitches` |
-| 2 | **Ready to Send** | `send_outs` ← table is named `send_outs`, the stage is "Ready to Send" |
-| 3 | **Sent** | `submissions` ← table is named `submissions`, the stage is "Sent" |
+| 1 | **Pitches** | `pitches` |
+| 2 | **Send Outs** | `send_outs` |
+| 3 | **Submissions** | `submissions` |
 | 4 | **Interviews** | `interviews` |
 | 5 | **Placements** | `placements` |
 | 6 | **Rejections** | `rejections` |
 
-**⚠️ Don't write "Send-Outs" or "Submitted" in user-facing UI.** Write "Ready to Send" and "Sent" respectively. The table names are legacy; they won't be renamed because too many code paths reference them.
+UI labels and DB table names match exactly. Singular form: "Pitch", "Send Out", "Submission", "Interview", "Placement", "Rejection". Use whichever fits the context.
 
 ---
 

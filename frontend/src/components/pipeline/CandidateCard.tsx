@@ -10,8 +10,8 @@ interface CandidateCardProps {
 const stageLabels: Partial<Record<CandidateStage, string>> = {
   back_of_resume: 'Resume',
   pitch: 'Pitch',
-  send_out: 'Ready to Send',
-  submitted: 'Sent',
+  send_out: 'Send Out',
+  submitted: 'Submissions',
   interview: 'Interview',
   first_round: '1st Round',
   second_round: '2nd Round',

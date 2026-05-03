@@ -39,8 +39,8 @@ const JOB_STATUSES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
   { value: 'reached_out',  label: 'Reached Out',  color: 'bg-sky-500/15 text-sky-400' },
   { value: 'pitched',      label: 'Pitched',      color: 'bg-blue-500/15 text-blue-400' },
-  { value: 'send_out',     label: 'Ready to Send',   color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'submitted',    label: 'Sent',           color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'send_out',     label: 'Send Out',   color: 'bg-yellow-500/15 text-yellow-400' },
+  { value: 'submitted',    label: 'Submissions',           color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
   { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
   { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
@@ -122,7 +122,7 @@ const InlineRoleEdit = ({ role, onSave }: { role: string | null; onSave: (v: str
 
 // Stages relevant to send outs (the submission pipeline)
 const SEND_OUT_STAGES = [
-  { value: 'submitted',    label: 'Sent',           color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'submitted',    label: 'Submissions',           color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
   { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
   { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
@@ -1186,7 +1186,7 @@ const JobDetail = () => {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <FileText className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold text-foreground">Ready to Send</h2>
+                    <h2 className="text-base font-semibold text-foreground">Send Outs</h2>
                     {(sendOuts as any[]).length > 0 && (
                       <Badge variant="secondary" className="ml-1">{(sendOuts as any[]).length}</Badge>
                     )}
@@ -1237,7 +1237,7 @@ const JobDetail = () => {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Candidate to Ready to Send</DialogTitle>
+            <DialogTitle>Add Candidate to Send Outs</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">

@@ -205,14 +205,13 @@ const Dashboard = () => {
   const displayName = user?.user_metadata?.display_name?.split(' ')[0] || 'there';
   const m = metrics;
 
-  // 6-stage funnel — one card per stage table.
-  // TERMINOLOGY: send_outs table = "Ready to Send" stage. submissions table = "Sent" stage.
-  const pitched    = m?.pitchedCount   ?? 0;
-  const readyToSend = m?.sendOutCount  ?? 0;
-  const sent       = m?.submittedCount ?? 0;
-  const interviews = m?.interviewCount ?? 0;
-  const placements = m?.placedCount    ?? 0;
-  const rejections = m?.rejectedCount  ?? 0;
+  // 6-stage funnel — one card per stage table. UI labels match table names exactly.
+  const pitched     = m?.pitchedCount   ?? 0;
+  const sendOuts    = m?.sendOutCount   ?? 0;
+  const submissions = m?.submittedCount ?? 0;
+  const interviews  = m?.interviewCount ?? 0;
+  const placements  = m?.placedCount    ?? 0;
+  const rejections  = m?.rejectedCount  ?? 0;
 
   // Person-level
   const engaged       = m?.engagedCount      ?? 0;
@@ -264,9 +263,9 @@ const Dashboard = () => {
                     {' · '}
                     <span className="font-semibold text-foreground">{engaged} engaged</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{readyToSend} ready to send</span>
+                    <span className="font-semibold text-foreground">{sendOuts} send out{sendOuts !== 1 ? 's' : ''}</span>
                     {' · '}
-                    <span className="font-semibold text-foreground">{sent} sent</span>
+                    <span className="font-semibold text-foreground">{submissions} submission{submissions !== 1 ? 's' : ''}</span>
                     {' · '}
                     <span className="font-semibold text-foreground">{interviews} interview{interviews !== 1 ? 's' : ''}</span>
                     {' · '}
@@ -320,12 +319,12 @@ const Dashboard = () => {
             <span className="text-xs text-muted-foreground">Sourced from stage tables</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <MetricCard label="Pitched"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />} />
-            <MetricCard label="Ready to Send" value={isLoading ? '…' : readyToSend} icon={<FileText className="h-5 w-5" />} />
-            <MetricCard label="Sent"          value={isLoading ? '…' : sent}        icon={<Send className="h-5 w-5" />} />
-            <MetricCard label="Interviews"    value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight />
-            <MetricCard label="Placements"    value={isLoading ? '…' : placements}  icon={<Award className="h-5 w-5" />} highlight />
-            <MetricCard label="Rejections"    value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />} />
+            <MetricCard label="Pitches"     value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />} />
+            <MetricCard label="Send Outs"   value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />} />
+            <MetricCard label="Submissions" value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />} />
+            <MetricCard label="Interviews"  value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight />
+            <MetricCard label="Placements"  value={isLoading ? '…' : placements}  icon={<Award className="h-5 w-5" />} highlight />
+            <MetricCard label="Rejections"  value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />} />
           </div>
         </div>
 

@@ -612,7 +612,7 @@ export default function SendOut() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-lg font-semibold text-foreground">Ready to Send — {fullName}</h1>
+          <h1 className="text-lg font-semibold text-foreground">Send Out — {fullName}</h1>
           <p className="text-sm text-muted-foreground">
             Format resume, generate email, send to client
           </p>

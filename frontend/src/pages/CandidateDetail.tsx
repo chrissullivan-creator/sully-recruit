@@ -41,8 +41,8 @@ const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
   { value: 'reached_out',  label: 'Reached Out',  color: 'bg-blue-500/15 text-blue-400' },
   { value: 'pitch',        label: 'Pitch',        color: 'bg-indigo-500/15 text-indigo-400' },
-  { value: 'send_out',     label: 'Ready to Send',color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'sent',         label: 'Sent',         color: 'bg-purple-500/15 text-purple-400' },
+  { value: 'send_out',     label: 'Send Out',color: 'bg-yellow-500/15 text-yellow-400' },
+  { value: 'sent',         label: 'Submissions',         color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interviewing', color: 'bg-orange-500/15 text-orange-400' },
   { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
   { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
@@ -1854,7 +1854,7 @@ const CandidateDetail = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Send className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Ready to Send</h2>
+                    <h2 className="text-base font-semibold">Send Outs</h2>
                     <span className="text-xs text-muted-foreground">({sendOuts.length})</span>
                   </div>
                   {!addingSendOut && (
