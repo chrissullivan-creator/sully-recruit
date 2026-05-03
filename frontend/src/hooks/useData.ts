@@ -214,7 +214,7 @@ export function useContacts() {
   return query;
 }
 
-// Unified people view — v_people (UNION ALL of candidates + contacts)
+// Unified people — backed by v_people view (candidates with type/title/company normalized)
 export function usePeople() {
   const queryClient = useQueryClient();
 
@@ -245,9 +245,6 @@ export function usePeople() {
     const ch = supabase
       .channel(channelName.current)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['people'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => {
         queryClient.invalidateQueries({ queryKey: ['people'] });
       })
       .subscribe();
