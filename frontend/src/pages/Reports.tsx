@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, TrendingUp, Users, Building2, Calendar as CalendarIcon, Trophy } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 
 type RangeKey = 'this_month' | 'last_month' | 'last_3' | 'ytd';
 
@@ -217,7 +218,7 @@ function AggTable({ rows, headerLabel, emptyText }: { rows: AggRow[]; headerLabe
   }
   const top = rows[0];
   return (
-    <div className="rounded-xl border border-card-border bg-white overflow-hidden">
+    <HorizontalTableScroll className="rounded-xl border border-card-border bg-white overflow-hidden" minWidth={900}>
       <table className="w-full">
         <thead>
           <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground border-b border-card-border bg-page-bg/40">
@@ -249,7 +250,7 @@ function AggTable({ rows, headerLabel, emptyText }: { rows: AggRow[]; headerLabe
           ))}
         </tbody>
       </table>
-    </div>
+    </HorizontalTableScroll>
   );
 }
 

@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BulkAddCandidatesDialog } from '@/components/source/BulkAddCandidatesDialog';
 import { BulkAddContactsDialog } from '@/components/source/BulkAddContactsDialog';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
@@ -378,6 +379,7 @@ export default function SourceProject() {
                 </span>
               </div>
 
+              <HorizontalTableScroll minWidth={1100}>
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
@@ -448,6 +450,7 @@ export default function SourceProject() {
                   ))}
                 </tbody>
               </table>
+              </HorizontalTableScroll>
 
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/50 text-xs text-muted-foreground">
