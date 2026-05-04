@@ -34,7 +34,7 @@ import {
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
 
 type PersonTab = 'all' | 'candidates' | 'clients';
-type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated';
+type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated' | 'created';
 type SortDir = 'asc' | 'desc';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
@@ -135,6 +135,7 @@ const People = () => {
       else if (sortField === 'company')  { av = (a.company_name ?? '').toLowerCase(); bv = (b.company_name ?? '').toLowerCase(); }
       else if (sortField === 'lastReached')   { av = a.last_contacted_at ?? ''; bv = b.last_contacted_at ?? ''; }
       else if (sortField === 'lastResponded') { av = a.last_responded_at ?? ''; bv = b.last_responded_at ?? ''; }
+      else if (sortField === 'created')       { av = a.created_at ?? ''; bv = b.created_at ?? ''; }
       else { av = a.updated_at ?? a.created_at ?? ''; bv = b.updated_at ?? b.created_at ?? ''; }
       const cmp = av.localeCompare(bv);
       return sortDir === 'asc' ? cmp : -cmp;
@@ -350,6 +351,9 @@ const People = () => {
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
+                    <span className="flex items-center gap-1">Date Added <SortIcon field="created" /></span>
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
                     <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
                   </th>
@@ -453,6 +457,9 @@ const People = () => {
                       </td>
                       <td className="px-4 py-3">
                         <ChannelBadge channel={person.last_comm_channel} />
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {person.created_at ? format(new Date(person.created_at), 'MMM d, yyyy') : '—'}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {person.updated_at ? format(new Date(person.updated_at), 'MMM d, yyyy') : '—'}

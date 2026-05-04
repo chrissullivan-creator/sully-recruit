@@ -252,7 +252,8 @@ async function processResumesInboxEmail(
         full_name: senderDisplay || senderEmail,
         email: senderEmail,
         status: "new",
-        source: `resumes_inbox:${recipientEmail}`,
+        source: "resumes_inbox",
+        source_detail: recipientEmail,
         is_stub: true,
       } as any)
       .select("id")
