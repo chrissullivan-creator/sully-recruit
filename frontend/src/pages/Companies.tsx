@@ -6,6 +6,7 @@ import { useCompanies } from '@/hooks/useData';
 import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { CardGridSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
@@ -39,7 +40,7 @@ const Companies = () => {
 
   const handleQuickDelete = async (companyId: string) => {
     try {
-      const { error } = await supabase.from('companies').delete().eq('id', companyId);
+      const { error } = await softDelete('companies', companyId).then(({ error }) => ({ error: error ? new Error(error.message) : null }));
       if (error) throw new Error(error.message);
       toast.success('Company deleted');
       invalidateCompanyScope(queryClient);

@@ -42,6 +42,7 @@ import {
   invalidateSendOutScope, invalidateJobScope, invalidateNoteScope,
   invalidatePersonScope, invalidateAll,
 } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
@@ -501,9 +502,9 @@ const JobDetail = () => {
     if (!id) return;
     setDeletingJob(true);
     try {
-      const { error } = await supabase.from('jobs').delete().eq('id', id);
+      const { error } = await softDelete('jobs', id);
       if (error) { toast.error(error.message || 'Failed to delete job'); return; }
-      toast.success('Job deleted');
+      toast.success('Moved to trash — undo from /audit/trash within 30 days');
       invalidateJobScope(queryClient);
       navigate('/jobs');
     } catch (err: any) {

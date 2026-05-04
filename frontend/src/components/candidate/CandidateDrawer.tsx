@@ -22,6 +22,7 @@ import { moveStage } from '@/lib/mutations/move-stage';
 import { type SendOutRow, formatComp, lastTouchAt } from '@/lib/queries/send-outs';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 
 interface CandidateDrawerProps {
   row: SendOutRow | null;
@@ -69,8 +70,8 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
     if (!row) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('send_outs').delete().eq('id', row.id);
-      if (error) throw error;
+      const { error } = await softDelete('send_outs', row.id);
+      if (error) throw new Error(error.message);
       toast.success('Removed from pipeline');
       invalidateSendOutScope(queryClient);
       invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));

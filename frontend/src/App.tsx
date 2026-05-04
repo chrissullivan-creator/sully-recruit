@@ -36,6 +36,9 @@ const Calls = lazy(() => import("./pages/Calls"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Calendar = lazy(() => import("./pages/Calendar"));
 const Reports = lazy(() => import("./pages/Reports"));
+const AuditLog = lazy(() => import("./pages/AuditLog"));
+const Trash = lazy(() => import("./pages/Trash"));
+const Status = lazy(() => import("./pages/Status"));
 const Settings = lazy(() => import("./pages/Settings"));
 const MicrosoftCallback = lazy(() => import("./pages/MicrosoftCallback"));
 const ResumeSearch = lazy(() => import("./pages/ResumeSearch").then((m) => ({ default: m.ResumeSearch })));
@@ -92,6 +95,12 @@ const App = () => (
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+            <Route path="/audit" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
+            <Route path="/audit/trash" element={<ProtectedRoute><Trash /></ProtectedRoute>} />
+            {/* /status is intentionally NOT wrapped in ProtectedRoute — recruiters
+                who can't sign in can still tell whether the system or their session
+                is the problem. */}
+            <Route path="/status" element={<Status />} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />

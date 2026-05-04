@@ -16,6 +16,7 @@ import {
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -186,8 +187,13 @@ const People = () => {
     try {
       const candIds = selectedKeys.filter(k => k.startsWith('candidate:')).map(k => k.split(':')[1]);
       const contIds = selectedKeys.filter(k => k.startsWith('contact:')).map(k => k.split(':')[1]);
-      if (candIds.length) await supabase.from('people').delete().in('id', candIds);
-      if (contIds.length) await supabase.from('contacts').delete().in('id', contIds);
+      // Both candidates and contacts live in the unified `people` table
+      // (contacts is a backwards-compat view). Soft-delete in one shot.
+      const allIds = [...candIds, ...contIds];
+      if (allIds.length) {
+        const { error } = await softDelete('people', allIds);
+        if (error) throw new Error(error.message);
+      }
       toast.success(`${selectedKeys.length} record${selectedKeys.length === 1 ? '' : 's'} deleted`);
       setSelectedKeys([]);
       invalidatePersonScope(queryClient);
@@ -474,9 +480,9 @@ const People = () => {
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={async () => {
-                                const table = person.source_table === 'candidate' ? 'candidates' : 'contacts';
-                                await supabase.from(table).delete().eq('id', person.id);
-                                toast.success('Deleted');
+                                const { error } = await softDelete('people', person.id);
+                                if (error) { toast.error(error.message); return; }
+                                toast.success('Moved to trash — undo from /audit/trash within 30 days');
                                 invalidatePersonScope(queryClient);
                               }}
                             >

@@ -16,6 +16,7 @@ import { CANONICAL_PIPELINE, canonicalConfig, type CanonicalStage } from '@/lib/
 import { moveStage } from '@/lib/mutations/move-stage';
 import type { SendOutRow } from '@/lib/queries/send-outs';
 import { invalidateSendOutScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 
 interface BulkActionBarProps {
   selectedRows: SendOutRow[];
@@ -62,8 +63,8 @@ export function BulkActionBar({ selectedRows, onClear }: BulkActionBarProps) {
     setBusy(true);
     try {
       const ids = selectedRows.map((r) => r.id);
-      const { error } = await supabase.from('send_outs').delete().in('id', ids);
-      if (error) throw error;
+      const { error } = await softDelete('send_outs', ids);
+      if (error) throw new Error(error.message);
       invalidateSendOutScope(queryClient);
       toast.success(`Deleted ${ids.length} send-out${ids.length === 1 ? '' : 's'}`);
       onClear();

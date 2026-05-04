@@ -1,6 +1,7 @@
 import { logger } from "@trigger.dev/sdk/v3";
 import { getUnipileBaseUrl, getAppSetting } from "./supabase";
 import { getMicrosoftAccessToken } from "./microsoft-graph";
+import { fetchWithRetry } from "./fetch-retry";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -114,7 +115,7 @@ export async function sendEmail(
     ];
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
     {
       method: "POST",
@@ -218,7 +219,7 @@ export async function sendSms(
 
   const { access_token } = await authResponse.json();
 
-  const smsResponse = await fetch(
+  const smsResponse = await fetchWithRetry(
     `${serverUrl}/restapi/v1.0/account/~/extension/~/sms`,
     {
       method: "POST",
@@ -376,7 +377,7 @@ export async function sendLinkedIn(
       message: body,
     };
 
-    const response = await fetch(`${baseUrl}/users/invite`, {
+    const response = await fetchWithRetry(`${baseUrl}/users/invite`, {
       method: "POST",
       headers: {
         "X-API-KEY": apiKey,
@@ -399,7 +400,7 @@ export async function sendLinkedIn(
   const sendPayload: any = { provider_id: providerId, text: body };
   if (isInMailChannel) sendPayload.message_type = "INMAIL";
 
-  const response = await fetch(`${baseUrl}/messages`, {
+  const response = await fetchWithRetry(`${baseUrl}/messages`, {
     method: "POST",
     headers: {
       "X-API-KEY": apiKey,

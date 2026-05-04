@@ -20,6 +20,7 @@ export function useCandidates() {
           .from('people')
           .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
           .eq('type', 'candidate')
+          .is('deleted_at', null)
           .order('created_at', { ascending: false })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
@@ -140,6 +141,7 @@ export function useJobs(includesClosed = false) {
       let query = supabase
         .from('jobs')
         .select('*, companies(name, domain), job_functions(id, name, code, examples)')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (!includesClosed) {
         query = query.not('status', 'in', '("lost","closed","closed_won","closed_lost")');
@@ -176,6 +178,7 @@ export function useCompanies() {
       const { data, error } = await supabase
         .from('companies')
         .select('*, jobs(id)')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data.map((c) => ({

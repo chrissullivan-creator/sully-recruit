@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { ListSkeleton } from '@/components/shared/EmptyState';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
@@ -187,8 +188,8 @@ export default function SendOuts() {
     if (!deleteRow) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('send_outs').delete().eq('id', deleteRow.id);
-      if (error) throw error;
+      const { error } = await softDelete('send_outs', deleteRow.id);
+      if (error) throw new Error(error.message);
       toast.success('Removed from pipeline');
       invalidateSendOutScope(queryClient);
       setDeleteRow(null);

@@ -30,6 +30,7 @@ import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { invalidatePersonScope, invalidateNoteScope, invalidateJobScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 
 /* ------------------------------------------------------------------ */
 /*  Inline hooks                                                       */
@@ -253,9 +254,9 @@ const ContactDetail = () => {
     try {
       // contacts is a backwards-compat VIEW over people WHERE type='client'
       // — delete from people for clean cascade.
-      const { error } = await supabase.from('people').delete().eq('id', id);
-      if (error) throw error;
-      toast.success('Contact deleted');
+      const { error } = await softDelete('people', id);
+      if (error) throw new Error(error.message);
+      toast.success('Moved to trash — undo from /audit/trash within 30 days');
       invalidatePersonScope(queryClient);
       navigate('/contacts');
     } catch (err: any) {

@@ -12,6 +12,7 @@ import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Brief
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { invalidateJobScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -51,7 +52,7 @@ const Jobs = () => {
 
   const handleQuickDelete = async (jobId: string) => {
     try {
-      const { error } = await supabase.from('jobs').delete().eq('id', jobId);
+      const { error } = await softDelete('jobs', jobId).then(({ error }) => ({ error: error ? new Error(error.message) : null }));
       if (error) throw new Error(error.message);
       toast.success('Job deleted');
       invalidateJobScope(queryClient);

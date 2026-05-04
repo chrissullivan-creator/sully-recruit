@@ -42,6 +42,7 @@ import {
   invalidatePersonScope, invalidateSendOutScope, invalidateNoteScope,
   invalidateTaskScope,
 } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 
 const SEND_OUT_STAGES = [
   { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
@@ -241,9 +242,9 @@ const CandidateDetail = () => {
     if (!id) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('people').delete().eq('id', id);
+      const { error } = await softDelete('people', id);
       if (error) { toast.error(error.message || 'Failed to delete candidate'); return; }
-      toast.success('Candidate deleted');
+      toast.success('Moved to trash — undo from /audit/trash within 30 days');
       invalidatePersonScope(queryClient);
       navigate('/candidates');
     } catch (err: any) {
@@ -532,7 +533,7 @@ const CandidateDetail = () => {
   };
 
   const handleDeleteSendOut = async (sendOutId: string) => {
-    const { error } = await supabase.from('send_outs').delete().eq('id', sendOutId);
+    const { error } = await softDelete('send_outs', sendOutId).then(({ error }) => ({ error: error ? new Error(error.message) : null }));
     if (error) { toast.error('Failed to remove'); return; }
     queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
     toast.success('Removed from pipeline');

@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useProfiles } from '@/hooks/useProfiles';
 import { invalidateNoteScope } from '@/lib/invalidate';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 
 interface EntityNotesTabProps {
   /** Polymorphic notes target. Mirrors notes.entity_type values. */
@@ -28,6 +29,8 @@ export function EntityNotesTab({ entityType, entityId, placeholder }: EntityNote
   const { data: profiles = [] } = useProfiles();
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // Warn if the user navigates away with an unsaved note in the textarea.
+  useUnsavedChangesWarning(draft.trim().length > 0);
 
   const queryKey = ['notes', entityType, entityId];
   const activityKey = entityType === 'job' ? ['job_activity', entityId] : null;
