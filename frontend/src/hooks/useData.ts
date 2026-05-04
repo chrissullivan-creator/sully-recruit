@@ -523,8 +523,13 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
         cjRows.filter((r) => stages.includes(r.pipeline_stage));
 
       const pitchList      = inStage(['pitch', 'pitched']);
-      const sendOutListCJ  = inStage(['ready_to_send', 'send_out', 'sendout', 'sent']);
-      const submittedList  = inStage(['submitted']);
+      // "Send Out" = the working queue waiting to go out today.
+      // Once a candidate is actually sent, they move to Submission. So
+      // legacy 'sent' belongs with 'submitted', not with the queue.
+      // (Matches stageToCanonical() in pipeline.ts; the dashboard was
+      // double-counting until this fix.)
+      const sendOutListCJ  = inStage(['ready_to_send', 'send_out', 'sendout']);
+      const submittedList  = inStage(['submitted', 'sent']);
       const interviewListCJ = inStage(['interviewing', 'interview', 'interview_round_1', 'interview_round_2_plus']);
       const offerListCJ    = inStage(['offer']);
       const rejectionListCJ = inStage(['rejected', 'withdrew', 'withdrawn']);
