@@ -265,7 +265,10 @@ export const sequenceActionExecute = task({
             await checkSequenceComplete(supabase, enrollment);
             return { action: "skipped", reason: `invalid_email` };
           }
-          sendResult = await sendEmail(supabase, to, undefined, formatEmailBody(messageBody), senderUserId, undefined, action.use_signature !== false);
+          sendResult = await sendEmail(
+            supabase, to, undefined, formatEmailBody(messageBody), senderUserId,
+            undefined, action.use_signature !== false, payload.stepLogId,
+          );
           break;
         }
         case "sms":

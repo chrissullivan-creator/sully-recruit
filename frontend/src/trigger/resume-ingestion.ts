@@ -61,6 +61,27 @@ export const resumeIngestion = task({
     const rawText = await extractText(fileBytes, fileName);
     logger.info("Extracted text", { length: rawText.length });
 
+    // ── 2a. Resume sanity check ─────────────────────────────────────
+    // Cheap heuristic before we burn AI tokens on something that isn't a
+    // resume (random PDF attachment, signed contract, screenshot). We
+    // require: (a) at least 200 chars of text, (b) at least one email-
+    // shaped token, (c) at least one resume-y keyword. Fails are marked
+    // 'rejected_not_a_resume' so the candidate stub doesn't get garbage
+    // fields written to it.
+    if (!looksLikeResume(rawText)) {
+      logger.warn("File does not look like a resume; skipping AI parse", {
+        fileName, textLength: rawText.length,
+      });
+      await supabase
+        .from("resumes")
+        .update({
+          raw_text: rawText.slice(0, 4000),
+          parsing_status: "rejected_not_a_resume",
+        })
+        .eq("id", resumeId);
+      return { skipped: true, reason: "not_a_resume" };
+    }
+
     // ── 3. Parse with Claude ────────────────────────────────────────
     const anthropicKey = await getAnthropicKey();
     const parsedJson = await parseWithClaude(fileBytes, fileName, rawText, anthropicKey);
@@ -162,6 +183,35 @@ export const resumeIngestion = task({
 // ─────────────────────────────────────────────────────────────────────────────
 // TEXT EXTRACTION (ported from parse-resume edge function)
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Cheap pre-AI guard: does this look like a resume?
+ *
+ * Triggers a soft rejection if the extracted text is too short, missing
+ * any email pattern, AND missing all resume-shaped keywords. The bar is
+ * intentionally low — false positives waste a few cents of AI tokens,
+ * false negatives lose a candidate. So we only reject when *all three*
+ * signals are missing.
+ */
+function looksLikeResume(rawText: string): boolean {
+  const text = (rawText || "").toLowerCase();
+  if (text.length < 200) return false;
+
+  const hasEmail = /[\w.+-]+@[\w-]+\.[\w.-]+/.test(text);
+  const KEYWORDS = [
+    "experience", "education", "skills", "summary", "objective",
+    "employment", "qualifications", "responsibilities", "achievements",
+    "university", "college", "bachelor", "master", "ph.d", "phd",
+    "linkedin.com/in",
+  ];
+  const hasKeyword = KEYWORDS.some((k) => text.includes(k));
+
+  // If we have an email AND a keyword, definitely a resume.
+  if (hasEmail && hasKeyword) return true;
+  // Either alone is enough to keep going.
+  if (hasEmail || hasKeyword) return true;
+  return false;
+}
+
 async function extractText(fileBytes: Uint8Array, fileName: string): Promise<string> {
   const lowerName = fileName.toLowerCase();
 

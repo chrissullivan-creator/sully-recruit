@@ -49,6 +49,12 @@ export async function sendEmail(
     references?: string;
   },
   useSignature?: boolean,
+  /**
+   * Optional sequence step log id. When provided, a 1x1 transparent
+   * tracking pixel is appended to the email body so opens get attributed
+   * back to this step via /api/track/open.
+   */
+  trackingStepLogId?: string,
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
@@ -70,6 +76,26 @@ export async function sendEmail(
       }
     } catch (err: any) {
       logger.warn("Failed to fetch email signature, sending without", { error: err.message });
+    }
+  }
+
+  // Append 1×1 open-tracking pixel for sequence sends. Tracking host comes
+  // from app_settings.TRACKING_BASE_URL (falls back to the public app URL).
+  // Skipping is silent: missing host = no pixel = no tracking.
+  if (trackingStepLogId) {
+    try {
+      const { data: hostRow } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "TRACKING_BASE_URL")
+        .maybeSingle();
+      const host = (hostRow?.value || "").replace(/\/+$/, "");
+      if (host) {
+        const pixel = `<img src="${host}/api/track/open?id=${encodeURIComponent(trackingStepLogId)}" alt="" width="1" height="1" style="display:block;width:1px;height:1px;border:0" />`;
+        body = body + pixel;
+      }
+    } catch {
+      // Pixel failure is silent — never block the send.
     }
   }
 

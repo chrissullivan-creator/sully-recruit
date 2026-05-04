@@ -11,8 +11,9 @@ import { usePeople } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
-  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus,
+  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase,
 } from 'lucide-react';
+import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
@@ -92,6 +93,7 @@ const People = () => {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [bulkSendOutOpen, setBulkSendOutOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -206,9 +208,14 @@ const People = () => {
             {selectedKeys.length > 0 && (
               <>
                 {selectedCandidateIds.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-                    <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setBulkSendOutOpen(true)}>
+                      <Briefcase className="h-3.5 w-3.5 mr-1" /> Add to Job ({selectedCandidateIds.length})
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                      <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
+                    </Button>
+                  </>
                 )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -507,6 +514,16 @@ const People = () => {
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}
+        candidateIds={selectedCandidateIds}
+        candidateNames={selectedCandidateIds.map(id => {
+          const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
+          return p?.full_name ?? id;
+        })}
+      />
+
+      <BulkCandidateActionsDialog
+        open={bulkSendOutOpen}
+        onOpenChange={setBulkSendOutOpen}
         candidateIds={selectedCandidateIds}
         candidateNames={selectedCandidateIds.map(id => {
           const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
