@@ -28,32 +28,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (id) {
     // Fire-and-forget: don't await, don't fail the response.
+    // Atomic increment via RPC — real mail clients fire the pixel many
+    // times concurrently (preview, full view, image proxy), and a
+    // read-modify-write here would drop opens.
     (async () => {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
         if (!supabaseUrl || !serviceKey) return;
         const supabase = createClient(supabaseUrl, serviceKey);
-
-        const { data: existing } = await supabase
-          .from("sequence_step_logs")
-          .select("id, opened_at, open_count")
-          .eq("id", id)
-          .maybeSingle();
-
-        if (!existing) return;
-
-        const update: Record<string, any> = {
-          open_count: (existing.open_count ?? 0) + 1,
-        };
-        if (!existing.opened_at) {
-          update.opened_at = new Date().toISOString();
-        }
-
-        await supabase
-          .from("sequence_step_logs")
-          .update(update)
-          .eq("id", id);
+        await supabase.rpc("increment_step_log_open", { p_id: id });
       } catch {
         // Swallow — the pixel response must never block on tracking.
       }

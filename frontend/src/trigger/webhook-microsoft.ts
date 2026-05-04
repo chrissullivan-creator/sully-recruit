@@ -196,6 +196,10 @@ async function processResumesInboxEmail(
   senderEmail: string,
   recipientEmail: string,
 ): Promise<{ created: number; skipped: number }> {
+  // Idempotency anchor: the Graph message id (or internetMessageId) lets
+  // us recognise a webhook redelivery and skip duplicate processing.
+  const sourceMessageId: string | null =
+    message.id || message.internetMessageId || null;
   // Pull attachments from Graph
   let attachments: any[] = [];
   try {
@@ -267,6 +271,23 @@ async function processResumesInboxEmail(
 
   for (const att of resumeAtts) {
     const fileName = att.name as string;
+
+    // Dedup: the same (source_message_id, file_name) was already ingested
+    // on a prior delivery — skip cleanly. This makes webhook redeliveries
+    // free; without it we'd duplicate-parse and double-queue.
+    if (sourceMessageId) {
+      const { data: existingResume } = await supabase
+        .from("resumes")
+        .select("id")
+        .eq("source_message_id", sourceMessageId)
+        .eq("file_name", fileName)
+        .maybeSingle();
+      if (existingResume?.id) {
+        skipped++;
+        continue;
+      }
+    }
+
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `inbox/${candidateId}/${Date.now()}_${safeName}`;
     const buffer = Buffer.from(att.contentBytes as string, "base64");
@@ -284,9 +305,9 @@ async function processResumesInboxEmail(
       continue;
     }
 
-    // Create resumes row pointing at the file. resume-ingestion will flip
-    // it from pending → completed (or failed) and write parsed fields back
-    // to the candidate.
+    // Create resumes row. The (source_message_id, file_name) unique index
+    // is the dedup safety net — a redelivery race that wins the read but
+    // loses the insert lands here as a 23505 conflict, which we swallow.
     const { data: resumeRow, error: resErr } = await supabase
       .from("resumes")
       .insert({
@@ -296,12 +317,22 @@ async function processResumesInboxEmail(
         mime_type: att.contentType || null,
         parse_status: "pending",
         parsing_status: "pending",
+        source_message_id: sourceMessageId,
       } as any)
       .select("id")
       .single();
     if (resErr || !resumeRow?.id) {
-      logger.warn("Resumes inbox: resumes row insert failed", { fileName, error: resErr?.message });
-      skipped++;
+      // Postgres unique_violation = a concurrent webhook delivery won.
+      // Quietly skip; the other branch will queue the parse.
+      if ((resErr as any)?.code === "23505") {
+        skipped++;
+      } else {
+        logger.warn("Resumes inbox: resumes row insert failed", { fileName, error: resErr?.message });
+        skipped++;
+      }
+      // Best-effort cleanup of the orphaned upload so storage doesn't
+      // accumulate duplicates from the loser branch.
+      await supabase.storage.from(RESUMES_BUCKET).remove([storagePath]);
       continue;
     }
 
