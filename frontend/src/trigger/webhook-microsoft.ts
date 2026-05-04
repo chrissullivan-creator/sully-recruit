@@ -361,6 +361,22 @@ async function processEmailMessage(
     return { action: "skipped", reason: "no_sender_email" };
   }
 
+  // When mail is forwarded by Cloudflare Email Routing (or any other
+  // SRS-style forwarder) the visible From: can be rewritten to a
+  // forwarder-owned address. The real candidate email is preserved in
+  // Reply-To. Prefer Reply-To when the From: is from a known forwarder
+  // domain so we still match/create the right candidate.
+  const FORWARDER_DOMAINS = ["cloudflareemail.com", "cloudflarenet.com"];
+  const isFromForwarder = FORWARDER_DOMAINS.some((d) => senderEmail.endsWith("@" + d));
+  let effectiveSender = senderEmail;
+  if (isFromForwarder) {
+    const replyTo = (message.replyTo || []).map((r: any) => r?.emailAddress?.address?.toLowerCase()).filter(Boolean)[0];
+    if (replyTo) {
+      logger.info("Webhook: From is a forwarder; using Reply-To as sender", { from: senderEmail, replyTo });
+      effectiveSender = replyTo;
+    }
+  }
+
   // Resumes-inbox short-circuit: if the recipient is configured as a
   // resumes drop-box, treat each PDF/DOCX attachment as an inbound resume
   // and fan it out to the parser. Runs alongside (not instead of) normal
@@ -388,7 +404,7 @@ async function processEmailMessage(
     : null;
   if (matchedInbox) {
     await processResumesInboxEmail(
-      supabase, message, resourceUrl, accessToken, senderEmail, matchedInbox,
+      supabase, message, resourceUrl, accessToken, effectiveSender, matchedInbox,
     );
     // Continue on — we still want to log the email + match sender below.
   }
