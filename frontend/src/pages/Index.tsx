@@ -7,6 +7,7 @@ import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/c
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
 import { WeekCalendar } from '@/components/dashboard/WeekCalendar';
+import { OrgActivityFeed } from '@/components/dashboard/OrgActivityFeed';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -403,11 +404,19 @@ const Dashboard = () => {
         {/* ── This Week Calendar ────────────────────────────────────── */}
         <WeekCalendar />
 
-        {/* ── Tasks + Quick Actions ─────────────────────────────────── */}
+        {/* ── Tasks + Activity ───────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <DashboardTasks />
           </div>
+          <div>
+            <OrgActivityFeed />
+          </div>
+        </div>
+
+        {/* ── Quick Actions ──────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 hidden">{/* legacy slot */}</div>
           <div>
             <div className="rounded-lg border border-border bg-card p-6">
               <h2 className="text-lg font-semibold text-foreground mb-4">Quick Actions</h2>
