@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -322,7 +323,7 @@ const People = () => {
             <p className="text-sm text-muted-foreground">Try a different filter or search term.</p>
           </div>
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1300}>
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
@@ -503,7 +504,7 @@ const People = () => {
                 })}
               </tbody>
             </table>
-          </div>
+          </HorizontalTableScroll>
         )}
 
         {/* Pagination */}

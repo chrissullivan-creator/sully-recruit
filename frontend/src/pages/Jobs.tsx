@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -130,7 +131,7 @@ const Jobs = () => {
         ) : view === 'pipeline' ? (
           <JobPipeline />
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1200}>
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
@@ -220,7 +221,7 @@ const Jobs = () => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </HorizontalTableScroll>
         )}
       </div>
 
