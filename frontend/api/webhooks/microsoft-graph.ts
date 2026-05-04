@@ -4,12 +4,11 @@ import { tasks } from "@trigger.dev/sdk/v3";
 /**
  * Vercel serverless function — Microsoft Graph webhook receiver.
  *
- * Handles subscription validation and fires a Trigger.dev task for each
- * notification. Verifies the per-subscription `clientState` so we don't
- * trust a leaked webhook URL — Graph attaches the same clientState we
- * set when creating the subscription, and we drop notifications that
- * don't match. Expected value comes from the
- * MICROSOFT_GRAPH_CLIENT_STATE env var (set during subscription setup).
+ * Pairs with the Trigger.dev `process-microsoft-event` task in
+ * src/trigger/webhook-microsoft.ts. Microsoft requires a <3s response
+ * to webhook calls or it disables the subscription, so this file does
+ * the bare minimum (validation + queue) and the worker does the real
+ * processing.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Microsoft Graph subscription validation — return validationToken as plain text
@@ -22,36 +21,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const expectedClientState = process.env.MICROSOFT_GRAPH_CLIENT_STATE;
     const notifications = req.body?.value || [];
 
-    let dispatched = 0;
-    let rejected = 0;
-
+    // Trigger a task for each notification
     for (const notification of notifications) {
-      // Verify clientState if we have one configured. Reject mismatches
-      // so a leaked URL can't be used to inject fake notifications.
-      // Skip the check when the env var is unset (legacy deploys); log
-      // so the gap is visible in Vercel logs.
-      if (expectedClientState && notification.clientState !== expectedClientState) {
-        console.warn("Graph webhook: clientState mismatch — dropping notification", {
-          subscriptionId: notification.subscriptionId,
-        });
-        rejected++;
-        continue;
-      }
-      if (!expectedClientState) {
-        console.warn("Graph webhook: MICROSOFT_GRAPH_CLIENT_STATE not set — accepting unverified notification");
-      }
-
       await tasks.trigger("process-microsoft-event", {
         notification,
         receivedAt: new Date().toISOString(),
       });
-      dispatched++;
     }
 
-    return res.status(202).json({ received: true, dispatched, rejected });
+    return res.status(202).json({ received: true });
   } catch (err: any) {
     console.error("Microsoft Graph webhook error:", err.message);
     return res.status(202).json({ received: true, error: "processing_queued" });
