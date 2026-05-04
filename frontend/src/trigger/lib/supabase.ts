@@ -128,6 +128,20 @@ export async function getAnthropicKey(): Promise<string> {
 }
 
 /**
+ * Get OpenAI API key from app_settings. Used as a fallback parser when
+ * Anthropic is over quota / rate-limited / down. Returns empty string
+ * (not an error) so callers can detect "fallback unavailable" without
+ * a try/catch.
+ */
+export async function getOpenAIKey(): Promise<string> {
+  try {
+    return await getAppSetting("OPENAI_API_KEY");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Get Voyage AI API key from app_settings.
  */
 export async function getVoyageKey(): Promise<string> {
