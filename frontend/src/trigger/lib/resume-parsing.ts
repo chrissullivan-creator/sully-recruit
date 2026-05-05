@@ -116,28 +116,43 @@ export async function parseWithClaude(
       throw new Error("Invalid PDF header");
     }
     const b64 = toBase64(fileBytes);
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 1024,
-        system: RESUME_SYSTEM,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-            { type: "text", text: "Parse this resume and return the JSON." },
-          ],
-        }],
-      }),
-    });
-    if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    return { parsed: parseClaudeResponse(await res.json()), rawText: null };
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: 1024,
+          system: RESUME_SYSTEM,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+              { type: "text", text: "Parse this resume and return the JSON." },
+            ],
+          }],
+        }),
+      });
+      if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return { parsed: parseClaudeResponse(await res.json()), rawText: null };
+    } catch (claudeErr: any) {
+      const msg = String(claudeErr?.message || "");
+      if (!FALLBACKABLE.test(msg)) throw claudeErr;
+      const openAiKey = await getOpenAIKey();
+      if (!openAiKey) throw claudeErr;
+      // Extract PDF text and route through OpenAI.
+      const pdfParse = (await import("pdf-parse")).default;
+      const result = await pdfParse(Buffer.from(fileBytes));
+      const rawText = (result.text || "").trim();
+      if (rawText.length < 50) throw claudeErr;
+      logger.warn("Claude PDF failed, falling back to OpenAI on extracted text", { error: msg });
+      const parsed = await parseTextWithOpenAI(rawText, fileName, openAiKey);
+      return { parsed, rawText };
+    }
   }
 
   // DOCX / DOC — extract text first so we can fall back to OpenAI.
