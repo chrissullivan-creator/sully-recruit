@@ -1,370 +1,210 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
+import { getMicrosoftAccessToken } from "./lib/microsoft-graph";
+import { notifyError } from "./lib/alerting";
 
 /**
- * Scheduled task: pull upcoming Outlook calendar events and create/match
- * tasks (type=meeting) linked to candidates/contacts via meeting_attendees.
+ * Pull each configured mailbox's upcoming Outlook calendar events and
+ * upsert them as `tasks` (task_type='meeting'), with `meeting_attendees`
+ * + `task_links` rows for any attendee that matches a candidate or
+ * contact by email.
  *
- * Schedule in Trigger.dev Dashboard:
- *   Task: sync-outlook-events
- *   Cron: 0 12 * * * (daily at noon UTC / 7 AM ET)
+ * Architecture (mirrors backfill-emails / webhook-microsoft / send-channels):
+ *   - App-level Microsoft Graph token from getMicrosoftAccessToken()
+ *     (client_credentials grant via MICROSOFT_GRAPH_*).
+ *   - List of mailboxes from app_settings.MICROSOFT_GRAPH_ACCOUNT_EMAILS.
+ *   - Owner user_id resolved via integration_accounts.email_address.
+ *   - Hits /users/{email}/calendarview — /me/calendarview won't work
+ *     with an app token.
  *
- * Token sources (checked in order):
- *   1. user_integrations where integration_type = 'microsoft_oauth' (per-user delegated tokens)
- *   2. Fallback: app-level client_credentials grant via MICROSOFT_GRAPH_* settings
+ * Why this rewrite: the previous version filtered user_integrations for
+ * integration_type='microsoft_oauth' (none exist; the rows are stored
+ * as 'outlook'), and then fell back to /me/calendarview (incompatible
+ * with app-level tokens). Result: 0 tasks, calendar page blank.
+ *
+ * Schedule: every 30 minutes — frequent enough that today's events
+ * land before they're missed, light enough that we're not hammering
+ * Graph for 14d of forward-looking events.
  */
 export const syncOutlookEvents = schedules.task({
   id: "sync-outlook-events",
+  cron: "*/30 * * * *",
+  maxDuration: 300,
   run: async () => {
     const supabase = getSupabaseAdmin();
 
-    let eventsSynced = 0;
-    let eventsMatched = 0;
-    let accountsChecked = 0;
-
-    // ── Per-user delegated tokens from user_integrations ──────────────
-    const { data: userIntegrations } = await supabase
-      .from("user_integrations")
-      .select("user_id, config, is_active")
-      .eq("integration_type", "microsoft_oauth")
-      .eq("is_active", true);
-
-    for (const row of userIntegrations || []) {
-      const userId = row.user_id;
-      const config = (row.config || {}) as Record<string, string>;
-      let accessToken = config.access_token;
-      const refreshToken = config.refresh_token;
-      const expiresAt = config.expires_at;
-
-      if (!accessToken || !userId) continue;
-      accountsChecked++;
-
-      // Refresh token if expired (or within 5-minute buffer)
-      if (expiresAt && new Date(expiresAt).getTime() < Date.now() + 5 * 60 * 1000) {
-        if (!refreshToken) {
-          logger.warn(`Token expired and no refresh token for user ${userId} — marking inactive`);
-          await supabase
-            .from("user_integrations")
-            .update({ is_active: false } as any)
-            .eq("user_id", userId)
-            .eq("integration_type", "microsoft_oauth");
-          continue;
-        }
-        accessToken = await refreshAccessToken(supabase, userId, refreshToken);
-        if (!accessToken) continue;
-      }
-
-      const result = await syncEventsForUser(supabase, userId, accessToken);
-      if (result.tokenExpired) {
-        // Try refresh once
-        if (refreshToken) {
-          const newToken = await refreshAccessToken(supabase, userId, refreshToken);
-          if (newToken) {
-            const retry = await syncEventsForUser(supabase, userId, newToken);
-            eventsSynced += retry.synced;
-            eventsMatched += retry.matched;
-          }
-        } else {
-          await supabase
-            .from("user_integrations")
-            .update({ is_active: false } as any)
-            .eq("user_id", userId)
-            .eq("integration_type", "microsoft_oauth");
-        }
-      } else {
-        eventsSynced += result.synced;
-        eventsMatched += result.matched;
-      }
+    let graphEmailsRaw = "";
+    try { graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || ""; } catch {}
+    const graphEmails = new Set(
+      graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    );
+    if (graphEmails.size === 0) {
+      logger.warn("No mailboxes configured (MICROSOFT_GRAPH_ACCOUNT_EMAILS empty)");
+      return { events_synced: 0, events_matched: 0, mailboxes_checked: 0 };
     }
 
-    // ── Fallback: app-level integration_accounts (legacy) ─────────────
-    const { data: legacyAccounts } = await supabase
+    // owner user_id per mailbox via integration_accounts.email_address
+    const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, owner_user_id, provider, account_label, is_active")
-      .eq("provider", "microsoft")
+      .select("email_address, owner_user_id")
+      .eq("provider", "email")
       .eq("is_active", true);
+    const ownerByEmail = new Map<string, string>();
+    for (const a of accounts ?? []) {
+      const e = (a.email_address || "").toLowerCase().trim();
+      if (e && a.owner_user_id) ownerByEmail.set(e, a.owner_user_id);
+    }
 
-    // Only process legacy accounts that DON'T already have a user_integrations row
-    const usersWithDelegated = new Set((userIntegrations || []).map((r: any) => r.user_id));
+    let accessToken: string;
+    try {
+      accessToken = await getMicrosoftAccessToken();
+    } catch (err: any) {
+      await notifyError({ taskId: "sync-outlook-events", error: err, context: { phase: "token" } });
+      return { events_synced: 0, events_matched: 0, mailboxes_checked: 0, error: err.message };
+    }
 
-    for (const acct of legacyAccounts || []) {
-      const userId = acct.owner_user_id;
-      if (!userId || usersWithDelegated.has(userId)) continue;
+    let totalSynced = 0;
+    let totalMatched = 0;
+    let mailboxesChecked = 0;
+    const perMailbox: Array<{ email: string; synced: number; matched: number }> = [];
 
-      // Use app-level client_credentials for this account
+    for (const email of graphEmails) {
+      mailboxesChecked++;
+      const ownerUserId = ownerByEmail.get(email);
       try {
-        const appToken = await getAppLevelToken();
-        if (!appToken) continue;
-        accountsChecked++;
-        const result = await syncEventsForUser(supabase, userId, appToken);
-        eventsSynced += result.synced;
-        eventsMatched += result.matched;
+        const result = await syncMailbox(supabase, email, ownerUserId, accessToken);
+        totalSynced += result.synced;
+        totalMatched += result.matched;
+        perMailbox.push({ email, synced: result.synced, matched: result.matched });
       } catch (err: any) {
-        logger.warn(`Legacy sync error for account ${acct.id}: ${err.message}`);
+        await notifyError({
+          taskId: "sync-outlook-events",
+          error: err,
+          context: { mailbox: email },
+          severity: "WARN",
+        });
       }
     }
 
     const summary = {
-      events_synced: eventsSynced,
-      events_matched: eventsMatched,
-      accounts_checked: accountsChecked,
+      events_synced: totalSynced,
+      events_matched: totalMatched,
+      mailboxes_checked: mailboxesChecked,
+      per_mailbox: perMailbox,
     };
-
     logger.info("Outlook calendar sync complete", summary);
     return summary;
   },
 });
 
-// ── Sync events for a single user ──────────────────────────────────────────
+// ─── per-mailbox sync ──────────────────────────────────────────────────────
 
-async function syncEventsForUser(
+async function syncMailbox(
   supabase: any,
-  userId: string,
+  mailboxEmail: string,
+  ownerUserId: string | undefined,
   accessToken: string,
-): Promise<{ synced: number; matched: number; tokenExpired: boolean }> {
+): Promise<{ synced: number; matched: number }> {
   const now = new Date().toISOString();
-  const twoWeeksLater = new Date(Date.now() + 14 * 86400000).toISOString();
+  const twoWeeksLater = new Date(Date.now() + 14 * 86_400_000).toISOString();
+
+  const url =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailboxEmail)}/calendarview` +
+    `?startDateTime=${encodeURIComponent(now)}&endDateTime=${encodeURIComponent(twoWeeksLater)}` +
+    `&$select=id,iCalUId,subject,start,end,attendees,bodyPreview,location,onlineMeeting,onlineMeetingUrl` +
+    `&$top=50&$orderby=start/dateTime`;
+
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) {
+    throw new Error(`Graph ${resp.status} for ${mailboxEmail}: ${(await resp.text()).slice(0, 200)}`);
+  }
+  const events = ((await resp.json()) as any).value || [];
 
   let synced = 0;
   let matched = 0;
 
-  try {
-    const graphResp = await fetch(
-      `https://graph.microsoft.com/v1.0/me/calendarview` +
-        `?startDateTime=${now}&endDateTime=${twoWeeksLater}` +
-        `&$select=id,iCalUId,subject,start,end,attendees,bodyPreview,location,onlineMeeting,webLink,isOnlineMeeting,onlineMeetingUrl` +
-        `&$top=50&$orderby=start/dateTime`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
+  for (const event of events) {
+    const subject = event.subject || "";
+    const externalId = event.id || event.iCalUId;
+    const startDt = event.start?.dateTime || "";
+    const endDt = event.end?.dateTime || "";
+    if (!subject || !startDt) continue;
 
-    if (graphResp.status === 401) {
-      logger.warn(`Token expired for user ${userId}`);
-      return { synced: 0, matched: 0, tokenExpired: true };
-    }
-    if (!graphResp.ok) {
-      logger.warn(`Graph API ${graphResp.status} for user ${userId}`);
-      return { synced: 0, matched: 0, tokenExpired: false };
-    }
-
-    const events = ((await graphResp.json()) as any).value || [];
-
-    for (const event of events) {
-      const subject = event.subject || "";
-      const externalId = event.id || event.iCalUId;
-      const startDt = event.start?.dateTime || "";
-      const endDt = event.end?.dateTime || "";
-      if (!subject || !startDt) continue;
-
-      // Dedup by external_id
-      if (externalId) {
-        const { data: existing } = await supabase
-          .from("tasks")
-          .select("id")
-          .eq("external_id", externalId)
-          .limit(1);
-        if (existing?.length) continue;
-      }
-
-      // Also dedup by title + date (fallback for events without external_id)
+    if (externalId) {
+      const { data: existing } = await supabase
+        .from("tasks").select("id").eq("external_id", externalId).limit(1);
+      if (existing?.length) continue;
+    } else {
       const dateOnly = startDt.slice(0, 10);
-      if (!externalId) {
-        const { data: existing } = await supabase
-          .from("tasks")
-          .select("id")
-          .eq("title", subject)
-          .eq("due_date", dateOnly)
-          .eq("created_by", userId)
-          .limit(1);
-        if (existing?.length) continue;
-      }
-
-      // Extract meeting URL
-      const meetingUrl =
-        event.onlineMeetingUrl ||
-        event.onlineMeeting?.joinUrl ||
-        "";
-
-      // Extract location
-      const locationText = event.location?.displayName || "";
-
-      // Match attendee emails to candidates/contacts
-      const attendeeEmails: string[] = (event.attendees || [])
-        .map((a: any) => a.emailAddress?.address?.toLowerCase())
-        .filter(Boolean);
-
-      const attendeeMatches: { entityId: string; entityType: string; email: string }[] = [];
-
-      for (const email of attendeeEmails) {
-        const match = await matchByEmail(supabase, email);
-        if (match) {
-          attendeeMatches.push({ ...match, email });
-        }
-      }
-
-      // Create the task as a meeting
-      const { data: taskData, error: taskErr } = await supabase
-        .from("tasks")
-        .insert({
-          title: subject,
-          description: (event.bodyPreview || "").slice(0, 500) || `Outlook calendar event`,
-          priority: "medium",
-          due_date: dateOnly,
-          start_time: startDt.endsWith("Z") ? startDt : startDt + "Z",
-          end_time: endDt ? (endDt.endsWith("Z") ? endDt : endDt + "Z") : null,
-          timezone: event.start?.timeZone || "UTC",
-          task_type: "meeting",
-          location: locationText || null,
-          meeting_url: meetingUrl || null,
-          assigned_to: userId,
-          created_by: userId,
-          external_id: externalId || null,
-        } as any)
-        .select("id")
-        .single();
-
-      if (taskErr || !taskData) {
-        logger.warn("Failed to insert task", { error: taskErr?.message, subject });
-        continue;
-      }
-      synced++;
-
-      // Insert meeting_attendees for matched people
-      for (const m of attendeeMatches) {
-        await supabase.from("meeting_attendees").insert({
-          task_id: taskData.id,
-          entity_type: m.entityType,
-          entity_id: m.entityId,
-        } as any);
-
-        // Also create task_links so the event shows up on entity pages
-        await supabase.from("task_links").insert({
-          task_id: taskData.id,
-          entity_type: m.entityType,
-          entity_id: m.entityId,
-        } as any);
-
-        matched++;
-      }
-    }
-  } catch (err: any) {
-    logger.warn(`Graph API error for user ${userId}: ${err.message}`);
-  }
-
-  return { synced, matched, tokenExpired: false };
-}
-
-// ── Token refresh ──────────────────────────────────────────────────────────
-
-async function refreshAccessToken(
-  supabase: any,
-  userId: string,
-  refreshToken: string,
-): Promise<string | null> {
-  try {
-    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
-
-    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-    const resp = await fetch(tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-        scope: "openid profile email offline_access Calendars.Read Calendars.ReadWrite Mail.Read Mail.Send User.Read",
-      }),
-    });
-
-    if (!resp.ok) {
-      logger.error(`Token refresh failed for user ${userId}`, { status: resp.status });
-      await supabase
-        .from("user_integrations")
-        .update({ is_active: false } as any)
-        .eq("user_id", userId)
-        .eq("integration_type", "microsoft_oauth");
-      return null;
+      const { data: existing } = await supabase
+        .from("tasks").select("id")
+        .eq("title", subject).eq("due_date", dateOnly).eq("created_by", ownerUserId).limit(1);
+      if (existing?.length) continue;
     }
 
-    const data = await resp.json();
-    const expiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
+    const meetingUrl = event.onlineMeetingUrl || event.onlineMeeting?.joinUrl || "";
+    const locationText = event.location?.displayName || "";
+    const dateOnly = startDt.slice(0, 10);
 
-    // Update stored tokens
-    const { data: existing } = await supabase
-      .from("user_integrations")
-      .select("config")
-      .eq("user_id", userId)
-      .eq("integration_type", "microsoft_oauth")
-      .maybeSingle();
+    const attendeeEmails: string[] = (event.attendees || [])
+      .map((a: any) => a.emailAddress?.address?.toLowerCase())
+      .filter(Boolean);
 
-    const existingConfig = (existing?.config || {}) as Record<string, string>;
+    const attendeeMatches: { entityId: string; entityType: string; email: string }[] = [];
+    for (const e of attendeeEmails) {
+      const m = await matchByEmail(supabase, e);
+      if (m) attendeeMatches.push({ ...m, email: e });
+    }
 
-    await supabase
-      .from("user_integrations")
-      .update({
-        config: {
-          ...existingConfig,
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || refreshToken,
-          expires_at: expiresAt,
-        },
-      })
-      .eq("user_id", userId)
-      .eq("integration_type", "microsoft_oauth");
+    const { data: taskData, error: taskErr } = await supabase
+      .from("tasks")
+      .insert({
+        title: subject,
+        description: (event.bodyPreview || "").slice(0, 500) || "Outlook calendar event",
+        priority: "medium",
+        due_date: dateOnly,
+        start_time: startDt.endsWith("Z") ? startDt : startDt + "Z",
+        end_time: endDt ? (endDt.endsWith("Z") ? endDt : endDt + "Z") : null,
+        timezone: event.start?.timeZone || "UTC",
+        task_type: "meeting",
+        location: locationText || null,
+        meeting_url: meetingUrl || null,
+        assigned_to: ownerUserId ?? null,
+        created_by: ownerUserId ?? null,
+        external_id: externalId || null,
+      } as any)
+      .select("id").single();
 
-    logger.info(`Refreshed token for user ${userId}`);
-    return data.access_token;
-  } catch (err: any) {
-    logger.error(`Token refresh error for user ${userId}: ${err.message}`);
-    return null;
+    if (taskErr || !taskData) {
+      logger.warn("Failed to insert task", { error: taskErr?.message, subject });
+      continue;
+    }
+    synced++;
+
+    for (const m of attendeeMatches) {
+      await supabase.from("meeting_attendees").insert({
+        task_id: taskData.id, entity_type: m.entityType, entity_id: m.entityId,
+      } as any);
+      await supabase.from("task_links").insert({
+        task_id: taskData.id, entity_type: m.entityType, entity_id: m.entityId,
+      } as any);
+      matched++;
+    }
   }
+
+  return { synced, matched };
 }
-
-// ── App-level token (client_credentials grant) ─────────────────────────────
-
-async function getAppLevelToken(): Promise<string | null> {
-  try {
-    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
-
-    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-    const resp = await fetch(tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      }),
-    });
-
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return data.access_token;
-  } catch {
-    return null;
-  }
-}
-
-// ── Email matching ─────────────────────────────────────────────────────────
 
 async function matchByEmail(
   supabase: any,
   email: string,
 ): Promise<{ entityId: string; entityType: string } | null> {
   const normalized = email.toLowerCase().trim();
-
-  const [candidateRes, contactRes] = await Promise.all([
+  const [people, contactsRes] = await Promise.all([
     supabase.from("people").select("id").ilike("email", normalized).limit(1),
     supabase.from("contacts").select("id").ilike("email", normalized).limit(1),
   ]);
-
-  if (candidateRes.data?.[0]) {
-    return { entityId: candidateRes.data[0].id, entityType: "candidate" };
-  }
-  if (contactRes.data?.[0]) {
-    return { entityId: contactRes.data[0].id, entityType: "contact" };
-  }
-
+  if (people.data?.[0]) return { entityId: people.data[0].id, entityType: "candidate" };
+  if (contactsRes.data?.[0]) return { entityId: contactsRes.data[0].id, entityType: "contact" };
   return null;
 }
