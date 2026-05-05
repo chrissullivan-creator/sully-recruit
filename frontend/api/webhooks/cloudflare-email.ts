@@ -31,16 +31,32 @@ import { simpleParser } from "mailparser";
 
 export const config = {
   api: {
-    // mailparser handles binary streams; let bodyParser hand us the raw text.
-    bodyParser: {
-      sizeLimit: "30mb",
-    },
+    // Disable Vercel's bodyParser — Cloudflare sends raw RFC822 with
+    // Content-Type 'message/rfc822' which bodyParser doesn't handle, so
+    // req.body comes through as undefined. Read the stream ourselves
+    // and feed it to mailparser directly.
+    bodyParser: false,
   },
 };
 
 const RESUME_EXTS = [".pdf", ".doc", ".docx"];
 const RESUMES_BUCKET = "resumes";
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB per attachment
+const MAX_REQUEST_BYTES = 30 * 1024 * 1024; // 30 MB total request size cap
+
+async function readRawBody(req: VercelRequest): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req as any) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > MAX_REQUEST_BYTES) {
+      throw new Error(`request body exceeds ${MAX_REQUEST_BYTES} bytes`);
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "method not allowed" });
@@ -68,19 +84,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: "unauthorized" });
   }
 
-  // The Worker may pass the raw email as a string (default JSON body
-  // parsing) or as a Buffer. Normalise to a Buffer for mailparser.
+  // bodyParser is disabled — read the raw stream ourselves. Cloudflare
+  // sends the RFC822 email body with Content-Type 'message/rfc822'.
   let raw: Buffer;
-  if (typeof req.body === "string") {
-    raw = Buffer.from(req.body, "utf-8");
-  } else if (Buffer.isBuffer(req.body)) {
-    raw = req.body;
-  } else if (req.body && typeof req.body === "object") {
-    // Some Vercel runtimes may have decoded JSON unexpectedly; reject
-    // here rather than guess.
-    return res.status(400).json({ error: "expected raw RFC822 body, got object" });
-  } else {
-    return res.status(400).json({ error: "missing body" });
+  try {
+    raw = await readRawBody(req);
+  } catch (err: any) {
+    console.error("Cloudflare email: body read failed", err.message);
+    return res.status(400).json({ error: `body read failed: ${err.message}` });
+  }
+  if (raw.length === 0) {
+    return res.status(400).json({ error: "empty body" });
   }
 
   // Cloudflare envelope headers (preserved by the Worker).
