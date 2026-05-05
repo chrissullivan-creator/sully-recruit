@@ -17,7 +17,11 @@ import { cn } from '@/lib/utils';
 const ACCEPTED_EXTS = ['.pdf', '.doc', '.docx', '.txt'];
 const MAX_BYTES = 20 * 1024 * 1024;
 const RESUMES_BUCKET = 'resumes';
-const CONCURRENCY = 4;
+// How many uploads run in parallel. The queue itself is unbounded —
+// you can drop hundreds of files and they'll all process. 8 is a good
+// balance between throughput and not hammering Supabase Storage's
+// connection pool.
+const CONCURRENCY = 8;
 
 type RowStatus = 'pending' | 'uploading' | 'queued' | 'failed';
 
@@ -174,7 +178,7 @@ export default function PeopleImport() {
             Drop resumes here, or click to choose
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            PDF / DOC / DOCX / TXT · 20 MB each · drop hundreds at once
+            PDF / DOC / DOCX / TXT · 20 MB each · no cap on count — drop a whole folder
           </p>
         </div>
 

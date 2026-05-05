@@ -17,7 +17,7 @@ interface QuickStatsProps {
   closedAt?: string | null;
   /** When provided, clicking the Submitted / Interview / Placed rows calls this with the
    *  matching canonical stage so the parent can scroll to / highlight it. */
-  onStageClick?: (stage: 'submitted' | 'interview_round_1' | 'placed') => void;
+  onStageClick?: (stage: 'submitted' | 'interview' | 'placed') => void;
 }
 
 export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedAt, onStageClick }: QuickStatsProps) {
@@ -39,7 +39,7 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
   for (const r of rows) {
     const c = stageToCanonical(r.pipeline_stage);
     if (c === 'submitted') submitted++;
-    else if (c === 'interview_round_1' || c === 'interview_round_2_plus') interviewing++;
+    else if (c === 'interview') interviewing++;
     else if (c === 'placed') placed++;
   }
   const submissionRate = total > 0 ? Math.round((submitted / total) * 100) : 0;
@@ -76,7 +76,7 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
         <StatRow icon={Calendar} label="Days Open"        value={`${daysOpen}d`} />
         <StatRow icon={Users}    label="Total Candidates" value={String(total)} />
         <StatRow icon={FileCheck} label="Submission Rate" value={`${submissionRate}%`} onClick={onStageClick ? () => onStageClick('submitted') : undefined} />
-        <StatRow icon={Calendar} label="Interview Rate"   value={`${interviewRate}%`} onClick={onStageClick ? () => onStageClick('interview_round_1') : undefined} />
+        <StatRow icon={Calendar} label="Interview Rate"   value={`${interviewRate}%`} onClick={onStageClick ? () => onStageClick('interview') : undefined} />
         {placed > 0 && <StatRow icon={Award} label="Placed" value={String(placed)} gold onClick={onStageClick ? () => onStageClick('placed') : undefined} />}
       </div>
     </div>

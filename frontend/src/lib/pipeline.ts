@@ -1,18 +1,27 @@
 // Canonical pipeline funnel — single source of truth for stage labels and groupings.
-// Per the Send Outs / Job Detail spec, the canonical stage list is:
-//   pitch → ready_to_send → submitted → interview_round_1 → interview_round_2_plus
-//   → offer → placed → withdrawn
 //
-// Existing data uses synonym values (sent, send_out, interviewing, etc.) — the
-// stageToCanonical() mapper normalises them so the UI can group cleanly.
-// Rejected rows fold into withdrawn for now (final-exit lane).
+// Per the firm's terminology (May 2026), the pipeline is:
+//   Pitch       — candidate needs to be pitched the role
+//   Send Out    — candidate is ready to go (queue waiting to go to client)
+//   Submission  — candidate has been sent to the client
+//   Interview   — candidate is in the client's interview process
+//                 (round number captured separately in send_outs.interview_round)
+//   Offer       — client has extended an offer
+//   Withdrawn   — terminal exit, with optional withdrawn_reason text
+//
+// `placed` is kept as a 7th stage value so historical "win" rows still
+// resolve, but it doesn't show up on the main funnel tiles — Placed is
+// the success outcome after Offer, surfaced on the Send Outs page in
+// its own collapsible section + on Reports.
+//
+// Existing data uses synonym values (sent, send_out, interview_round_1,
+// etc.) — stageToCanonical() normalises them so the UI groups cleanly.
 
 export type CanonicalStage =
   | 'pitch'
   | 'ready_to_send'
   | 'submitted'
-  | 'interview_round_1'
-  | 'interview_round_2_plus'
+  | 'interview'
   | 'offer'
   | 'placed'
   | 'withdrawn';
@@ -37,9 +46,6 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     dotColor: 'bg-stage-warm',
   },
   {
-    // Per the firm's terminology: "Send Out" = candidate is ready to go
-    // (queue waiting to be sent to client today). Internal stage stays
-    // 'ready_to_send' so the DB CHECK + existing rows don't have to move.
     key: 'ready_to_send',
     label: 'Send Out',
     shortLabel: 'Send Out',
@@ -48,8 +54,6 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     dotColor: 'bg-yellow-600',
   },
   {
-    // "Submission" = the candidate has been submitted to the client.
-    // Internal stage stays 'submitted'.
     key: 'submitted',
     label: 'Submission',
     shortLabel: 'Submission',
@@ -58,31 +62,29 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     dotColor: 'bg-purple-600',
   },
   {
-    key: 'interview_round_1',
-    label: 'Interview R1',
-    shortLabel: 'R1',
-    pipelineStageValues: ['interview_round_1', 'interview', 'interviewing'],
+    // Single Interview stage — round number lives on send_outs.interview_round
+    // (and candidate_jobs.interview_round). Legacy split values
+    // ('interview_round_1', 'interview_round_2_plus') were migrated in
+    // the May 2026 pipeline_simplification_* migration.
+    key: 'interview',
+    label: 'Interview',
+    shortLabel: 'Interview',
+    pipelineStageValues: ['interview', 'interviewing', 'interview_round_1', 'interview_round_2_plus'],
     color: 'bg-emerald/10 text-emerald border-emerald/30',
     dotColor: 'bg-emerald',
-  },
-  {
-    key: 'interview_round_2_plus',
-    label: 'Interview R2+',
-    shortLabel: 'R2+',
-    pipelineStageValues: ['interview_round_2_plus'],
-    color: 'bg-emerald-dark/10 text-emerald-dark border-emerald-dark/30',
-    dotColor: 'bg-emerald-dark',
   },
   {
     key: 'offer',
     label: 'Offer',
     shortLabel: 'Offer',
     pipelineStageValues: ['offer'],
-    // Offer is gold per spec — premium UI moment.
     color: 'bg-gold/10 text-gold-deep border-gold/40',
     dotColor: 'bg-gold',
   },
   {
+    // 'placed' = the success terminal. Kept so existing data resolves
+    // and so reports / Send Outs page can show the wins. Not surfaced
+    // on the main 6-tile dashboard funnel.
     key: 'placed',
     label: 'Placed',
     shortLabel: 'Placed',
@@ -94,10 +96,19 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     key: 'withdrawn',
     label: 'Withdrawn',
     shortLabel: 'Withdrawn',
-    pipelineStageValues: ['withdrawn', 'withdrew', 'rejected', 'declined'],
+    pipelineStageValues: ['withdrawn', 'withdrew', 'rejected', 'declined', 'reject'],
     color: 'bg-muted text-muted-foreground border-border',
     dotColor: 'bg-muted-foreground',
   },
+];
+
+/**
+ * Stages that show up as funnel tiles on the Dashboard. `placed` is
+ * intentionally excluded — it's a success outcome, not a step. Reports
+ * + Send Outs page surface it on their own.
+ */
+export const FUNNEL_STAGES: CanonicalStage[] = [
+  'pitch', 'ready_to_send', 'submitted', 'interview', 'offer', 'withdrawn',
 ];
 
 const STAGE_TO_CANONICAL: Record<string, CanonicalStage> = (() => {

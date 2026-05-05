@@ -21,6 +21,7 @@ import { StageTable } from '@/components/send-outs/StageTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 import { BulkActionBar } from '@/components/send-outs/BulkActionBar';
+import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -70,6 +71,10 @@ export default function SendOuts() {
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
   const [deleteRow, setDeleteRow] = useState<SendOutRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // When set, a move to 'withdrawn' is pending the reason dialog.
+  const [pendingWithdrawal, setPendingWithdrawal] = useState<{
+    row: SendOutRow; source: string;
+  } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -139,7 +144,7 @@ export default function SendOuts() {
     if (target === 'all') return expandAll();
     const targets: CanonicalStage[] =
       target === 'submitted'    ? ['submitted'] :
-      target === 'interviewing' ? ['interview_round_1', 'interview_round_2_plus'] :
+      target === 'interviewing' ? ['interview'] :
       target === 'offer'        ? ['offer'] : [];
     setOpenStages(new Set(targets));
   };
@@ -156,7 +161,12 @@ export default function SendOuts() {
     await commitMove(row, nextK, 'advance');
   };
 
-  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string) => {
+  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string, withdrawnReason?: string) => {
+    // Withdrawn requires a reason — defer the move until the dialog returns.
+    if (target === 'withdrawn' && !withdrawnReason) {
+      setPendingWithdrawal({ row, source });
+      return;
+    }
     // Optimistic patch — react-query cache update.
     queryClient.setQueryData<SendOutRow[]>(['send_outs_list'], (prev = []) =>
       prev.map((r) => (r.id === row.id ? { ...r, stage: target } : r)),
@@ -169,6 +179,7 @@ export default function SendOuts() {
       triggerSource: source,
       entityId: row.candidate?.id ?? null,
       entityType: 'send_out',
+      withdrawnReason: withdrawnReason ?? null,
     });
     if (!res.ok) {
       // Roll back.
@@ -344,6 +355,19 @@ export default function SendOuts() {
         onOpenChange={(v) => setAddModal((prev) => ({ ...prev, open: v }))}
         jobId={addModal.jobId}
         stage={addModal.stage}
+      />
+
+      <WithdrawnReasonDialog
+        open={!!pendingWithdrawal}
+        onOpenChange={(v) => { if (!v) setPendingWithdrawal(null); }}
+        candidateName={pendingWithdrawal?.row.candidate?.full_name ?? undefined}
+        jobTitle={pendingWithdrawal?.row.job?.title ?? undefined}
+        onConfirm={async (reason) => {
+          if (!pendingWithdrawal) return;
+          const { row, source } = pendingWithdrawal;
+          setPendingWithdrawal(null);
+          await commitMove(row, 'withdrawn', source, reason);
+        }}
       />
 
       <AlertDialog open={!!deleteRow} onOpenChange={(v) => { if (!v) setDeleteRow(null); }}>
