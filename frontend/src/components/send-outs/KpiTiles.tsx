@@ -37,7 +37,7 @@ export function KpiTiles({ rows, onTileClick, offerFee }: KpiTilesProps) {
 
   const tiles: TileSpec[] = [
     { key: 'all',          label: 'Active',       value: active,       icon: Send,      gold: false, dropStage: null },
-    { key: 'submitted',    label: 'Submitted',    value: submitted,    icon: FileCheck, gold: false, dropStage: 'submitted' },
+    { key: 'submitted',    label: 'Submission',   value: submitted,    icon: FileCheck, gold: false, dropStage: 'submitted' },
     { key: 'interviewing', label: 'Interviewing', value: interviewing, icon: Calendar,  gold: false, dropStage: 'interview_round_1' },
     { key: 'offer',        label: 'Offer Stage',  value: offer,        icon: Award,     gold: true,  dropStage: 'offer', sub: offerFee ? `~$${Math.round(offerFee / 1000)}k est. fee` : undefined },
   ];

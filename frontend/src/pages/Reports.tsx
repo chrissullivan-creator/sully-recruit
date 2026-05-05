@@ -121,7 +121,7 @@ export default function Reports() {
         {/* KPI strip */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <KpiCard label="Total Send-outs" value={totals.total.toString()} />
-          <KpiCard label="Sent Out" value={totals.sentOut.toString()} />
+          <KpiCard label="Submissions" value={totals.sentOut.toString()} />
           <KpiCard label="Interviews" value={totals.interviews.toString()} />
           <KpiCard label="Offers" value={totals.offers.toString()} />
           <KpiCard label="Placements" value={totals.placements.toString()} highlight />
@@ -224,7 +224,7 @@ function AggTable({ rows, headerLabel, emptyText }: { rows: AggRow[]; headerLabe
           <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground border-b border-card-border bg-page-bg/40">
             <th className="px-4 py-2.5">{headerLabel}</th>
             <th className="px-3 py-2.5 text-right">Total</th>
-            <th className="px-3 py-2.5 text-right">Sent</th>
+            <th className="px-3 py-2.5 text-right">Submissions</th>
             <th className="px-3 py-2.5 text-right">Interviews</th>
             <th className="px-3 py-2.5 text-right">Offers</th>
             <th className="px-3 py-2.5 text-right">Placed</th>
