@@ -45,7 +45,7 @@ import {
 import { softDelete } from '@/lib/softDelete';
 import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
-import { stageToCanonical, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
+import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPELINE } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -368,6 +368,20 @@ const JobDetail = () => {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [funnelStage, setFunnelStage] = useState<CanonicalStage | null>(null);
+  // Active sub-tab inside the Send Outs tab. 'all' shows everything;
+  // anything else filters by canonical pipeline stage.
+  const [sendOutStageTab, setSendOutStageTab] = useState<'all' | CanonicalStage>('all');
+  // Top-level tab. Made controlled so funnel-strip / quick-stats clicks
+  // can jump straight to the Send Outs sub-tab they imply.
+  const [activeJobTab, setActiveJobTab] = useState<string>('details');
+
+  /** Click handler for funnel-strip / quick-stats: jump to the Send Outs
+   *  tab and pre-select the matching sub-tab. */
+  const focusStage = (s: CanonicalStage | null) => {
+    setFunnelStage(s);
+    setSendOutStageTab(s ?? 'all');
+    setActiveJobTab('send-outs');
+  };
   const [activeDrag, setActiveDrag] = useState<KanbanRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -914,7 +928,7 @@ const JobDetail = () => {
         <FunnelStrip
           jobId={id!}
           activeStage={funnelStage}
-          onStageClick={setFunnelStage}
+          onStageClick={focusStage}
           dropTargets
         />
 
@@ -1071,11 +1085,10 @@ const JobDetail = () => {
 
         {/* ── Tabs Area ────────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
+          <Tabs value={activeJobTab} onValueChange={setActiveJobTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-secondary">
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
-                <TabsTrigger value="pipeline" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
@@ -1144,15 +1157,6 @@ const JobDetail = () => {
               </TabsContent>
 
               {/* ── Pipeline Tab (kanban with DnD; DndContext is at page-level) ─ */}
-              <TabsContent value="pipeline" className="px-6 lg:px-8 py-5 mt-0">
-                <JobPipelineKanban
-                  jobId={job.id}
-                  filterStage={funnelStage}
-                  overStage={overStage}
-                  onCardClick={(row) => { if (row.candidate?.id) navigate(`/candidates/${row.candidate.id}`); }}
-                />
-              </TabsContent>
-
               {/* ── AI Matches Tab ─────────────────────────── */}
               <TabsContent value="matches" className="px-8 py-5 mt-0">
                 <JobMatchesList jobId={job.id} />
@@ -1339,48 +1343,108 @@ const JobDetail = () => {
 
               {/* ── Send Outs Tab ──────────────────────────── */}
               <TabsContent value="send-outs" className="px-6 lg:px-8 py-5 mt-0">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-emerald" />
-                    <h2 className="text-base font-display font-semibold text-emerald-dark">Send Outs</h2>
-                    {(sendOuts as any[]).length > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums bg-emerald-light text-emerald-dark ml-1">
-                        {(sendOuts as any[]).length}
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    onClick={() => setAddSendOutOpen(true)}
-                  >
-                    <UserPlus className="h-3.5 w-3.5" />
-                    Add Candidate
-                  </Button>
-                </div>
-                {(sendOuts as any[]).length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No send outs yet</p>
-                    <p className="text-xs text-muted-foreground mb-3">Send outs will appear here once candidates are submitted.</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => setAddSendOutOpen(true)}
-                    >
-                      <UserPlus className="h-3.5 w-3.5" />
-                      Add Candidate
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {(sendOuts as any[]).map(so => (
-                      <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  // Group send-outs into the canonical pipeline buckets so each
+                  // sub-tab shows exactly what its label says (and counts match
+                  // the Dashboard / Send Outs page tile semantics).
+                  const allSendOuts = sendOuts as any[];
+                  const countByStage = new Map<CanonicalStage, number>();
+                  for (const so of allSendOuts) {
+                    const c = stageToCanonical(so.stage);
+                    if (c) countByStage.set(c, (countByStage.get(c) ?? 0) + 1);
+                  }
+                  const filtered = sendOutStageTab === 'all'
+                    ? allSendOuts
+                    : allSendOuts.filter((so) => stageToCanonical(so.stage) === sendOutStageTab);
+
+                  // Order matches Dashboard: Pitch / Send Out / Submission /
+                  // Interview R1 / Interview R2+ / Offer / Placed / Withdrawn.
+                  const subTabs: { key: 'all' | CanonicalStage; label: string; count: number }[] = [
+                    { key: 'all', label: 'All', count: allSendOuts.length },
+                    ...CANONICAL_PIPELINE.map((s) => ({
+                      key: s.key, label: s.shortLabel, count: countByStage.get(s.key) ?? 0,
+                    })),
+                  ];
+
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-emerald" />
+                          <h2 className="text-base font-display font-semibold text-emerald-dark">Send Outs</h2>
+                          {allSendOuts.length > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums bg-emerald-light text-emerald-dark ml-1">
+                              {allSendOuts.length}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5"
+                          onClick={() => setAddSendOutOpen(true)}
+                        >
+                          <UserPlus className="h-3.5 w-3.5" />
+                          Add Candidate
+                        </Button>
+                      </div>
+
+                      {/* Sub-tabs across the canonical pipeline */}
+                      <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
+                        {subTabs.map((t) => {
+                          const active = sendOutStageTab === t.key;
+                          return (
+                            <button
+                              key={t.key}
+                              onClick={() => setSendOutStageTab(t.key)}
+                              className={cn(
+                                'shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                                active
+                                  ? 'bg-emerald text-white border-emerald'
+                                  : 'bg-white text-muted-foreground border-card-border hover:border-emerald/40 hover:text-emerald-dark',
+                              )}
+                            >
+                              {t.label}
+                              <span className={cn(
+                                'inline-flex items-center justify-center min-w-5 h-4 px-1 rounded-full text-[10px] font-semibold tabular-nums',
+                                active ? 'bg-emerald-dark text-white' : 'bg-emerald-light text-emerald-dark',
+                              )}>
+                                {t.count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {allSendOuts.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                          <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                          <p className="text-sm font-medium mb-1">No send outs yet</p>
+                          <p className="text-xs text-muted-foreground mb-3">Send outs will appear here once candidates are submitted.</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => setAddSendOutOpen(true)}
+                          >
+                            <UserPlus className="h-3.5 w-3.5" />
+                            Add Candidate
+                          </Button>
+                        </div>
+                      ) : filtered.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                          No send outs in this stage.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {filtered.map(so => (
+                            <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </TabsContent>
 
               {/* ── Notes Tab ─────────────────────────────── */}
@@ -1401,7 +1465,7 @@ const JobDetail = () => {
             feePct={(job as any).fee_pct ?? null}
             createdAt={job.created_at}
             closedAt={(job as any).closed_at ?? (job as any).filled_at ?? null}
-            onStageClick={(s) => setFunnelStage(s)}
+            onStageClick={(s) => focusStage(s)}
           />
           <JobActivityFeed jobId={id!} limit={10} />
         </aside>
