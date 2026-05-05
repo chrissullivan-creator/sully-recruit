@@ -37,6 +37,40 @@ export async function getMicrosoftAccessToken(): Promise<string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SIMPLE INTERNAL EMAIL — fire-and-forget summary mails (e.g. reconcile run
+// reports). Skips silently when sender/recipients aren't configured.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function sendInternalEmail(
+  fromEmail: string,
+  toEmails: string[],
+  subject: string,
+  htmlBody: string,
+): Promise<void> {
+  if (!fromEmail || toEmails.length === 0) return;
+  const accessToken = await getMicrosoftAccessToken();
+  const resp = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "HTML", content: htmlBody },
+          toRecipients: toEmails.map((addr) => ({ emailAddress: { address: addr } })),
+        },
+        saveToSentItems: true,
+      }),
+    },
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    logger.warn("sendInternalEmail failed", { fromEmail, toEmails, error: err.slice(0, 200) });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CONTACTS — create or update Outlook contact
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -232,7 +232,7 @@ export default function DuplicatesReview() {
         };
       });
       toast.success(
-        `Merge started: "${mergeDialog.mergedName}" will be merged into "${mergeDialog.survivorName}"`
+        `Merged "${mergeDialog.mergedName}" into "${mergeDialog.survivorName}"`
       );
     } catch (err: any) {
       toast.error(err.message || "Failed to trigger merge");
