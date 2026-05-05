@@ -137,7 +137,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
         file_name: fileName,
         file_url: urlData?.signedUrl || null,
         mime_type: mimeType,
-        parse_status: 'pending',
+        parsing_status: 'pending',
       } as any).select('id').single();
       resume = inserted;
     }

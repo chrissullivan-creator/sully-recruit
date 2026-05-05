@@ -14,6 +14,8 @@ import {
   MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase, Upload,
 } from 'lucide-react';
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
+import { BulkMergeDialog } from '@/components/people/BulkMergeDialog';
+import { Merge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
@@ -96,6 +98,7 @@ const People = () => {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkSendOutOpen, setBulkSendOutOpen] = useState(false);
+  const [bulkMergeOpen, setBulkMergeOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -129,15 +132,39 @@ const People = () => {
       return matchesSearch && matchesTab(p);
     });
 
+    // Date fields are compared as epoch ms so null sorts predictably at
+    // one end (rather than getting tangled with empty-string locale rules).
+    // Text fields stay as locale-aware compare.
+    const isDateField = (
+      sortField === 'lastReached' || sortField === 'lastResponded'
+      || sortField === 'created' || sortField === 'updated'
+    );
+
     list.sort((a: any, b: any) => {
+      if (isDateField) {
+        const pickDate = (r: any) => {
+          if (sortField === 'lastReached')   return r.last_contacted_at;
+          if (sortField === 'lastResponded') return r.last_responded_at;
+          if (sortField === 'created')       return r.created_at;
+          return r.updated_at ?? r.created_at;
+        };
+        const at = Date.parse(pickDate(a) ?? '');
+        const bt = Date.parse(pickDate(b) ?? '');
+        // NaN (null/empty) goes to the END regardless of direction so
+        // "newest first" actually shows the people with timestamps.
+        const aBad = Number.isNaN(at);
+        const bBad = Number.isNaN(bt);
+        if (aBad && bBad) return 0;
+        if (aBad) return 1;
+        if (bBad) return -1;
+        const cmp = at - bt;
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+
       let av = '', bv = '';
       if (sortField === 'name')          { av = (a.full_name ?? '').toLowerCase();    bv = (b.full_name ?? '').toLowerCase(); }
       else if (sortField === 'title')    { av = (a.title ?? '').toLowerCase();        bv = (b.title ?? '').toLowerCase(); }
       else if (sortField === 'company')  { av = (a.company_name ?? '').toLowerCase(); bv = (b.company_name ?? '').toLowerCase(); }
-      else if (sortField === 'lastReached')   { av = a.last_contacted_at ?? ''; bv = b.last_contacted_at ?? ''; }
-      else if (sortField === 'lastResponded') { av = a.last_responded_at ?? ''; bv = b.last_responded_at ?? ''; }
-      else if (sortField === 'created')       { av = a.created_at ?? ''; bv = b.created_at ?? ''; }
-      else { av = a.updated_at ?? a.created_at ?? ''; bv = b.updated_at ?? b.created_at ?? ''; }
       const cmp = av.localeCompare(bv);
       return sortDir === 'asc' ? cmp : -cmp;
     });
@@ -152,7 +179,7 @@ const People = () => {
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [searchQuery, tab]);
+  useEffect(() => { setPage(1); }, [searchQuery, tab, sortField, sortDir]);
 
   const toggleSelect = (key: string) =>
     setSelectedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
@@ -178,6 +205,14 @@ const People = () => {
   const selectedCandidateIds = selectedKeys
     .filter(k => k.startsWith('candidate:'))
     .map(k => k.split(':')[1]);
+
+  // Unique person ids across the selection. The People page lists each
+  // person once per role (a client who's also a candidate appears in
+  // both buckets), so the same `people.id` can show up under multiple
+  // selectedKeys. For Delete + Merge we want the underlying-row count.
+  const selectedPersonIds = Array.from(new Set(
+    selectedKeys.map((k) => k.split(':')[1]).filter(Boolean),
+  ));
 
   const handleRowClick = (p: any) => {
     navigate(p.source_table === 'candidate' ? `/candidates/${p.id}` : `/contacts/${p.id}`);
@@ -228,15 +263,20 @@ const People = () => {
                     </Button>
                   </>
                 )}
+                {selectedPersonIds.length >= 2 && (
+                  <Button variant="outline" size="sm" onClick={() => setBulkMergeOpen(true)}>
+                    <Merge className="h-3.5 w-3.5 mr-1" /> Merge ({selectedPersonIds.length})
+                  </Button>
+                )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" size="sm" disabled={bulkDeleting}>
-                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete ({selectedKeys.length})
+                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete ({selectedPersonIds.length})
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Delete {selectedKeys.length} record{selectedKeys.length === 1 ? '' : 's'}?</AlertDialogTitle>
+                      <AlertDialogTitle>Delete {selectedPersonIds.length} record{selectedPersonIds.length === 1 ? '' : 's'}?</AlertDialogTitle>
                       <AlertDialogDescription>This permanently removes the selected people. Cannot be undone.</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -546,6 +586,12 @@ const People = () => {
           const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
           return p?.full_name ?? id;
         })}
+      />
+
+      <BulkMergeDialog
+        open={bulkMergeOpen}
+        onOpenChange={setBulkMergeOpen}
+        personIds={selectedPersonIds}
       />
 
       <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} />
