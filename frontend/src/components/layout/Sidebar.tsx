@@ -55,7 +55,7 @@ const navigation = [
   { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
-  { name: 'Submissions', href: '/send-outs', icon: Send            },
+  { name: 'Send Outs',  href: '/send-outs',  icon: Send            },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
