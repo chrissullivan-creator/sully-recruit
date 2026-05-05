@@ -11,7 +11,7 @@ const stageLabels: Partial<Record<CandidateStage, string>> = {
   back_of_resume: 'Resume',
   pitch: 'Pitch',
   send_out: 'Send Out',
-  submitted: 'Submissions',
+  submitted: 'Submission',
   interview: 'Interview',
   first_round: '1st Round',
   second_round: '2nd Round',

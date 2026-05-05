@@ -515,21 +515,25 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const interviewList    = (interviewsInRangeRes.data?? []) as any[];
       const cjRows           = (candidateJobsInRangeRes.data ?? []) as any[];
 
-      // Funnel cells count rows from `send_outs` (the canonical source the
-      // Send Outs page reads from), so dashboard numbers exactly match
-      // what shows up on /send-outs. Previously we counted from
-      // candidate_jobs and the two could drift when a row was created in
-      // one but not the other.
+      // Funnel cells split between two sources by what the stage actually
+      // represents:
+      //   Pitch + Send Out (ready_to_send) — the pre-submission queue;
+      //     these rows live in `candidate_jobs` because they haven't
+      //     been sent to a client yet (a `send_outs` row is created at
+      //     the moment of submission).
+      //   Submission / Interview / Offer / Rejection — already sent;
+      //     pulled from `send_outs` so they exactly match the Send Outs
+      //     page tiles.
+      const inCJStage = (stages: string[]) =>
+        cjRows.filter((r: any) => stages.includes(r.pipeline_stage));
       const inSendOutStage = (stages: string[]) =>
         sendOutsInRange.filter((r: any) => stages.includes(r.stage));
 
-      const pitchList      = inSendOutStage(['pitch', 'pitched']);
-      // "Send Out" tile = ready_to_send queue (drains to zero by EOD).
-      // "Submission" tile = actually sent to client.
-      const sendOutListCJ  = inSendOutStage(['ready_to_send', 'send_out', 'sendout']);
-      const submittedList  = inSendOutStage(['submitted', 'sent']);
+      const pitchList       = inCJStage(['pitch', 'pitched']);
+      const sendOutListCJ   = inCJStage(['ready_to_send', 'send_out', 'sendout']);
+      const submittedList   = inSendOutStage(['submitted', 'sent']);
       const interviewListCJ = inSendOutStage(['interviewing', 'interview', 'interview_round_1', 'interview_round_2_plus']);
-      const offerListCJ    = inSendOutStage(['offer']);
+      const offerListCJ     = inSendOutStage(['offer']);
       const rejectionListCJ = inSendOutStage(['rejected', 'withdrew', 'withdrawn']);
 
       return {

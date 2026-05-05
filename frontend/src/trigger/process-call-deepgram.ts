@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./lib/supabase";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -212,17 +213,11 @@ export const processCallDeepgram = task({
       };
 
       try {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": anthropicKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2000,
-            system: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
+        const openaiKey = await getOpenAIKey();
+        const { text } = await callAIWithFallback({
+          anthropicKey,
+          openaiKey: openaiKey || undefined,
+          systemPrompt: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
 
 Return ONLY valid JSON in this exact shape:
 {"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null}
@@ -239,12 +234,12 @@ Field rules:
 - where_interviewed: firms/companies they mentioned currently interviewing at (comma-separated or short prose). Null if not discussed.
 - where_submitted: firms/companies they mentioned being submitted to by other recruiters. Null if not discussed.
 - notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.`,
-            messages: [{ role: "user", content: `Transcript:\n${transcript.slice(0, 30000)}` }],
-          }),
+          userContent: `Transcript:\n${transcript.slice(0, 30000)}`,
+          model: "claude-sonnet-4-20250514",
+          maxTokens: 2000,
+          jsonOutput: true,
         });
-        if (!resp.ok) throw new Error(`Claude ${resp.status}`);
-        const data = await resp.json();
-        intel = JSON.parse((data.content?.[0]?.text ?? "").replace(/```json|```/g, "").trim());
+        intel = JSON.parse(text.replace(/```json|```/g, "").trim());
       } catch (err: any) {
         logger.warn("Joe extraction failed", { error: err.message });
         stats.joe_error++;

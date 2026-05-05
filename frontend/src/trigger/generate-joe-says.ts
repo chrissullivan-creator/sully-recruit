@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 interface GenerateJoeSaysPayload {
   entityId: string;
@@ -86,7 +87,7 @@ export const generateJoeSays = task({
   run: async (payload: GenerateJoeSaysPayload) => {
     const { entityId, entityType } = payload;
     const supabase = getSupabaseAdmin();
-    const anthropicKey = await getAnthropicKey();
+    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
 
     logger.info("Generating Joe Says", { entityId, entityType });
 
@@ -108,39 +109,18 @@ export const generateJoeSays = task({
       return { skipped: true, reason: "insufficient_data" };
     }
 
-    // Call Claude
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 3000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: "user",
-            content: `Generate a comprehensive brief for this ${entityType} based on all available data:\n\n${contextText.slice(0, 30000)}`,
-          },
-        ],
-        temperature: 0,
-      }),
+    // Claude with OpenAI fallback on rate-limit / credit / auth errors
+    const { text: summary } = await callAIWithFallback({
+      anthropicKey,
+      openaiKey: openaiKey || undefined,
+      systemPrompt,
+      userContent: `Generate a comprehensive brief for this ${entityType} based on all available data:\n\n${contextText.slice(0, 30000)}`,
+      model: "claude-sonnet-4-20250514",
+      maxTokens: 3000,
     });
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      logger.error("Claude API error", { error: errText });
-      throw new Error(`Claude API error: ${resp.status}`);
-    }
-
-    const data = await resp.json();
-    const summary = data.content?.[0]?.text || "";
-
     if (!summary) {
-      throw new Error("Empty response from Claude");
+      throw new Error("Empty response from AI provider");
     }
 
     // Save to database

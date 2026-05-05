@@ -37,20 +37,22 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     dotColor: 'bg-stage-warm',
   },
   {
+    // Per the firm's terminology: "Send Out" = candidate is ready to go
+    // (queue waiting to be sent to client today). Internal stage stays
+    // 'ready_to_send' so the DB CHECK + existing rows don't have to move.
     key: 'ready_to_send',
-    label: 'Ready to Send',
-    shortLabel: 'Ready',
+    label: 'Send Out',
+    shortLabel: 'Send Out',
     pipelineStageValues: ['ready_to_send', 'send_out', 'sendout'],
     color: 'bg-yellow-600/10 text-yellow-700 border-yellow-600/30',
     dotColor: 'bg-yellow-600',
   },
   {
-    // The act of sending the candidate to the client — the "send out" moment.
-    // Internal stage value stays 'submitted' (DB CHECK constraint), but the
-    // user-facing label is "Sent Out" so the Send Outs page reads consistently.
+    // "Submission" = the candidate has been submitted to the client.
+    // Internal stage stays 'submitted'.
     key: 'submitted',
-    label: 'Sent Out',
-    shortLabel: 'Sent',
+    label: 'Submission',
+    shortLabel: 'Submission',
     pipelineStageValues: ['submitted', 'sent'],
     color: 'bg-purple-600/10 text-purple-700 border-purple-600/30',
     dotColor: 'bg-purple-600',

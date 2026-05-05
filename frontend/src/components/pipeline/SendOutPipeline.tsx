@@ -51,7 +51,7 @@ const statusLabels: Record<string, string> = {
   reached_out: 'Reached Out',
   pitch: 'Pitch',
   send_out: 'Send Out',
-  submitted: 'Submissions',
+  submitted: 'Submission',
   interviewing: 'Interviewing',
   offer: 'Offer',
   placed: 'Placed',

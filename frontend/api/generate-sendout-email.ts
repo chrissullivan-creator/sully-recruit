@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/generate-sendout-email
@@ -34,20 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const contactList = contact_names?.length ? contact_names.join(", ") : "the hiring team";
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        messages: [
-          {
-            role: "user",
-            content: `You are a senior Wall Street recruiter at The Emerald Recruiting Group. Write a professional sendout/submission email presenting a candidate to a client for a role.
+    const userPrompt = `You are a senior Wall Street recruiter at The Emerald Recruiting Group. Write a professional sendout/submission email presenting a candidate to a client for a role.
 
 Candidate: ${candidate_name}
 ${candidate_title ? `Current Title: ${candidate_title}` : ""}
@@ -66,19 +54,17 @@ Return ONLY valid JSON with two fields:
 {
   "greeting": "Hi [first name of first contact],",
   "body": "the email body (no greeting, no sign-off). Be concise, professional, and highlight why this candidate is a strong fit. 2-3 short paragraphs max."
-}`,
-          },
-        ],
-      }),
+}`;
+
+    const { text } = await callAIWithFallback({
+      anthropicKey: apiKey,
+      openaiKey: process.env.OPENAI_API_KEY,
+      systemPrompt: "You write professional client-facing submission emails for a senior Wall Street recruiter.",
+      userContent: userPrompt,
+      model: "claude-sonnet-4-20250514",
+      maxTokens: 1024,
+      jsonOutput: true,
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Anthropic API error: ${errText}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text || "";
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {

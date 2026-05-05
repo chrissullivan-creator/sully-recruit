@@ -318,19 +318,19 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* ── 6-stage pipeline funnel (click → Submissions by stage) ─── */}
+        {/* ── 6-stage pipeline funnel (click → Send Outs by stage) ─── */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-foreground">Pipeline Funnel — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Click any stage to open Submissions</span>
+            <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
-            <MetricCard label="Send Out"    value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />}   onClick={() => navigate('/send-outs?stage=sent')} />
+            <MetricCard label="Send Out"    value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />}   onClick={() => navigate('/send-outs?stage=ready_to_send')} />
             <MetricCard label="Submission"  value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/send-outs?stage=submitted')} />
-            <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interviewing')} />
+            <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interview_round_1')} />
             <MetricCard label="Offer"       value={isLoading ? '…' : offers}      icon={<Award className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=offer')} />
-            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=rejected')} />
+            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=withdrawn')} />
           </div>
         </div>
 
@@ -358,9 +358,9 @@ const Dashboard = () => {
             ))}
           </ListPanel>
 
-          {/* Submissions */}
+          {/* Send Outs */}
           <ListPanel
-            title="Submissions"
+            title="Send Outs"
             count={sendOutList.length}
             icon={<Send className="h-4 w-4" />}
             accentColor="bg-blue-500/10 text-blue-400"

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/parse-resume-ai
@@ -25,20 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? `\nJob context: ${job_title}${job_description ? ` — ${job_description.slice(0, 500)}` : ""}`
       : "";
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        messages: [
-          {
-            role: "user",
-            content: `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.${jobContext}
+    const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.${jobContext}
 
 Extract:
 {
@@ -61,19 +49,17 @@ Extract:
 }
 
 Resume text:
-${resume_text}`,
-          },
-        ],
-      }),
+${resume_text}`;
+
+    const { text } = await callAIWithFallback({
+      anthropicKey: apiKey,
+      openaiKey: process.env.OPENAI_API_KEY,
+      systemPrompt: "You parse resumes into structured JSON.",
+      userContent: userPrompt,
+      model: "claude-sonnet-4-20250514",
+      maxTokens: 2048,
+      jsonOutput: true,
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Anthropic API error: ${errText}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text || "";
 
     // Extract JSON from response (handle potential markdown wrapping)
     const jsonMatch = text.match(/\{[\s\S]*\}/);

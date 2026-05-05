@@ -9,7 +9,8 @@
  * and appended to back_of_resume_notes for context preservation.
  */
 import { logger } from "@trigger.dev/sdk/v3";
-import { getAnthropicKey } from "./supabase";
+import { getAnthropicKey, getOpenAIKey } from "./supabase";
+import { callAIWithFallback } from "../../lib/ai-fallback";
 
 interface ExtractedIntel {
   sentiment: string;
@@ -88,36 +89,17 @@ export async function extractMessageIntel(
     : plainText;
 
   try {
-    const apiKey = await getAnthropicKey();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 500,
-        system: EXTRACTION_PROMPT,
-        messages: [{ role: "user", content: fullText.slice(0, 3000) }],
-        temperature: 0,
-      }),
-      signal: controller.signal,
+    const [apiKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    const { text } = await callAIWithFallback({
+      anthropicKey: apiKey,
+      openaiKey: openaiKey || undefined,
+      systemPrompt: EXTRACTION_PROMPT,
+      userContent: fullText.slice(0, 3000),
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 500,
+      jsonOutput: true,
     });
 
-    clearTimeout(timeout);
-
-    if (!resp.ok) {
-      logger.warn("Intel extraction API error", { status: resp.status });
-      return null;
-    }
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
