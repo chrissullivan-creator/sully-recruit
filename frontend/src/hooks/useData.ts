@@ -532,7 +532,7 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const pitchList       = inCJStage(['pitch', 'pitched']);
       const sendOutListCJ   = inCJStage(['ready_to_send', 'send_out', 'sendout']);
       const submittedList   = inSendOutStage(['submitted', 'sent']);
-      const interviewListCJ = inSendOutStage(['interviewing', 'interview', 'interview_round_1', 'interview_round_2_plus']);
+      const interviewListCJ = inSendOutStage(['interview', 'interviewing']);
       const offerListCJ     = inSendOutStage(['offer']);
       const rejectionListCJ = inSendOutStage(['rejected', 'withdrew', 'withdrawn']);
 

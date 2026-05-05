@@ -2,6 +2,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 const INTERVIEW_STAGE_VALUES = new Set([
   'interview', 'interviewing',
+  // Legacy values still tolerated when reading old data; new writes
+  // always use 'interview' with a separate interview_round integer.
   'interview_round_1', 'interview_round_2_plus',
 ]);
 
@@ -9,10 +11,13 @@ export function isInterviewStage(stage: string | null | undefined) {
   return INTERVIEW_STAGE_VALUES.has(String(stage || '').toLowerCase());
 }
 
-export function normalizeInterviewStage(stage: string | null | undefined) {
-  const value = String(stage || '').toLowerCase();
-  if (value === 'interview') return 'interviewing';
-  return value;
+/**
+ * Normalise any interview-stage variant to the canonical 'interview'
+ * value. Round info should be passed separately via interview_round
+ * since May 2026.
+ */
+export function normalizeInterviewStage(_stage: string | null | undefined) {
+  return 'interview';
 }
 
 /**
@@ -37,7 +42,9 @@ export async function ensureInterviewArtifacts(payload: {
   if (!isInterviewStage(payload.stage)) return;
 
   const stage = normalizeInterviewStage(payload.stage);
-  const round = stage === 'interview_round_2_plus' ? 2 : 1;
+  // Default to round 1; callers wanting a specific round should pass it
+  // through and write to send_outs.interview_round directly.
+  const round = 1;
 
   // Pull canonical IDs from the send_out so the interview row can stand alone.
   const [{ data: sendOut }, { data: actor }] = await Promise.all([

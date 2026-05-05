@@ -13,6 +13,10 @@ export interface MoveStageInput {
   /** When known, the candidate_jobs.candidate_id — used as entity_id in stage_transitions. */
   entityId?: string | null;
   entityType?: 'candidate_job' | 'send_out';
+  /** Reason text — stamped on send_outs.withdrawn_reason when toStage='withdrawn'. */
+  withdrawnReason?: string | null;
+  /** Round number — stamped on send_outs.interview_round when toStage='interview'. */
+  interviewRound?: number | null;
 }
 
 /**
@@ -27,13 +31,22 @@ export interface MoveStageInput {
  * best-effort tail call — failing to log shouldn't break the move.
  */
 export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; error?: string }> {
-  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out' } = input;
+  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, interviewRound } = input;
 
-  const stageSpecificPatch: Record<string, string> = {};
-  if (toStage === 'submitted')              stageSpecificPatch.sent_to_client_at = new Date().toISOString();
-  else if (toStage === 'interview_round_1') stageSpecificPatch.interview_at      = new Date().toISOString();
-  else if (toStage === 'offer')             stageSpecificPatch.offer_at          = new Date().toISOString();
-  else if (toStage === 'placed')            stageSpecificPatch.placed_at         = new Date().toISOString();
+  const stageSpecificPatch: Record<string, any> = {};
+  if (toStage === 'submitted')          stageSpecificPatch.sent_to_client_at = new Date().toISOString();
+  else if (toStage === 'interview')     stageSpecificPatch.interview_at      = new Date().toISOString();
+  else if (toStage === 'offer')         stageSpecificPatch.offer_at          = new Date().toISOString();
+  else if (toStage === 'placed')        stageSpecificPatch.placed_at         = new Date().toISOString();
+
+  // Stage-shaped extra fields. Stamped only on the relevant transitions
+  // so a later "edit reason" doesn't accidentally clear it on every move.
+  if (toStage === 'withdrawn' && withdrawnReason && withdrawnReason.trim()) {
+    stageSpecificPatch.withdrawn_reason = withdrawnReason.trim();
+  }
+  if (toStage === 'interview' && typeof interviewRound === 'number') {
+    stageSpecificPatch.interview_round = interviewRound;
+  }
 
   const { error: soErr } = await supabase
     .from('send_outs')
@@ -42,9 +55,16 @@ export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; e
   if (soErr) return { ok: false, error: soErr.message };
 
   if (candidateJobId) {
+    const cjPatch: Record<string, any> = { pipeline_stage: toStage, stage_updated_at: new Date().toISOString() };
+    if (toStage === 'withdrawn' && withdrawnReason && withdrawnReason.trim()) {
+      cjPatch.withdrawn_reason = withdrawnReason.trim();
+    }
+    if (toStage === 'interview' && typeof interviewRound === 'number') {
+      cjPatch.interview_round = interviewRound;
+    }
     const { error: cjErr } = await supabase
       .from('candidate_jobs')
-      .update({ pipeline_stage: toStage, stage_updated_at: new Date().toISOString() })
+      .update(cjPatch)
       .eq('id', candidateJobId);
     if (cjErr) return { ok: false, error: cjErr.message };
   }
