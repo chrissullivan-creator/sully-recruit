@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
 import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { invalidateCompanyScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
+import { CardGridSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { AddCompanyDialog } from '@/components/companies/AddCompanyDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { supabase } from '@/integrations/supabase/client';
@@ -29,7 +32,7 @@ const Companies = () => {
       const { error } = await supabase.from('companies').update({ company_type: newType }).eq('id', companyId);
       if (error) throw new Error(error.message);
       toast.success(`Company type updated to ${newType}`);
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      invalidateCompanyScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update type');
     }
@@ -37,10 +40,10 @@ const Companies = () => {
 
   const handleQuickDelete = async (companyId: string) => {
     try {
-      const { error } = await supabase.from('companies').delete().eq('id', companyId);
+      const { error } = await softDelete('companies', companyId).then(({ error }) => ({ error: error ? new Error(error.message) : null }));
       if (error) throw new Error(error.message);
       toast.success('Company deleted');
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      invalidateCompanyScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete company');
     }
@@ -87,7 +90,14 @@ const Companies = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading companies…</p>
+          <CardGridSkeleton cards={6} />
+        ) : filteredCompanies.length === 0 && !searchQuery ? (
+          <EmptyState
+            icon={Building}
+            title="No companies yet"
+            description="Track every client, target, and prospect. Add a company to start associating jobs and contacts."
+            action={{ label: 'Add Company', icon: Plus, onClick: () => setAddOpen(true) }}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCompanies.map((company) => (

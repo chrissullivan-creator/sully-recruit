@@ -17,6 +17,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Upload, Loader2, FileText, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { invalidatePersonScope } from '@/lib/invalidate';
 
 interface AddCandidateDialogProps {
   open?: boolean;
@@ -162,8 +163,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
       resetForm();
       setOpen(false);
 
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['people'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to add candidate');
     } finally {

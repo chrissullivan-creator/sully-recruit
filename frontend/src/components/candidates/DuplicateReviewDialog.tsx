@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { invalidatePersonScope } from '@/lib/invalidate';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -273,7 +274,7 @@ export function DuplicateReviewDialog({
         setCurrentIndex(newPairs.length - 1);
       }
 
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error('Merge failed: ' + err.message);
     } finally {

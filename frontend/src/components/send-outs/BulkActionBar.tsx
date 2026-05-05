@@ -15,6 +15,8 @@ import { toast } from 'sonner';
 import { CANONICAL_PIPELINE, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
 import type { SendOutRow } from '@/lib/queries/send-outs';
+import { invalidateSendOutScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 
 interface BulkActionBarProps {
   selectedRows: SendOutRow[];
@@ -47,8 +49,7 @@ export function BulkActionBar({ selectedRows, onClear }: BulkActionBarProps) {
         });
         if (res.ok) ok++; else failed++;
       }
-      queryClient.invalidateQueries({ queryKey: ['send_outs_list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+      invalidateSendOutScope(queryClient);
       if (failed === 0) toast.success(`Moved ${ok} to ${canonicalConfig(target).label}`);
       else toast.warning(`Moved ${ok}; ${failed} failed`);
       onClear();
@@ -62,10 +63,9 @@ export function BulkActionBar({ selectedRows, onClear }: BulkActionBarProps) {
     setBusy(true);
     try {
       const ids = selectedRows.map((r) => r.id);
-      const { error } = await supabase.from('send_outs').delete().in('id', ids);
-      if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['send_outs_list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+      const { error } = await softDelete('send_outs', ids);
+      if (error) throw new Error(error.message);
+      invalidateSendOutScope(queryClient);
       toast.success(`Deleted ${ids.length} send-out${ids.length === 1 ? '' : 's'}`);
       onClear();
     } catch (err: any) {

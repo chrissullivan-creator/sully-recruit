@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
 import type { CanonicalStage } from '@/lib/pipeline';
+import { invalidateSendOutScope } from '@/lib/invalidate';
 
 export interface AddCandidateModalProps {
   open: boolean;
@@ -126,16 +127,7 @@ export function AddCandidateModal({
       }
 
       toast.success(`${fullName} added` + (jobId ? ` to ${stage.replace(/_/g, ' ')}` : ''));
-      // Invalidate every surface that renders this person + send-outs.
-      queryClient.invalidateQueries({ queryKey: ['send_outs_list'] });
-      queryClient.invalidateQueries({ queryKey: ['job_funnel'] });
-      queryClient.invalidateQueries({ queryKey: ['job_quick_stats'] });
-      queryClient.invalidateQueries({ queryKey: ['job_pipeline_kanban'] });
-      queryClient.invalidateQueries({ queryKey: ['job_activity'] });
-      queryClient.invalidateQueries({ queryKey: ['candidate_jobs_funnel'] });
-      queryClient.invalidateQueries({ queryKey: ['people'] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+      invalidateSendOutScope(queryClient);
       onCreated?.(person!.id);
       reset();
       onOpenChange(false);

@@ -1,6 +1,7 @@
 import { logger } from "@trigger.dev/sdk/v3";
 import { getUnipileBaseUrl, getAppSetting } from "./supabase";
 import { getMicrosoftAccessToken } from "./microsoft-graph";
+import { fetchWithRetry } from "./fetch-retry";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -49,6 +50,12 @@ export async function sendEmail(
     references?: string;
   },
   useSignature?: boolean,
+  /**
+   * Optional sequence step log id. When provided, a 1x1 transparent
+   * tracking pixel is appended to the email body so opens get attributed
+   * back to this step via /api/track/open.
+   */
+  trackingStepLogId?: string,
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
@@ -73,6 +80,26 @@ export async function sendEmail(
     }
   }
 
+  // Append 1×1 open-tracking pixel for sequence sends. Tracking host comes
+  // from app_settings.TRACKING_BASE_URL (falls back to the public app URL).
+  // Skipping is silent: missing host = no pixel = no tracking.
+  if (trackingStepLogId) {
+    try {
+      const { data: hostRow } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "TRACKING_BASE_URL")
+        .maybeSingle();
+      const host = (hostRow?.value || "").replace(/\/+$/, "");
+      if (host) {
+        const pixel = `<img src="${host}/api/track/open?id=${encodeURIComponent(trackingStepLogId)}" alt="" width="1" height="1" style="display:block;width:1px;height:1px;border:0" />`;
+        body = body + pixel;
+      }
+    } catch {
+      // Pixel failure is silent — never block the send.
+    }
+  }
+
   // Build the message payload
   const message: any = {
     subject: subject || "",
@@ -88,7 +115,7 @@ export async function sendEmail(
     ];
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
     {
       method: "POST",
@@ -192,7 +219,7 @@ export async function sendSms(
 
   const { access_token } = await authResponse.json();
 
-  const smsResponse = await fetch(
+  const smsResponse = await fetchWithRetry(
     `${serverUrl}/restapi/v1.0/account/~/extension/~/sms`,
     {
       method: "POST",
@@ -350,7 +377,7 @@ export async function sendLinkedIn(
       message: body,
     };
 
-    const response = await fetch(`${baseUrl}/users/invite`, {
+    const response = await fetchWithRetry(`${baseUrl}/users/invite`, {
       method: "POST",
       headers: {
         "X-API-KEY": apiKey,
@@ -373,7 +400,7 @@ export async function sendLinkedIn(
   const sendPayload: any = { provider_id: providerId, text: body };
   if (isInMailChannel) sendPayload.message_type = "INMAIL";
 
-  const response = await fetch(`${baseUrl}/messages`, {
+  const response = await fetchWithRetry(`${baseUrl}/messages`, {
     method: "POST",
     headers: {
       "X-API-KEY": apiKey,

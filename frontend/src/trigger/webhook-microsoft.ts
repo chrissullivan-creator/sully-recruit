@@ -1,8 +1,9 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey } from "./lib/supabase";
+import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey, getAppSetting } from "./lib/supabase";
 import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
+import { resumeIngestion } from "./resume-ingestion";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -153,6 +154,202 @@ async function fetchAndUploadAttachments(
   return result;
 }
 
+// Extensions we treat as resume payloads on inbound to the resumes inbox.
+const RESUME_FILE_EXTS = [".pdf", ".doc", ".docx"];
+const RESUMES_BUCKET = "resumes";
+
+/**
+ * Read the configured resumes-inbox email(s) from app_settings. The setting
+ * value is one address or a comma-separated list (lowercased on read).
+ * Returns null if the setting isn't configured — callers should treat that
+ * as "feature disabled".
+ */
+async function getResumesInboxEmails(): Promise<Set<string> | null> {
+  try {
+    const raw = await getAppSetting("RESUMES_INBOX_EMAIL");
+    if (!raw) return null;
+    const set = new Set(
+      raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    );
+    return set.size > 0 ? set : null;
+  } catch {
+    // Setting absent — feature off.
+    return null;
+  }
+}
+
+/**
+ * If this email was sent to the dedicated resumes inbox, treat each
+ * PDF/DOC/DOCX attachment as a candidate resume: create a stub `people`
+ * row, drop the file into the resumes bucket, and queue resume-ingestion
+ * which fills in name/title/company/email/phone via the AI parser.
+ *
+ * Idempotent on (sender_email, attachment_name): we don't re-create a
+ * candidate if one already exists for that email + the same filename has
+ * already been ingested.
+ */
+async function processResumesInboxEmail(
+  supabase: any,
+  message: any,
+  resourceUrl: string,
+  accessToken: string,
+  senderEmail: string,
+  recipientEmail: string,
+): Promise<{ created: number; skipped: number }> {
+  // Idempotency anchor: the Graph message id (or internetMessageId) lets
+  // us recognise a webhook redelivery and skip duplicate processing.
+  const sourceMessageId: string | null =
+    message.id || message.internetMessageId || null;
+  // Pull attachments from Graph
+  let attachments: any[] = [];
+  try {
+    const resp = await fetch(`${resourceUrl}/attachments`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resp.ok) {
+      logger.warn("Resumes inbox: could not list attachments", { status: resp.status });
+      return { created: 0, skipped: 0 };
+    }
+    const json = await resp.json();
+    attachments = json.value || [];
+  } catch (err: any) {
+    logger.warn("Resumes inbox: attachments fetch failed", { error: err.message });
+    return { created: 0, skipped: 0 };
+  }
+
+  const resumeAtts = attachments.filter((a: any) => {
+    if (a["@odata.type"] !== "#microsoft.graph.fileAttachment") return false;
+    if (!a.name || !a.contentBytes) return false;
+    if (a.size && a.size > MAX_ATTACHMENT_BYTES) return false;
+    const lower = String(a.name).toLowerCase();
+    return RESUME_FILE_EXTS.some((ext) => lower.endsWith(ext));
+  });
+
+  if (resumeAtts.length === 0) return { created: 0, skipped: 0 };
+
+  // Reuse an existing candidate if the sender already has one. Otherwise
+  // create a stub — name extracted from displayName or local-part of email,
+  // ingestion will overwrite once the resume parses cleanly.
+  const senderDisplay = (message.from?.emailAddress?.name as string) || "";
+  const [firstNameGuess, ...rest] = senderDisplay.trim().split(/\s+/);
+  const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
+
+  let candidateId: string;
+  const { data: existing } = await supabase
+    .from("people")
+    .select("id")
+    .eq("email", senderEmail)
+    .maybeSingle();
+  if (existing?.id) {
+    candidateId = existing.id;
+  } else {
+    const { data: created, error: createErr } = await supabase
+      .from("people")
+      .insert({
+        type: "candidate",
+        first_name: firstNameGuess || null,
+        last_name: lastNameGuess || null,
+        full_name: senderDisplay || senderEmail,
+        email: senderEmail,
+        status: "new",
+        source: "resumes_inbox",
+        source_detail: recipientEmail,
+        is_stub: true,
+      } as any)
+      .select("id")
+      .single();
+    if (createErr || !created?.id) {
+      logger.error("Resumes inbox: failed to create candidate stub", {
+        senderEmail, error: createErr?.message,
+      });
+      return { created: 0, skipped: 0 };
+    }
+    candidateId = created.id;
+  }
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const att of resumeAtts) {
+    const fileName = att.name as string;
+
+    // Dedup: the same (source_message_id, file_name) was already ingested
+    // on a prior delivery — skip cleanly. This makes webhook redeliveries
+    // free; without it we'd duplicate-parse and double-queue.
+    if (sourceMessageId) {
+      const { data: existingResume } = await supabase
+        .from("resumes")
+        .select("id")
+        .eq("source_message_id", sourceMessageId)
+        .eq("file_name", fileName)
+        .maybeSingle();
+      if (existingResume?.id) {
+        skipped++;
+        continue;
+      }
+    }
+
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `inbox/${candidateId}/${Date.now()}_${safeName}`;
+    const buffer = Buffer.from(att.contentBytes as string, "base64");
+
+    // Upload to the resumes/ bucket where resume-ingestion expects files.
+    const { error: upErr } = await supabase.storage
+      .from(RESUMES_BUCKET)
+      .upload(storagePath, buffer, {
+        contentType: att.contentType || "application/octet-stream",
+        upsert: false,
+      });
+    if (upErr) {
+      logger.warn("Resumes inbox: storage upload failed", { fileName, error: upErr.message });
+      skipped++;
+      continue;
+    }
+
+    // Create resumes row. The (source_message_id, file_name) unique index
+    // is the dedup safety net — a redelivery race that wins the read but
+    // loses the insert lands here as a 23505 conflict, which we swallow.
+    const { data: resumeRow, error: resErr } = await supabase
+      .from("resumes")
+      .insert({
+        candidate_id: candidateId,
+        file_path: storagePath,
+        file_name: fileName,
+        mime_type: att.contentType || null,
+        parse_status: "pending",
+        parsing_status: "pending",
+        source_message_id: sourceMessageId,
+      } as any)
+      .select("id")
+      .single();
+    if (resErr || !resumeRow?.id) {
+      // Postgres unique_violation = a concurrent webhook delivery won.
+      // Quietly skip; the other branch will queue the parse.
+      if ((resErr as any)?.code === "23505") {
+        skipped++;
+      } else {
+        logger.warn("Resumes inbox: resumes row insert failed", { fileName, error: resErr?.message });
+        skipped++;
+      }
+      // Best-effort cleanup of the orphaned upload so storage doesn't
+      // accumulate duplicates from the loser branch.
+      await supabase.storage.from(RESUMES_BUCKET).remove([storagePath]);
+      continue;
+    }
+
+    await resumeIngestion.trigger({
+      resumeId: resumeRow.id,
+      candidateId,
+      filePath: storagePath,
+      fileName,
+    });
+    created++;
+  }
+
+  logger.info("Resumes inbox processed", { senderEmail, candidateId, created, skipped });
+  return { created, skipped };
+}
+
 async function processEmailMessage(
   supabase: any,
   message: any,
@@ -163,6 +360,54 @@ async function processEmailMessage(
   const senderEmail = message.from?.emailAddress?.address?.toLowerCase();
   if (!senderEmail) {
     return { action: "skipped", reason: "no_sender_email" };
+  }
+
+  // When mail is forwarded by Cloudflare Email Routing (or any other
+  // SRS-style forwarder) the visible From: can be rewritten to a
+  // forwarder-owned address. The real candidate email is preserved in
+  // Reply-To. Prefer Reply-To when the From: is from a known forwarder
+  // domain so we still match/create the right candidate.
+  const FORWARDER_DOMAINS = ["cloudflareemail.com", "cloudflarenet.com"];
+  const isFromForwarder = FORWARDER_DOMAINS.some((d) => senderEmail.endsWith("@" + d));
+  let effectiveSender = senderEmail;
+  if (isFromForwarder) {
+    const replyTo = (message.replyTo || []).map((r: any) => r?.emailAddress?.address?.toLowerCase()).filter(Boolean)[0];
+    if (replyTo) {
+      logger.info("Webhook: From is a forwarder; using Reply-To as sender", { from: senderEmail, replyTo });
+      effectiveSender = replyTo;
+    }
+  }
+
+  // Resumes-inbox short-circuit: if the recipient is configured as a
+  // resumes drop-box, treat each PDF/DOCX attachment as an inbound resume
+  // and fan it out to the parser. Runs alongside (not instead of) normal
+  // sender-matching: a known candidate emailing in still gets the message
+  // logged AND their resume parsed.
+  //
+  // We check both `toRecipients` (direct send) and original `To:` from
+  // `internetMessageHeaders` (so a mail forwarded into a monitored
+  // mailbox still trips the resumes-inbox rule on the *original* address).
+  const toRecipients: string[] = (message.toRecipients || [])
+    .map((r: any) => r?.emailAddress?.address?.toLowerCase())
+    .filter(Boolean);
+  const headerToValues: string[] = (message.internetMessageHeaders || [])
+    .filter((h: any) => typeof h?.name === "string" && /^to$/i.test(h.name))
+    .map((h: any) => String(h.value || "").toLowerCase());
+  // header `To:` lines look like `Name <addr@x>, addr2@y` — extract emails.
+  const headerEmails = headerToValues.flatMap((line) =>
+    Array.from(line.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]+/g)).map((m) => m[0].toLowerCase()),
+  );
+  const recipientEmails = Array.from(new Set([...toRecipients, ...headerEmails]));
+
+  const resumesInbox = await getResumesInboxEmails();
+  const matchedInbox = resumesInbox
+    ? recipientEmails.find((r) => resumesInbox.has(r))
+    : null;
+  if (matchedInbox) {
+    await processResumesInboxEmail(
+      supabase, message, resourceUrl, accessToken, effectiveSender, matchedInbox,
+    );
+    // Continue on — we still want to log the email + match sender below.
   }
 
   // ── Bounce / NDR detection ──────────────────────────────────────

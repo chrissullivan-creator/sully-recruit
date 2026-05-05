@@ -26,6 +26,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -330,7 +331,7 @@ const Contacts = () => {
             </Button>
           </div>
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1300}>
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
@@ -571,7 +572,7 @@ const Contacts = () => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </HorizontalTableScroll>
         )}
 
         {totalPages > 1 && (

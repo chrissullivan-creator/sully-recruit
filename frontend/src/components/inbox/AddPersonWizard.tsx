@@ -20,6 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { invalidatePersonScope, invalidateCommsScope } from '@/lib/invalidate';
 import {
   Loader2, UserCheck, Users, UserPlus, Check, Building,
   ChevronsUpDown, Link as LinkIcon, ArrowLeft, Plus,
@@ -377,10 +378,9 @@ export function AddPersonWizard({
   };
 
   const invalidateQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+    invalidatePersonScope(queryClient);
+    invalidateCommsScope(queryClient);
     queryClient.invalidateQueries({ queryKey: ['inbox_thread', threadId] });
-    queryClient.invalidateQueries({ queryKey: ['candidates'] });
-    queryClient.invalidateQueries({ queryKey: ['contacts'] });
   };
 
   // ── Type selection handler ─────────────────────────────────────────────────

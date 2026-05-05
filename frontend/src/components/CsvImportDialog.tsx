@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { invalidatePersonScope, invalidateJobScope } from '@/lib/invalidate';
 import { Upload, CheckCircle2, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -238,7 +239,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
 
           processed += batch.length;
         }
-        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        invalidatePersonScope(queryClient);
 
       } else if (entityType === 'contacts') {
         const buildRow = (r: ParsedResult) => {
@@ -287,7 +288,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             processed += Math.min(BATCH, rows.length - i);
           }
         }
-        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        invalidatePersonScope(queryClient);
 
       } else {
         const rows = valid.map(r => {
@@ -309,7 +310,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
           if (error) throw error;
           processed += Math.min(BATCH, rows.length - i);
         }
-        queryClient.invalidateQueries({ queryKey: ['jobs'] });
+        invalidateJobScope(queryClient);
       }
 
       setImportedCount(processed);

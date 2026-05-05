@@ -301,6 +301,7 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           roles: ['candidate'],                // always a candidate from Source import
           is_stub: false,                      // real person — not a stub
           source: 'linkedin_hiring_project',
+          source_detail: project?.id ?? null,
           job_id: jobId,
           owner_user_id: userId,               // FIX: was owner_id (column doesn't exist)
         };

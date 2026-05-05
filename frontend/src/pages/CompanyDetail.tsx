@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { invalidateCompanyScope } from '@/lib/invalidate';
 import { format } from 'date-fns';
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
@@ -375,8 +376,7 @@ const CompanyDetail = () => {
     if (!id) return;
     const { error } = await supabase.from('companies').update({ [field]: value || null }).eq('id', id);
     if (error) { toast.error('Failed to update'); return; }
-    queryClient.invalidateQueries({ queryKey: ['company', id] });
-    queryClient.invalidateQueries({ queryKey: ['companies'] });
+    invalidateCompanyScope(queryClient);
   };
 
   const updateContract = async (contractId: string, patch: Record<string, any>) => {
@@ -493,8 +493,7 @@ const CompanyDetail = () => {
               <Select value={company.company_type ?? 'none'} onValueChange={async (val) => {
                 const newType = val === 'none' ? null : val;
                 await supabase.from('companies').update({ company_type: newType }).eq('id', id!);
-                queryClient.invalidateQueries({ queryKey: ['company', id] });
-                queryClient.invalidateQueries({ queryKey: ['companies'] });
+                invalidateCompanyScope(queryClient);
                 toast.success('Type updated');
               }}>
                 <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Set type..." /></SelectTrigger>

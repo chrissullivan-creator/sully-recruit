@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { NotificationBell } from './NotificationBell';
@@ -8,7 +9,7 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
-  Send, Martini,
+  Send, Martini, Calendar, BarChart3, Menu, X,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -54,10 +55,12 @@ const navigation = [
   { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
-  { name: 'Send Outs',  href: '/send-outs',  icon: Send            },
+  { name: 'Submissions', href: '/send-outs', icon: Send            },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
+  { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
   { name: 'Calls',      href: '/calls',      icon: Phone           },
+  { name: 'Reports',    href: '/reports',    icon: BarChart3       },
   { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Settings',   href: '/settings',   icon: Settings        },
 ];
@@ -67,6 +70,10 @@ export function Sidebar() {
   const navigate  = useNavigate();
   const { user, signOut } = useAuth();
   const { inboxUnread, tasksOpen } = useSidebarCounts(user?.id);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Close drawer when route changes (so tapping a nav item dismisses it).
+  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
   const badgeFor = (href: string): number | null => {
     if (href === '/inbox') return inboxUnread > 0 ? inboxUnread : null;
     if (href === '/tasks') return tasksOpen > 0 ? tasksOpen : null;
@@ -83,7 +90,38 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border">
+    <>
+    {/* Mobile menu button — visible only below md breakpoint. */}
+    <button
+      onClick={() => setMobileOpen(true)}
+      className="lg:hidden fixed top-2 left-2 z-50 p-2 rounded-lg bg-sidebar border border-sidebar-border text-sidebar-foreground shadow-sm"
+      aria-label="Open menu"
+    >
+      <Menu className="h-4 w-4" />
+    </button>
+
+    {/* Backdrop on mobile when open. */}
+    {mobileOpen && (
+      <div
+        className="lg:hidden fixed inset-0 z-40 bg-black/40"
+        onClick={() => setMobileOpen(false)}
+        aria-hidden
+      />
+    )}
+
+    <aside className={cn(
+      'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar border-r border-sidebar-border transition-transform duration-200',
+      mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+    )}>
+
+      {/* Mobile close button */}
+      <button
+        onClick={() => setMobileOpen(false)}
+        className="lg:hidden absolute top-2 right-2 p-1.5 rounded-md text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+        aria-label="Close menu"
+      >
+        <X className="h-4 w-4" />
+      </button>
 
       {/* ── Logo ── */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border">
@@ -177,5 +215,6 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

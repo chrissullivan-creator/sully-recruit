@@ -6,6 +6,8 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
+import { WeekCalendar } from '@/components/dashboard/WeekCalendar';
+import { OrgActivityFeed } from '@/components/dashboard/OrgActivityFeed';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -316,11 +318,11 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* ── 6-stage pipeline funnel (click → Send Outs by stage) ─── */}
+        {/* ── 6-stage pipeline funnel (click → Submissions by stage) ─── */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-foreground">Pipeline Funnel — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
+            <span className="text-xs text-muted-foreground">Click any stage to open Submissions</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
@@ -356,9 +358,9 @@ const Dashboard = () => {
             ))}
           </ListPanel>
 
-          {/* Send Outs */}
+          {/* Submissions */}
           <ListPanel
-            title="Send Outs"
+            title="Submissions"
             count={sendOutList.length}
             icon={<Send className="h-4 w-4" />}
             accentColor="bg-blue-500/10 text-blue-400"
@@ -399,11 +401,22 @@ const Dashboard = () => {
           </ListPanel>
         </div>
 
-        {/* ── Tasks + Quick Actions ─────────────────────────────────── */}
+        {/* ── This Week Calendar ────────────────────────────────────── */}
+        <WeekCalendar />
+
+        {/* ── Tasks + Activity ───────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <DashboardTasks />
           </div>
+          <div>
+            <OrgActivityFeed />
+          </div>
+        </div>
+
+        {/* ── Quick Actions ──────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 hidden">{/* legacy slot */}</div>
           <div>
             <div className="rounded-lg border border-border bg-card p-6">
               <h2 className="text-lg font-semibold text-foreground mb-4">Quick Actions</h2>

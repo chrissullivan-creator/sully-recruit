@@ -86,28 +86,29 @@ export default function SequenceAnalyticsPage() {
 
   // Per-channel reply rates
   const channelStats = useMemo(() => {
-    const byChannel: Record<string, { sent: number; replies: number }> = {};
+    const byChannel: Record<string, { sent: number; replies: number; opens: number }> = {};
     for (const log of stepLogs) {
       if (!log.channel) continue;
-      if (!byChannel[log.channel]) byChannel[log.channel] = { sent: 0, replies: 0 };
+      if (!byChannel[log.channel]) byChannel[log.channel] = { sent: 0, replies: 0, opens: 0 };
       if (log.status === "sent") byChannel[log.channel].sent++;
       if (log.reply_received_at) byChannel[log.channel].replies++;
+      if ((log as any).opened_at) byChannel[log.channel].opens++;
     }
     return Object.entries(byChannel).map(([channel, stats]) => ({
       channel: channel.replace(/_/g, " "),
       sent: stats.sent,
       replies: stats.replies,
+      opens: stats.opens,
       replyRate: stats.sent > 0 ? Number(((stats.replies / stats.sent) * 100).toFixed(1)) : 0,
+      openRate: stats.sent > 0 ? Number(((stats.opens / stats.sent) * 100).toFixed(1)) : 0,
       color: CHANNEL_COLORS[channel] || "#6b7280",
     }));
   }, [stepLogs]);
 
-  // Connection accept rate (LinkedIn connections)
-  const connectionStats = useMemo(() => {
-    const connectionSends = stepLogs.filter((l) => l.channel === "linkedin_connection" && l.status === "sent").length;
-    const accepted = enrollments.filter((e) => e.stop_trigger !== "reply_received" && e.status !== "active").length; // rough proxy
-    return { sent: connectionSends, rate: connectionSends > 0 ? ((accepted / connectionSends) * 100).toFixed(1) : "0" };
-  }, [stepLogs, enrollments]);
+  // Note: an earlier "connection accept rate" KPI lived here. It was a bogus
+  // proxy (any non-reply non-active enrollment counted as accepted, which
+  // includes calendar_booked / completed / timed-out). Removed until we
+  // track real LinkedIn invite-accepted webhooks distinctly from sends.
 
   if (loading) return <MainLayout><div className="container mx-auto py-6">Loading...</div></MainLayout>;
 

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { invalidatePersonScope } from '@/lib/invalidate';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -186,8 +187,7 @@ export function MergeCandidateDialog({
         `Merged successfully${fieldsCount > 0 ? ` — ${fieldsCount} field${fieldsCount > 1 ? 's' : ''} filled from duplicate` : ''}`
       );
 
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['candidate', survivorId] });
+      invalidatePersonScope(queryClient);
       onOpenChange(false);
 
       // If the current candidate was merged away, navigate to the survivor

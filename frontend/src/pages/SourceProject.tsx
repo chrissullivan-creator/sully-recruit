@@ -12,10 +12,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BulkAddCandidatesDialog } from '@/components/source/BulkAddCandidatesDialog';
 import { BulkAddContactsDialog } from '@/components/source/BulkAddContactsDialog';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
+
+const PAGE_SIZE = 25;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -106,6 +110,7 @@ export default function SourceProject() {
   // ---- State ----
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [projectData, setProjectData] = useState<any>(null);
+  const [debug, setDebug] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [label, setLabel] = useState<ProjectLabel>('candidate');
@@ -114,6 +119,12 @@ export default function SourceProject() {
   // ---- Dialogs ----
   const [candidateDialogOpen, setCandidateDialogOpen] = useState(false);
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
+
+  // ---- Per-stage pagination (25/page so "select all on this page" stays sane) ----
+  const [stagePages, setStagePages] = useState<Record<string, number>>({});
+  const pageOf = (stage: string) => stagePages[stage] ?? 0;
+  const setPageOf = (stage: string, page: number) =>
+    setStagePages((prev) => ({ ...prev, [stage]: page }));
 
   // ---- Load project detail + applicants ----
   const fetchProject = useCallback(async () => {
@@ -137,6 +148,7 @@ export default function SourceProject() {
       }, session);
 
       setProjectData(data.project || null);
+      setDebug(data.debug || null);
       const items = data.items || [];
       setApplicants((Array.isArray(items) ? items : []).map(normalizeApplicant));
     } catch (err: any) {
@@ -314,8 +326,18 @@ export default function SourceProject() {
 
       {/* Empty */}
       {!loading && applicants.length === 0 && (
-        <div className="text-center py-20 text-muted-foreground">
-          No applicants found in this project
+        <div className="text-center py-20 text-muted-foreground space-y-3">
+          <p>No applicants found in this project.</p>
+          {debug?.tries && (
+            <details className="mt-4 max-w-2xl mx-auto text-left text-xs">
+              <summary className="cursor-pointer text-amber-700 underline">
+                Show endpoint diagnostics ({debug.tries.length} attempted)
+              </summary>
+              <pre className="mt-2 bg-muted/40 p-3 rounded overflow-x-auto whitespace-pre-wrap">
+                {JSON.stringify(debug.tries, null, 2)}
+              </pre>
+            </details>
+          )}
         </div>
       )}
 
@@ -336,26 +358,38 @@ export default function SourceProject() {
           </div>
 
           {/* Applicant tables by stage */}
-          {sortedStages.map((stage) => (
+          {sortedStages.map((stage) => {
+            const stageApplicants = byStage[stage];
+            const totalPages = Math.max(1, Math.ceil(stageApplicants.length / PAGE_SIZE));
+            const currentPage = Math.min(pageOf(stage), totalPages - 1);
+            const start = currentPage * PAGE_SIZE;
+            const visible = stageApplicants.slice(start, start + PAGE_SIZE);
+
+            return (
             <div key={stage} className="border border-border rounded-lg overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 bg-card border-b border-border">
                 <Badge className={STAGE_COLORS[stage] || STAGE_COLORS.unknown}>
                   {stage.charAt(0).toUpperCase() + stage.slice(1)}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  {byStage[stage].length} applicant{byStage[stage].length !== 1 ? 's' : ''}
+                  {stageApplicants.length} applicant{stageApplicants.length !== 1 ? 's' : ''}
+                  {stageApplicants.length > PAGE_SIZE && (
+                    <> · page {currentPage + 1} of {totalPages}</>
+                  )}
                 </span>
               </div>
 
+              <HorizontalTableScroll minWidth={1100}>
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="w-10 px-4 py-2 text-left">
                       <button
-                        onClick={() => toggleStageApplicants(byStage[stage])}
+                        onClick={() => toggleStageApplicants(visible)}
                         className="hover:text-foreground"
+                        title={`Select all on this page (${visible.length})`}
                       >
-                        {byStage[stage].every(a => selectedIds.has(a.id))
+                        {visible.length > 0 && visible.every(a => selectedIds.has(a.id))
                           ? <CheckSquare className="h-3.5 w-3.5" />
                           : <Square className="h-3.5 w-3.5" />
                         }
@@ -371,7 +405,7 @@ export default function SourceProject() {
                   </tr>
                 </thead>
                 <tbody>
-                  {byStage[stage].map((applicant) => (
+                  {visible.map((applicant) => (
                     <tr key={applicant.id} className="border-b border-border/50 hover:bg-accent/5 text-sm">
                       <td className="px-4 py-2">
                         <button onClick={() => toggleApplicant(applicant.id)}>
@@ -416,8 +450,39 @@ export default function SourceProject() {
                   ))}
                 </tbody>
               </table>
+              </HorizontalTableScroll>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/50 text-xs text-muted-foreground">
+                  <span>
+                    Showing {start + 1}–{Math.min(start + PAGE_SIZE, stageApplicants.length)} of {stageApplicants.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      disabled={currentPage === 0}
+                      onClick={() => setPageOf(stage, currentPage - 1)}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="px-2">{currentPage + 1} / {totalPages}</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      disabled={currentPage >= totalPages - 1}
+                      onClick={() => setPageOf(stage, currentPage + 1)}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
 

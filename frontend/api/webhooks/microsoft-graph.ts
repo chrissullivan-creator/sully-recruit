@@ -3,7 +3,12 @@ import { tasks } from "@trigger.dev/sdk/v3";
 
 /**
  * Vercel serverless function — Microsoft Graph webhook receiver.
- * Handles subscription validation and fires Trigger.dev task for notifications.
+ *
+ * Pairs with the Trigger.dev `process-microsoft-event` task in
+ * src/trigger/webhook-microsoft.ts. Microsoft requires a <3s response
+ * to webhook calls or it disables the subscription, so this file does
+ * the bare minimum (validation + queue) and the worker does the real
+ * processing.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Microsoft Graph subscription validation — return validationToken as plain text

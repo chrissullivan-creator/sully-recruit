@@ -51,6 +51,7 @@ export function useSendOuts() {
           candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, target_total_comp, target_base_comp, avatar_url, last_contacted_at, owner_user_id, type),
           job:jobs(id, title, company_name)
         `)
+        .is('deleted_at', null)
         .order('updated_at', { ascending: false, nullsFirst: false })
         .limit(2000);
       if (error) throw error;

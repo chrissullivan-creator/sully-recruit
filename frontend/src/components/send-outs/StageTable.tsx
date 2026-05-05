@@ -17,10 +17,11 @@ interface StageTableProps {
   onAdvance: (row: SendOutRow) => void;
   onOpen: (row: SendOutRow) => void;
   onAdd?: () => void;
+  onDelete?: (row: SendOutRow) => void;
 }
 
 export function StageTable({
-  config, rows, isOpen, isOver = false, onToggle, selectedIds, onToggleSelect, onAdvance, onOpen, onAdd,
+  config, rows, isOpen, isOver = false, onToggle, selectedIds, onToggleSelect, onAdvance, onOpen, onAdd, onDelete,
 }: StageTableProps) {
   const { setNodeRef } = useDroppable({ id: `stage:${config.key}` });
   const isOffer = config.key === 'offer';
@@ -121,6 +122,7 @@ export function StageTable({
                     onToggleSelect={onToggleSelect}
                     onAdvance={onAdvance}
                     onOpen={onOpen}
+                    onDelete={onDelete}
                   />
                 ))}
               </tbody>

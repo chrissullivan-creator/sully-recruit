@@ -38,6 +38,11 @@ import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
 import { QuickStats } from '@/components/job-detail/QuickStats';
 import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
 import { JobPipelineKanban, useJobKanbanRows, type KanbanRow } from '@/components/job-detail/JobPipelineKanban';
+import {
+  invalidateSendOutScope, invalidateJobScope, invalidateNoteScope,
+  invalidatePersonScope, invalidateAll,
+} from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
 import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
@@ -168,8 +173,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
 
       const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOut.id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
-      queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
+      invalidateSendOutScope(queryClient);
       toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === newStage)?.label}`);
     } catch (e: any) {
       toast.error(e.message);
@@ -183,7 +187,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
     try {
       const { error } = await supabase.from('send_outs').update({ submittal_notes: notes }).eq('id', sendOut.id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      invalidateSendOutScope(queryClient);
       toast.success('Notes saved');
     } catch (e: any) {
       toast.error(e.message);
@@ -206,7 +210,7 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
         resume_file_name: file.name,
       }).eq('id', sendOut.id);
       if (dbErr) throw dbErr;
-      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
+      invalidateSendOutScope(queryClient);
       toast.success('Resume uploaded');
     } catch (e: any) {
       toast.error(e.message);
@@ -405,10 +409,7 @@ const JobDetail = () => {
       return;
     }
     toast.success(`Moved to ${canonicalConfig(target).label}`);
-    queryClient.invalidateQueries({ queryKey: ['job_funnel', id] });
-    queryClient.invalidateQueries({ queryKey: ['job_quick_stats', id] });
-    queryClient.invalidateQueries({ queryKey: ['job_activity', id] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+    invalidateJobScope(queryClient);
   };
 
   const onDndDragStart = (e: DragStartEvent) => {
@@ -485,8 +486,7 @@ const JobDetail = () => {
         stage: 'submitted',
       });
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['send_outs_job'] });
-      queryClient.invalidateQueries({ queryKey: ['send_out_board'] });
+      invalidateSendOutScope(queryClient);
       toast.success('Candidate added to send outs');
       setAddSendOutOpen(false);
       setSendOutCandidateSearch('');
@@ -502,10 +502,10 @@ const JobDetail = () => {
     if (!id) return;
     setDeletingJob(true);
     try {
-      const { error } = await supabase.from('jobs').delete().eq('id', id);
+      const { error } = await softDelete('jobs', id);
       if (error) { toast.error(error.message || 'Failed to delete job'); return; }
-      toast.success('Job deleted');
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success('Moved to trash — undo from /audit/trash within 30 days');
+      invalidateJobScope(queryClient);
       navigate('/jobs');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to delete job');
@@ -563,8 +563,7 @@ const JobDetail = () => {
         job_code: jobCode,
       }).eq('id', id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
       toast.success('Function updated');
       setFunctionEditOpen(false);
     } catch (err: any) {
@@ -592,8 +591,7 @@ const JobDetail = () => {
         num_openings: Math.max(1, openingsEditValue),
       }).eq('id', id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
       toast.success('Openings updated');
       setOpeningsEditOpen(false);
     } catch (err: any) {
@@ -635,8 +633,7 @@ const JobDetail = () => {
         company_name: companyEditName.trim() || null,
       }).eq('id', id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
       toast.success('Company updated');
       setCompanyEditOpen(false);
     } catch (err: any) {
@@ -651,8 +648,7 @@ const JobDetail = () => {
     try {
       const { error } = await supabase.from('jobs').update({ [field]: value || null }).eq('id', id);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
       toast.success('Updated');
     } catch (err: any) {
       toast.error(err.message || 'Failed to update');
@@ -714,10 +710,9 @@ const JobDetail = () => {
       if (error) throw error;
       if (isFirst) {
         await supabase.from('jobs').update({ contact_id: selectedContactId }).eq('id', id);
-        queryClient.invalidateQueries({ queryKey: ['job', id] });
-        queryClient.invalidateQueries({ queryKey: ['jobs'] });
       }
       refetchJobContacts();
+      invalidateJobScope(queryClient);
       toast.success('Contact added');
       setSelectedContactId('');
     } catch (err: any) {
@@ -754,7 +749,7 @@ const JobDetail = () => {
         }
       }
       refetchJobContacts();
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      invalidateJobScope(queryClient);
       toast.success('Contact removed');
     } catch (err: any) {
       toast.error(err.message || 'Failed to remove contact');
@@ -781,7 +776,7 @@ const JobDetail = () => {
         .eq('id', id!);
       if (jobErr) throw jobErr;
       refetchJobContacts();
-      queryClient.invalidateQueries({ queryKey: ['job', id] });
+      invalidateJobScope(queryClient);
       toast.success('Primary contact updated');
     } catch (err: any) {
       toast.error(err.message || 'Failed to set primary contact');
@@ -1028,7 +1023,7 @@ const JobDetail = () => {
                     try {
                       const { error } = await supabase.from('jobs').update({ market_over: checked }).eq('id', id!);
                       if (error) throw error;
-                      queryClient.invalidateQueries({ queryKey: ['job', id] });
+                      invalidateJobScope(queryClient);
                       toast.success(checked ? 'Marked as market over' : 'Marked as not market over');
                     } catch (err: any) {
                       toast.error(err.message || 'Failed to update');

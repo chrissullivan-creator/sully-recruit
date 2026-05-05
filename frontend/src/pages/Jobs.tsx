@@ -11,6 +11,10 @@ import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { invalidateJobScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
+import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -41,7 +45,7 @@ const Jobs = () => {
       const { error } = await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId);
       if (error) throw new Error(error.message);
       toast.success(`Job status updated to ${JOB_STATUS_OPTIONS.find(o => o.value === newStatus)?.label ?? newStatus}`);
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update status');
     }
@@ -49,10 +53,10 @@ const Jobs = () => {
 
   const handleQuickDelete = async (jobId: string) => {
     try {
-      const { error } = await supabase.from('jobs').delete().eq('id', jobId);
+      const { error } = await softDelete('jobs', jobId).then(({ error }) => ({ error: error ? new Error(error.message) : null }));
       if (error) throw new Error(error.message);
       toast.success('Job deleted');
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete job');
     }
@@ -116,11 +120,18 @@ const Jobs = () => {
         </div>
 
         {isLoading ? (
-          <p className="text-muted-foreground text-sm">Loading jobs…</p>
+          <TableSkeleton rows={6} cols={6} />
+        ) : filteredJobs.length === 0 && !searchQuery ? (
+          <EmptyState
+            icon={Briefcase}
+            title="No jobs yet"
+            description="Track open roles, send candidates out, and manage the pipeline. Create your first job to get started."
+            action={{ label: 'Add Job', icon: Plus, onClick: () => setAddOpen(true) }}
+          />
         ) : view === 'pipeline' ? (
           <JobPipeline />
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1200}>
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
@@ -210,7 +221,7 @@ const Jobs = () => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </HorizontalTableScroll>
         )}
       </div>
 

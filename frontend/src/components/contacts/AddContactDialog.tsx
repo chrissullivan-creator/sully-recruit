@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
+import { invalidatePersonScope } from '@/lib/invalidate';
 
 interface Props {
   open: boolean;
@@ -119,8 +120,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
       } as any).select('id').single();
       if (error) throw error;
 
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
-      queryClient.invalidateQueries({ queryKey: ['people'] });
+      invalidatePersonScope(queryClient);
       toast.success('Contact created');
 
       // Resolve Unipile ID in background (non-blocking)

@@ -11,9 +11,14 @@ import { usePeople } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
-  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus,
+  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase,
 } from 'lucide-react';
+import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
+import { invalidatePersonScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
+import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,7 +35,7 @@ import {
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
 
 type PersonTab = 'all' | 'candidates' | 'clients';
-type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated';
+type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated' | 'created';
 type SortDir = 'asc' | 'desc';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
@@ -90,6 +95,7 @@ const People = () => {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [bulkSendOutOpen, setBulkSendOutOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -130,6 +136,7 @@ const People = () => {
       else if (sortField === 'company')  { av = (a.company_name ?? '').toLowerCase(); bv = (b.company_name ?? '').toLowerCase(); }
       else if (sortField === 'lastReached')   { av = a.last_contacted_at ?? ''; bv = b.last_contacted_at ?? ''; }
       else if (sortField === 'lastResponded') { av = a.last_responded_at ?? ''; bv = b.last_responded_at ?? ''; }
+      else if (sortField === 'created')       { av = a.created_at ?? ''; bv = b.created_at ?? ''; }
       else { av = a.updated_at ?? a.created_at ?? ''; bv = b.updated_at ?? b.created_at ?? ''; }
       const cmp = av.localeCompare(bv);
       return sortDir === 'asc' ? cmp : -cmp;
@@ -182,13 +189,16 @@ const People = () => {
     try {
       const candIds = selectedKeys.filter(k => k.startsWith('candidate:')).map(k => k.split(':')[1]);
       const contIds = selectedKeys.filter(k => k.startsWith('contact:')).map(k => k.split(':')[1]);
-      if (candIds.length) await supabase.from('people').delete().in('id', candIds);
-      if (contIds.length) await supabase.from('contacts').delete().in('id', contIds);
+      // Both candidates and contacts live in the unified `people` table
+      // (contacts is a backwards-compat view). Soft-delete in one shot.
+      const allIds = [...candIds, ...contIds];
+      if (allIds.length) {
+        const { error } = await softDelete('people', allIds);
+        if (error) throw new Error(error.message);
+      }
       toast.success(`${selectedKeys.length} record${selectedKeys.length === 1 ? '' : 's'} deleted`);
       setSelectedKeys([]);
-      queryClient.invalidateQueries({ queryKey: ['people'] });
-      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      invalidatePersonScope(queryClient);
     } catch (err: any) {
       toast.error(err?.message || 'Delete failed');
     } finally {
@@ -206,9 +216,14 @@ const People = () => {
             {selectedKeys.length > 0 && (
               <>
                 {selectedCandidateIds.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-                    <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setBulkSendOutOpen(true)}>
+                      <Briefcase className="h-3.5 w-3.5 mr-1" /> Add to Job ({selectedCandidateIds.length})
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                      <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
+                    </Button>
+                  </>
                 )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -291,9 +306,7 @@ const People = () => {
 
         {/* Table */}
         {isLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading people...
-          </div>
+          <TableSkeleton rows={8} cols={6} />
         ) : isError ? (
           <div className="text-center py-16">
             <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
@@ -310,7 +323,7 @@ const People = () => {
             <p className="text-sm text-muted-foreground">Try a different filter or search term.</p>
           </div>
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1300}>
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
@@ -339,6 +352,9 @@ const People = () => {
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
+                    <span className="flex items-center gap-1">Date Added <SortIcon field="created" /></span>
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
                     <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
                   </th>
@@ -444,6 +460,9 @@ const People = () => {
                         <ChannelBadge channel={person.last_comm_channel} />
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {person.created_at ? format(new Date(person.created_at), 'MMM d, yyyy') : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {person.updated_at ? format(new Date(person.updated_at), 'MMM d, yyyy') : '—'}
                       </td>
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
@@ -469,10 +488,10 @@ const People = () => {
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={async () => {
-                                const table = person.source_table === 'candidate' ? 'candidates' : 'contacts';
-                                await supabase.from(table).delete().eq('id', person.id);
-                                toast.success('Deleted');
-                                queryClient.invalidateQueries({ queryKey: ['people'] });
+                                const { error } = await softDelete('people', person.id);
+                                if (error) { toast.error(error.message); return; }
+                                toast.success('Moved to trash — undo from /audit/trash within 30 days');
+                                invalidatePersonScope(queryClient);
                               }}
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
@@ -485,7 +504,7 @@ const People = () => {
                 })}
               </tbody>
             </table>
-          </div>
+          </HorizontalTableScroll>
         )}
 
         {/* Pagination */}
@@ -509,6 +528,16 @@ const People = () => {
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}
+        candidateIds={selectedCandidateIds}
+        candidateNames={selectedCandidateIds.map(id => {
+          const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
+          return p?.full_name ?? id;
+        })}
+      />
+
+      <BulkCandidateActionsDialog
+        open={bulkSendOutOpen}
+        onOpenChange={setBulkSendOutOpen}
         candidateIds={selectedCandidateIds}
         candidateNames={selectedCandidateIds.map(id => {
           const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');

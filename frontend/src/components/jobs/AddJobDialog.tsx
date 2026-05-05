@@ -11,6 +11,7 @@ import { useCompanies, useJobFunctions } from '@/hooks/useData';
 import { toast } from 'sonner';
 import { Loader2, Globe, FileUp, PenLine, ArrowLeft, ExternalLink, Check, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { invalidateJobScope, invalidateCompanyScope } from '@/lib/invalidate';
 
 interface Props {
   open: boolean;
@@ -268,7 +269,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     }
 
     // Refresh companies list for future lookups in this session
-    queryClient.invalidateQueries({ queryKey: ['companies'] });
+    invalidateCompanyScope(queryClient);
     return { company_id: data.id, company_name: data.name };
   };
 
@@ -328,7 +329,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       };
       const { error } = await supabase.from('jobs').insert(insert);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
 
       // If editing one from multi-job list, go back to pick step
       if (editingIndex !== null) {
@@ -387,7 +388,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
       }
       const { error } = await supabase.from('jobs').insert(inserts);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      invalidateJobScope(queryClient);
       toast.success(`${selected.length} job${selected.length > 1 ? 's' : ''} created`);
       handleOpenChange(false);
     } catch (err: any) {

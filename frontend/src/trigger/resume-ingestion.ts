@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
@@ -61,10 +61,51 @@ export const resumeIngestion = task({
     const rawText = await extractText(fileBytes, fileName);
     logger.info("Extracted text", { length: rawText.length });
 
-    // ── 3. Parse with Claude ────────────────────────────────────────
+    // ── 2a. Resume sanity check ─────────────────────────────────────
+    // Cheap heuristic before we burn AI tokens on something that isn't a
+    // resume (random PDF attachment, signed contract, screenshot). We
+    // require: (a) at least 200 chars of text, (b) at least one email-
+    // shaped token, (c) at least one resume-y keyword. Fails are marked
+    // 'rejected_not_a_resume' so the candidate stub doesn't get garbage
+    // fields written to it.
+    if (!looksLikeResume(rawText)) {
+      logger.warn("File does not look like a resume; skipping AI parse", {
+        fileName, textLength: rawText.length,
+      });
+      await supabase
+        .from("resumes")
+        .update({
+          raw_text: rawText.slice(0, 4000),
+          parsing_status: "rejected_not_a_resume",
+        })
+        .eq("id", resumeId);
+      return { skipped: true, reason: "not_a_resume" };
+    }
+
+    // ── 3. Parse with Claude (OpenAI fallback on credit/rate-limit) ─
     const anthropicKey = await getAnthropicKey();
-    const parsedJson = await parseWithClaude(fileBytes, fileName, rawText, anthropicKey);
-    logger.info("Parsed resume", { parsed: parsedJson });
+    let parsedJson: any = null;
+    let parser: string = "trigger-claude";
+    try {
+      parsedJson = await parseWithClaude(fileBytes, fileName, rawText, anthropicKey);
+    } catch (claudeErr: any) {
+      // Only fall back on errors where retrying Claude won't help: credit
+      // exhausted, rate limit, auth. Other errors (parse error, 5xx) keep
+      // surfacing so Trigger.dev's retry policy still catches transient
+      // upstream issues.
+      const msg = String(claudeErr?.message || "");
+      const fallbackable =
+        /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key/i.test(msg);
+      const openAiKey = await getOpenAIKey();
+      if (fallbackable && openAiKey) {
+        logger.warn("Claude failed, falling back to OpenAI", { error: msg });
+        parsedJson = await parseWithOpenAI(rawText, fileName, openAiKey);
+        parser = "trigger-openai-fallback";
+      } else {
+        throw claudeErr;
+      }
+    }
+    logger.info("Parsed resume", { parsed: parsedJson, parser });
 
     // ── 4. Update resumes table ─────────────────────────────────────
     await supabase
@@ -73,7 +114,7 @@ export const resumeIngestion = task({
         raw_text: rawText,
         parsed_json: parsedJson,
         parsing_status: "completed",
-        parser: "trigger-claude",
+        parser,
       })
       .eq("id", resumeId);
 
@@ -162,6 +203,35 @@ export const resumeIngestion = task({
 // ─────────────────────────────────────────────────────────────────────────────
 // TEXT EXTRACTION (ported from parse-resume edge function)
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Cheap pre-AI guard: does this look like a resume?
+ *
+ * Triggers a soft rejection if the extracted text is too short, missing
+ * any email pattern, AND missing all resume-shaped keywords. The bar is
+ * intentionally low — false positives waste a few cents of AI tokens,
+ * false negatives lose a candidate. So we only reject when *all three*
+ * signals are missing.
+ */
+function looksLikeResume(rawText: string): boolean {
+  const text = (rawText || "").toLowerCase();
+  if (text.length < 200) return false;
+
+  const hasEmail = /[\w.+-]+@[\w-]+\.[\w.-]+/.test(text);
+  const KEYWORDS = [
+    "experience", "education", "skills", "summary", "objective",
+    "employment", "qualifications", "responsibilities", "achievements",
+    "university", "college", "bachelor", "master", "ph.d", "phd",
+    "linkedin.com/in",
+  ];
+  const hasKeyword = KEYWORDS.some((k) => text.includes(k));
+
+  // If we have an email AND a keyword, definitely a resume.
+  if (hasEmail && hasKeyword) return true;
+  // Either alone is enough to keep going.
+  if (hasEmail || hasKeyword) return true;
+  return false;
+}
+
 async function extractText(fileBytes: Uint8Array, fileName: string): Promise<string> {
   const lowerName = fileName.toLowerCase();
 
@@ -281,5 +351,53 @@ async function parseWithClaude(
   }
 
   return null;
+}
+
+/**
+ * Fallback parser using OpenAI (gpt-4o-mini). Used only when Claude is
+ * over quota / rate-limited. Operates on the extracted text only — no
+ * native PDF support — so for PDFs we rely on the (placeholder) text
+ * already pulled by extractText. If a PDF returns just the placeholder
+ * we return null and let Trigger.dev's retry pick it up later when
+ * Claude is back.
+ */
+async function parseWithOpenAI(
+  rawText: string,
+  fileName: string,
+  apiKey: string,
+): Promise<any> {
+  if (!rawText || rawText.startsWith("[PDF -")) {
+    return null;
+  }
+
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: PARSE_PROMPT },
+        { role: "user", content: `Parse this resume (${fileName}):\n\n${rawText.slice(0, 16000)}` },
+      ],
+    }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`OpenAI fallback error: ${await resp.text()}`);
+  }
+
+  const data = await resp.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  try {
+    return JSON.parse(text);
+  } catch {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+  }
 }
 

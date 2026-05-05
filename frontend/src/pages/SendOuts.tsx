@@ -21,6 +21,14 @@ import { StageTable } from '@/components/send-outs/StageTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 import { BulkActionBar } from '@/components/send-outs/BulkActionBar';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { supabase } from '@/integrations/supabase/client';
+import { invalidateSendOutScope } from '@/lib/invalidate';
+import { softDelete } from '@/lib/softDelete';
+import { ListSkeleton } from '@/components/shared/EmptyState';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -60,6 +68,8 @@ export default function SendOuts() {
   });
   const [activeDrag, setActiveDrag] = useState<SendOutRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
+  const [deleteRow, setDeleteRow] = useState<SendOutRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -174,6 +184,22 @@ export default function SendOuts() {
 
   const handleOpenRow = (row: SendOutRow) => setDrawerRow(row);
 
+  const handleDeleteRow = async () => {
+    if (!deleteRow) return;
+    setDeleting(true);
+    try {
+      const { error } = await softDelete('send_outs', deleteRow.id);
+      if (error) throw new Error(error.message);
+      toast.success('Removed from pipeline');
+      invalidateSendOutScope(queryClient);
+      setDeleteRow(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ── Drag & drop ──────────────────────────────────────────────────────
   const handleDragStart = (e: DragStartEvent) => {
     const row = filteredRows.find((r) => r.id === e.active.id);
@@ -226,8 +252,8 @@ export default function SendOuts() {
   return (
     <MainLayout>
       <PageHeader
-        title="Send Outs"
-        description="Every active send-out across the team — drag to advance, click to open."
+        title="Submissions"
+        description="Every active submission across the team — drag to advance, click to open."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
@@ -238,7 +264,7 @@ export default function SendOuts() {
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
             <Button variant="gold" size="sm" onClick={() => setAddModal({ open: true, stage: 'pitch', jobId: filters.jobId !== 'all' ? filters.jobId : null })} className="gap-1">
-              <Plus className="h-3.5 w-3.5" /> New Send Out
+              <Plus className="h-3.5 w-3.5" /> New Submission
             </Button>
           </div>
         }
@@ -255,9 +281,7 @@ export default function SendOuts() {
         />
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading send-outs…
-          </div>
+          <ListSkeleton rows={5} />
         ) : (
           <DndContext
             sensors={sensors}
@@ -281,6 +305,7 @@ export default function SendOuts() {
                   onAdvance={handleAdvance}
                   onOpen={handleOpenRow}
                   onAdd={() => setAddModal({ open: true, stage: cfg.key, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
+                  onDelete={(row) => setDeleteRow(row)}
                 />
               ))}
             </div>
@@ -298,7 +323,7 @@ export default function SendOuts() {
         {!isLoading && filteredRows.length === 0 && (
           <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
             <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
-            <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>
+            <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Submission" to start one.</p>
           </div>
         )}
       </div>
@@ -320,6 +345,24 @@ export default function SendOuts() {
         jobId={addModal.jobId}
         stage={addModal.stage}
       />
+
+      <AlertDialog open={!!deleteRow} onOpenChange={(v) => { if (!v) setDeleteRow(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove from pipeline?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes <span className="font-semibold">{deleteRow?.candidate?.full_name ?? 'this candidate'}</span>
+              {' '}from the {deleteRow?.job?.title ?? 'job'} pipeline. The person record stays — only this send-out is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteRow} disabled={deleting} className="bg-red-600 hover:bg-red-700">
+              {deleting ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }
