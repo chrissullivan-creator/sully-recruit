@@ -252,8 +252,8 @@ export default function SendOuts() {
   return (
     <MainLayout>
       <PageHeader
-        title="Send Outs"
-        description="Every active send-out across the team — drag to advance, click to open."
+        title="Submissions"
+        description="Every active submission across the team — drag to advance, click to open."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
@@ -264,7 +264,7 @@ export default function SendOuts() {
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
             <Button variant="gold" size="sm" onClick={() => setAddModal({ open: true, stage: 'pitch', jobId: filters.jobId !== 'all' ? filters.jobId : null })} className="gap-1">
-              <Plus className="h-3.5 w-3.5" /> New Send Out
+              <Plus className="h-3.5 w-3.5" /> New Submission
             </Button>
           </div>
         }
@@ -323,7 +323,7 @@ export default function SendOuts() {
         {!isLoading && filteredRows.length === 0 && (
           <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
             <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
-            <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>
+            <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Submission" to start one.</p>
           </div>
         )}
       </div>

@@ -318,11 +318,11 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* ── 6-stage pipeline funnel (click → Send Outs by stage) ─── */}
+        {/* ── 6-stage pipeline funnel (click → Submissions by stage) ─── */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-foreground">Pipeline Funnel — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
+            <span className="text-xs text-muted-foreground">Click any stage to open Submissions</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
@@ -358,9 +358,9 @@ const Dashboard = () => {
             ))}
           </ListPanel>
 
-          {/* Send Outs */}
+          {/* Submissions */}
           <ListPanel
-            title="Send Outs"
+            title="Submissions"
             count={sendOutList.length}
             icon={<Send className="h-4 w-4" />}
             accentColor="bg-blue-500/10 text-blue-400"

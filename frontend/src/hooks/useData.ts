@@ -515,24 +515,22 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const interviewList    = (interviewsInRangeRes.data?? []) as any[];
       const cjRows           = (candidateJobsInRangeRes.data ?? []) as any[];
 
-      // Aggregate candidate_jobs by pipeline_stage. Each canonical funnel cell
-      // groups one or more raw stage values (pitch+pitched, ready_to_send+sent,
-      // interviewing+interview_round_*, etc.) so the dashboard maps cleanly to
-      // however the data is currently spelled.
-      const inStage = (stages: string[]) =>
-        cjRows.filter((r) => stages.includes(r.pipeline_stage));
+      // Funnel cells count rows from `send_outs` (the canonical source the
+      // Send Outs page reads from), so dashboard numbers exactly match
+      // what shows up on /send-outs. Previously we counted from
+      // candidate_jobs and the two could drift when a row was created in
+      // one but not the other.
+      const inSendOutStage = (stages: string[]) =>
+        sendOutsInRange.filter((r: any) => stages.includes(r.stage));
 
-      const pitchList      = inStage(['pitch', 'pitched']);
-      // "Send Out" = the working queue waiting to go out today.
-      // Once a candidate is actually sent, they move to Submission. So
-      // legacy 'sent' belongs with 'submitted', not with the queue.
-      // (Matches stageToCanonical() in pipeline.ts; the dashboard was
-      // double-counting until this fix.)
-      const sendOutListCJ  = inStage(['ready_to_send', 'send_out', 'sendout']);
-      const submittedList  = inStage(['submitted', 'sent']);
-      const interviewListCJ = inStage(['interviewing', 'interview', 'interview_round_1', 'interview_round_2_plus']);
-      const offerListCJ    = inStage(['offer']);
-      const rejectionListCJ = inStage(['rejected', 'withdrew', 'withdrawn']);
+      const pitchList      = inSendOutStage(['pitch', 'pitched']);
+      // "Send Out" tile = ready_to_send queue (drains to zero by EOD).
+      // "Submission" tile = actually sent to client.
+      const sendOutListCJ  = inSendOutStage(['ready_to_send', 'send_out', 'sendout']);
+      const submittedList  = inSendOutStage(['submitted', 'sent']);
+      const interviewListCJ = inSendOutStage(['interviewing', 'interview', 'interview_round_1', 'interview_round_2_plus']);
+      const offerListCJ    = inSendOutStage(['offer']);
+      const rejectionListCJ = inSendOutStage(['rejected', 'withdrew', 'withdrawn']);
 
       return {
         activeJobs: jobsRes.count ?? 0,
