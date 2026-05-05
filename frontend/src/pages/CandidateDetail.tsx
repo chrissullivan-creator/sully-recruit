@@ -467,7 +467,9 @@ const CandidateDetail = () => {
       const { error } = await supabase.from('send_outs').insert({
         candidate_id: id,
         job_id: selectedJobForSendOut,
-        stage: 'lead',
+        // 'pitch' is the canonical first stage — candidate has been added
+        // to the pipeline and now needs to be pitched the role.
+        stage: 'pitch',
         recruiter_id: session?.user?.id ?? null,
       } as any);
       if (error) throw error;
