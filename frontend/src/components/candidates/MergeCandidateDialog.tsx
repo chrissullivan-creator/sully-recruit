@@ -174,7 +174,7 @@ export function MergeCandidateDialog({
 
     setMerging(true);
     try {
-      const { data, error } = await supabase.rpc('merge_duplicate_candidate', {
+      const { data, error } = await supabase.rpc('merge_candidate', {
         p_survivor_id: survivorId,
         p_merged_id: mergedId,
       });

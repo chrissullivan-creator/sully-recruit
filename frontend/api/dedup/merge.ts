@@ -54,15 +54,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const supabase = createClient(supabaseUrl, serviceKey);
-    const { data, error } = await supabase.rpc("merge_duplicate_candidate", {
+    const { data, error } = await supabase.rpc("merge_candidate", {
       p_survivor_id: survivorId,
       p_merged_id: mergedId,
-      p_duplicate_row_id: duplicatePairId ?? null,
     });
     if (error) {
-      console.error("merge_duplicate_candidate RPC error:", error.message);
+      console.error("merge_candidate RPC error:", error.message);
       return res.status(500).json({ error: error.message });
     }
+
+    // duplicate_pair_id was previously passed to merge_duplicate_candidate
+    // which marked the pair merged. merge_candidate handles that internally
+    // by status-flipping any duplicate_candidates row referencing either id,
+    // so no extra step is needed here.
     return res.status(200).json({ merged: true, result: data });
   } catch (err: any) {
     console.error("merge endpoint error:", err.message);

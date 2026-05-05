@@ -1,6 +1,7 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
+import { notifyError } from "./lib/alerting";
 import {
   looksLikeResume,
   parseWithClaude,
@@ -361,6 +362,12 @@ export const reconcileOrphanedResumes = schedules.task({
         errors.push(`${resume.fileName}: ${detail}`);
         await supabase.from("resumes").update({ parsing_status: "failed", parse_error: detail }).eq("id", resume.id);
         outcomes.push({ fileName: resume.fileName, candidateName: null, verdict: "failed", detail });
+        await notifyError({
+          taskId: "reconcile-orphaned-resumes",
+          error: err,
+          context: { resumeId: resume.id, fileName: resume.fileName },
+          severity: "WARN",
+        });
       }
 
       // Light spacing between resumes to avoid bursting Voyage; AI fallbacks
