@@ -149,7 +149,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
           file_size: resumeFile.size,
           storage_bucket: 'resumes',
           source: 'upload',
-          parse_status: 'completed',
+          parsing_status: 'completed',
         } as any);
 
         fetch('/api/trigger-resume-ingestion', {
