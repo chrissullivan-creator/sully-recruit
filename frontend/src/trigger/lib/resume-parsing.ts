@@ -1,8 +1,12 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getAnthropicKey, getVoyageKey } from "./supabase";
+import { getAnthropicKey, getOpenAIKey, getVoyageKey } from "./supabase";
 
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const OPENAI_FALLBACK_MODEL = "gpt-4o-mini";
 const VOYAGE_MODEL = "voyage-finance-2";
+
+// Errors where retrying Claude won't help — fall back to OpenAI.
+const FALLBACKABLE = /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key/i;
 
 export const RESUME_SYSTEM = `You are a resume parser for The Emerald Recruiting Group, a Wall Street staffing firm. Extract structured candidate data from resumes with precision.
 
@@ -69,9 +73,35 @@ function parseClaudeResponse(raw: any): any {
   return JSON.parse(text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
 }
 
+async function parseTextWithOpenAI(rawText: string, fileName: string, apiKey: string): Promise<any> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: OPENAI_FALLBACK_MODEL,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: RESUME_SYSTEM },
+        { role: "user", content: `Parse this resume (${fileName}):\n\n${rawText.slice(0, 16000)}` },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  try { return JSON.parse(text); }
+  catch { const m = text.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error("OpenAI returned non-JSON"); }
+}
+
 /**
  * Parse a resume file (PDF or DOCX) with Claude. Returns parsed JSON + raw text.
  * `fileBytes` is the raw file content as ArrayBuffer.
+ *
+ * Falls back to OpenAI (gpt-4o-mini) when Claude returns a "won't recover"
+ * error (credit balance, rate limit, auth) AND we have already-extracted
+ * text. PDFs without a fallback path still throw — Claude is the only
+ * native PDF parser here.
  */
 export async function parseWithClaude(
   fileBytes: ArrayBuffer,
@@ -110,27 +140,37 @@ export async function parseWithClaude(
     return { parsed: parseClaudeResponse(await res.json()), rawText: null };
   }
 
-  // DOCX / DOC
+  // DOCX / DOC — extract text first so we can fall back to OpenAI.
   const rawText = await extractDocxText(fileBytes);
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 1024,
-      system: RESUME_SYSTEM,
-      messages: [{
-        role: "user",
-        content: `Resume text:\n\n${rawText.slice(0, 30000)}\n\nParse and return the JSON.`,
-      }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return { parsed: parseClaudeResponse(await res.json()), rawText };
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 1024,
+        system: RESUME_SYSTEM,
+        messages: [{
+          role: "user",
+          content: `Resume text:\n\n${rawText.slice(0, 30000)}\n\nParse and return the JSON.`,
+        }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return { parsed: parseClaudeResponse(await res.json()), rawText };
+  } catch (claudeErr: any) {
+    const msg = String(claudeErr?.message || "");
+    if (!FALLBACKABLE.test(msg)) throw claudeErr;
+    const openAiKey = await getOpenAIKey();
+    if (!openAiKey) throw claudeErr;
+    logger.warn("Claude failed in lib/parseWithClaude, falling back to OpenAI", { error: msg });
+    const parsed = await parseTextWithOpenAI(rawText, fileName, openAiKey);
+    return { parsed, rawText };
+  }
 }
 
 /**

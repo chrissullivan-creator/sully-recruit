@@ -1,5 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
+import { sendInternalEmail } from "./lib/microsoft-graph";
 import {
   looksLikeResume,
   parseWithClaude,
@@ -9,6 +10,84 @@ import {
   normalizeLinkedIn,
   delay,
 } from "./lib/resume-parsing";
+
+type Verdict = "matched" | "created" | "failed" | "skipped";
+interface ResumeOutcome {
+  fileName: string;
+  candidateName: string | null;
+  verdict: Verdict;
+  detail?: string;
+}
+
+async function maybeSendReport(outcomes: ResumeOutcome[]) {
+  if (outcomes.length === 0) return;
+  let sender = "";
+  let recipients: string[] = [];
+  try { sender = (await getAppSetting("RESUME_REPORT_SENDER")) || ""; } catch { /* not configured */ }
+  try {
+    const raw = (await getAppSetting("RESUME_REPORT_RECIPIENTS")) || "";
+    recipients = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  } catch { /* not configured */ }
+  if (!sender || recipients.length === 0) {
+    logger.info("Resume report email skipped — sender/recipients not configured", {
+      have_sender: !!sender, recipient_count: recipients.length,
+    });
+    return;
+  }
+
+  const counts = outcomes.reduce(
+    (acc, o) => { acc[o.verdict] = (acc[o.verdict] ?? 0) + 1; return acc; },
+    {} as Record<Verdict, number>,
+  );
+
+  const rowFor = (o: ResumeOutcome) => {
+    const colors: Record<Verdict, string> = {
+      created: "#16a34a", matched: "#0ea5e9", failed: "#dc2626", skipped: "#6b7280",
+    };
+    const labels: Record<Verdict, string> = {
+      created: "Created", matched: "Matched", failed: "Failed", skipped: "Skipped",
+    };
+    return `<tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee">${o.candidateName ? escapeHtml(o.candidateName) : "<em style='color:#999'>(no name)</em>"}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;color:#666;font-family:monospace;font-size:12px">${escapeHtml(o.fileName)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;color:${colors[o.verdict]};font-weight:600">${labels[o.verdict]}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;color:#999;font-size:12px">${o.detail ? escapeHtml(o.detail) : ""}</td>
+    </tr>`;
+  };
+
+  const html = `
+    <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px">
+      <h2 style="margin:0 0 4px 0">Resume parsing summary</h2>
+      <p style="color:#666;margin:0 0 16px 0">
+        ${outcomes.length} resume${outcomes.length === 1 ? "" : "s"} processed —
+        <span style="color:#16a34a">${counts.created ?? 0} created</span>,
+        <span style="color:#0ea5e9">${counts.matched ?? 0} matched</span>,
+        <span style="color:#dc2626">${counts.failed ?? 0} failed</span>,
+        <span style="color:#6b7280">${counts.skipped ?? 0} skipped</span>
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <thead><tr style="text-align:left;background:#f9fafb">
+          <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">Name</th>
+          <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">File</th>
+          <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">Verdict</th>
+          <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">Detail</th>
+        </tr></thead>
+        <tbody>${outcomes.map(rowFor).join("")}</tbody>
+      </table>
+    </div>`;
+
+  const subject = `Resume parsing — ${counts.created ?? 0} new, ${counts.matched ?? 0} matched, ${counts.failed ?? 0} failed`;
+  try {
+    await sendInternalEmail(sender, recipients, subject, html);
+    logger.info("Resume report email sent", { sender, recipients, count: outcomes.length });
+  } catch (e: any) {
+    logger.warn("Resume report email failed", { error: e.message });
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
 
 /**
  * Find orphaned resumes (no candidate_id), parse them with Claude,
@@ -67,6 +146,7 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
 
 export const reconcileOrphanedResumes = schedules.task({
   id: "reconcile-orphaned-resumes",
+  cron: "* * * * *", // every minute — was previously dashboard-only, made explicit to survive redeploys
   maxDuration: 300,
   run: async () => {
     const supabase = getSupabaseAdmin();
@@ -130,6 +210,7 @@ export const reconcileOrphanedResumes = schedules.task({
 
     let matched = 0, created = 0, failed = 0, embedded = 0, blacklistedSkipped = 0;
     const errors: string[] = [];
+    const outcomes: ResumeOutcome[] = [];
 
     for (const resume of allToProcess) {
       try {
@@ -162,6 +243,7 @@ export const reconcileOrphanedResumes = schedules.task({
 
         if (!fullName && !parsed.email) {
           await supabase.from("resumes").update({ parsing_status: "skipped" }).eq("id", resume.id);
+          outcomes.push({ fileName: resume.fileName, candidateName: null, verdict: "skipped", detail: "no name or email" });
           continue;
         }
 
@@ -171,10 +253,12 @@ export const reconcileOrphanedResumes = schedules.task({
           logger.info(`Blacklisted: ${fullName || parsed.email} (${resume.fileName})`);
           await supabase.from("resumes").update({ parsing_status: "skipped" }).eq("id", resume.id);
           blacklistedSkipped++;
+          outcomes.push({ fileName: resume.fileName, candidateName: fullName || parsed.email || null, verdict: "skipped", detail: "previously deleted" });
           continue;
         }
 
         let candidateId = await findExistingCandidate(supabase, parsed);
+        const wasMatch = !!candidateId;
 
         if (candidateId) {
           // Update existing candidate with missing fields
@@ -265,15 +349,24 @@ export const reconcileOrphanedResumes = schedules.task({
           logger.warn("Embedding failed", { error: e.message });
         }
 
-        logger.info(`${resume.fileName} → ${candidateId ? (matched > 0 ? "matched" : "created") : "processed"}`);
+        logger.info(`${resume.fileName} → ${wasMatch ? "matched" : "created"}`);
+        outcomes.push({
+          fileName: resume.fileName,
+          candidateName: fullName || parsed.email || null,
+          verdict: wasMatch ? "matched" : "created",
+        });
       } catch (err: any) {
         failed++;
-        errors.push(`${resume.fileName}: ${err?.message ?? "unknown"}`);
-        await supabase.from("resumes").update({ parsing_status: "failed" }).eq("id", resume.id);
+        const detail = (err?.message ?? "unknown").slice(0, 200);
+        errors.push(`${resume.fileName}: ${detail}`);
+        await supabase.from("resumes").update({ parsing_status: "failed", parse_error: detail }).eq("id", resume.id);
+        outcomes.push({ fileName: resume.fileName, candidateName: null, verdict: "failed", detail });
       }
 
       await delay(1500);
     }
+
+    await maybeSendReport(outcomes);
 
     const { count: remaining } = await supabase
       .from("resumes")
