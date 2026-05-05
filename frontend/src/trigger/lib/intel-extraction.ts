@@ -90,7 +90,7 @@ export async function extractMessageIntel(
 
   try {
     const [apiKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
-    const { text } = await callAIWithFallback({
+    const { text, via } = await callAIWithFallback({
       anthropicKey: apiKey,
       openaiKey: openaiKey || undefined,
       systemPrompt: EXTRACTION_PROMPT,
@@ -101,11 +101,28 @@ export async function extractMessageIntel(
     });
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      logger.warn("Intel extraction returned non-JSON", {
+        via, snippet: text.slice(0, 200),
+      });
+      return null;
+    }
 
-    return JSON.parse(jsonMatch[0]) as ExtractedIntel;
+    try {
+      return JSON.parse(jsonMatch[0]) as ExtractedIntel;
+    } catch (parseErr: any) {
+      logger.warn("Intel extraction JSON parse failed", {
+        via, error: parseErr.message, snippet: jsonMatch[0].slice(0, 200),
+      });
+      return null;
+    }
   } catch (err: any) {
-    logger.warn("Intel extraction failed", { error: err.message });
+    // Surface the real upstream error (credit balance, OpenAI 401, etc.)
+    // so we can see why sentiment stops working — silent null was masking it.
+    logger.error("Intel extraction failed", {
+      error: err?.message || String(err),
+      stack: err?.stack?.slice(0, 500),
+    });
     return null;
   }
 }

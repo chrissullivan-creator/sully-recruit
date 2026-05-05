@@ -250,10 +250,21 @@ async function extractText(fileBytes: Uint8Array, fileName: string): Promise<str
     throw new Error("Could not extract readable text from DOC file");
   }
 
-  // PDF — Claude handles natively via document API, so return empty for text
-  // The actual parsing will use the PDF document block
+  // PDF — extract real text so we have a fallback for OpenAI when Claude
+  // is over quota. Claude's PDF-document-block path still runs in
+  // parseWithClaude (uses raw bytes); rawText here is for the fallback.
   if (lowerName.endsWith(".pdf")) {
-    return "[PDF - parsed via Claude document API]";
+    try {
+      // pdf-parse pulls in test fixtures at top-level import; defer the
+      // require so cold start isn't paying for it.
+      const pdfParse = (await import("pdf-parse")).default;
+      const result = await pdfParse(Buffer.from(fileBytes));
+      const text = (result.text || "").trim();
+      return text.length > 50 ? text.slice(0, 16000) : "[PDF - no extractable text]";
+    } catch (err: any) {
+      // Don't block Claude PDF-native path on extractor errors.
+      return "[PDF - extract failed: " + (err?.message || "unknown").slice(0, 80) + "]";
+    }
   }
 
   return new TextDecoder().decode(fileBytes).slice(0, 8000);
@@ -366,7 +377,9 @@ async function parseWithOpenAI(
   fileName: string,
   apiKey: string,
 ): Promise<any> {
-  if (!rawText || rawText.startsWith("[PDF -")) {
+  // "[PDF - ..." placeholders mean the extractor couldn't pull real text;
+  // fallback isn't useful in that case.
+  if (!rawText || rawText.startsWith("[PDF -") || rawText.length < 50) {
     return null;
   }
 
