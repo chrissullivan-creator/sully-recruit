@@ -1,32 +1,16 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getAnthropicKey, getOpenAIKey, getVoyageKey } from "./supabase";
+import { getVoyageKey } from "./supabase";
 
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
-const OPENAI_FALLBACK_MODEL = "gpt-4o-mini";
 const VOYAGE_MODEL = "voyage-finance-2";
 
-// Errors where retrying Claude won't help — fall back to OpenAI.
-const FALLBACKABLE = /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key/i;
-
-export const RESUME_SYSTEM = `You are a resume parser for The Emerald Recruiting Group, a Wall Street staffing firm. Extract structured candidate data from resumes with precision.
-
-Return ONLY a raw JSON object — no markdown fences, no backticks, no preamble. Just the JSON:
-{
-  "first_name": "",
-  "last_name": "",
-  "email": "",
-  "phone": "",
-  "linkedin_url": "",
-  "location": "",
-  "current_title": "",
-  "current_company": "",
-  "skills": []
-}
-
-Rules:
-- Use empty string for unknown fields, empty array for no skills
-- Extract up to 25 most relevant skills
-- current_title and current_company: most recent role only`;
+/**
+ * Trigger-side utilities used across the resume pipeline. The actual
+ * parser (Claude → OpenAI fallback + PDF text extraction) lives in
+ * `frontend/src/lib/resume-parser.ts` so Vercel functions and
+ * Trigger.dev tasks share a single implementation. This file owns the
+ * helpers around it: junk-file heuristic, Voyage embedding, and small
+ * normalisers.
+ */
 
 const JUNK_PATTERNS = [
   /invoice/i, /receipt/i, /confirmation/i, /waiver/i,
@@ -46,152 +30,6 @@ export function looksLikeResume(fileName: string): boolean {
     if (p.test(fileName)) return false;
   }
   return true;
-}
-
-function getExtension(s: string): "pdf" | "docx" | "doc" {
-  const l = (s || "").toLowerCase();
-  if (l.endsWith(".pdf")) return "pdf";
-  if (l.endsWith(".docx")) return "docx";
-  return "doc";
-}
-
-export function toBase64(buf: ArrayBuffer): string {
-  return Buffer.from(buf).toString("base64");
-}
-
-export async function extractDocxText(buf: ArrayBuffer): Promise<string> {
-  const mammoth = await import("mammoth");
-  const result = await mammoth.default.extractRawText({ buffer: Buffer.from(buf) });
-  const rawText = (result.value || "").trim();
-  if (!rawText) throw new Error("Empty text from DOCX");
-  return rawText;
-}
-
-function parseClaudeResponse(raw: any): any {
-  const text = raw?.content?.[0]?.text;
-  if (!text) throw new Error("Claude missing content");
-  return JSON.parse(text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
-}
-
-async function parseTextWithOpenAI(rawText: string, fileName: string, apiKey: string): Promise<any> {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: OPENAI_FALLBACK_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: RESUME_SYSTEM },
-        { role: "user", content: `Parse this resume (${fileName}):\n\n${rawText.slice(0, 16000)}` },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  try { return JSON.parse(text); }
-  catch { const m = text.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error("OpenAI returned non-JSON"); }
-}
-
-/**
- * Parse a resume file (PDF or DOCX) with Claude. Returns parsed JSON + raw text.
- * `fileBytes` is the raw file content as ArrayBuffer.
- *
- * Falls back to OpenAI (gpt-4o-mini) when Claude returns a "won't recover"
- * error (credit balance, rate limit, auth) AND we have already-extracted
- * text. PDFs without a fallback path still throw — Claude is the only
- * native PDF parser here.
- */
-export async function parseWithClaude(
-  fileBytes: ArrayBuffer,
-  fileName: string,
-): Promise<{ parsed: any; rawText: string | null }> {
-  const ext = getExtension(fileName);
-  const anthropicKey = await getAnthropicKey();
-
-  if (ext === "pdf") {
-    const header = new Uint8Array(fileBytes.slice(0, 4));
-    if (!(header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46)) {
-      throw new Error("Invalid PDF header");
-    }
-    const b64 = toBase64(fileBytes);
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          max_tokens: 1024,
-          system: RESUME_SYSTEM,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-              { type: "text", text: "Parse this resume and return the JSON." },
-            ],
-          }],
-        }),
-      });
-      if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return { parsed: parseClaudeResponse(await res.json()), rawText: null };
-    } catch (claudeErr: any) {
-      const msg = String(claudeErr?.message || "");
-      if (!FALLBACKABLE.test(msg)) throw claudeErr;
-      const openAiKey = await getOpenAIKey();
-      if (!openAiKey) throw claudeErr;
-      // Extract PDF text and route through OpenAI. Import the inner module
-      // to skip pdf-parse's top-level test-fixture autorun.
-      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
-      const result = await Promise.race([
-        pdfParse(Buffer.from(fileBytes)),
-        new Promise<{ text: string }>((_, rej) =>
-          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
-        ),
-      ]);
-      const rawText = (result.text || "").trim();
-      if (rawText.length < 50) throw claudeErr;
-      logger.warn("Claude PDF failed, falling back to OpenAI on extracted text", { error: msg });
-      const parsed = await parseTextWithOpenAI(rawText, fileName, openAiKey);
-      return { parsed, rawText };
-    }
-  }
-
-  // DOCX / DOC — extract text first so we can fall back to OpenAI.
-  const rawText = await extractDocxText(fileBytes);
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 1024,
-        system: RESUME_SYSTEM,
-        messages: [{
-          role: "user",
-          content: `Resume text:\n\n${rawText.slice(0, 30000)}\n\nParse and return the JSON.`,
-        }],
-      }),
-    });
-    if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    return { parsed: parseClaudeResponse(await res.json()), rawText };
-  } catch (claudeErr: any) {
-    const msg = String(claudeErr?.message || "");
-    if (!FALLBACKABLE.test(msg)) throw claudeErr;
-    const openAiKey = await getOpenAIKey();
-    if (!openAiKey) throw claudeErr;
-    logger.warn("Claude failed in lib/parseWithClaude, falling back to OpenAI", { error: msg });
-    const parsed = await parseTextWithOpenAI(rawText, fileName, openAiKey);
-    return { parsed, rawText };
-  }
 }
 
 /**
@@ -246,3 +84,7 @@ export function normalizeLinkedIn(u: string | null | undefined): string | null {
 }
 
 export const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Suppress unused-import warning for `logger` in environments that don't
+// statically detect it; consumers can still use it from @trigger.dev/sdk.
+void logger;

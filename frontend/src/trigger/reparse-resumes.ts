@@ -1,12 +1,12 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
 import {
   looksLikeResume,
-  parseWithClaude,
   getVoyageEmbedding,
   buildProfileText,
   delay,
 } from "./lib/resume-parsing";
+import { parseResume } from "../lib/resume-parser";
 
 /**
  * Re-parse resumes that have a candidate_id but no raw_text.
@@ -69,6 +69,8 @@ export const reparseResumes = schedules.task({
     let parsedCount = 0, embeddedCount = 0, failedCount = 0;
     const errors: string[] = [];
 
+    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+
     for (let i = 0; i < filtered.length; i++) {
       const resume = filtered[i];
       try {
@@ -77,7 +79,9 @@ export const reparseResumes = schedules.task({
         if (!publicUrl) throw new Error("No public URL");
 
         const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-        const { parsed, rawText } = await parseWithClaude(buf, resume.fileName);
+        const { parsed, rawText } = await parseResume(buf, resume.fileName, {
+          anthropicKey, openaiKey: openaiKey || undefined, log: logger,
+        });
         const normalizedRawText = (rawText ?? JSON.stringify(parsed)).slice(0, 50000);
         const skills = Array.isArray(parsed?.skills)
           ? parsed.skills.map((s: any) => String(s)).filter(Boolean).slice(0, 25)
