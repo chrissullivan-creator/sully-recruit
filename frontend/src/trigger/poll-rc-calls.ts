@@ -180,7 +180,14 @@ async function runPoll(lookbackMinutes: number) {
               .eq("external_call_id", callId)
               .maybeSingle();
             if (inserted?.id) {
-              await processCallDeepgram.trigger({ call_log_id: inserted.id });
+              // Delay 90s — RC recordings often aren't exposed in the
+              // call-log API for 1-2 min after the call ends. The
+              // retry-stuck-call-transcripts sweep is the safety net
+              // if even 90s isn't enough.
+              await processCallDeepgram.trigger(
+                { call_log_id: inserted.id },
+                { delay: "90s" },
+              );
               logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
             }
           }

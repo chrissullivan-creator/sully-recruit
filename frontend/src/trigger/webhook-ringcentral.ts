@@ -86,7 +86,7 @@ export const processRingcentralEvent = task({
       if (isCompletedCall && callLog?.id) {
         await processCallDeepgram.trigger(
           { call_log_id: callLog.id },
-          { delay: "30s" },
+          { delay: "90s" },
         );
       }
 
@@ -191,10 +191,12 @@ export const processRingcentralEvent = task({
         (eventBody.duration && eventBody.duration > 30);
 
       if (isCompletedCall && callLog?.id) {
-        // Delay 30s to let RingCentral finish processing the recording
+        // Delay 90s — RC recordings often need 1-2 min before they're
+        // exposed in the call-log API. The retry-stuck-call-transcripts
+        // sweep handles cases where even that isn't enough.
         await processCallDeepgram.trigger(
           { call_log_id: callLog.id },
-          { delay: "30s" },
+          { delay: "90s" },
         );
         logger.info("Triggered Deepgram transcription", { callLogId: callLog.id });
       }
