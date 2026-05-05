@@ -1,6 +1,7 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 import { processCallDeepgram } from "./process-call-deepgram";
+import { notifyError } from "./lib/alerting";
 
 /**
  * Safety net for calls whose transcripts never made it to ai_call_notes.
@@ -64,7 +65,11 @@ export const retryStuckCallTranscripts = schedules.task({
         await processCallDeepgram.trigger({ call_log_id: cl.id });
         triggered++;
       } catch (err: any) {
-        logger.warn("Retry trigger failed", { callLogId: cl.id, error: err.message });
+        await notifyError({
+          taskId: "retry-stuck-call-transcripts",
+          error: err,
+          context: { callLogId: cl.id, name: cl.linked_entity_name },
+        });
       }
     }
 

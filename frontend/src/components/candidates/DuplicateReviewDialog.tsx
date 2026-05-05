@@ -253,10 +253,9 @@ export function DuplicateReviewDialog({
     setMerging(true);
     try {
       // Call the merge RPC directly for synchronous, atomic merge
-      const { data, error } = await supabase.rpc('merge_duplicate_candidate', {
+      const { data, error } = await supabase.rpc('merge_candidate', {
         p_survivor_id: survivorId,
         p_merged_id: mergedId,
-        p_duplicate_row_id: currentPair.id,
       });
 
       if (error) throw error;

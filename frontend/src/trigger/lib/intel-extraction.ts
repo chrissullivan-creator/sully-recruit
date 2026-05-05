@@ -11,6 +11,7 @@
 import { logger } from "@trigger.dev/sdk/v3";
 import { getAnthropicKey, getOpenAIKey } from "./supabase";
 import { callAIWithFallback } from "../../lib/ai-fallback";
+import { notifyError } from "./alerting";
 
 interface ExtractedIntel {
   sentiment: string;
@@ -119,9 +120,10 @@ export async function extractMessageIntel(
   } catch (err: any) {
     // Surface the real upstream error (credit balance, OpenAI 401, etc.)
     // so we can see why sentiment stops working — silent null was masking it.
-    logger.error("Intel extraction failed", {
-      error: err?.message || String(err),
-      stack: err?.stack?.slice(0, 500),
+    await notifyError({
+      taskId: "intel-extraction",
+      error: err,
+      context: { textLen: fullText.length, sample: fullText.slice(0, 120) },
     });
     return null;
   }
