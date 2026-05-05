@@ -4,67 +4,69 @@
  * Bound to: resumes_emeraldrecruit@sullyrecruit.app (and any other
  * resumes-inbox alias on Cloudflare Email Routing).
  *
- * No npm dependencies — paste straight into the Cloudflare dashboard.
- * The Worker just streams the raw RFC822 to the Vercel webhook, which
- * does the MIME parsing, candidate stubbing, and AI parsing fan-out.
+ * Streams the raw RFC822 directly to the Vercel webhook — no MIME
+ * parsing, no buffering, no npm deps.
  *
  * Setup:
- *   1. Cloudflare → Workers & Pages → Create Worker (Hello World template)
- *   2. Replace the worker code with this file's contents
- *   3. Settings → Variables and Secrets, add:
+ *   1. Cloudflare → Workers & Pages → Create Worker (Hello World)
+ *   2. Paste this file's contents → Deploy
+ *   3. Settings → Variables and Secrets:
  *        CLOUDFLARE_EMAIL_WEBHOOK_URL    = https://www.sullyrecruit.app/api/webhooks/cloudflare-email
  *        CLOUDFLARE_EMAIL_WEBHOOK_SECRET = <secret> (mark Secret)
- *      Both must match the values set on the Vercel side
- *      (env var or app_settings).
+ *      Both must match the Vercel side
+ *      (env var or app_settings.CLOUDFLARE_EMAIL_WEBHOOK_SECRET).
  *   4. Email Routing → Routing rules → edit your inbox alias →
  *      Action: "Send to Worker" → pick this worker.
  */
 
 export default {
-  async email(message, env) {
+  async email(message, env, ctx) {
+    // Fail fast with a useful log if the worker isn't fully configured.
+    if (!env || !env.CLOUDFLARE_EMAIL_WEBHOOK_URL) {
+      console.error('Worker missing CLOUDFLARE_EMAIL_WEBHOOK_URL env var');
+      message.setReject('worker not configured');
+      return;
+    }
+    if (!env.CLOUDFLARE_EMAIL_WEBHOOK_SECRET) {
+      console.error('Worker missing CLOUDFLARE_EMAIL_WEBHOOK_SECRET env var');
+      message.setReject('worker not configured');
+      return;
+    }
+
     try {
-      // Pull the raw RFC822 stream into a single Uint8Array. Cloudflare
-      // exposes message.raw as a ReadableStream<Uint8Array>.
-      const chunks = [];
-      const reader = message.raw.getReader();
-      let total = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        total += value.length;
-      }
-      const raw = new Uint8Array(total);
-      let off = 0;
-      for (const c of chunks) { raw.set(c, off); off += c.length; }
+      // Drain the raw RFC822 stream into an ArrayBuffer so the upstream
+      // gets a proper Content-Length header. Some Vercel/Node bodyParser
+      // configurations choke on a streamed body without a length.
+      const raw = await new Response(message.raw).arrayBuffer();
 
       const resp = await fetch(env.CLOUDFLARE_EMAIL_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'message/rfc822',
           'x-cloudflare-secret': env.CLOUDFLARE_EMAIL_WEBHOOK_SECRET,
-          // Envelope addresses — the Vercel side prefers parsed.from but
-          // falls back to these when the From header is missing.
           'x-mail-from': message.from || '',
           'x-mail-to': message.to || '',
         },
         body: raw,
       });
 
-      if (!resp.ok) {
-        const text = await resp.text();
-        console.error('Webhook returned non-OK', resp.status, text);
-        // setReject tells Cloudflare to NDR (sender gets a bounce).
-        // Use it for permanent failures only; otherwise let CF retry.
-        if (resp.status >= 400 && resp.status < 500) {
-          message.setReject(`webhook ${resp.status}`);
-        } else {
-          throw new Error(`webhook ${resp.status}`);
-        }
+      if (resp.ok) return;
+
+      // Read the response body for the worker logs — Cloudflare truncates
+      // logs but at least the status code + first chars of error reach us.
+      let detail = '';
+      try { detail = (await resp.text()).slice(0, 500); } catch {}
+      console.error(`Webhook ${resp.status}: ${detail}`);
+
+      // 4xx are permanent (bad payload, auth) — bounce. 5xx and network
+      // errors get re-thrown so Cloudflare retries.
+      if (resp.status >= 400 && resp.status < 500) {
+        message.setReject(`webhook ${resp.status}`);
+      } else {
+        throw new Error(`webhook ${resp.status}`);
       }
     } catch (err) {
-      console.error('Email worker failed', err && err.stack || err);
-      // Re-throw so Cloudflare retries on transient failures.
+      console.error('Email worker exception', err && err.stack || err);
       throw err;
     }
   },
