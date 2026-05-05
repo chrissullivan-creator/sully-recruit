@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/parse-email-signature
@@ -116,21 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .join("\n");
 
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 500,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: `Extract the SENDER's contact info from the email below. Return ONLY valid JSON, no markdown, no backticks. Omit any field you can't confidently fill.
+    const userPrompt = `Extract the SENDER's contact info from the email below. Return ONLY valid JSON, no markdown, no backticks. Omit any field you can't confidently fill.
 
 Fields: first_name, last_name, email, phone, title, company_name, location, linkedin_url
 
@@ -144,19 +131,17 @@ ${hint ? hint + "\n\n" : ""}Email (cleaned, plaintext):
 ${signatureBlock}
 ---
 
-JSON:`,
-          },
-        ],
-      }),
+JSON:`;
+
+    const { text } = await callAIWithFallback({
+      anthropicKey,
+      openaiKey: process.env.OPENAI_API_KEY,
+      systemPrompt: "You extract contact info from email signatures and return JSON.",
+      userContent: userPrompt,
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 500,
+      jsonOutput: true,
     });
-
-    if (!resp.ok) {
-      console.error("Claude API error:", await resp.text());
-      return res.status(200).json({});
-    }
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(200).json({});
 
