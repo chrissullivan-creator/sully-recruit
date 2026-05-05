@@ -143,12 +143,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // 2) Try every known applicants sub-endpoint in turn until one yields rows.
       // Unipile has used at least three URL shapes for LinkedIn Recruiter
       // candidates over time — try each and stop at the first match.
-      const candidateEndpoints = [
+      //
+      // Hiring projects are tied to a LinkedIn `job_posting` and applicants
+      // live under /linkedin/jobs/{job_id}/applicants (same path the
+      // resume-download flow uses). When the project payload exposes that
+      // id (as a string or an object with .id), prefer it — that's where
+      // the candidates actually are.
+      const jobPostingRaw = projectData?.job_posting ?? projectData?.jobPosting;
+      const jobPostingId =
+        typeof jobPostingRaw === "string"
+          ? jobPostingRaw
+          : jobPostingRaw?.id ?? jobPostingRaw?.public_id ?? null;
+
+      const candidateEndpoints: string[] = [];
+      if (jobPostingId) {
+        candidateEndpoints.push(
+          `${baseUrl}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants`,
+          `${baseUrl}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/candidates`,
+        );
+      }
+      candidateEndpoints.push(
         `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/applicants`,
         `${baseUrl}/linkedin/projects/${encodeURIComponent(job_id)}/candidates`,
         `${baseUrl}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}/candidates`,
         `${baseUrl}/linkedin/hiring/projects/${encodeURIComponent(job_id)}/candidates`,
-      ];
+      );
 
       for (const ep of candidateEndpoints) {
         if (applicants.length > 0) break;

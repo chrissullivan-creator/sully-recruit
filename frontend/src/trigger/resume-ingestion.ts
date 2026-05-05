@@ -3,23 +3,7 @@ import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase"
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
-
-const PARSE_PROMPT = `You are a professional resume parser. Extract structured data from the resume provided. Return ONLY valid JSON, no markdown, no explanation.
-
-Return this exact JSON structure:
-{
-  "first_name": "First Name",
-  "last_name": "Last Name",
-  "email": "email@example.com",
-  "phone": "phone number",
-  "current_company": "Most Recent Company",
-  "current_title": "Most Recent Job Title",
-  "location": "City, State",
-  "linkedin_url": "LinkedIn URL",
-  "skills": ["skill1", "skill2"]
-}
-
-If a field is not found, use an empty string. For skills, return an empty array if none found.`;
+import { parseResume, extractResumeText } from "../lib/resume-parser";
 
 interface ResumeIngestionPayload {
   resumeId: string;
@@ -30,16 +14,13 @@ interface ResumeIngestionPayload {
 
 export const resumeIngestion = task({
   id: "resume-ingestion",
-  retry: {
-    maxAttempts: 3,
-  },
+  retry: { maxAttempts: 3 },
   run: async (payload: ResumeIngestionPayload) => {
     const { resumeId, candidateId, filePath, fileName } = payload;
     const supabase = getSupabaseAdmin();
 
     logger.info("Starting resume ingestion", { resumeId, candidateId, fileName });
 
-    // Update status to processing
     await supabase
       .from("resumes")
       .update({ parsing_status: "processing" })
@@ -57,61 +38,41 @@ export const resumeIngestion = task({
     const fileBytes = new Uint8Array(await downloadData.arrayBuffer());
     logger.info("Downloaded file", { size: fileBytes.length });
 
-    // ── 2. Extract text content based on file type ──────────────────
-    const rawText = await extractText(fileBytes, fileName);
-    logger.info("Extracted text", { length: rawText.length });
-
-    // ── 2a. Resume sanity check ─────────────────────────────────────
+    // ── 2. Pre-AI sanity check (does this look like a resume?) ──────
     // Cheap heuristic before we burn AI tokens on something that isn't a
-    // resume (random PDF attachment, signed contract, screenshot). We
-    // require: (a) at least 200 chars of text, (b) at least one email-
-    // shaped token, (c) at least one resume-y keyword. Fails are marked
-    // 'rejected_not_a_resume' so the candidate stub doesn't get garbage
-    // fields written to it.
-    if (!looksLikeResume(rawText)) {
+    // resume. shared extractor handles PDF/DOCX/DOC/TXT; the parser will
+    // re-extract internally too — that's fine, it's a tiny cost vs. the
+    // value of skipping junk.
+    const sniffText = await extractResumeText(fileBytes, fileName, { log: logger });
+    if (!looksLikeResume(sniffText)) {
       logger.warn("File does not look like a resume; skipping AI parse", {
-        fileName, textLength: rawText.length,
+        fileName, textLength: sniffText.length,
       });
       await supabase
         .from("resumes")
         .update({
-          raw_text: rawText.slice(0, 4000),
+          raw_text: sniffText.slice(0, 4000),
           parsing_status: "rejected_not_a_resume",
         })
         .eq("id", resumeId);
       return { skipped: true, reason: "not_a_resume" };
     }
 
-    // ── 3. Parse with Claude (OpenAI fallback on credit/rate-limit) ─
-    const anthropicKey = await getAnthropicKey();
-    let parsedJson: any = null;
-    let parser: string = "trigger-claude";
-    try {
-      parsedJson = await parseWithClaude(fileBytes, fileName, rawText, anthropicKey);
-    } catch (claudeErr: any) {
-      // Only fall back on errors where retrying Claude won't help: credit
-      // exhausted, rate limit, auth. Other errors (parse error, 5xx) keep
-      // surfacing so Trigger.dev's retry policy still catches transient
-      // upstream issues.
-      const msg = String(claudeErr?.message || "");
-      const fallbackable =
-        /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key/i.test(msg);
-      const openAiKey = await getOpenAIKey();
-      if (fallbackable && openAiKey) {
-        logger.warn("Claude failed, falling back to OpenAI", { error: msg });
-        parsedJson = await parseWithOpenAI(rawText, fileName, openAiKey);
-        parser = "trigger-openai-fallback";
-      } else {
-        throw claudeErr;
-      }
-    }
+    // ── 3. Parse via shared parser (Claude → OpenAI fallback) ───────
+    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    const { parsed: parsedJson, rawText, via } = await parseResume(fileBytes, fileName, {
+      anthropicKey,
+      openaiKey: openaiKey || undefined,
+      log: logger,
+    });
+    const parser = via === "openai" ? "trigger-openai-fallback" : "trigger-claude";
     logger.info("Parsed resume", { parsed: parsedJson, parser });
 
     // ── 4. Update resumes table ─────────────────────────────────────
     await supabase
       .from("resumes")
       .update({
-        raw_text: rawText,
+        raw_text: rawText ?? sniffText,
         parsed_json: parsedJson,
         parsing_status: "completed",
         parser,
@@ -154,7 +115,8 @@ export const resumeIngestion = task({
     }
 
     // ── 6. Embed full profile with Voyage and store in resume_embeddings ──
-    if (candidateId && rawText.length > 50) {
+    const textForEmbed = rawText ?? sniffText;
+    if (candidateId && textForEmbed.length > 50) {
       try {
         const { data: candidate } = await supabase
           .from("people")
@@ -163,7 +125,7 @@ export const resumeIngestion = task({
           .single();
 
         if (candidate) {
-          const profileText = buildProfileText(candidate, rawText, parsedJson);
+          const profileText = buildProfileText(candidate, textForEmbed, parsedJson);
           const embedding = await getVoyageEmbedding(profileText);
 
           await supabase
@@ -200,9 +162,6 @@ export const resumeIngestion = task({
   },
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TEXT EXTRACTION (ported from parse-resume edge function)
-// ─────────────────────────────────────────────────────────────────────────────
 /**
  * Cheap pre-AI guard: does this look like a resume?
  *
@@ -225,198 +184,7 @@ function looksLikeResume(rawText: string): boolean {
   ];
   const hasKeyword = KEYWORDS.some((k) => text.includes(k));
 
-  // If we have an email AND a keyword, definitely a resume.
   if (hasEmail && hasKeyword) return true;
-  // Either alone is enough to keep going.
   if (hasEmail || hasKeyword) return true;
   return false;
 }
-
-async function extractText(fileBytes: Uint8Array, fileName: string): Promise<string> {
-  const lowerName = fileName.toLowerCase();
-
-  if (lowerName.endsWith(".txt")) {
-    return new TextDecoder().decode(fileBytes).slice(0, 8000);
-  }
-
-  if (lowerName.endsWith(".docx")) {
-    return extractDocxText(fileBytes);
-  }
-
-  if (lowerName.endsWith(".doc")) {
-    const textContent = new TextDecoder("utf-8", { fatal: false }).decode(fileBytes);
-    const readable = textContent.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s{3,}/g, " ").trim();
-    if (readable.length > 50) return readable.slice(0, 8000);
-    throw new Error("Could not extract readable text from DOC file");
-  }
-
-  // PDF — extract real text so we have a fallback for OpenAI when Claude
-  // is over quota. Claude's PDF-document-block path still runs in
-  // parseWithClaude (uses raw bytes); rawText here is for the fallback.
-  if (lowerName.endsWith(".pdf")) {
-    try {
-      // Import the inner module directly — `pdf-parse`'s top-level index.js
-      // tries to read a test fixture when run outside a typical Node env,
-      // which fails in the Trigger.dev sandbox. Lib path skips that.
-      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
-      const result = await Promise.race([
-        pdfParse(Buffer.from(fileBytes)),
-        new Promise<{ text: string }>((_, rej) =>
-          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
-        ),
-      ]);
-      const text = (result.text || "").trim();
-      return text.length > 50 ? text.slice(0, 16000) : "[PDF - no extractable text]";
-    } catch (err: any) {
-      // Don't block Claude PDF-native path on extractor errors.
-      return "[PDF - extract failed: " + (err?.message || "unknown").slice(0, 80) + "]";
-    }
-  }
-
-  return new TextDecoder().decode(fileBytes).slice(0, 8000);
-}
-
-function extractDocxText(zipData: Uint8Array): string {
-  const decoder = new TextDecoder("utf-8", { fatal: false });
-  const needle = new TextEncoder().encode("word/document.xml");
-
-  for (let i = 0; i < zipData.length - needle.length; i++) {
-    // Local file header signature: PK\x03\x04
-    if (zipData[i] === 0x50 && zipData[i + 1] === 0x4B && zipData[i + 2] === 0x03 && zipData[i + 3] === 0x04) {
-      const fnLen = zipData[i + 26] | (zipData[i + 27] << 8);
-      const extraLen = zipData[i + 28] | (zipData[i + 29] << 8);
-      const fnBytes = zipData.slice(i + 30, i + 30 + fnLen);
-      const fn = decoder.decode(fnBytes);
-
-      if (fn === "word/document.xml") {
-        const xmlStart = i + 30 + fnLen + extraLen;
-        let xmlEnd = zipData.length;
-        for (let j = xmlStart + 1; j < zipData.length - 3; j++) {
-          if (zipData[j] === 0x50 && zipData[j + 1] === 0x4B) {
-            xmlEnd = j;
-            break;
-          }
-        }
-
-        const xmlRaw = zipData.slice(xmlStart, xmlEnd);
-        const xmlText = decoder.decode(xmlRaw);
-
-        return xmlText
-          .replace(/<w:br[^>]*\/>/g, "\n")
-          .replace(/<\/w:p>/g, "\n")
-          .replace(/<[^>]+>/g, "")
-          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-          .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-          .replace(/\n{3,}/g, "\n\n")
-          .trim()
-          .slice(0, 8000);
-      }
-    }
-  }
-  throw new Error("Could not extract text from DOCX file");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CLAUDE PARSING
-// ─────────────────────────────────────────────────────────────────────────────
-async function parseWithClaude(
-  fileBytes: Uint8Array,
-  fileName: string,
-  rawText: string,
-  apiKey: string,
-): Promise<any> {
-  const contentBlocks: any[] = [];
-  const lowerName = fileName.toLowerCase();
-
-  if (lowerName.endsWith(".pdf")) {
-    const base64Data = Buffer.from(fileBytes).toString("base64");
-    contentBlocks.push({
-      type: "document",
-      source: { type: "base64", media_type: "application/pdf", data: base64Data },
-    });
-    contentBlocks.push({ type: "text", text: "Parse this resume and extract the structured data." });
-  } else {
-    contentBlocks.push({ type: "text", text: `Parse this resume:\n\n${rawText}` });
-  }
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: PARSE_PROMPT,
-      messages: [{ role: "user", content: contentBlocks }],
-      temperature: 0,
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Claude API error: ${errText}`);
-  }
-
-  const data = await resp.json();
-  const text = data.content?.[0]?.text || "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    return JSON.parse(jsonMatch[0]);
-  }
-
-  return null;
-}
-
-/**
- * Fallback parser using OpenAI (gpt-4o-mini). Used only when Claude is
- * over quota / rate-limited. Operates on the extracted text only — no
- * native PDF support — so for PDFs we rely on the (placeholder) text
- * already pulled by extractText. If a PDF returns just the placeholder
- * we return null and let Trigger.dev's retry pick it up later when
- * Claude is back.
- */
-async function parseWithOpenAI(
-  rawText: string,
-  fileName: string,
-  apiKey: string,
-): Promise<any> {
-  // "[PDF - ..." placeholders mean the extractor couldn't pull real text;
-  // fallback isn't useful in that case.
-  if (!rawText || rawText.startsWith("[PDF -") || rawText.length < 50) {
-    return null;
-  }
-
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: PARSE_PROMPT },
-        { role: "user", content: `Parse this resume (${fileName}):\n\n${rawText.slice(0, 16000)}` },
-      ],
-    }),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`OpenAI fallback error: ${await resp.text()}`);
-  }
-
-  const data = await resp.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  try {
-    return JSON.parse(text);
-  } catch {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-  }
-}
-

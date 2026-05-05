@@ -1,16 +1,16 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
 import {
   looksLikeResume,
-  parseWithClaude,
   getVoyageEmbedding,
   buildProfileText,
   normalizeEmail,
   normalizeLinkedIn,
   delay,
 } from "./lib/resume-parsing";
+import { parseResume } from "../lib/resume-parser";
 
 type Verdict = "matched" | "created" | "failed" | "skipped";
 interface ResumeOutcome {
@@ -213,6 +213,9 @@ export const reconcileOrphanedResumes = schedules.task({
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
+    // Resolve AI keys once per sweep so we don't hit app_settings 4× per resume.
+    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+
     for (const resume of allToProcess) {
       try {
         let parsed: any;
@@ -224,14 +227,18 @@ export const reconcileOrphanedResumes = schedules.task({
           if (!parsed.first_name && rawText) {
             const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
             const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-            const result = await parseWithClaude(buf, resume.fileName);
+            const result = await parseResume(buf, resume.fileName, {
+              anthropicKey, openaiKey: openaiKey || undefined, log: logger,
+            });
             parsed = result.parsed;
             rawText = result.rawText;
           }
         } else {
           const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
           const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-          const result = await parseWithClaude(buf, resume.fileName);
+          const result = await parseResume(buf, resume.fileName, {
+            anthropicKey, openaiKey: openaiKey || undefined, log: logger,
+          });
           parsed = result.parsed;
           rawText = result.rawText;
         }
