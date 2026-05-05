@@ -74,25 +74,38 @@ async function buildEmailLookup(
 ): Promise<Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>> {
   const map = new Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>();
 
-  const { data: candidates } = await supabase
-    .from("people")
-    .select("id, email, owner_user_id")
-    .not("email", "is", null)
-    .neq("email", "");
-  for (const c of candidates ?? []) {
-    const e = normalizeEmail(c.email);
-    if (e) map.set(e, { type: "candidate", id: c.id, owner_user_id: c.owner_user_id });
-  }
+  // Supabase's default range is 1000 rows. With ~6k people in the firm,
+  // an unpaginated query silently dropped everyone past the first page —
+  // any inbound email from a "page 2+" person landed unmatched.
+  // Paginate explicitly until we hit a partial page.
+  const PAGE = 1000;
+  const loadAll = async (table: "people" | "contacts", as: "candidate" | "contact") => {
+    let from = 0;
+    while (true) {
+      const { data } = await supabase
+        .from(table)
+        .select("id, email, owner_user_id, type")
+        .not("email", "is", null)
+        .neq("email", "")
+        .range(from, from + PAGE - 1);
+      const rows = data ?? [];
+      for (const c of rows) {
+        // For the unified `people` table, route by row.type — clients
+        // become contact entries, anything else stays candidate. The
+        // contacts view already filters, so `as` wins there.
+        const resolvedType: "candidate" | "contact" =
+          table === "contacts" ? "contact"
+            : (c as any).type === "client" ? "contact" : "candidate";
+        const e = normalizeEmail(c.email);
+        if (e) map.set(e, { type: resolvedType, id: c.id, owner_user_id: c.owner_user_id });
+      }
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  };
 
-  const { data: contacts } = await supabase
-    .from("contacts")
-    .select("id, email, owner_user_id")
-    .not("email", "is", null)
-    .neq("email", "");
-  for (const c of contacts ?? []) {
-    const e = normalizeEmail(c.email);
-    if (e) map.set(e, { type: "contact", id: c.id, owner_user_id: c.owner_user_id });
-  }
+  await loadAll("people", "candidate");
+  await loadAll("contacts", "contact");
 
   return map;
 }
