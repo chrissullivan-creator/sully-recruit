@@ -1,13 +1,22 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 
 /**
  * POST /api/dedup/merge
  *
- * Triggers the merge-candidates Trigger.dev task.
- * Body: { survivorId: string, mergedId: string, mergedBy?: string }
+ * Merges a duplicate candidate into a survivor by calling the
+ * `merge_duplicate_candidate` Postgres RPC. The RPC repoints FK
+ * references, snapshots+deletes the merged row, and writes
+ * candidate_merge_log.
+ *
+ * Body: { survivorId: string, mergedId: string, duplicatePairId?: string }
  * Auth: Supabase JWT (from logged-in user) or service role key.
+ *
+ * Note: previously this endpoint trigger.dev-fired a `merge-candidates`
+ * task that no longer exists, which surfaced as
+ *   "Task 'merge-candidates' not found on locked version 'YYYYMMDD.N'"
+ * The merge is a synchronous DB op so calling the RPC directly is the
+ * right shape — no queue indirection needed.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -22,43 +31,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Server misconfigured" });
   }
 
-  // Check auth: service role key OR valid Supabase JWT
   const token = authHeader?.replace("Bearer ", "");
-  let mergedBy: string | undefined;
 
-  if (token === serviceKey) {
-    mergedBy = req.body?.mergedBy;
-  } else if (token) {
-    const supabase = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || serviceKey);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (token !== serviceKey) {
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    const supabaseAuth = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || serviceKey);
+    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
     if (error || !user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    mergedBy = user.id;
-  } else {
-    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { survivorId, mergedId, duplicatePairId } = req.body ?? {};
+
+  if (!survivorId || !mergedId) {
+    return res.status(400).json({ error: "Missing required fields: survivorId, mergedId" });
+  }
+
+  if (survivorId === mergedId) {
+    return res.status(400).json({ error: "survivorId and mergedId must be different" });
   }
 
   try {
-    const { survivorId, mergedId } = req.body;
-
-    if (!survivorId || !mergedId) {
-      return res.status(400).json({ error: "Missing required fields: survivorId, mergedId" });
-    }
-
-    if (survivorId === mergedId) {
-      return res.status(400).json({ error: "survivorId and mergedId must be different" });
-    }
-
-    const handle = await tasks.trigger("merge-candidates", {
-      survivorId,
-      mergedId,
-      mergedBy,
+    const supabase = createClient(supabaseUrl, serviceKey);
+    const { data, error } = await supabase.rpc("merge_duplicate_candidate", {
+      p_survivor_id: survivorId,
+      p_merged_id: mergedId,
+      p_duplicate_row_id: duplicatePairId ?? null,
     });
-
-    return res.status(200).json({ triggered: true, id: handle.id });
+    if (error) {
+      console.error("merge_duplicate_candidate RPC error:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    return res.status(200).json({ merged: true, result: data });
   } catch (err: any) {
-    console.error("Trigger merge-candidates error:", err.message);
+    console.error("merge endpoint error:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }
