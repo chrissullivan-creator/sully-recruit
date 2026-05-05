@@ -11,7 +11,7 @@ import { usePeople } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
-  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase,
+  MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase, Upload,
 } from 'lucide-react';
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
@@ -213,6 +213,9 @@ const People = () => {
         description="Everyone in your network — candidates, clients, and the people who are both."
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/people/import')} className="gap-1.5">
+              <Upload className="h-3.5 w-3.5" /> Bulk Import
+            </Button>
             {selectedKeys.length > 0 && (
               <>
                 {selectedCandidateIds.length > 0 && (

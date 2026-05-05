@@ -28,6 +28,7 @@ const CompanyDetail = lazy(() => import("./pages/CompanyDetail"));
 const Contacts = lazy(() => import("./pages/Contacts"));
 const ContactDetail = lazy(() => import("./pages/ContactDetail"));
 const People = lazy(() => import("./pages/People"));
+const PeopleImport = lazy(() => import("./pages/PeopleImport"));
 const Sequences = lazy(() => import("./pages/Sequences"));
 const SequenceBuilder = lazy(() => import("./pages/SequenceBuilder"));
 const SequenceScheduleView = lazy(() => import("./pages/SequenceScheduleView"));
@@ -81,6 +82,7 @@ const App = () => (
             <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/contacts/:id" element={<ProtectedRoute><ContactDetail /></ProtectedRoute>} />
             <Route path="/people" element={<ProtectedRoute><People /></ProtectedRoute>} />
+            <Route path="/people/import" element={<ProtectedRoute><PeopleImport /></ProtectedRoute>} />
             <Route path="/sequences" element={<ProtectedRoute><Sequences /></ProtectedRoute>} />
             <Route path="/sequences/new" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
             <Route path="/sequences/:id/edit" element={<ProtectedRoute><SequenceBuilder /></ProtectedRoute>} />
