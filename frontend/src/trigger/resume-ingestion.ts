@@ -255,10 +255,16 @@ async function extractText(fileBytes: Uint8Array, fileName: string): Promise<str
   // parseWithClaude (uses raw bytes); rawText here is for the fallback.
   if (lowerName.endsWith(".pdf")) {
     try {
-      // pdf-parse pulls in test fixtures at top-level import; defer the
-      // require so cold start isn't paying for it.
-      const pdfParse = (await import("pdf-parse")).default;
-      const result = await pdfParse(Buffer.from(fileBytes));
+      // Import the inner module directly — `pdf-parse`'s top-level index.js
+      // tries to read a test fixture when run outside a typical Node env,
+      // which fails in the Trigger.dev sandbox. Lib path skips that.
+      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
+      const result = await Promise.race([
+        pdfParse(Buffer.from(fileBytes)),
+        new Promise<{ text: string }>((_, rej) =>
+          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
+        ),
+      ]);
       const text = (result.text || "").trim();
       return text.length > 50 ? text.slice(0, 16000) : "[PDF - no extractable text]";
     } catch (err: any) {

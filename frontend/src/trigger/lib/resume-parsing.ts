@@ -144,9 +144,15 @@ export async function parseWithClaude(
       if (!FALLBACKABLE.test(msg)) throw claudeErr;
       const openAiKey = await getOpenAIKey();
       if (!openAiKey) throw claudeErr;
-      // Extract PDF text and route through OpenAI.
-      const pdfParse = (await import("pdf-parse")).default;
-      const result = await pdfParse(Buffer.from(fileBytes));
+      // Extract PDF text and route through OpenAI. Import the inner module
+      // to skip pdf-parse's top-level test-fixture autorun.
+      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
+      const result = await Promise.race([
+        pdfParse(Buffer.from(fileBytes)),
+        new Promise<{ text: string }>((_, rej) =>
+          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
+        ),
+      ]);
       const rawText = (result.text || "").trim();
       if (rawText.length < 50) throw claudeErr;
       logger.warn("Claude PDF failed, falling back to OpenAI on extracted text", { error: msg });

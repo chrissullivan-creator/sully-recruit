@@ -147,10 +147,10 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
 export const reconcileOrphanedResumes = schedules.task({
   id: "reconcile-orphaned-resumes",
   cron: "* * * * *", // every minute — was previously dashboard-only, made explicit to survive redeploys
-  maxDuration: 300,
+  maxDuration: 600, // 10 min — pdf-parse + AI fallback + voyage can stretch past 5 min on a large batch
   run: async () => {
     const supabase = getSupabaseAdmin();
-    const limit = 10;
+    const limit = 4; // pdf-parse + Claude+OpenAI fallback + voyage embed adds up; 4/run keeps each sweep < 10 min
 
     // Resumes with existing parsed data but no candidate
     const { data: withData } = await supabase
@@ -363,7 +363,9 @@ export const reconcileOrphanedResumes = schedules.task({
         outcomes.push({ fileName: resume.fileName, candidateName: null, verdict: "failed", detail });
       }
 
-      await delay(1500);
+      // Light spacing between resumes to avoid bursting Voyage; AI fallbacks
+      // already self-throttle. Was 1500ms — too much for a batch of 4.
+      await delay(300);
     }
 
     await maybeSendReport(outcomes);
