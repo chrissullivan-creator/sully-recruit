@@ -204,7 +204,7 @@ export const sequenceActionExecute = task({
     const entityTable = entityType === "candidate" ? "candidates" : "contacts";
     const { data: entityRow } = await supabase
       .from(entityTable)
-      .select("email, phone, linkedin_url")
+      .select("email, phone, linkedin_url, email_invalid")
       .eq("id", entityId)
       .maybeSingle();
 
@@ -212,6 +212,12 @@ export const sequenceActionExecute = task({
       await markStepSkipped(supabase, payload.stepLogId, "no_email_on_record");
       await checkSequenceComplete(supabase, enrollment);
       return { action: "skipped", reason: "no_email_on_record" };
+    }
+    if (action.channel === "email" && entityRow?.email_invalid) {
+      // Hard-bounced previously — don't re-attempt.
+      await markStepSkipped(supabase, payload.stepLogId, "email_invalid_bounced");
+      await checkSequenceComplete(supabase, enrollment);
+      return { action: "skipped", reason: "email_invalid_bounced" };
     }
     if (action.channel === "sms" && !entityRow?.phone) {
       await markStepSkipped(supabase, payload.stepLogId, "no_phone_on_record");
@@ -265,9 +271,46 @@ export const sequenceActionExecute = task({
             await checkSequenceComplete(supabase, enrollment);
             return { action: "skipped", reason: `invalid_email` };
           }
+
+          // Threading: when this step is flagged reply_to_previous, look
+          // up the most recent SENT email step log in this enrollment and
+          // pull its captured internet_message_id. Outlook/Gmail render
+          // the resulting email as a threaded reply to that one.
+          let subject = action.subject_line || "";
+          let threadingOptions: { inReplyTo?: string; references?: string } | undefined;
+          if (action.reply_to_previous) {
+            const { data: prev } = await supabase
+              .from("sequence_step_logs")
+              .select("internet_message_id, action_id, sent_at")
+              .eq("enrollment_id", payload.enrollmentId)
+              .eq("status", "sent")
+              .eq("channel", "email")
+              .not("internet_message_id", "is", null)
+              .order("sent_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (prev?.internet_message_id) {
+              threadingOptions = {
+                inReplyTo: prev.internet_message_id,
+                references: prev.internet_message_id,
+              };
+              // Re-use the previous step's subject (with "Re: " prefix)
+              // when the user didn't type a fresh one.
+              if (!subject) {
+                const { data: prevAction } = await supabase
+                  .from("sequence_actions")
+                  .select("subject_line")
+                  .eq("id", prev.action_id)
+                  .maybeSingle();
+                const prevSubject = prevAction?.subject_line || "";
+                subject = prevSubject ? (prevSubject.startsWith("Re:") ? prevSubject : `Re: ${prevSubject}`) : "";
+              }
+            }
+          }
+
           sendResult = await sendEmail(
-            supabase, to, undefined, formatEmailBody(messageBody), senderUserId,
-            undefined, action.use_signature !== false, payload.stepLogId,
+            supabase, to, subject || undefined, formatEmailBody(messageBody), senderUserId,
+            threadingOptions, action.use_signature !== false, payload.stepLogId,
             action.attachment_url || undefined,
           );
           break;
@@ -327,9 +370,17 @@ export const sequenceActionExecute = task({
       return { action: "failed", reason: errMsg };
     }
 
-    // Mark sent
+    // Mark sent. For email sends we also persist the
+    // internet_message_id Graph returns so the next email step in this
+    // enrollment can thread as a reply.
     const sentAt = new Date();
     await markStepLog(supabase, payload.stepLogId, "sent", sentAt);
+    if (action.channel === "email" && (sendResult as any)?.internetMessageId) {
+      await supabase
+        .from("sequence_step_logs")
+        .update({ internet_message_id: (sendResult as any).internetMessageId } as any)
+        .eq("id", payload.stepLogId);
+    }
 
     // Increment daily send counter
     const est = sentAt.toLocaleString("en-US", { timeZone: "America/New_York" });

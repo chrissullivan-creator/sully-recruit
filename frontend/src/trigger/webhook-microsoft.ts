@@ -362,6 +362,16 @@ async function processEmailMessage(
     return { action: "skipped", reason: "no_sender_email" };
   }
 
+  // Hard-bounce / Non-Delivery Report (NDR) detection. When the receiving
+  // mailbox surfaces a bounce we mark the failed recipient's email as
+  // invalid on `people` and stop any active sequence enrollments for them
+  // — instead of treating the NDR as a genuine reply (which the universal
+  // stop rule would otherwise do).
+  const bounce = await maybeHandleBounce(supabase, message, senderEmail);
+  if (bounce) {
+    return { action: "bounce_handled", recipient: bounce.failedRecipient, reason: bounce.reason };
+  }
+
   // When mail is forwarded by Cloudflare Email Routing (or any other
   // SRS-style forwarder) the visible From: can be rewritten to a
   // forwarder-owned address. The real candidate email is preserved in
@@ -791,4 +801,117 @@ async function matchByEmail(
   }
 
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HARD-BOUNCE / NDR HANDLING
+//
+// Microsoft surfaces undeliverable-mail reports as inbound emails from
+// `postmaster@<tenant>` (sometimes mailer-daemon@). The body has the
+// Final-Recipient + diagnostic. We detect the pattern, extract the
+// failed address, and:
+//   1. mark `people.email_invalid = true` (skip future email steps)
+//   2. stop any active enrollments for that person
+//
+// Non-fatal: detection or extraction failure falls through and the
+// message is processed as a normal inbound (which is mostly fine — at
+// worst the universal-stop rule fires which is the existing behaviour
+// anyway).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BOUNCE_SENDER_RE = /^(postmaster|mailer-daemon|mail.daemon)@/i;
+const BOUNCE_SUBJECT_RE = /undeliverable|delivery (status|has|failure)|delivery has failed|returned mail|mail delivery (subsystem|failed)/i;
+
+function extractFailedRecipient(body: string): string | null {
+  // Multiple shapes — try them in order.
+  // 1. "Final-Recipient: rfc822;<email>" (RFC 3464 standard)
+  const final = body.match(/Final-Recipient[^\n]*?(?:rfc822;\s*)?([\w.+-]+@[\w.-]+)/i);
+  if (final?.[1]) return final[1].toLowerCase();
+  // 2. Plain "<email> ... could not be delivered"
+  const plain = body.match(/<([\w.+-]+@[\w.-]+)>[^\n]{0,200}?(?:not be delivered|undeliverable|address not found|user (?:unknown|not found)|550 5\.\d)/i);
+  if (plain?.[1]) return plain[1].toLowerCase();
+  // 3. "Recipient address rejected: <email>"
+  const reject = body.match(/[Rr]ecipient(?: address)?[^\n]{0,40}(?:rejected|unknown)[^\n]*?([\w.+-]+@[\w.-]+)/);
+  if (reject?.[1]) return reject[1].toLowerCase();
+  // 4. Last-resort: the only non-postmaster email in the body.
+  const all = Array.from(body.matchAll(/([\w.+-]+@[\w.-]+)/g)).map((m) => m[1].toLowerCase());
+  const candidate = all.find((e) => !/^(postmaster|mailer-daemon|noreply|no-reply)@/i.test(e));
+  return candidate ?? null;
+}
+
+async function maybeHandleBounce(
+  supabase: any,
+  message: any,
+  senderEmail: string,
+): Promise<{ failedRecipient: string; reason: string } | null> {
+  const subject = (message.subject || "").trim();
+  const body = (message.body?.content || message.bodyPreview || "").toString();
+
+  const senderMatches = BOUNCE_SENDER_RE.test(senderEmail);
+  const subjectMatches = BOUNCE_SUBJECT_RE.test(subject);
+  // Need at least one strong + one weak signal. A postmaster sender
+  // alone is enough; otherwise require subject match too.
+  if (!senderMatches && !subjectMatches) return null;
+
+  const failedRecipient = extractFailedRecipient(body);
+  if (!failedRecipient) {
+    logger.warn("Bounce detected but couldn't extract recipient", { senderEmail, subject });
+    return null;
+  }
+
+  // Find the candidate / contact by email.
+  const [{ data: cand }, { data: cont }] = await Promise.all([
+    supabase.from("people").select("id").eq("email", failedRecipient).maybeSingle(),
+    supabase.from("contacts").select("id").eq("email", failedRecipient).maybeSingle(),
+  ]);
+
+  const reason = subject.slice(0, 200) || "ndr";
+  const now = new Date().toISOString();
+
+  if (cand?.id) {
+    await supabase
+      .from("people")
+      .update({
+        email_invalid: true,
+        email_invalid_reason: reason,
+        email_invalid_at: now,
+      } as any)
+      .eq("id", cand.id);
+
+    // Stop active sequence enrollments for this person.
+    const { data: enrollments } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq("candidate_id", cand.id)
+      .eq("status", "active");
+    for (const e of enrollments ?? []) {
+      await stopEnrollment(supabase, e, "email_bounced", reason);
+    }
+    logger.info("Bounce handled", { failedRecipient, candidateId: cand.id, stopped: (enrollments ?? []).length });
+  } else if (cont?.id) {
+    // Contact: contacts is a view; the underlying column lives on
+    // people-as-client rows. The view's INSTEAD OF UPDATE trigger
+    // should let this through.
+    await supabase
+      .from("contacts")
+      .update({
+        email_invalid: true,
+        email_invalid_reason: reason,
+        email_invalid_at: now,
+      } as any)
+      .eq("id", cont.id);
+    const { data: enrollments } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq("contact_id", cont.id)
+      .eq("status", "active");
+    for (const e of enrollments ?? []) {
+      await stopEnrollment(supabase, e, "email_bounced", reason);
+    }
+    logger.info("Bounce handled (contact)", { failedRecipient, contactId: cont.id, stopped: (enrollments ?? []).length });
+  } else {
+    logger.info("Bounce for unknown recipient — skipped", { failedRecipient });
+  }
+
+  return { failedRecipient, reason };
 }

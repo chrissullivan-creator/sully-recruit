@@ -98,6 +98,8 @@ function mapActionRow(action: Record<string, unknown>): ActionData {
     useSignature: action.use_signature !== false,
     attachmentUrl: typeof action.attachment_url === "string" ? action.attachment_url : undefined,
     attachmentName: typeof action.attachment_name === "string" ? action.attachment_name : undefined,
+    subjectLine: typeof action.subject_line === "string" ? action.subject_line : undefined,
+    replyToPrevious: action.reply_to_previous === true,
   };
 }
 

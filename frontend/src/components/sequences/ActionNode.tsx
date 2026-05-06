@@ -13,12 +13,20 @@ export interface ActionData {
   respectSendWindow: boolean;
   useSignature?: boolean;
   /** Public URL of an attachment (résumé, branded PDF, etc.) the send
-   *  path should attach to outgoing email. Stored on
-   *  sequence_actions.attachment_url. Email channel only. */
+   *  path should attach to outgoing email or LinkedIn message. Stored on
+   *  sequence_actions.attachment_url. */
   attachmentUrl?: string;
   /** Original filename — kept so the recipient sees a sensible name
    *  rather than a Storage hash. Optional. */
   attachmentName?: string;
+  /** Email subject line. Empty for non-email channels. When
+   *  reply_to_previous is on this is ignored and the previous sent
+   *  step's subject is reused with "Re: " prefix. */
+  subjectLine?: string;
+  /** When true, send this email as a reply to the most recent sent
+   *  email step in the same enrollment (In-Reply-To + References).
+   *  Default off for the first step, on for follow-ups. */
+  replyToPrevious?: boolean;
 }
 
 interface ActionNodeData {
