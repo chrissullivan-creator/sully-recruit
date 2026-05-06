@@ -240,6 +240,10 @@ export default function SequenceBuilder() {
             post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
             respect_send_window: action.respectSendWindow,
             use_signature: action.channel === "email" ? (action.useSignature !== false) : false,
+            // Attachments only attach for email — other channels don't
+            // support file attachments today, so we don't persist the
+            // URL for them.
+            attachment_url: action.channel === "email" ? (action.attachmentUrl || null) : null,
           } as any);
           if (actionErr) throw new Error(`Action save failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actionErr.message}`);
         }

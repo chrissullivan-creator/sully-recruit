@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,8 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/shared/RichTextEditor";
 import { toast } from "sonner";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil } from "lucide-react";
+import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X } from "lucide-react";
 import type { ActionData } from "./ActionNode";
+import { supabase } from "@/integrations/supabase/client";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -297,6 +298,15 @@ export function SequenceStepCard({
                   </Label>
                 </div>
               )}
+              {action.channel === "email" && (
+                <AttachmentPicker
+                  action={action}
+                  onUpdate={(url, name) => {
+                    updateAction(i, "attachmentUrl", url);
+                    updateAction(i, "attachmentName", name);
+                  }}
+                />
+              )}
               <p className="text-[9px] text-muted-foreground italic">
                 {action.channel === "linkedin_connection"
                   ? "Connection requests send 24/7 (send window ignored)"
@@ -394,5 +404,96 @@ export function SequenceStepCard({
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+/**
+ * Attachment picker for an email-channel action. Uploads to the
+ * `sequence-attachments` Storage bucket under the user's id and stores
+ * the resulting public URL on action.attachmentUrl. The send path
+ * (lib/send-channels.ts:sendEmail) fetches that URL at send-time and
+ * attaches the file to the outbound Microsoft Graph message.
+ */
+function AttachmentPicker({
+  action,
+  onUpdate,
+}: {
+  action: ActionData;
+  onUpdate: (url: string | undefined, name: string | undefined) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${session.user.id}/${Date.now()}_${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from("sequence-attachments")
+        .upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
+      if (upErr) throw new Error(upErr.message);
+      const { data: pub } = supabase.storage.from("sequence-attachments").getPublicUrl(path);
+      onUpdate(pub.publicUrl, file.name);
+      toast.success("Attachment uploaded");
+    } catch (e: any) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (action.attachmentUrl) {
+    return (
+      <div className="flex items-center gap-2 rounded border border-emerald/30 bg-emerald-light/10 px-2 py-1.5">
+        <Paperclip className="h-3.5 w-3.5 text-emerald-dark shrink-0" />
+        <a
+          href={action.attachmentUrl}
+          target="_blank" rel="noopener noreferrer"
+          className="text-[11px] text-emerald-dark hover:underline truncate flex-1"
+          title={action.attachmentUrl}
+        >
+          {action.attachmentName || "Attachment"}
+        </a>
+        <button
+          type="button"
+          onClick={() => onUpdate(undefined, undefined)}
+          className="text-muted-foreground hover:text-destructive"
+          title="Remove attachment"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+          e.target.value = "";
+        }}
+      />
+      <Button
+        type="button" variant="outline" size="sm"
+        disabled={uploading}
+        onClick={() => fileInputRef.current?.click()}
+        className="h-7 text-[11px]"
+      >
+        {uploading ? (
+          <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Uploading…</>
+        ) : (
+          <><Paperclip className="h-3 w-3 mr-1" /> Add attachment</>
+        )}
+      </Button>
+    </div>
   );
 }

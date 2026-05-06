@@ -56,6 +56,13 @@ export async function sendEmail(
    * back to this step via /api/track/open.
    */
   trackingStepLogId?: string,
+  /**
+   * Optional URL of an attachment to include with the email. The file is
+   * fetched server-side and embedded as a Microsoft Graph fileAttachment.
+   * Used by sequence steps that ship a branded résumé / one-pager.
+   * 25MB total Graph limit per message; we cap at 24MB to leave headroom.
+   */
+  attachmentUrl?: string,
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
@@ -113,6 +120,40 @@ export async function sendEmail(
       { name: "In-Reply-To", value: threadingOptions.inReplyTo },
       { name: "References", value: threadingOptions.references || threadingOptions.inReplyTo },
     ];
+  }
+
+  // Attach a file (sequence step's branded résumé / collateral). We
+  // download the bytes ourselves so the recipient gets it inline as a
+  // standard Graph fileAttachment — no Storage signed-URL hand-off
+  // required on their end.
+  if (attachmentUrl) {
+    try {
+      const fileResp = await fetch(attachmentUrl, { signal: AbortSignal.timeout(20_000) });
+      if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
+      const buf = Buffer.from(await fileResp.arrayBuffer());
+      const MAX_BYTES = 24 * 1024 * 1024;
+      if (buf.length > MAX_BYTES) throw new Error(`attachment > ${MAX_BYTES} bytes`);
+      // Pull a sensible filename out of the URL.
+      let fileName = "attachment";
+      try {
+        const u = new URL(attachmentUrl);
+        const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+        if (last) fileName = last.replace(/^\d+_/, ""); // strip our `${ts}_` prefix
+      } catch { /* keep default */ }
+      const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
+      message.attachments = [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: fileName,
+          contentType,
+          contentBytes: buf.toString("base64"),
+        },
+      ];
+    } catch (err: any) {
+      logger.warn("Email attachment fetch failed — sending without attachment", {
+        attachmentUrl, error: err.message,
+      });
+    }
   }
 
   const response = await fetchWithRetry(

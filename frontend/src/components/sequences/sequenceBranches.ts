@@ -96,6 +96,8 @@ function mapActionRow(action: Record<string, unknown>): ActionData {
     postConnectionHardcodedHours: Number(action.post_connection_hardcoded_hours ?? action.min_hours_after_connection) || 4,
     respectSendWindow: action.respect_send_window !== false,
     useSignature: action.use_signature !== false,
+    attachmentUrl: typeof action.attachment_url === "string" ? action.attachment_url : undefined,
+    attachmentName: typeof action.attachment_name === "string" ? action.attachment_name : undefined,
   };
 }
 

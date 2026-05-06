@@ -12,6 +12,13 @@ export interface ActionData {
   postConnectionHardcodedHours: number;
   respectSendWindow: boolean;
   useSignature?: boolean;
+  /** Public URL of an attachment (résumé, branded PDF, etc.) the send
+   *  path should attach to outgoing email. Stored on
+   *  sequence_actions.attachment_url. Email channel only. */
+  attachmentUrl?: string;
+  /** Original filename — kept so the recipient sees a sensible name
+   *  rather than a Storage hash. Optional. */
+  attachmentName?: string;
 }
 
 interface ActionNodeData {
