@@ -178,6 +178,11 @@ export async function parseResume(
 
   const file_base64 = toBase64(fileBytes);
   const mime = getMimeType(fileName);
+  // Eden v3 universal-ai expects the file as a single `file` field
+  // containing a data URI (base64-encoded with mime prefix). The
+  // earlier `file_base64` / `file_name` shape was rejected with
+  // 422 "field: file, message: Field required".
+  const dataUri = `data:${mime};base64,${file_base64}`;
 
   const resp = await fetch(EDEN_URL, {
     method: "POST",
@@ -188,10 +193,8 @@ export async function parseResume(
     body: JSON.stringify({
       model: EDEN_MODEL,
       input: {
-        file_base64,
+        file: dataUri,
         file_name: fileName,
-        // Some Eden universal-ai paths look at file_type / mime_type.
-        file_type: mime,
       },
       show_original_response: false,
     }),
