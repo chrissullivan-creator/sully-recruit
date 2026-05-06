@@ -282,8 +282,20 @@ export default function SequenceBuilder() {
   return (
     <MainLayout>
       <div className="container mx-auto py-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">{isEdit ? "Edit Sequence" : "New Sequence"}</h1>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
+              {isEdit ? "Editing sequence" : "New sequence"}
+            </p>
+            <h1 className="text-2xl font-bold truncate">
+              {isEdit
+                ? (setup.name?.trim() || <span className="text-muted-foreground italic">Untitled sequence</span>)
+                : "New Sequence"}
+            </h1>
+            {isEdit && id && (
+              <p className="text-[10px] text-muted-foreground/70 font-mono mt-0.5">id: {id}</p>
+            )}
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
