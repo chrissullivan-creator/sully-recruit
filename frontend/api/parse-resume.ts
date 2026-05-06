@@ -6,9 +6,10 @@ import { parseResume } from "../src/lib/resume-parser";
  * POST /api/parse-resume
  *
  * Downloads a resume from Supabase Storage and runs the shared parser
- * (Claude with OpenAI fallback). Returns parsed JSON + which provider
- * answered. No DB writes — the calling dialog persists candidate fields.
+ * (Eden AI → Affinda). Returns parsed JSON. No DB writes — the calling
+ * dialog persists candidate fields.
  *
+ * EDEN_AI_API_KEY: env var preferred; falls back to app_settings row.
  * Body: { filePath: string, fileName: string }
  * Auth: Supabase JWT (from logged-in user)
  */
@@ -19,14 +20,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
   if (!serviceKey || !supabaseUrl) {
     return res.status(500).json({ error: "Server misconfigured: missing Supabase credentials" });
-  }
-  if (!anthropicKey) {
-    return res.status(500).json({ error: "Server misconfigured: missing ANTHROPIC_API_KEY" });
   }
 
   // Auth: validate Supabase JWT
@@ -43,6 +38,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
+
+    // Resolve Eden key: env first, then app_settings.
+    let edenKey = process.env.EDEN_AI_API_KEY || "";
+    if (!edenKey) {
+      const { data } = await admin.from("app_settings").select("value").eq("key", "EDEN_AI_API_KEY").maybeSingle();
+      edenKey = data?.value || "";
+    }
+    if (!edenKey) {
+      return res.status(500).json({ error: "EDEN_AI_API_KEY not configured" });
+    }
+
     const { data: downloadData, error: downloadErr } = await admin.storage
       .from("resumes")
       .download(filePath);
@@ -54,8 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const fileBytes = new Uint8Array(await downloadData.arrayBuffer());
     const result = await parseResume(fileBytes, fileName, {
-      anthropicKey,
-      openaiKey: openaiKey || undefined,
+      edenKey,
       log: { warn: (m, meta) => console.warn(m, meta) },
     });
 

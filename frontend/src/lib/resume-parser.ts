@@ -1,44 +1,28 @@
 /**
  * Single source of truth for resume parsing.
  *
+ * Strategy: send the file straight to Affinda via Eden AI's universal-ai
+ * endpoint (model = "ocr/resume_parser/affinda"). Affinda is a
+ * purpose-built resume parser that:
+ *   - Handles native PDFs (text layer)
+ *   - OCRs scanned / image-only PDFs (the long tail that pdf-parse +
+ *     LLM-on-text approaches choke on — exactly what was leaving 180+
+ *     of our bulk-drop résumés stuck)
+ *   - Handles DOCX/DOC natively
+ *   - Returns structured data — no prompt engineering, no JSON-parse
+ *     fragility
+ *
  * Used by:
- *   - frontend/api/parse-resume.ts          (Vercel — interactive AddCandidate flow)
+ *   - frontend/api/parse-resume.ts          (Vercel — interactive AddCandidate)
  *   - frontend/src/trigger/resume-ingestion.ts          (Trigger — bulk-drop / inbox)
- *   - frontend/src/trigger/lib/resume-parsing.ts        (Trigger — reconcile / reparse)
+ *   - frontend/src/trigger/reconcile-orphaned-resumes.ts (Trigger — reconcile)
+ *   - frontend/src/trigger/reparse-resumes.ts            (Trigger — reparse)
  *
- * Each used to maintain its own copy of:
- *   - PDF/DOCX text extraction
- *   - Claude system prompt
- *   - Claude → OpenAI fallback regex
- *   - JSON parsing of model output
- *
- * Bugs (e.g. PDF placeholder bypassing OpenAI fallback) had to be patched in
- * three places. This module owns all of it. Both Vercel and Trigger.dev run
- * Node 20+ with global fetch, so no env-specific imports here.
+ * Both Vercel and Trigger.dev run Node 20+ with global fetch / Buffer.
  */
 
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
-const OPENAI_FALLBACK_MODEL = "gpt-4o-mini";
-
-export const RESUME_SYSTEM_PROMPT = `You are a resume parser for The Emerald Recruiting Group, a Wall Street staffing firm. Extract structured candidate data from resumes with precision.
-
-Return ONLY a raw JSON object — no markdown fences, no backticks, no preamble. Just the JSON:
-{
-  "first_name": "",
-  "last_name": "",
-  "email": "",
-  "phone": "",
-  "linkedin_url": "",
-  "location": "",
-  "current_title": "",
-  "current_company": "",
-  "skills": []
-}
-
-Rules:
-- Use empty string for unknown fields, empty array for no skills
-- Extract up to 25 most relevant skills
-- current_title and current_company: most recent role only`;
+const EDEN_URL = "https://api.edenai.run/v3/universal-ai/";
+const EDEN_MODEL = "ocr/resume_parser/affinda";
 
 export interface ParsedResume {
   first_name?: string;
@@ -54,223 +38,229 @@ export interface ParsedResume {
 }
 
 export interface ParseResumeResult {
-  /** Parsed structured fields. Empty object if model returned no JSON. */
   parsed: ParsedResume;
-  /** Best-effort raw text extracted from the file. Null only when extraction failed. */
+  /** Best-effort raw text Affinda surfaced from the file (or empty). */
   rawText: string | null;
-  /** Which provider produced the answer. */
-  via: "claude" | "openai";
+  via: "affinda";
 }
 
 export interface ParseResumeOptions {
-  anthropicKey: string;
-  /** When provided, used as fallback on credit/rate/auth errors. */
-  openaiKey?: string;
-  /** Optional logger for warnings (Trigger.dev's `logger`, console, etc.). */
+  edenKey: string;
   log?: { warn: (msg: string, meta?: any) => void };
-  /** Override timeout for pdf-parse (ms). Default 20s. */
-  pdfTimeoutMs?: number;
 }
 
-const FALLBACK_REGEX =
-  /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded/i;
-
-function isFallbackable(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err ?? "");
-  return FALLBACK_REGEX.test(msg);
-}
-
-function getExt(s: string): "pdf" | "docx" | "doc" | "txt" | "other" {
-  const l = (s || "").toLowerCase();
-  if (l.endsWith(".pdf")) return "pdf";
-  if (l.endsWith(".docx")) return "docx";
-  if (l.endsWith(".doc")) return "doc";
-  if (l.endsWith(".txt")) return "txt";
-  return "other";
-}
-
-function toBuffer(input: ArrayBuffer | Uint8Array): Buffer {
-  return Buffer.from(input as any);
+function getMimeType(fileName: string): string {
+  const l = (fileName || "").toLowerCase();
+  if (l.endsWith(".pdf")) return "application/pdf";
+  if (l.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (l.endsWith(".doc")) return "application/msword";
+  if (l.endsWith(".txt")) return "text/plain";
+  return "application/octet-stream";
 }
 
 function toBase64(input: ArrayBuffer | Uint8Array): string {
-  return toBuffer(input).toString("base64");
+  return Buffer.from(input as any).toString("base64");
+}
+
+function firstNonEmpty(arr: any[]): string {
+  for (const v of arr) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v?.value && String(v.value).trim()) return String(v.value).trim();
+    if (v?.email && String(v.email).trim()) return String(v.email).trim();
+    if (v?.phone && String(v.phone).trim()) return String(v.phone).trim();
+    if (v?.url && String(v.url).trim()) return String(v.url).trim();
+  }
+  return "";
 }
 
 /**
- * Best-effort text extraction. Always returns a string — empty string when
- * we genuinely have nothing (we never return placeholder strings like
- * "[PDF - ...]" because they used to silently bypass OpenAI fallback).
+ * Map Affinda's `extracted_data` shape (as returned by Eden) to our flat
+ * candidate schema. Defensive about field names — Eden has shifted shapes
+ * more than once.
  */
-export async function extractResumeText(
-  fileBytes: ArrayBuffer | Uint8Array,
-  fileName: string,
-  opts?: { pdfTimeoutMs?: number; log?: ParseResumeOptions["log"] },
-): Promise<string> {
-  const ext = getExt(fileName);
-  const buffer = toBuffer(fileBytes);
+function mapAffindaOutput(output: any): ParsedResume {
+  const ed = output?.extracted_data ?? output ?? {};
+  const personal = ed.personal_infos ?? ed.personalInfos ?? {};
+  const work = (ed.work_experience ?? ed.workExperience ?? ed.experiences ?? []) as any[];
+  const skillsRaw = (ed.skills ?? []) as any[];
+  const name = personal.name ?? {};
 
-  if (ext === "txt") {
-    return new TextDecoder().decode(buffer).slice(0, 16_000);
-  }
-
-  if (ext === "docx") {
-    try {
-      const mammoth = await import("mammoth");
-      const result = await mammoth.default.extractRawText({ buffer });
-      return (result.value || "").trim().slice(0, 16_000);
-    } catch (err: any) {
-      opts?.log?.warn("DOCX extract failed", { fileName, error: err?.message });
-      return "";
+  let firstName = name.first_name ?? name.firstName ?? name.first ?? "";
+  let lastName = name.last_name ?? name.lastName ?? name.last ?? "";
+  if (!firstName && !lastName) {
+    const raw = name.raw_name ?? name.rawName ?? name.full_name ?? name.fullName ?? "";
+    if (raw) {
+      const parts = String(raw).trim().split(/\s+/);
+      firstName = parts[0] || "";
+      lastName = parts.slice(1).join(" ") || "";
     }
   }
 
-  if (ext === "doc") {
-    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
-    const readable = decoded.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s{3,}/g, " ").trim();
-    return readable.length > 50 ? readable.slice(0, 16_000) : "";
+  const mails = personal.mails ?? personal.emails ?? ed.emails ?? [];
+  const phones = personal.phones ?? ed.phones ?? [];
+  const urls: any[] = personal.urls ?? ed.urls ?? [];
+
+  let linkedinUrl = "";
+  for (const u of urls) {
+    const v = typeof u === "string" ? u : (u?.url ?? u?.value ?? "");
+    if (v && /linkedin\.com/i.test(v)) { linkedinUrl = v; break; }
   }
 
-  if (ext === "pdf") {
-    try {
-      // Inner module path skips pdf-parse's top-level test-fixture autorun.
-      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
-      const timeoutMs = opts?.pdfTimeoutMs ?? 20_000;
-      const result = await Promise.race([
-        pdfParse(buffer),
-        new Promise<{ text: string }>((_, rej) =>
-          setTimeout(() => rej(new Error(`pdf-parse timeout ${timeoutMs}ms`)), timeoutMs),
-        ),
-      ]);
-      return (result.text || "").trim().slice(0, 16_000);
-    } catch (err: any) {
-      opts?.log?.warn("PDF extract failed", { fileName, error: err?.message });
-      return "";
-    }
-  }
+  const address = personal.address ?? {};
+  const location =
+    address.formatted_location ??
+    address.formattedLocation ??
+    [address.city, address.state, address.country].filter(Boolean).join(", ") ??
+    "";
 
-  return new TextDecoder().decode(buffer).slice(0, 16_000);
-}
+  // Most-recent experience: prefer is_current, else first entry.
+  const sortedWork = [...(work || [])];
+  const cur = sortedWork.find((w) => w?.is_current || w?.isCurrent) ?? sortedWork[0] ?? {};
+  const current_title = cur.title ?? cur.job_title ?? cur.role ?? cur.position ?? "";
+  const current_company = cur.company ?? cur.employer ?? cur.organization ?? cur.organisation ?? "";
 
-/** Pull the first valid JSON object from a model response. */
-function extractJson(text: string): ParsedResume {
-  const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    return {};
-  }
-}
+  const skills = skillsRaw
+    .map((s) => (typeof s === "string" ? s : s?.name ?? s?.skill ?? ""))
+    .filter((s: any) => typeof s === "string" && s.trim())
+    .slice(0, 25);
 
-async function parseViaClaude(
-  fileBytes: ArrayBuffer | Uint8Array,
-  fileName: string,
-  rawText: string,
-  apiKey: string,
-): Promise<ParsedResume> {
-  const ext = getExt(fileName);
-  const useDocumentBlock = ext === "pdf";
-
-  const userContent = useDocumentBlock
-    ? [
-        {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: toBase64(fileBytes) },
-        },
-        { type: "text", text: "Parse this resume and return the JSON." },
-      ]
-    : `Resume text:\n\n${rawText.slice(0, 30_000)}\n\nParse and return the JSON.`;
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 1024,
-      temperature: 0,
-      system: RESUME_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userContent }],
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Claude ${resp.status}: ${errText.slice(0, 300)}`);
-  }
-  const data = await resp.json();
-  const text = (data.content || [])
-    .filter((c: any) => c.type === "text")
-    .map((c: any) => c.text)
-    .join("");
-  return extractJson(text);
-}
-
-async function parseViaOpenAI(
-  rawText: string,
-  fileName: string,
-  apiKey: string,
-): Promise<ParsedResume> {
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: OPENAI_FALLBACK_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: RESUME_SYSTEM_PROMPT },
-        { role: "user", content: `Parse this resume (${fileName}):\n\n${rawText.slice(0, 16_000)}` },
-      ],
-    }),
-  });
-  if (!resp.ok) {
-    throw new Error(`OpenAI ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-  }
-  const data = await resp.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  return extractJson(text);
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    email: firstNonEmpty(mails),
+    phone: firstNonEmpty(phones),
+    linkedin_url: linkedinUrl,
+    location,
+    current_title,
+    current_company,
+    skills,
+  };
 }
 
 /**
- * Parse a resume file. PDFs prefer Claude's native document block; DOCX/DOC/TXT
- * route through the text path. On Claude credit-balance / rate / auth errors,
- * falls back to OpenAI gpt-4o-mini using extracted text — but only if we
- * actually have text (PDFs whose text extractor produced nothing will surface
- * the original Claude error rather than send a junk prompt).
+ * Best-effort: extract a raw text representation from Affinda's response
+ * so downstream code (Voyage embedding, sanity-check) has something to
+ * work with. Affinda exposes either `text` or assembled per-section
+ * blobs depending on provider settings.
+ */
+function extractRawTextFromOutput(output: any): string {
+  const direct = output?.text ?? output?.raw_text ?? output?.rawText;
+  if (typeof direct === "string" && direct.length > 50) return direct.slice(0, 16_000);
+
+  const ed = output?.extracted_data ?? output ?? {};
+  const lines: string[] = [];
+  const personal = ed.personal_infos ?? ed.personalInfos ?? {};
+  if (personal.name?.raw_name) lines.push(personal.name.raw_name);
+  if (Array.isArray(ed.summary)) lines.push(...ed.summary);
+  else if (typeof ed.summary === "string") lines.push(ed.summary);
+
+  for (const w of ed.work_experience ?? ed.workExperience ?? []) {
+    lines.push([w?.title, w?.company].filter(Boolean).join(" — "));
+    if (w?.description) lines.push(String(w.description));
+  }
+  for (const e of ed.education ?? []) {
+    lines.push([e?.establishment, e?.title, e?.dates?.from?.text].filter(Boolean).join(" · "));
+  }
+  return lines.join("\n").slice(0, 16_000);
+}
+
+/**
+ * Parse a resume via Eden AI's universal Affinda model. Throws on
+ * non-success Eden response — callers treat that as a fatal parse
+ * failure (no further fallback configured).
  */
 export async function parseResume(
   fileBytes: ArrayBuffer | Uint8Array,
   fileName: string,
   opts: ParseResumeOptions,
 ): Promise<ParseResumeResult> {
-  // Always try to extract text first — used both as an OpenAI input on
-  // fallback AND as raw_text we want to persist.
-  const rawText = await extractResumeText(fileBytes, fileName, {
-    pdfTimeoutMs: opts.pdfTimeoutMs,
-    log: opts.log,
+  if (!opts.edenKey) throw new Error("EDEN_AI_API_KEY missing");
+
+  const file_base64 = toBase64(fileBytes);
+  const mime = getMimeType(fileName);
+
+  const resp = await fetch(EDEN_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.edenKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: EDEN_MODEL,
+      input: {
+        file_base64,
+        file_name: fileName,
+        // Some Eden universal-ai paths look at file_type / mime_type.
+        file_type: mime,
+      },
+      show_original_response: false,
+    }),
   });
 
-  let claudeErr: unknown = null;
-  try {
-    const parsed = await parseViaClaude(fileBytes, fileName, rawText, opts.anthropicKey);
-    return { parsed, rawText: rawText || null, via: "claude" };
-  } catch (err) {
-    claudeErr = err;
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Eden ${resp.status}: ${text.slice(0, 300)}`);
   }
 
-  if (!opts.openaiKey || !isFallbackable(claudeErr)) throw claudeErr;
-  if (!rawText || rawText.length < 50) throw claudeErr;
+  let data: any;
+  try { data = JSON.parse(text); } catch {
+    throw new Error(`Eden non-JSON response: ${text.slice(0, 200)}`);
+  }
 
-  opts.log?.warn?.("Claude failed, falling back to OpenAI", {
-    fileName,
-    error: claudeErr instanceof Error ? claudeErr.message : String(claudeErr),
-  });
-  const parsed = await parseViaOpenAI(rawText, fileName, opts.openaiKey);
-  return { parsed, rawText, via: "openai" };
+  if (data?.status && data.status !== "success") {
+    throw new Error(`Eden ${data.status}: ${JSON.stringify(data.error ?? data).slice(0, 300)}`);
+  }
+
+  const output = data?.output ?? data;
+  const parsed = mapAffindaOutput(output);
+  const rawText = extractRawTextFromOutput(output);
+
+  return { parsed, rawText: rawText || null, via: "affinda" };
+}
+
+/**
+ * Standalone text extraction. Kept for callers that want a `raw_text`
+ * column without running the full parseResume (e.g. the resume-ingestion
+ * sanity check). Production paths should prefer parseResume()'s rawText.
+ *
+ * For image-only PDFs this returns an empty string — Affinda inside
+ * parseResume() OCRs them; this helper does not.
+ */
+export async function extractResumeText(
+  fileBytes: ArrayBuffer | Uint8Array,
+  fileName: string,
+): Promise<string> {
+  const lower = (fileName || "").toLowerCase();
+  const buffer = Buffer.from(fileBytes as any);
+
+  if (lower.endsWith(".txt")) {
+    return new TextDecoder().decode(buffer).slice(0, 16_000);
+  }
+
+  if (lower.endsWith(".docx")) {
+    try {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.default.extractRawText({ buffer });
+      return (result.value || "").trim().slice(0, 16_000);
+    } catch {
+      return "";
+    }
+  }
+
+  if (lower.endsWith(".pdf")) {
+    try {
+      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
+      const result = await Promise.race([
+        pdfParse(buffer),
+        new Promise<{ text: string }>((_, rej) =>
+          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
+        ),
+      ]);
+      return (result.text || "").trim().slice(0, 16_000);
+    } catch {
+      return "";
+    }
+  }
+
+  return new TextDecoder().decode(buffer).slice(0, 16_000);
 }

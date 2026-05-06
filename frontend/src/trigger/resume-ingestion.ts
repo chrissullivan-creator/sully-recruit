@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getEdenAIKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
@@ -58,14 +58,14 @@ export const resumeIngestion = task({
       return { skipped: true, reason: "not_a_resume" };
     }
 
-    // ── 3. Parse via shared parser (Claude → OpenAI fallback) ───────
-    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    // ── 3. Parse via Affinda (Eden AI) ──────────────────────────────
+    const edenKey = await getEdenAIKey();
+    if (!edenKey) throw new Error("EDEN_AI_API_KEY missing in app_settings");
     const { parsed: parsedJson, rawText, via } = await parseResume(fileBytes, fileName, {
-      anthropicKey,
-      openaiKey: openaiKey || undefined,
+      edenKey,
       log: logger,
     });
-    const parser = via === "openai" ? "trigger-openai-fallback" : "trigger-claude";
+    const parser = `trigger-${via}`;
     logger.info("Parsed resume", { parsed: parsedJson, parser });
 
     // ── 4. Update resumes table ─────────────────────────────────────
