@@ -268,6 +268,7 @@ export const sequenceActionExecute = task({
           sendResult = await sendEmail(
             supabase, to, undefined, formatEmailBody(messageBody), senderUserId,
             undefined, action.use_signature !== false, payload.stepLogId,
+            action.attachment_url || undefined,
           );
           break;
         }
