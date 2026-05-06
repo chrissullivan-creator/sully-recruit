@@ -15,6 +15,7 @@ import {
   MapPin, Video, Users as UsersIcon, ExternalLink, Clock, CalendarPlus,
 } from 'lucide-react';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
+import { MeetingDetailDialog, type MeetingTask } from '@/components/calendar/MeetingDetailDialog';
 import {
   format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks,
   isSameDay, isToday, eachDayOfInterval, parseISO, isWithinInterval,
@@ -86,6 +87,7 @@ export default function CalendarPage() {
   const [anchorDate, setAnchorDate] = useState(new Date());
   const [ownerFilter, setOwnerFilter] = useState<'me' | 'all' | string>('me');
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<MeetingTask | null>(null);
 
   const ownerId = ownerFilter === 'me'
     ? (user?.id ?? null)
@@ -161,6 +163,10 @@ export default function CalendarPage() {
       />
 
       <ScheduleMeetingDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />
+      <MeetingDetailDialog
+        task={selectedTask}
+        onOpenChange={(o) => { if (!o) setSelectedTask(null); }}
+      />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-4">
         {/* Toolbar */}
@@ -213,16 +219,22 @@ export default function CalendarPage() {
             ))}
           </div>
         ) : viewMode === 'week' ? (
-          <WeekGrid days={days} tasksByDay={tasksByDay} />
+          <WeekGrid days={days} tasksByDay={tasksByDay} onSelect={setSelectedTask} />
         ) : (
-          <DayList day={anchorDate} tasks={tasksByDay.get(format(anchorDate, 'yyyy-MM-dd')) ?? []} />
+          <DayList day={anchorDate} tasks={tasksByDay.get(format(anchorDate, 'yyyy-MM-dd')) ?? []} onSelect={setSelectedTask} />
         )}
       </div>
     </MainLayout>
   );
 }
 
-function WeekGrid({ days, tasksByDay }: { days: Date[]; tasksByDay: Map<string, CalendarTask[]> }) {
+function WeekGrid({
+  days, tasksByDay, onSelect,
+}: {
+  days: Date[];
+  tasksByDay: Map<string, CalendarTask[]>;
+  onSelect: (t: CalendarTask) => void;
+}) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
       {days.map((day) => {
@@ -250,7 +262,7 @@ function WeekGrid({ days, tasksByDay }: { days: Date[]; tasksByDay: Map<string, 
             <div className="p-2 space-y-1.5 flex-1">
               {items.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground/60 italic px-1.5 py-1">No events</p>
-              ) : items.map((t) => <EventCard key={t.id} task={t} compact />)}
+              ) : items.map((t) => <EventCard key={t.id} task={t} compact onSelect={onSelect} />)}
             </div>
           </div>
         );
@@ -259,7 +271,13 @@ function WeekGrid({ days, tasksByDay }: { days: Date[]; tasksByDay: Map<string, 
   );
 }
 
-function DayList({ day, tasks }: { day: Date; tasks: CalendarTask[] }) {
+function DayList({
+  day, tasks, onSelect,
+}: {
+  day: Date;
+  tasks: CalendarTask[];
+  onSelect: (t: CalendarTask) => void;
+}) {
   return (
     <div className="rounded-xl border border-card-border bg-white">
       <div className={cn(
@@ -276,13 +294,19 @@ function DayList({ day, tasks }: { day: Date; tasks: CalendarTask[] }) {
       <div className="p-4 space-y-2">
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8 text-center">No events scheduled.</p>
-        ) : tasks.map((t) => <EventCard key={t.id} task={t} />)}
+        ) : tasks.map((t) => <EventCard key={t.id} task={t} onSelect={onSelect} />)}
       </div>
     </div>
   );
 }
 
-function EventCard({ task, compact = false }: { task: CalendarTask; compact?: boolean }) {
+function EventCard({
+  task, compact = false, onSelect,
+}: {
+  task: CalendarTask;
+  compact?: boolean;
+  onSelect: (t: CalendarTask) => void;
+}) {
   const start = eventStart(task);
   const end = task.end_time ? parseISO(task.end_time) : null;
   const timeLabel = start
@@ -292,25 +316,33 @@ function EventCard({ task, compact = false }: { task: CalendarTask; compact?: bo
 
   if (compact) {
     return (
-      <div className={cn(
-        'rounded-md border px-2 py-1.5 text-[11px] leading-tight',
-        completed
-          ? 'bg-muted/40 border-card-border text-muted-foreground line-through'
-          : 'bg-emerald-light/30 border-emerald/30 text-emerald-dark hover:bg-emerald-light/60 transition-colors',
-      )}>
+      <button
+        type="button"
+        onClick={() => onSelect(task)}
+        className={cn(
+          'w-full text-left rounded-md border px-2 py-1.5 text-[11px] leading-tight transition-colors',
+          completed
+            ? 'bg-muted/40 border-card-border text-muted-foreground line-through hover:bg-muted/60'
+            : 'bg-emerald-light/30 border-emerald/30 text-emerald-dark hover:bg-emerald-light/60',
+        )}
+      >
         <p className="font-semibold tabular-nums">{timeLabel}</p>
         <p className="truncate">{task.title.replace(/^📅\s*/, '')}</p>
-      </div>
+      </button>
     );
   }
 
   return (
-    <div className={cn(
-      'rounded-lg border p-3 flex items-start gap-3',
-      completed
-        ? 'bg-muted/40 border-card-border'
-        : 'bg-emerald-light/15 border-emerald/30',
-    )}>
+    <button
+      type="button"
+      onClick={() => onSelect(task)}
+      className={cn(
+        'w-full text-left rounded-lg border p-3 flex items-start gap-3 transition-colors',
+        completed
+          ? 'bg-muted/40 border-card-border hover:bg-muted/60'
+          : 'bg-emerald-light/15 border-emerald/30 hover:bg-emerald-light/30',
+      )}
+    >
       <div className="shrink-0 w-20 text-right">
         <p className="text-xs font-semibold tabular-nums text-emerald-dark">{start ? format(start, 'h:mm a') : 'All day'}</p>
         {end && <p className="text-[10px] text-muted-foreground tabular-nums">{format(end, 'h:mm a')}</p>}
@@ -332,6 +364,7 @@ function EventCard({ task, compact = false }: { task: CalendarTask; compact?: bo
           {task.meeting_url && (
             <a
               href={task.meeting_url} target="_blank" rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1 text-emerald hover:text-emerald-dark"
             >
               <Video className="h-3 w-3" /> Join
@@ -345,6 +378,6 @@ function EventCard({ task, compact = false }: { task: CalendarTask; compact?: bo
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
