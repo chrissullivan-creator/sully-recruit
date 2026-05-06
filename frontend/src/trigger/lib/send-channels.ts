@@ -380,6 +380,13 @@ export async function sendLinkedIn(
   userId?: string,
   accountId?: string,
   stepChannel?: string,
+  /**
+   * Optional URL of a file to attach. Unipile's /messages endpoint
+   * supports multipart with one or more `attachments` fields. Connection
+   * requests have a hard 200-char-only payload (no files), so the
+   * attachment is silently dropped on that path.
+   */
+  attachmentUrl?: string,
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
   const baseUrl = await getUnipileBaseUrl();
@@ -437,7 +444,62 @@ export async function sendLinkedIn(
     return { message_id: data.id || `invite_${Date.now()}`, conversation_id: data.conversation_id || "" };
   }
 
-  // Regular messages and InMails
+  // Regular messages and InMails. Use multipart when an attachment is
+  // present so Unipile picks up the `attachments` file field.
+  if (attachmentUrl) {
+    let fileBlob: Blob | null = null;
+    let fileName = "attachment";
+    try {
+      const fileResp = await fetch(attachmentUrl, { signal: AbortSignal.timeout(20_000) });
+      if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
+      const buf = await fileResp.arrayBuffer();
+      const MAX_BYTES = 20 * 1024 * 1024;
+      if (buf.byteLength > MAX_BYTES) throw new Error(`attachment > ${MAX_BYTES} bytes`);
+      const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
+      fileBlob = new Blob([buf], { type: contentType });
+      try {
+        const u = new URL(attachmentUrl);
+        const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+        if (last) fileName = last.replace(/^\d+_/, "");
+      } catch { /* keep default */ }
+    } catch (err: any) {
+      logger.warn("LinkedIn attachment fetch failed — sending without attachment", {
+        attachmentUrl, error: err.message,
+      });
+      fileBlob = null;
+    }
+
+    if (fileBlob) {
+      const fd = new FormData();
+      fd.append("provider_id", providerId);
+      fd.append("text", body);
+      if (isInMailChannel) fd.append("message_type", "INMAIL");
+      fd.append("attachments", fileBlob, fileName);
+
+      const response = await fetchWithRetry(`${baseUrl}/messages`, {
+        method: "POST",
+        headers: {
+          "X-API-KEY": apiKey,
+          Accept: "application/json",
+          // Don't set Content-Type — fetch fills in the multipart boundary.
+        },
+        body: fd,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        if (isInMailChannel && response.status === 422) {
+          throw new Error(`InMail ${response.status}: ${error}`);
+        }
+        throw new Error(`Unipile send error: ${error}`);
+      }
+
+      const data = await response.json();
+      return { message_id: data.id, conversation_id: data.conversation_id };
+    }
+    // Fall through to the JSON path if attachment fetch failed.
+  }
+
   const sendPayload: any = { provider_id: providerId, text: body };
   if (isInMailChannel) sendPayload.message_type = "INMAIL";
 

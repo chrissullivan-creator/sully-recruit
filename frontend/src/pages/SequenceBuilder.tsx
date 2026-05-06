@@ -240,10 +240,16 @@ export default function SequenceBuilder() {
             post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
             respect_send_window: action.respectSendWindow,
             use_signature: action.channel === "email" ? (action.useSignature !== false) : false,
-            // Attachments only attach for email — other channels don't
-            // support file attachments today, so we don't persist the
-            // URL for them.
-            attachment_url: action.channel === "email" ? (action.attachmentUrl || null) : null,
+            // Attachments persist for channels that actually send a
+            // file: email (Microsoft Graph fileAttachment) and Unipile
+            // LinkedIn message / InMail (multipart `attachments` field).
+            // SMS / connection requests / manual_call don't carry files.
+            attachment_url:
+              action.channel === "email"
+                || action.channel === "linkedin_message"
+                || action.channel === "linkedin_inmail"
+                ? (action.attachmentUrl || null)
+                : null,
           } as any);
           if (actionErr) throw new Error(`Action save failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actionErr.message}`);
         }

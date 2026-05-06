@@ -298,7 +298,9 @@ export function SequenceStepCard({
                   </Label>
                 </div>
               )}
-              {action.channel === "email" && (
+              {(action.channel === "email"
+                || action.channel === "linkedin_message"
+                || action.channel === "linkedin_inmail") && (
                 <AttachmentPicker
                   action={action}
                   onUpdate={(url, name) => {

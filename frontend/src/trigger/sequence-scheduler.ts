@@ -276,13 +276,21 @@ export const sequenceActionExecute = task({
           sendResult = await sendSms(supabase, to, messageBody, senderUserId);
           break;
         case "linkedin_connection":
+          // Connection requests don't carry attachments (no file field
+          // on Unipile's invite endpoint), so attachmentUrl is omitted.
           sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_connection");
           break;
         case "linkedin_message":
-          sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_message");
+          sendResult = await sendLinkedIn(
+            supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_message",
+            action.attachment_url || undefined,
+          );
           break;
         case "linkedin_inmail":
-          sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "recruiter_inmail");
+          sendResult = await sendLinkedIn(
+            supabase, to, messageBody, senderUserId, payload.accountId, "recruiter_inmail",
+            action.attachment_url || undefined,
+          );
           break;
         default:
           await markStepLog(supabase, payload.stepLogId, "failed");
