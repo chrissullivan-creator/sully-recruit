@@ -13,11 +13,19 @@ export function isInterviewStage(stage: string | null | undefined) {
 
 /**
  * Normalise any interview-stage variant to the canonical 'interview'
- * value. Round info should be passed separately via interview_round
- * since May 2026.
+ * value. Non-interview stages pass through unchanged. Round info now
+ * lives on a separate `interview_round` integer (May 2026 simplification).
+ *
+ * Previously this returned 'interview' regardless of input — every
+ * caller that piped a stage value through here ended up writing
+ * `stage='interview'` to send_outs no matter which chip the user
+ * actually clicked. Three pages had this bug; fixing it here repairs
+ * all of them.
  */
-export function normalizeInterviewStage(_stage: string | null | undefined) {
-  return 'interview';
+export function normalizeInterviewStage(stage: string | null | undefined): string {
+  const v = String(stage || '').toLowerCase();
+  if (INTERVIEW_STAGE_VALUES.has(v)) return 'interview';
+  return v;
 }
 
 /**

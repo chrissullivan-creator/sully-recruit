@@ -37,24 +37,25 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
-import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
+import { ensureInterviewArtifacts } from '@/lib/interviewWorkflow';
 import {
   invalidatePersonScope, invalidateSendOutScope, invalidateNoteScope,
   invalidateTaskScope,
 } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 
-const SEND_OUT_STAGES = [
-  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
-  { value: 'reached_out',  label: 'Reached Out',  color: 'bg-blue-500/15 text-blue-400' },
-  { value: 'pitch',        label: 'Pitch',        color: 'bg-indigo-500/15 text-indigo-400' },
-  { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'sent',         label: 'Submission',   color: 'bg-purple-500/15 text-purple-400' },
-  { value: 'interviewing', label: 'Interview',    color: 'bg-orange-500/15 text-orange-400' },
-  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
-  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
-  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
-];
+// Pipeline chip strip — derives from the canonical pipeline
+// (frontend/src/lib/pipeline.ts) so this UI never drifts from the
+// dashboard / Send Outs page. Canonical values: pitch, ready_to_send
+// ('Send Out'), submitted ('Submission'), interview, offer, placed,
+// withdrawn. Legacy values (sent / interviewing / rejected / new /
+// reached_out) get normalised through stageToCanonical when reading
+// existing rows; writes go in the canonical form.
+const SEND_OUT_STAGES = CANONICAL_PIPELINE.map((s) => ({
+  value: s.key,
+  label: s.label,
+  color: s.color,
+}));
 
 const REJECTED_BY_OPTIONS = [
   { value: 'recruiter',    label: 'By Recruiter' },
@@ -485,12 +486,14 @@ const CandidateDetail = () => {
   };
 
   const handleUpdateStage = async (sendOutId: string, newStage: string) => {
-    const normalizedStage = normalizeInterviewStage(newStage);
-    const updates: any = { stage: normalizedStage, updated_at: new Date().toISOString() };
-    if (newStage === 'sent_to_client') updates.sent_to_client_at = new Date().toISOString();
-    if (normalizedStage === 'interviewing') updates.interview_at = new Date().toISOString();
-    if (normalizedStage === 'offer') updates.offer_at = new Date().toISOString();
-    if (normalizedStage === 'placed') updates.placed_at = new Date().toISOString();
+    // Canonical pipeline keys: pitch | ready_to_send | submitted | interview |
+    // offer | placed | withdrawn. Map any legacy values that may still arrive.
+    const canonical = stageToCanonical(newStage) ?? (newStage as CanonicalStage);
+    const updates: any = { stage: canonical, updated_at: new Date().toISOString() };
+    if (canonical === 'submitted') updates.sent_to_client_at = new Date().toISOString();
+    if (canonical === 'interview') updates.interview_at = new Date().toISOString();
+    if (canonical === 'offer') updates.offer_at = new Date().toISOString();
+    if (canonical === 'placed') updates.placed_at = new Date().toISOString();
 
     const { data: updatedSendOut, error } = await supabase
       .from('send_outs')
@@ -500,14 +503,14 @@ const CandidateDetail = () => {
       .single();
     if (error) { toast.error('Failed to update stage'); return; }
 
-    if (normalizedStage === 'interviewing' && updatedSendOut) {
+    if (canonical === 'interview' && updatedSendOut) {
       await ensureInterviewArtifacts({
         sendOutId: updatedSendOut.id,
         candidateId: updatedSendOut.candidate_id,
         contactId: updatedSendOut.contact_id,
         jobId: updatedSendOut.job_id,
         recruiterId: updatedSendOut.recruiter_id,
-        stage: normalizedStage,
+        stage: canonical,
         interviewAt: updatedSendOut.interview_at,
       });
     }
@@ -515,13 +518,13 @@ const CandidateDetail = () => {
     queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
     queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    toast.success(`Stage updated to ${SEND_OUT_STAGES.find(s => s.value === normalizedStage)?.label ?? normalizedStage}`);
+    toast.success(`Stage updated to ${canonicalConfig(canonical).label}`);
   };
 
   const handleReject = async (sendOutId: string) => {
     if (!rejectForm.rejected_by) { toast.error('Please select who rejected'); return; }
     const { error } = await supabase.from('send_outs').update({
-      stage: 'rejected',
+      stage: 'withdrawn',
       rejected_by: rejectForm.rejected_by,
       rejection_reason: rejectForm.rejection_reason || null,
       feedback: rejectForm.feedback || null,
@@ -708,11 +711,11 @@ const CandidateDetail = () => {
     if (!id) return;
     setUpdatingJobStatus(true);
     try {
-      const normalizedStatus = normalizeInterviewStage(newStatus);
+      const normalizedStatus = stageToCanonical(newStatus) ?? (newStatus as CanonicalStage);
       const { error } = await supabase.from('people').update({ job_status: normalizedStatus }).eq('id', id);
       if (error) { toast.error('Failed to update status'); return; }
 
-      if (normalizedStatus === 'interviewing' && candidate?.job_id) {
+      if (normalizedStatus === 'interview' && candidate?.job_id) {
         const { data: existingSendOut } = await supabase
           .from('send_outs')
           .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
@@ -1939,8 +1942,9 @@ const CandidateDetail = () => {
                   <div className="space-y-3">
                     {sendOuts.map((so: any) => {
                       const j = so.jobs;
-                      const stageCfg = SEND_OUT_STAGES.find(s => s.value === so.stage);
-                      const isRejected = so.stage === 'rejected';
+                      const canonicalStage = stageToCanonical(so.stage);
+                      const stageCfg = canonicalStage ? SEND_OUT_STAGES.find(s => s.value === canonicalStage) : undefined;
+                      const isRejected = canonicalStage === 'withdrawn';
                       const isRejecting = rejectingId === so.id;
                       const isSendOutOwner = so.recruiter_id === user?.id || isAdmin;
                       return (
@@ -1971,13 +1975,13 @@ const CandidateDetail = () => {
                           {/* Stage selector — only visible to the recruiter who created this send out */}
                           {!isRejected && !isRejecting && isSendOutOwner && (
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              {SEND_OUT_STAGES.filter(s => s.value !== 'rejected').map(s => (
+                              {SEND_OUT_STAGES.filter(s => s.value !== 'withdrawn').map(s => (
                                 <button
                                   key={s.value}
                                   onClick={() => handleUpdateStage(so.id, s.value)}
                                   className={cn(
                                     'px-2 py-0.5 rounded text-[10px] font-medium transition-all border',
-                                    so.stage === s.value
+                                    canonicalStage === s.value
                                       ? cn(s.color, 'border-current')
                                       : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
                                   )}
