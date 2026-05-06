@@ -108,12 +108,15 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
     queryKey: ['send_outs', candidateId],
     enabled: !!candidateId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('send_out_board')
-        .select('*')
-        .eq('candidate_id', candidateId!);
+      // send_out_board view doesn't exist; query send_outs directly
+      // and stitch job/candidate identity client-side.
+      const { data: rows, error } = await supabase
+        .from('send_outs')
+        .select('*, jobs:job_id (id, title, location_text, comp_min, comp_max)')
+        .eq('candidate_id', candidateId!)
+        .order('created_at', { ascending: false });
       if (error) throw error;
-      return data;
+      return (rows ?? []) as any[];
     },
   });
 }
@@ -346,28 +349,77 @@ export function useJobSendOuts(jobId: string | undefined) {
     queryKey: ['send_outs_job', jobId],
     enabled: !!jobId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('send_out_board')
+      // The `send_out_board` view referenced earlier doesn't exist in
+      // the current schema, which is why newly-added send-outs were
+      // silently disappearing. Query send_outs directly and stitch
+      // candidate identity client-side so we don't depend on PostgREST
+      // detecting the FK relationship.
+      const { data: rows, error } = await supabase
+        .from('send_outs')
         .select('*')
         .eq('job_id', jobId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data;
+
+      const ids = Array.from(
+        new Set(((rows ?? []) as any[]).map((r) => r.candidate_id).filter(Boolean)),
+      );
+      let byId = new Map<string, any>();
+      if (ids.length) {
+        const { data: people } = await supabase
+          .from('people')
+          .select('id, full_name, first_name, last_name, current_title, current_company, email, phone, resume_url')
+          .in('id', ids);
+        byId = new Map(((people ?? []) as any[]).map((p) => [p.id, p]));
+      }
+
+      return ((rows ?? []) as any[]).map((row) => {
+        const c = row.candidate_id ? byId.get(row.candidate_id) : null;
+        return {
+          ...row,
+          candidate: c ?? null,
+          candidate_name: c?.full_name ?? null,
+          resume_url: row.resume_url ?? c?.resume_url ?? null,
+        };
+      });
     },
   });
 }
 
-// Send out board view
+// Send out board — was a view, now read straight from send_outs and
+// stitch identity columns client-side. Same shape as before so the
+// kanban consumers don't change.
 export function useSendOutBoard() {
   return useQuery({
     queryKey: ['send_out_board'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('send_out_board')
+      const { data: rows, error } = await supabase
+        .from('send_outs')
         .select('*')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data;
+
+      const ids = Array.from(
+        new Set(((rows ?? []) as any[]).map((r) => r.candidate_id).filter(Boolean)),
+      );
+      let byId = new Map<string, any>();
+      if (ids.length) {
+        const { data: people } = await supabase
+          .from('people')
+          .select('id, full_name, current_title, current_company, email, resume_url')
+          .in('id', ids);
+        byId = new Map(((people ?? []) as any[]).map((p) => [p.id, p]));
+      }
+
+      return ((rows ?? []) as any[]).map((row) => {
+        const c = row.candidate_id ? byId.get(row.candidate_id) : null;
+        return {
+          ...row,
+          candidate: c ?? null,
+          candidate_name: c?.full_name ?? null,
+          resume_url: row.resume_url ?? c?.resume_url ?? null,
+        };
+      });
     },
   });
 }
