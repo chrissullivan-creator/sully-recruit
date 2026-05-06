@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getEdenAIKey } from "./lib/supabase";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -69,7 +69,11 @@ export const reparseResumes = schedules.task({
     let parsedCount = 0, embeddedCount = 0, failedCount = 0;
     const errors: string[] = [];
 
-    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    const edenKey = await getEdenAIKey();
+    if (!edenKey) {
+      logger.warn("EDEN_AI_API_KEY missing — reparse cannot run without it");
+      return { skipped: true, reason: "no_eden_key" };
+    }
 
     for (let i = 0; i < filtered.length; i++) {
       const resume = filtered[i];
@@ -79,9 +83,7 @@ export const reparseResumes = schedules.task({
         if (!publicUrl) throw new Error("No public URL");
 
         const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-        const { parsed, rawText } = await parseResume(buf, resume.fileName, {
-          anthropicKey, openaiKey: openaiKey || undefined, log: logger,
-        });
+        const { parsed, rawText } = await parseResume(buf, resume.fileName, { edenKey, log: logger });
         const normalizedRawText = (rawText ?? JSON.stringify(parsed)).slice(0, 50000);
         const skills = Array.isArray(parsed?.skills)
           ? parsed.skills.map((s: any) => String(s)).filter(Boolean).slice(0, 25)

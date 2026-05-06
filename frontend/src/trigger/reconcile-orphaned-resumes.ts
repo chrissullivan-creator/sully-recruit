@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting, getEdenAIKey } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
 import {
@@ -213,8 +213,12 @@ export const reconcileOrphanedResumes = schedules.task({
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
-    // Resolve AI keys once per sweep so we don't hit app_settings 4× per resume.
-    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    // Resolve Eden key once per sweep.
+    const edenKey = await getEdenAIKey();
+    if (!edenKey) {
+      logger.warn("EDEN_AI_API_KEY missing — reconcile cannot parse without it");
+      return { skipped: true, reason: "no_eden_key" };
+    }
 
     for (const resume of allToProcess) {
       try {
@@ -227,18 +231,14 @@ export const reconcileOrphanedResumes = schedules.task({
           if (!parsed.first_name && rawText) {
             const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
             const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-            const result = await parseResume(buf, resume.fileName, {
-              anthropicKey, openaiKey: openaiKey || undefined, log: logger,
-            });
+            const result = await parseResume(buf, resume.fileName, { edenKey, log: logger });
             parsed = result.parsed;
             rawText = result.rawText;
           }
         } else {
           const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
           const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
-          const result = await parseResume(buf, resume.fileName, {
-            anthropicKey, openaiKey: openaiKey || undefined, log: logger,
-          });
+          const result = await parseResume(buf, resume.fileName, { edenKey, log: logger });
           parsed = result.parsed;
           rawText = result.rawText;
         }
