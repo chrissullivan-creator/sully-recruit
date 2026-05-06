@@ -235,37 +235,57 @@ function BranchColumn({
 }
 
 export function FlowBuilder({ initialBranches, onChange, onAskJoe }: Props) {
-  const initialValue = useMemo(() => normalizeBranches(initialBranches), [initialBranches]);
-  const [branches, setBranches] = useState<SequenceBranch[]>(initialValue);
+  // Initial state computed once. The earlier `useMemo([initialBranches])` made
+  // a new memo object on every parent render, but the value was only used
+  // for the initial useState seed — wasted work + churn.
+  const [branches, setBranches] = useState<SequenceBranch[]>(() =>
+    normalizeBranches(initialBranches),
+  );
+
+  // Refs so callbacks below stay stable and don't pull onChange/onAskJoe
+  // into effect deps (which would re-fire the bidirectional sync loop
+  // that was making the builder feel choppy / flashy).
+  const onChangeRef = useRef(onChange);
   const onAskJoeRef = useRef(onAskJoe);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { onAskJoeRef.current = onAskJoe; }, [onAskJoe]);
 
-  useEffect(() => {
-    onAskJoeRef.current = onAskJoe;
-  }, [onAskJoe]);
-
+  // External-sync: only re-seed local state when the parent actually pushed a
+  // *different* tree (e.g. after a fresh hydrate from the DB). Compare the
+  // last serialized snapshot we received from the parent — not local — so we
+  // don't ping-pong with our own changes.
+  const lastIncomingRef = useRef(serializeSnapshot(initialBranches));
   useEffect(() => {
     const incoming = serializeSnapshot(initialBranches);
-    const current = serializeSnapshot(branches);
-    if (incoming !== current) {
+    if (incoming !== lastIncomingRef.current) {
+      lastIncomingRef.current = incoming;
       setBranches(normalizeBranches(initialBranches));
     }
-  }, [branches, initialBranches]);
+  }, [initialBranches]);
 
-  useEffect(() => {
-    onChange?.(normalizeBranches(branches));
-  }, [branches, onChange]);
-
-  const updateBranch = useCallback((branchId: SequenceBranchId, updater: (steps: BranchStepData[]) => BranchStepData[]) => {
-    setBranches((current) =>
-      normalizeBranches(
-        current.map((branch) =>
-          branch.id === branchId
-            ? { ...branch, steps: updater(branch.steps) }
-            : branch,
-        ),
-      ),
-    );
-  }, []);
+  // Single mutator: applies the update, normalises, and synchronously
+  // notifies the parent. No more setState→effect→onChange→parentSetState
+  // round-trip. Edits feel immediate.
+  const updateBranch = useCallback(
+    (branchId: SequenceBranchId, updater: (steps: BranchStepData[]) => BranchStepData[]) => {
+      setBranches((current) => {
+        const normalized = normalizeBranches(
+          current.map((branch) =>
+            branch.id === branchId
+              ? { ...branch, steps: updater(branch.steps) }
+              : branch,
+          ),
+        );
+        // Cache the snapshot we're about to push so the external-sync
+        // effect doesn't see our own write as an "incoming" change and
+        // bounce it back.
+        lastIncomingRef.current = serializeSnapshot(normalized);
+        onChangeRef.current?.(normalized);
+        return normalized;
+      });
+    },
+    [],
+  );
 
   const addStep = useCallback((branchId: SequenceBranchId) => {
     updateBranch(branchId, (steps) => [...steps, createBranchStep(branchId, steps.length + 1)]);
