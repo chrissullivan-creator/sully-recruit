@@ -683,11 +683,41 @@ const JobDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_contacts')
-        .select('id, contact_id, is_primary, role, contact:people!contact_id(id, full_name, email, phone, title)')
+        .select('id, contact_id, is_primary, role, contact:people!contact_id(id, full_name, email, phone, title, current_company, current_title)')
         .eq('job_id', id!)
         .order('is_primary', { ascending: false });
       if (error) throw error;
       return data ?? [];
+    },
+  });
+
+  // Companies represented by the assigned contacts. Used to surface
+  // candidates currently working at any of those firms — warm leads
+  // who already have a foot in the door.
+  const firmCompanyNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const jc of jobContacts as any[]) {
+      const name = jc.contact?.current_company?.trim();
+      if (name) set.add(name);
+    }
+    return Array.from(set);
+  }, [jobContacts]);
+
+  const { data: candidatesAtFirm = [] } = useQuery({
+    queryKey: ['candidates_at_firm', id, firmCompanyNames.join('|')],
+    enabled: !!id && firmCompanyNames.length > 0,
+    queryFn: async () => {
+      // OR-join ilike across each firm name (Postgres handles the OR).
+      const orFilter = firmCompanyNames
+        .map((n) => `current_company.ilike.%${n.replace(/[,()%]/g, ' ').trim()}%`)
+        .join(',');
+      const { data, error } = await supabase
+        .from('people')
+        .select('id, full_name, current_title, current_company, status, last_contacted_at')
+        .or(orFilter)
+        .limit(50);
+      if (error) throw error;
+      return (data ?? []) as any[];
     },
   });
 
@@ -1339,6 +1369,73 @@ const JobDetail = () => {
                     Create New Contact
                   </Button>
                 </div>
+
+                {/* ── Candidates at the assigned contacts' firms ──
+                    Surfaces warm leads: people in our DB whose
+                    current_company matches one of the companies of the
+                    contacts attached to this job. Filters out anyone
+                    already on this job's send_outs. */}
+                {firmCompanyNames.length > 0 && (() => {
+                  const sendOutCandidateIds = new Set(
+                    (sendOuts as any[]).map((s: any) => s.candidate_id).filter(Boolean),
+                  );
+                  const warmLeads = (candidatesAtFirm as any[]).filter(
+                    (c: any) => !sendOutCandidateIds.has(c.id),
+                  );
+                  return (
+                    <div className="rounded-lg border border-card-border bg-card/40 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                          <UsersRound className="h-4 w-4 text-emerald-dark" />
+                          Candidates at {firmCompanyNames.length === 1 ? firmCompanyNames[0] : `${firmCompanyNames.length} firms`}
+                        </h2>
+                        <span className="text-xs text-muted-foreground">{warmLeads.length} warm lead{warmLeads.length === 1 ? '' : 's'}</span>
+                      </div>
+                      {warmLeads.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">No matching candidates in our database yet.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {warmLeads.slice(0, 20).map((c: any) => (
+                            <div
+                              key={c.id}
+                              className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 hover:border-emerald/40 transition-colors"
+                            >
+                              <button
+                                onClick={() => navigate(`/candidates/${c.id}`)}
+                                className="flex-1 min-w-0 text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-foreground truncate">{c.full_name || 'Unknown'}</span>
+                                  {c.status && (
+                                    <Badge variant="secondary" className="text-[9px] capitalize">
+                                      {String(c.status).replace(/_/g, ' ')}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {[c.current_title, c.current_company].filter(Boolean).join(' · ')}
+                                </p>
+                              </button>
+                              <Button
+                                variant="outline" size="sm"
+                                disabled={addingSendOut}
+                                onClick={() => addCandidateToSendOuts(c.id)}
+                                className="text-[11px] h-7 shrink-0"
+                              >
+                                <Send className="h-3 w-3 mr-1" /> Send Out
+                              </Button>
+                            </div>
+                          ))}
+                          {warmLeads.length > 20 && (
+                            <p className="text-[10px] text-muted-foreground/70 text-center pt-1">
+                              + {warmLeads.length - 20} more — refine by adding more contacts to the job
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </TabsContent>
 
               {/* ── Send Outs Tab ──────────────────────────── */}
