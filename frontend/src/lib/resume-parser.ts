@@ -21,8 +21,18 @@
  * Both Vercel and Trigger.dev run Node 20+ with global fetch / Buffer.
  */
 
-const EDEN_URL = "https://api.edenai.run/v3/universal-ai/";
-const EDEN_MODEL = "ocr/resume_parser/affinda";
+/**
+ * Eden v3 universal-ai accepts JSON but its file-input shape for
+ * the resume_parser model is poorly documented and rejected every
+ * JSON variant we tried (file_base64 + file_name + file_type, then
+ * `file` as data URI — both 422'd with "field 'file' is required").
+ *
+ * The well-documented Eden path for resume parsing is the v2 multipart
+ * form-data endpoint, identical to uploading from a browser
+ * <input type=file>. That's what we use here.
+ */
+const EDEN_URL = "https://api.edenai.run/v2/ocr/resume_parser";
+const EDEN_PROVIDER = "affinda";
 
 export interface ParsedResume {
   first_name?: string;
@@ -176,28 +186,20 @@ export async function parseResume(
 ): Promise<ParseResumeResult> {
   if (!opts.edenKey) throw new Error("EDEN_AI_API_KEY missing");
 
-  const file_base64 = toBase64(fileBytes);
   const mime = getMimeType(fileName);
-  // Eden v3 universal-ai expects the file as a single `file` field
-  // containing a data URI (base64-encoded with mime prefix). The
-  // earlier `file_base64` / `file_name` shape was rejected with
-  // 422 "field: file, message: Field required".
-  const dataUri = `data:${mime};base64,${file_base64}`;
+  // Node 20+ has Blob and FormData as globals.
+  const blob = new Blob([fileBytes as any], { type: mime });
+  const fd = new FormData();
+  fd.append("providers", EDEN_PROVIDER);
+  fd.append("file", blob, fileName);
 
   const resp = await fetch(EDEN_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${opts.edenKey}`,
-      "Content-Type": "application/json",
+      // Don't set Content-Type — fetch fills in the multipart boundary.
     },
-    body: JSON.stringify({
-      model: EDEN_MODEL,
-      input: {
-        file: dataUri,
-        file_name: fileName,
-      },
-      show_original_response: false,
-    }),
+    body: fd,
   });
 
   const text = await resp.text();
@@ -210,13 +212,17 @@ export async function parseResume(
     throw new Error(`Eden non-JSON response: ${text.slice(0, 200)}`);
   }
 
-  if (data?.status && data.status !== "success") {
-    throw new Error(`Eden ${data.status}: ${JSON.stringify(data.error ?? data).slice(0, 300)}`);
+  // v2 envelopes the result by provider name:
+  //   { affinda: { status, extracted_data, ... } }
+  const providerBlock = data?.[EDEN_PROVIDER] ?? data;
+  if (providerBlock?.status && providerBlock.status !== "success") {
+    throw new Error(
+      `Eden ${providerBlock.status}: ${JSON.stringify(providerBlock.error ?? providerBlock).slice(0, 300)}`,
+    );
   }
 
-  const output = data?.output ?? data;
-  const parsed = mapAffindaOutput(output);
-  const rawText = extractRawTextFromOutput(output);
+  const parsed = mapAffindaOutput(providerBlock);
+  const rawText = extractRawTextFromOutput(providerBlock);
 
   return { parsed, rawText: rawText || null, via: "affinda" };
 }
