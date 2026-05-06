@@ -40,30 +40,51 @@ export default function SequenceBuilder() {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
 
-  // Load existing sequence when editing
+  // Load existing sequence when editing.
+  //
+  // Previously this was a single embedded select:
+  //   .select("*, sequence_nodes(..., sequence_actions(*)), sequence_steps(*)")
+  // which would silently return `null` for the whole row when PostgREST
+  // failed to resolve the nested `sequence_actions` relationship — leaving
+  // the builder rendered with an empty form (the bug the user hit when
+  // clicking into an existing sequence). Splitting into three separate
+  // queries: setup row first (guaranteed to load), then nodes+actions,
+  // then steps. Each step logs on failure so we never silently render
+  // a blank Edit screen again.
   useEffect(() => {
     if (!id) return;
     (async () => {
-      const { data: seq } = await supabase
+      const { data: seq, error: seqErr } = await supabase
         .from("sequences")
-        .select("*, sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_steps(*)")
+        .select("*")
         .eq("id", id)
-        .single() as any;
-      if (seq) {
-        setSetup({
-          name: seq.name || "",
-          jobId: seq.job_id,
-          audienceType: seq.audience_type,
-          objective: seq.objective || "",
-          sendWindowStart: toTimeInput(seq.send_window_start, "09:00"),
-          sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
-          timezone: seq.timezone || "America/New_York",
-          senderUserId: seq.sender_user_id || seq.created_by,
-        });
-
-        const nodeRows = ((seq.sequence_nodes || []) as any[]).sort(compareSequenceNodes);
-        setBranches(hydrateBranchesFromNodes(nodeRows, seq.sequence_steps || []));
+        .maybeSingle() as any;
+      if (seqErr || !seq) {
+        toast.error(`Couldn't load sequence: ${seqErr?.message || "not found"}`);
+        return;
       }
+
+      setSetup({
+        name: seq.name || "",
+        jobId: seq.job_id,
+        audienceType: seq.audience_type,
+        objective: seq.objective || "",
+        sendWindowStart: toTimeInput(seq.send_window_start, "09:00"),
+        sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
+        timezone: seq.timezone || "America/New_York",
+        senderUserId: seq.sender_user_id || seq.created_by,
+      });
+
+      const [{ data: nodes }, { data: stepsLegacy }] = await Promise.all([
+        supabase
+          .from("sequence_nodes")
+          .select("id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)")
+          .eq("sequence_id", id),
+        supabase.from("sequence_steps").select("*").eq("sequence_id", id),
+      ]);
+
+      const nodeRows = ((nodes ?? []) as any[]).sort(compareSequenceNodes);
+      setBranches(hydrateBranchesFromNodes(nodeRows, stepsLegacy ?? []));
     })();
   }, [id]);
 
@@ -282,8 +303,20 @@ export default function SequenceBuilder() {
   return (
     <MainLayout>
       <div className="container mx-auto py-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">{isEdit ? "Edit Sequence" : "New Sequence"}</h1>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
+              {isEdit ? "Editing sequence" : "New sequence"}
+            </p>
+            <h1 className="text-2xl font-bold truncate">
+              {isEdit
+                ? (setup.name?.trim() || <span className="text-muted-foreground italic">Untitled sequence</span>)
+                : "New Sequence"}
+            </h1>
+            {isEdit && id && (
+              <p className="text-[10px] text-muted-foreground/70 font-mono mt-0.5">id: {id}</p>
+            )}
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
