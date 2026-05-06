@@ -28,6 +28,7 @@ export default function SequenceBuilder() {
   const [setup, setSetup] = useState<SequenceSetupData>({
     name: "",
     jobId: null,
+    jobIds: [],
     audienceType: "candidates",
     objective: "",
     sendWindowStart: "09:00",
@@ -64,9 +65,16 @@ export default function SequenceBuilder() {
         return;
       }
 
+      // job_ids[] is the canonical multi-tag list; fall back to a
+      // single-element array built from job_id for old rows that
+      // pre-date the migration.
+      const loadedJobIds: string[] = Array.isArray(seq.job_ids) && seq.job_ids.length
+        ? seq.job_ids
+        : (seq.job_id ? [seq.job_id] : []);
       setSetup({
         name: seq.name || "",
-        jobId: seq.job_id,
+        jobId: seq.job_id || loadedJobIds[0] || null,
+        jobIds: loadedJobIds,
         audienceType: seq.audience_type,
         objective: seq.objective || "",
         sendWindowStart: toTimeInput(seq.send_window_start, "09:00"),
@@ -191,13 +199,19 @@ export default function SequenceBuilder() {
     setSaving(true);
     try {
       // 1. Create or update the sequence
+      // Resolve the canonical job tag list. job_id stays in sync with
+      // jobIds[0] so legacy single-job consumers keep working.
+      const finalJobIds = setup.jobIds.length ? setup.jobIds : (setup.jobId ? [setup.jobId] : []);
+      const finalJobId = finalJobIds[0] ?? null;
+
       let sequenceId = id;
       if (!sequenceId) {
         const { data: seq, error } = await supabase
           .from("sequences")
           .insert({
             name: setup.name,
-            job_id: setup.jobId,
+            job_id: finalJobId,
+            job_ids: finalJobIds,
             audience_type: setup.audienceType,
             objective: setup.objective,
             send_window_start: setup.sendWindowStart,
@@ -217,7 +231,8 @@ export default function SequenceBuilder() {
           .from("sequences")
           .update({
             name: setup.name,
-            job_id: setup.jobId,
+            job_id: finalJobId,
+            job_ids: finalJobIds,
             audience_type: setup.audienceType,
             objective: setup.objective,
             send_window_start: setup.sendWindowStart,
@@ -271,6 +286,10 @@ export default function SequenceBuilder() {
                 || action.channel === "linkedin_inmail"
                 ? (action.attachmentUrl || null)
                 : null,
+            // Subject + threading are email-only. Other channels ignore
+            // them entirely.
+            subject_line: action.channel === "email" ? (action.subjectLine || null) : null,
+            reply_to_previous: action.channel === "email" ? (action.replyToPrevious === true) : false,
           } as any);
           if (actionErr) throw new Error(`Action save failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actionErr.message}`);
         }

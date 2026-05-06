@@ -13,7 +13,13 @@ import { Sparkles } from "lucide-react";
 
 export interface SequenceSetupData {
   name: string;
+  /** Primary job — kept for backward-compat with existing read paths.
+   *  When jobIds has entries this should mirror jobIds[0]. */
   jobId: string | null;
+  /** Multi-job tag list. A sequence can be associated with several jobs
+   *  (e.g. one outreach sequence covering 3 similar FX roles). Stored as
+   *  sequences.job_ids uuid[]. */
+  jobIds: string[];
   audienceType: "candidates" | "contacts";
   objective: string;
   sendWindowStart: string;
@@ -113,20 +119,57 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
         </div>
 
         <div className="space-y-2">
-          <Label>Tied to Job</Label>
+          <Label>Tied to Jobs</Label>
+          <p className="text-[11px] text-muted-foreground -mt-1">
+            Tag one or more jobs. The first selected becomes the primary
+            (used by Ask Joe + the dashboard funnel link).
+          </p>
           <SearchableSelect
-            options={(jobs as any[]).map((job: any) => ({
-              value: job.id,
-              label: `${job.status === 'hot' ? '🔥 ' : ''}${job.title}`,
-              sublabel: job.company_name ? job.company_name : undefined,
-            }))}
-            value={data.jobId || ''}
-            onChange={(v) => update("jobId", v || null)}
-            placeholder="Select a job (optional)"
+            options={(jobs as any[])
+              // Hide jobs already in the multi-tag list — they show as
+              // chips below.
+              .filter((job: any) => !data.jobIds.includes(job.id))
+              .map((job: any) => ({
+                value: job.id,
+                label: `${job.status === 'hot' ? '🔥 ' : ''}${job.title}`,
+                sublabel: job.company_name ? job.company_name : undefined,
+              }))}
+            value=""
+            onChange={(v) => {
+              if (!v) return;
+              const next = [...data.jobIds, v];
+              onChange({ ...data, jobIds: next, jobId: next[0] });
+            }}
+            placeholder={data.jobIds.length === 0 ? "Add a job (optional)" : "Add another job"}
             searchPlaceholder="Search jobs..."
             clearLabel="None"
             emptyText="No job found."
           />
+          {data.jobIds.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {data.jobIds.map((id) => {
+                const j = (jobs as any[]).find((x: any) => x.id === id);
+                return (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald/30 bg-emerald-light/15 px-2 py-0.5 text-[11px] text-emerald-dark"
+                  >
+                    {j ? `${j.status === 'hot' ? '🔥 ' : ''}${j.title}` : id.slice(0, 8)}
+                    {j?.company_name && <span className="text-muted-foreground">· {j.company_name}</span>}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = data.jobIds.filter((x) => x !== id);
+                        onChange({ ...data, jobIds: next, jobId: next[0] ?? null });
+                      }}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label="Remove"
+                    >×</button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">

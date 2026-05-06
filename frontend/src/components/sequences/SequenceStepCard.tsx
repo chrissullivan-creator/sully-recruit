@@ -287,15 +287,38 @@ export function SequenceStepCard({
                 </div>
               </div>
               {action.channel === "email" && (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={`use-signature-${action.id}`}
-                    checked={action.useSignature !== false}
-                    onCheckedChange={(checked) => updateAction(i, "useSignature", !!checked)}
-                  />
-                  <Label htmlFor={`use-signature-${action.id}`} className="text-[11px] cursor-pointer">
-                    Include email signature
-                  </Label>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <Label htmlFor={`subject-${action.id}`} className="text-[11px]">Subject line</Label>
+                    <Input
+                      id={`subject-${action.id}`}
+                      value={action.subjectLine ?? ""}
+                      onChange={(e) => updateAction(i, "subjectLine", e.target.value)}
+                      placeholder={action.replyToPrevious ? "(re-uses previous subject with “Re:”)" : "e.g. Quick intro"}
+                      disabled={action.replyToPrevious === true}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`use-signature-${action.id}`}
+                      checked={action.useSignature !== false}
+                      onCheckedChange={(checked) => updateAction(i, "useSignature", !!checked)}
+                    />
+                    <Label htmlFor={`use-signature-${action.id}`} className="text-[11px] cursor-pointer">
+                      Include email signature
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`reply-prev-${action.id}`}
+                      checked={action.replyToPrevious === true}
+                      onCheckedChange={(checked) => updateAction(i, "replyToPrevious", !!checked)}
+                    />
+                    <Label htmlFor={`reply-prev-${action.id}`} className="text-[11px] cursor-pointer">
+                      Reply to previous email (threads in recipient's inbox)
+                    </Label>
+                  </div>
                 </div>
               )}
               {(action.channel === "email"
