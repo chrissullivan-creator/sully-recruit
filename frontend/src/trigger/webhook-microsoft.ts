@@ -356,7 +356,6 @@ async function processResumesInboxEmail(
         file_path: storagePath,
         file_name: fileName,
         mime_type: att.contentType || null,
-        parse_status: "pending",
         parsing_status: "pending",
         source_message_id: sourceMessageId,
       } as any)
