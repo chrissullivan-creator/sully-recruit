@@ -18,7 +18,17 @@ async function getToken(acct: any): Promise<string | null> {
   const clientId = meta.rc_client_id;
   const clientSecret = meta.rc_client_secret;
   const jwt = acct.rc_jwt;
-  if (!clientId || !clientSecret || !jwt) return acct.access_token ?? null;
+  if (!clientId || !clientSecret || !jwt) {
+    logger.warn("RC credentials incomplete — cannot mint token", {
+      account: acct.account_label,
+      missing: {
+        rc_client_id: !clientId,
+        rc_client_secret: !clientSecret,
+        rc_jwt: !jwt,
+      },
+    });
+    return acct.access_token ?? null;
+  }
 
   const res = await fetch(`${RC_SERVER}/restapi/oauth/token`, {
     method: "POST",
@@ -31,7 +41,13 @@ async function getToken(acct: any): Promise<string | null> {
       assertion: jwt,
     }),
   });
-  if (!res.ok) return acct.access_token ?? null;
+  if (!res.ok) {
+    logger.warn("RC JWT token exchange failed", {
+      account: acct.account_label,
+      status: res.status,
+    });
+    return acct.access_token ?? null;
+  }
   return (await res.json()).access_token;
 }
 

@@ -364,6 +364,58 @@ const Settings = () => {
 
       if (error) throw error;
 
+      // RingCentral creds are read by Trigger.dev tasks (poll-rc-calls,
+      // webhook-ringcentral, process-call-deepgram) from `integration_accounts`,
+      // not `user_integrations`. Mirror the credentials so polling/webhook
+      // auth doesn't silently drift out of sync.
+      if (type === 'ringcentral') {
+        const normalizePhone = (raw: string): string | null => {
+          if (!raw) return null;
+          const digits = raw.replace(/\D/g, '');
+          if (digits.length === 10) return `+1${digits}`;
+          if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+          return raw.startsWith('+') ? raw : null;
+        };
+
+        const { data: existing } = await supabase
+          .from('integration_accounts')
+          .select('id, account_label, rc_extension, metadata')
+          .eq('owner_user_id', user.id)
+          .eq('provider', 'sms')
+          .maybeSingle();
+
+        const mergedMetadata = {
+          ...((existing?.metadata as Record<string, unknown>) ?? {}),
+          rc_client_id: config.client_id,
+          rc_client_secret: config.client_secret,
+          rc_server: config.server_url || 'https://platform.ringcentral.com',
+        };
+
+        const ringcentralRow = {
+          owner_user_id: user.id,
+          provider: 'sms' as const,
+          account_type: 'sms' as const,
+          auth_provider: 'ringcentral' as const,
+          account_label: existing?.account_label || user.email || 'RingCentral',
+          rc_extension: existing?.rc_extension ?? null,
+          rc_phone_number: normalizePhone(config.phone_number ?? '') ?? config.phone_number ?? null,
+          rc_jwt: config.jwt_token,
+          access_token: null,
+          token_expires_at: null,
+          metadata: mergedMetadata,
+          is_active: isActive,
+        };
+
+        const { error: iaError } = existing
+          ? await supabase.from('integration_accounts').update(ringcentralRow).eq('id', existing.id)
+          : await supabase.from('integration_accounts').insert(ringcentralRow);
+
+        if (iaError) {
+          console.error('integration_accounts sync failed', iaError);
+          toast.error(`Saved to user_integrations but failed to sync to integration_accounts: ${iaError.message}`);
+        }
+      }
+
       // Sync Clay settings to app_settings so Trigger.dev tasks can read them
       if (type === 'clay_enrichment') {
         const appSettingsMap: Record<string, string> = {
