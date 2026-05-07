@@ -60,6 +60,7 @@ interface InboxThread {
   account_id: string | null;
   external_conversation_id: string | null;
   integration_account_id: string | null;
+  has_attachments?: boolean | null;
 }
 
 interface Message {
@@ -190,6 +191,12 @@ function ThreadItem({
                 <span className="text-sm font-medium text-warning italic">Unlinked</span>
               )}
               {!thread.is_read && <Circle className="h-1.5 w-1.5 fill-accent text-accent shrink-0" />}
+              {thread.has_attachments && (
+                <Paperclip
+                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                  aria-label="Has attachments"
+                />
+              )}
             </div>
             <span className="text-[10px] text-muted-foreground shrink-0">
               {previewTime
