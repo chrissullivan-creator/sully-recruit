@@ -1,8 +1,9 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getUnipileBaseUrl, getAppSetting } from "./supabase";
+import { getAppSetting } from "./supabase";
 import { getMicrosoftAccessToken } from "./microsoft-graph";
 import { fetchWithRetry } from "./fetch-retry";
 import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email";
+import { unipileFetch } from "./unipile-v2";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -362,7 +363,7 @@ async function getUnipileApiKey(
       .from("integration_accounts")
       .select("id, unipile_account_id")
       .eq("owner_user_id", userId)
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .limit(1);
@@ -376,7 +377,7 @@ async function getUnipileApiKey(
   const { data: accounts } = await supabase
     .from("integration_accounts")
     .select("id, unipile_account_id")
-    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
+    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
     .eq("is_active", true)
     .not("unipile_account_id", "is", null)
     .limit(1);
@@ -391,11 +392,25 @@ async function getUnipileApiKey(
 /**
  * Verify that the Unipile account is still connected and healthy.
  * Throws if the account is disconnected or the API is unreachable.
+ *
+ * v2 has no per-account endpoint at this position — account state
+ * lives at /api/v2/accounts/{id} (still supported, no path-account-id
+ * shape because this is a meta endpoint). Use it directly with the
+ * v2 base URL + key.
  */
-async function verifyUnipileAccountHealth(apiKey: string, accountId: string): Promise<void> {
-  const baseUrl = await getUnipileBaseUrl();
+async function verifyUnipileAccountHealth(supabase: any, accountId: string): Promise<void> {
+  const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+  ]);
+  const base = (v2Row?.value || "").replace(/\/+$/, "")
+    || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+  const apiKey = v2KeyRow?.value || v1KeyRow?.value;
+  if (!base || !apiKey) throw new Error("Unipile config missing");
   try {
-    const resp = await fetch(`${baseUrl}/accounts/${encodeURIComponent(accountId)}`, {
+    const resp = await fetch(`${base}/accounts/${encodeURIComponent(accountId)}`, {
       headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       signal: AbortSignal.timeout(5_000),
     });
@@ -433,25 +448,27 @@ export async function sendLinkedIn(
    */
   attachmentUrls?: string | string[],
 ): Promise<{ message_id: string; conversation_id: string }> {
-  const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = await getUnipileBaseUrl();
+  const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
 
-  // Verify account is healthy before sending
-  await verifyUnipileAccountHealth(apiKey, resolvedAccountId);
+  // Health check uses v2 base — /accounts/{id} is unchanged across versions.
+  await verifyUnipileAccountHealth(supabase, resolvedAccountId);
 
-  // Resolve LinkedIn URL to provider_id if needed
+  // ── Resolve LinkedIn URL → provider_id via v2 ───────────────────
+  // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug}
   let providerId = to;
   if (to.includes("linkedin.com/")) {
     const match = to.match(/linkedin\.com\/in\/([^/?#]+)/);
     if (match) {
-      const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
-        headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-      });
-      if (lookupResp.ok) {
-        const userData = await lookupResp.json();
-        providerId = userData.provider_id || userData.id || match[1];
-      } else {
-        throw new Error(`Could not resolve LinkedIn profile: ${match[1]}`);
+      try {
+        const userData: any = await unipileFetch(
+          supabase,
+          resolvedAccountId,
+          `linkedin/users/${encodeURIComponent(match[1])}`,
+          { method: "GET" },
+        );
+        providerId = userData.provider_id || userData.id || userData.public_id || match[1];
+      } catch (err: any) {
+        throw new Error(`Could not resolve LinkedIn profile ${match[1]}: ${err.message}`);
       }
     }
   }
@@ -462,36 +479,58 @@ export async function sendLinkedIn(
     stepChannel === "linkedin_recruiter";
   const isConnectionRequest = stepChannel === "linkedin_connection";
 
-  // Connection requests use a different Unipile endpoint
-  if (isConnectionRequest) {
-    const invitePayload: any = {
-      provider_id: providerId,
-      account_id: resolvedAccountId,
-      message: body,
-    };
-
-    const response = await fetchWithRetry(`${baseUrl}/users/invite`, {
-      method: "POST",
-      headers: {
-        "X-API-KEY": apiKey,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(invitePayload),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Unipile invite error: ${error}`);
+  // Credit guard: InMails cost real money. The hourly sync stamps
+  // remaining credits onto integration_accounts; if we know the
+  // bucket is empty, fail fast with a clear message instead of
+  // letting Unipile 422 us with a generic error.
+  if (isInMailChannel) {
+    const { data: acct } = await supabase
+      .from("integration_accounts")
+      .select("inmail_credits_remaining, inmail_credits_updated_at, account_label")
+      .eq("unipile_account_id", resolvedAccountId)
+      .maybeSingle();
+    if (
+      acct?.inmail_credits_remaining !== null &&
+      acct?.inmail_credits_remaining !== undefined &&
+      acct.inmail_credits_remaining <= 0
+    ) {
+      throw new Error(
+        `InMail credits exhausted on ${acct.account_label || resolvedAccountId}` +
+        ` (last checked ${acct.inmail_credits_updated_at}). ` +
+        `Top up before re-running.`,
+      );
     }
-
-    const data = await response.json();
-    return { message_id: data.id || `invite_${Date.now()}`, conversation_id: data.conversation_id || "" };
   }
 
-  // Regular messages and InMails. Use multipart when one or more
-  // attachments are present so Unipile picks up each file via its
-  // `attachments` field.
+  // ── Connection request via v2 ───────────────────────────────────
+  // v2 path: POST /api/v2/{account_id}/linkedin/users/invite
+  // (account_id moves to path; body no longer needs it)
+  if (isConnectionRequest) {
+    const data: any = await unipileFetch(
+      supabase,
+      resolvedAccountId,
+      `linkedin/users/invite`,
+      {
+        method: "POST",
+        body: JSON.stringify({ provider_id: providerId, message: body }),
+      },
+    );
+    return {
+      message_id: data.id || `invite_${Date.now()}`,
+      conversation_id: data.conversation_id || "",
+    };
+  }
+
+  // ── Regular message + InMail via v2 ─────────────────────────────
+  // v2 path: POST /api/v2/{account_id}/chats
+  // Body: { attendees_ids: [providerId], text, message_type? }
+  //   - Classic message:  no message_type
+  //   - Recruiter InMail: message_type = "INMAIL"
+  //
+  // Use multipart when one or more attachments are present so Unipile
+  // picks up each file via its `attachments` field. Attachments are
+  // skipped for connection requests (handled above) since invitations
+  // have a 200-char text-only payload.
   const linkedinUrls = !attachmentUrls
     ? []
     : Array.isArray(attachmentUrls)
@@ -525,61 +564,93 @@ export async function sendLinkedIn(
 
     if (blobs.length) {
       const fd = new FormData();
-      fd.append("provider_id", providerId);
+      fd.append("attendees_ids", providerId);
       fd.append("text", body);
-      if (isInMailChannel) fd.append("message_type", "INMAIL");
+      // Per Unipile v2 SDK (chat-start.types.ts): use the `linkedin`
+      // field, not a top-level message_type.
+      //   InMail (Recruiter seat):  { linkedin: { api: 'recruiter' } }
+      //   Classic DM:               omit linkedin (defaults to classic)
+      if (isInMailChannel) {
+        fd.append("linkedin", JSON.stringify({ api: "recruiter" }));
+      }
       for (const { blob, name } of blobs) {
         fd.append("attachments", blob, name);
       }
 
-      const response = await fetchWithRetry(`${baseUrl}/messages`, {
-        method: "POST",
-        headers: {
-          "X-API-KEY": apiKey,
-          Accept: "application/json",
-          // Don't set Content-Type — fetch fills in the multipart boundary.
-        },
-        body: fd,
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        if (isInMailChannel && response.status === 422) {
-          throw new Error(`InMail ${response.status}: ${error}`);
+      try {
+        const data: any = await unipileFetch(
+          supabase,
+          resolvedAccountId,
+          `chats`,
+          { method: "POST", body: fd as any },
+        );
+        if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
+        return {
+          message_id: data.id || data.message_id || `msg_${Date.now()}`,
+          conversation_id: data.chat_id || data.conversation_id || "",
+        };
+      } catch (err: any) {
+        if (isInMailChannel && /\b422\b/.test(err.message)) {
+          throw new Error(`InMail ${err.message}`);
         }
-        throw new Error(`Unipile send error: ${error}`);
+        throw new Error(`Unipile send error: ${err.message}`);
       }
-
-      const data = await response.json();
-      return { message_id: data.id, conversation_id: data.conversation_id };
     }
     // Every attachment failed — fall through to the JSON path so the
     // message itself still goes out.
   }
 
-  const sendPayload: any = { provider_id: providerId, text: body };
-  if (isInMailChannel) sendPayload.message_type = "INMAIL";
+  const sendPayload: any = { attendees_ids: [providerId], text: body };
+  // Per Unipile v2 SDK: route InMail through linkedin.api='recruiter'.
+  // Classic DMs need no extras (default).
+  if (isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
 
-  const response = await fetchWithRetry(`${baseUrl}/messages`, {
-    method: "POST",
-    headers: {
-      "X-API-KEY": apiKey,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(sendPayload),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    if (isInMailChannel && response.status === 422) {
-      throw new Error(`InMail ${response.status}: ${error}`);
+  try {
+    const data: any = await unipileFetch(
+      supabase,
+      resolvedAccountId,
+      `chats`,
+      {
+        method: "POST",
+        body: JSON.stringify(sendPayload),
+      },
+    );
+    if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
+    return {
+      message_id: data.id || data.message_id || `msg_${Date.now()}`,
+      conversation_id: data.chat_id || data.conversation_id || "",
+    };
+  } catch (err: any) {
+    if (isInMailChannel && /\b422\b/.test(err.message)) {
+      throw new Error(`InMail ${err.message}`);
     }
-    throw new Error(`Unipile send error: ${error}`);
+    throw new Error(`Unipile send error: ${err.message}`);
   }
+}
 
-  const data = await response.json();
-  return { message_id: data.id, conversation_id: data.conversation_id };
+/**
+ * Best-effort: subtract 1 from the cached credit count after a
+ * confirmed InMail send. The hourly sync overwrites with the truth,
+ * so a brief race here is harmless. Failure is silent — never block
+ * a successful send because the local counter couldn't update.
+ */
+async function decrementInmailCredit(supabase: any, unipileAccountId: string): Promise<void> {
+  try {
+    const { data: row } = await supabase
+      .from("integration_accounts")
+      .select("inmail_credits_remaining")
+      .eq("unipile_account_id", unipileAccountId)
+      .maybeSingle();
+    const current = row?.inmail_credits_remaining;
+    if (typeof current === "number" && current > 0) {
+      await supabase
+        .from("integration_accounts")
+        .update({ inmail_credits_remaining: current - 1 } as any)
+        .eq("unipile_account_id", unipileAccountId);
+    }
+  } catch {
+    // Silent — the cached counter is decorative, not authoritative.
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -644,17 +715,14 @@ export async function resolveRecipient(
   const match = entity.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
   if (!match) throw new Error(`Invalid LinkedIn URL: ${entity.linkedin_url}`);
 
-  // Get Unipile API key for this user
-  const { apiKey } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = await getUnipileBaseUrl();
-
-  const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
-    headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-  });
-
-  if (!lookupResp.ok) throw new Error(`Unipile lookup failed for ${match[1]}: ${lookupResp.status}`);
-
-  const userData = await lookupResp.json();
+  // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug}
+  const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
+  const userData: any = await unipileFetch(
+    supabase,
+    resolvedAccountId,
+    `linkedin/users/${encodeURIComponent(match[1])}`,
+    { method: "GET" },
+  );
   const resolvedId = userData.provider_id || userData.id;
 
   // Cache resolved ID

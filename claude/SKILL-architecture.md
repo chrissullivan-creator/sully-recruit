@@ -6,6 +6,19 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 
 ---
 
+## What changed on 2026-05-07 — read this first
+
+If you're returning to this codebase, these are the recent invariants that bite:
+
+- **`people.email` is gone.** Use `personal_email`, `work_email`, or the generated `primary_email` (`COALESCE(personal_email, work_email)` — personal-first since the sequence flip). Legacy reads through the `candidates` / `contacts` views still see an `email` column — it's computed, not real. Writes that hand `email:` straight to `from('people').insert({...})` will error. New writers: spread `classifyEmail(addr)` into the payload (helper exported from `frontend/src/lib/email-classifier.ts` + `frontend/src/trigger/lib/match-person-by-email.ts`) so consumer-domain addresses go to `personal_email` and corporate to `work_email`. There's also `secondary_emails TEXT[]` to capture extra/import-residue addresses without losing them.
+- **Dual roles.** `people.roles TEXT[]` (e.g. `['candidate']`, `['client']`, or both). `people.type` is kept in sync via a BEFORE-trigger; treat `roles` as the truth, `type` as the primary-display label. `/api/add-person` auto-merges: if the submitted email matches an existing person, the new role is appended instead of duplicating the row.
+- **Inbound email matching is multi-column.** `trigger/lib/match-person-by-email.ts:matchPersonByEmail` ORs across all three address columns. Every webhook + backfill route through it. Don't `.eq("email", x)` on `people` directly — it can't.
+- **Unipile is on v2.** `account_id` lives in the URL path. All trigger callers go through `trigger/lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)`. Send-channels uses `{ attendees_ids:[providerId], text, linkedin: { api: 'recruiter' } }` for InMail, not `message_type: "INMAIL"`.
+- **Channel buckets are FOUR, not five.** `email`, `sms`, `linkedin`, `linkedin_recruiter`. Sales Navigator was removed from the active code paths — `canonicalChannel()` now folds any sales_navigator label into `linkedin`. Inbound bucketing reads `chat.content_type === 'inmail'` or `folder` includes `'INBOX_LINKEDIN_RECRUITER'`. Don't fall back to integration_account.account_type alone.
+- **InMail credit guard.** `sync-inmail-credits` cron stamps `integration_accounts.inmail_credits_remaining`. `sendLinkedIn` refuses to fire an InMail when the cached balance is 0; successful InMails decrement the cache locally between hourly polls.
+
+---
+
 ## Project Overview
 
 **Sully Recruit** — custom CRM/ATS + communication hub for The Emerald Recruiting Group, a Wall Street staffing firm. Places talent at hedge funds, investment banks, prop trading, asset managers, and fintech.
@@ -22,7 +35,7 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 
 | Person | Email | LinkedIn | SMS |
 |---|---|---|---|
-| Chris Sullivan (President) | ✅ chris.sullivan@emeraldrecruit.com | recruiter_inmail, sales_nav_inmail, classic_message, connection_request | ✅ RingCentral |
+| Chris Sullivan (President) | ✅ chris.sullivan@emeraldrecruit.com | recruiter_inmail, classic_message, connection_request | ✅ RingCentral |
 | Nancy Eberlein (MD) | ✅ nancy.eberlein@emeraldrecruit.com | recruiter_inmail, classic_message, connection_request | ✅ RingCentral |
 | Ashley Leichner (Recruiter) | ✅ ashley.leichner@emeraldrecruit.com | classic_message, connection_request | ❌ No RingCentral |
 | House Account | ✅ EmeraldRecruit@theemeraldrecruitinggroup.com | ❌ | ❌ |
@@ -33,18 +46,26 @@ This skill captures hard-won knowledge about the Sully Recruit codebase. Every i
 
 ## Database — Critical Column Names
 
-### Unified person model (Pass 5a, 2026-05-03)
+### Unified person model (Pass 5a, 2026-05-03; renamed Pass 6, 2026-05-03; emails retired 2026-05-07)
 
-**The `candidates` table now holds BOTH candidates and clients via the `type` column.** The old `contacts` table is a backwards-compat VIEW filtered by `type='client'` with INSTEAD OF triggers for writes. See `TERMINOLOGY.md` at repo root for the canonical naming guide.
+**The base table is `people` (was `candidates`).** It holds BOTH candidates and clients. The legacy `candidates` and `contacts` are now both views:
+- `candidates` — all rows from `people` (every column visible, plus `email` computed)
+- `contacts` — `WHERE type = 'client'` + INSTEAD OF triggers so writes still work
 
-- 11,331 type='candidate' + 1,868 type='client' = 13,199 total rows
-- `from('contacts').insert/update/delete(...)` still works via INSTEAD OF triggers — but new code should write directly to `candidates` with `type='client'`
-- Frontend `from('contacts')` queries return clients via the view (slightly slower but correct)
+`people.type` is kept in sync with `people.roles TEXT[]` via a BEFORE-trigger (candidate wins when a row carries both roles).
 
-### `candidates` table
+- ~11.5k candidates + ~1.9k clients = ~13.4k total rows
+- New code can write to `from('people')` directly. Use `roles: ['candidate']` or `roles: ['client', 'candidate']` for dual roles.
+- Plain `email` column was dropped 2026-05-07 — see "What changed" at the top.
+
+### `people` table (base table — formerly `candidates`)
 ```
-id, type, first_name, last_name, full_name, email, phone
-linkedin_url, unipile_provider_id, unipile_recruiter_id, unipile_classic_id, unipile_sales_nav_id
+id, type, roles (text[]), first_name, last_name, full_name
+personal_email, work_email           ← canonical addresses; write here
+primary_email                         ← STORED-GENERATED COALESCE(personal_email, work_email)
+secondary_emails (text[])             ← extras (import residue) so we don't lose data
+phone, mobile_phone
+linkedin_url, unipile_provider_id, unipile_recruiter_id, unipile_classic_id
 current_title, current_company        ← used for type='candidate'
 title, department, company_id, company_name   ← used for type='client'
 location_text          ← NOT "location" (that column doesn't exist)
@@ -121,7 +142,7 @@ is_read, is_archived, assigned_user_id
 ### `candidate_channels` table (Pass 6, 2026-05-03)
 Per-candidate per-channel cache for Unipile/provider IDs. **This was missing before Pass 6 and was the root cause of "so many errors" on Trigger.dev tasks.**
 ```
-id, candidate_id, channel (linkedin|linkedin_recruiter|linkedin_classic|linkedin_sales_nav|email|sms),
+id, candidate_id, channel (linkedin|linkedin_recruiter|email|sms),
 account_id, unipile_id, provider_id, external_conversation_id,
 is_connected, connection_status, last_synced_at
 UNIQUE (candidate_id, channel)

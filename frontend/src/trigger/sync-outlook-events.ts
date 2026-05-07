@@ -6,6 +6,7 @@ import {
   fetchUnipileEventsForAccount,
   shouldUseUnipileCalendar,
 } from "./lib/unipile-calendar";
+import { matchPersonByEmail as matchPersonByEmailHelper } from "./lib/match-person-by-email";
 
 /**
  * Pull each configured mailbox's upcoming Outlook calendar events and
@@ -260,16 +261,13 @@ async function syncMailbox(
   return { synced, matched };
 }
 
+// Wraps the shared multi-column matcher (email / personal_email /
+// work_email) so calendar attendees still match a candidate or contact
+// even when they emailed in from a different address.
 async function matchByEmail(
   supabase: any,
   email: string,
 ): Promise<{ entityId: string; entityType: string } | null> {
-  const normalized = email.toLowerCase().trim();
-  const [people, contactsRes] = await Promise.all([
-    supabase.from("people").select("id").ilike("email", normalized).limit(1),
-    supabase.from("contacts").select("id").ilike("email", normalized).limit(1),
-  ]);
-  if (people.data?.[0]) return { entityId: people.data[0].id, entityType: "candidate" };
-  if (contactsRes.data?.[0]) return { entityId: contactsRes.data[0].id, entityType: "contact" };
-  return null;
+  const m = await matchPersonByEmailHelper(supabase, email);
+  return m ? { entityId: m.entityId, entityType: m.entityType } : null;
 }

@@ -144,7 +144,10 @@ export function ComposeMessageDialog({
     setSearching(true);
     const q = searchQuery.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('people').select('id, full_name, email, phone, linkedin_url, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      // Plain people.email is gone — use primary_email (computed COALESCE
+      // of work_email/personal_email) and alias it back to `email` so
+      // downstream code doesn't have to change.
+      supabase.from('people').select('id, full_name, email:primary_email, phone, linkedin_url, current_title, current_company').or(`full_name.ilike.%${q}%,primary_email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, phone, linkedin_url, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     setSearchResults([

@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin } from "./lib/supabase";
+import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
 
 /**
  * Fetch historical email and LinkedIn messages for a contact.
@@ -116,21 +117,21 @@ export const fetchEntityHistory = task({
       }
     }
 
-    // 3. Search LinkedIn history via Unipile
+    // 3. Search LinkedIn history via Unipile v2
+    //    GET /api/v2/{account_id}/chats/{chat_id}/messages
     if (contact.linkedin_url) {
       try {
-        const apiKey = await getAppSetting("UNIPILE_API_KEY");
         const { data: liAccounts } = await supabase
           .from("integration_accounts")
-          .select("id, unipile_account_id")
-          .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+          .select("id, unipile_account_id, account_type")
+          .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
           .eq("is_active", true)
           .not("unipile_account_id", "is", null)
           .limit(1);
 
         const liAcct = liAccounts?.[0];
 
-        if (liAcct && apiKey) {
+        if (liAcct?.unipile_account_id) {
           // Get contact's Unipile provider_id
           const { data: channel } = await supabase
             .from("contact_channels")
@@ -140,15 +141,18 @@ export const fetchEntityHistory = task({
             .maybeSingle();
 
           if (channel?.external_conversation_id) {
-            // Fetch conversation messages from Unipile
-            const baseUrl = await getUnipileBaseUrl();
-            const convResp = await fetch(
-              `${baseUrl}/messages?conversation_id=${channel.external_conversation_id}&limit=50`,
-              { headers: { "X-API-KEY": apiKey, Accept: "application/json" } },
+            // Bucket inbound history under the right channel.
+            const channelBucket = canonicalChannel(
+              liAcct.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
             );
-
-            if (convResp.ok) {
-              const messages = ((await convResp.json()) as any).items || [];
+            try {
+              const data: any = await unipileFetch(
+                supabase,
+                liAcct.unipile_account_id,
+                `chats/${encodeURIComponent(channel.external_conversation_id)}/messages`,
+                { method: "GET", query: { limit: 50 } },
+              );
+              const messages = data.items || data || [];
               results.linkedin_history.searched = true;
 
               for (const msg of messages) {
@@ -165,7 +169,7 @@ export const fetchEntityHistory = task({
                 await supabase.from("messages").insert({
                   conversation_id: channel.external_conversation_id,
                   contact_id,
-                  channel: "linkedin",
+                  channel: channelBucket,
                   direction,
                   body: msg.text || msg.body,
                   sender_name: msg.sender_name || contact.full_name,
@@ -176,6 +180,8 @@ export const fetchEntityHistory = task({
 
                 results.linkedin_history.inserted++;
               }
+            } catch (err: any) {
+              logger.warn(`Unipile chat messages fetch failed: ${err.message}`);
             }
           }
         }
