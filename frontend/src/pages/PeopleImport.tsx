@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -23,13 +23,21 @@ const RESUMES_BUCKET = 'resumes';
 // connection pool.
 const CONCURRENCY = 8;
 
-type RowStatus = 'pending' | 'uploading' | 'queued' | 'failed';
+type RowStatus =
+  | 'pending'      // dropped, not yet uploaded
+  | 'uploading'    // upload in progress
+  | 'queued'       // uploaded; resumes row created with parsing_status=pending
+  | 'parsing'      // ingestion task picked it up (parsing_status=processing)
+  | 'completed'    // parsing_status=completed AND candidate_id set
+  | 'parse_failed' // parsing_status=failed/rejected_not_a_resume/skipped
+  | 'failed';      // upload itself failed (pre-DB)
 
 interface UploadRow {
   id: string;
   file: File;
   status: RowStatus;
   storagePath?: string;
+  candidateId?: string | null;
   error?: string;
 }
 
@@ -79,7 +87,56 @@ export default function PeopleImport() {
     setRows((prev) => prev.filter((r) => r.id !== id || r.status === 'queued'));
 
   const clearDone = () =>
-    setRows((prev) => prev.filter((r) => r.status !== 'queued'));
+    setRows((prev) => prev.filter((r) => r.status !== 'completed' && r.status !== 'queued'));
+
+  // Poll the resumes table while any row is post-upload but pre-terminal.
+  // The reconciler / resume-ingestion task writes parsing_status, so we
+  // just look up our storage paths and translate that into UI status.
+  useEffect(() => {
+    const inFlightPaths = rows
+      .filter((r) => (r.status === 'queued' || r.status === 'parsing') && r.storagePath)
+      .map((r) => r.storagePath!) as string[];
+    if (inFlightPaths.length === 0) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      const { data, error } = await supabase
+        .from('resumes')
+        .select('file_path, parsing_status, candidate_id, parse_error')
+        .in('file_path', inFlightPaths);
+      if (cancelled || error || !data) return;
+      const byPath = new Map<string, { parsing_status: string; candidate_id: string | null; parse_error: string | null }>();
+      for (const r of data as any[]) byPath.set(r.file_path, r);
+      setRows((prev) =>
+        prev.map((row) => {
+          if (!row.storagePath) return row;
+          if (row.status !== 'queued' && row.status !== 'parsing') return row;
+          const hit = byPath.get(row.storagePath);
+          if (!hit) return row;
+          if (hit.parsing_status === 'completed') {
+            return { ...row, status: 'completed', candidateId: hit.candidate_id };
+          }
+          if (hit.parsing_status === 'failed' || hit.parsing_status === 'rejected_not_a_resume' || hit.parsing_status === 'skipped') {
+            return {
+              ...row,
+              status: 'parse_failed',
+              error: hit.parse_error || hit.parsing_status,
+            };
+          }
+          if (hit.parsing_status === 'processing' && row.status !== 'parsing') {
+            return { ...row, status: 'parsing' };
+          }
+          return row;
+        }),
+      );
+    };
+
+    // First poll right away so the UI updates fast for already-parsed rows;
+    // then on a 4s cadence — matches typical reconciler/parse latency.
+    poll();
+    const t = setInterval(poll, 4000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [rows]);
 
   const uploadOne = async (row: UploadRow, userId: string) => {
     updateRow(row.id, { status: 'uploading', error: undefined });
@@ -127,18 +184,23 @@ export default function PeopleImport() {
     invalidatePersonScope(queryClient);
     setRunning(false);
 
-    const ok = rows.filter((r) => r.status === 'queued').length;
+    const ok = rows.filter((r) => r.status === 'queued' || r.status === 'parsing' || r.status === 'completed').length;
     if (ok > 0) {
       toast.success(`${ok} resume${ok === 1 ? '' : 's'} uploaded — parsing in the background`);
     }
   };
 
   const total = rows.length;
-  const queued = rows.filter((r) => r.status === 'queued').length;
+  const completed = rows.filter((r) => r.status === 'completed').length;
+  const queued = rows.filter((r) => r.status === 'queued' || r.status === 'parsing').length;
+  const parseFailed = rows.filter((r) => r.status === 'parse_failed').length;
   const failed = rows.filter((r) => r.status === 'failed').length;
   const inFlight = rows.filter((r) => r.status === 'uploading').length;
   const pending = rows.filter((r) => r.status === 'pending').length;
-  const progressPct = total === 0 ? 0 : Math.round(((queued + failed) / total) * 100);
+  // Progress = upload-or-better. Completed counts double weight to feel
+  // like real forward motion (queued doesn't, since parsing is async).
+  const terminal = completed + failed + parseFailed;
+  const progressPct = total === 0 ? 0 : Math.round(((terminal + queued * 0.5) / total) * 100);
 
   return (
     <MainLayout>
@@ -199,20 +261,28 @@ export default function PeopleImport() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3 text-sm">
                 <span className="text-muted-foreground">Total: <strong className="text-foreground tabular-nums">{total}</strong></span>
-                <span className="text-emerald">Uploaded: <strong className="tabular-nums">{queued}</strong></span>
+                {completed > 0 && (
+                  <span className="text-emerald">Completed: <strong className="tabular-nums">{completed}</strong></span>
+                )}
+                {queued > 0 && (
+                  <span className="text-amber-700">Parsing: <strong className="tabular-nums">{queued}</strong></span>
+                )}
                 {inFlight > 0 && (
-                  <span className="text-amber-700">In flight: <strong className="tabular-nums">{inFlight}</strong></span>
+                  <span className="text-amber-700">Uploading: <strong className="tabular-nums">{inFlight}</strong></span>
                 )}
                 {failed > 0 && (
-                  <span className="text-red-600">Failed: <strong className="tabular-nums">{failed}</strong></span>
+                  <span className="text-red-600">Upload failed: <strong className="tabular-nums">{failed}</strong></span>
+                )}
+                {parseFailed > 0 && (
+                  <span className="text-red-600">Parse failed: <strong className="tabular-nums">{parseFailed}</strong></span>
                 )}
                 {pending > 0 && !running && (
                   <span className="text-muted-foreground">Pending: <strong className="tabular-nums">{pending}</strong></span>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {queued > 0 && (
-                  <Button variant="outline" size="sm" onClick={clearDone}>Clear uploaded</Button>
+                {(completed > 0 || queued > 0) && (
+                  <Button variant="outline" size="sm" onClick={clearDone}>Clear completed</Button>
                 )}
                 <Button
                   variant="gold"
@@ -287,7 +357,16 @@ function StatusBadge({ status, error }: { status: RowStatus; error?: string }) {
     return <Badge className="bg-amber-50 text-amber-800 border-amber-200 gap-1 text-xs"><Loader2 className="h-3 w-3 animate-spin" /> Uploading</Badge>;
   }
   if (status === 'queued') {
-    return <Badge className="bg-emerald-light text-emerald-dark border-emerald/30 gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Queued for parsing</Badge>;
+    return <Badge className="bg-amber-50 text-amber-800 border-amber-200 gap-1 text-xs"><Loader2 className="h-3 w-3 animate-spin" /> Queued</Badge>;
+  }
+  if (status === 'parsing') {
+    return <Badge className="bg-amber-50 text-amber-800 border-amber-200 gap-1 text-xs"><Loader2 className="h-3 w-3 animate-spin" /> Parsing</Badge>;
+  }
+  if (status === 'completed') {
+    return <Badge className="bg-emerald-light text-emerald-dark border-emerald/30 gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Completed</Badge>;
+  }
+  if (status === 'parse_failed') {
+    return <Badge className="bg-red-50 text-red-700 border-red-200 gap-1 text-xs" title={error}><XCircle className="h-3 w-3" /> Parse failed</Badge>;
   }
   return <Badge className="bg-red-50 text-red-700 border-red-200 gap-1 text-xs" title={error}><XCircle className="h-3 w-3" /> Failed</Badge>;
 }
