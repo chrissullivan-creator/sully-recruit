@@ -8,6 +8,7 @@ import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { invalidatePersonScope } from '@/lib/invalidate';
@@ -15,77 +16,6 @@ import { invalidatePersonScope } from '@/lib/invalidate';
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-/**
- * Extract a LinkedIn slug from a URL or return the input as-is if already a slug.
- */
-function extractLinkedInSlug(input: string): string | null {
-  if (!input) return null;
-  const match = input.match(/linkedin\.com\/in\/([^/?#]+)/);
-  if (match) return match[1];
-  // If it looks like a slug already (no slashes/spaces)
-  if (/^[\w-]+$/.test(input.trim())) return input.trim();
-  return null;
-}
-
-/**
- * After saving a contact, resolve their Unipile ID via Chris's Recruiter account.
- * This runs in the background and doesn't block the UI.
- */
-async function resolveUnipileIdInBackground(contactId: string, linkedinUrl: string) {
-  try {
-    const slug = extractLinkedInSlug(linkedinUrl);
-    if (!slug) return;
-
-    // Get Chris's Unipile account ID
-    const { data: chrisAcct } = await supabase
-      .from('integration_accounts')
-      .select('unipile_account_id')
-      .ilike('account_label', '%Chris Sullivan%')
-      .eq('is_active', true)
-      .maybeSingle();
-
-    const accountId = chrisAcct?.unipile_account_id;
-    if (!accountId) {
-      console.warn('No Unipile account found for Chris — skipping ID resolution');
-      return;
-    }
-
-    // Call resolve-unipile-id edge function
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-    const resp = await fetch(`${supabaseUrl}/functions/v1/resolve-unipile-id`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseKey,
-      },
-      body: JSON.stringify({ linkedin_slug: slug, account_id: accountId }),
-    });
-
-    if (!resp.ok) {
-      console.warn('Failed to resolve Unipile ID:', await resp.text());
-      return;
-    }
-
-    const result = await resp.json();
-    if (result.unipile_id || result.provider_id) {
-      // Store in contact_channels (not on contacts table)
-      await supabase
-        .from('contact_channels')
-        .upsert({
-          contact_id: contactId,
-          channel: 'linkedin',
-          unipile_id: result.unipile_id || null,
-          provider_id: result.provider_id || null,
-          is_connected: true,
-        }, { onConflict: 'contact_id,channel' });
-    }
-  } catch (err) {
-    console.warn('Background Unipile ID resolution failed:', err);
-  }
 }
 
 export function AddContactDialog({ open, onOpenChange }: Props) {
@@ -105,28 +35,32 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
     setSaving(true);
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const { data: inserted, error } = await supabase.from('contacts').insert({
+      const linkedinUrl = form.linkedin_url.trim() || null;
+      const { error } = await supabase.from('people').insert({
+        type: 'client',
         first_name: form.first_name.trim() || null,
         last_name: form.last_name.trim() || null,
         full_name: `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || null,
-        email: form.email.trim() || null,
+        // classifyEmail returns { work_email } or { personal_email } based on
+        // domain. For clients we route outreach via work_email at send time,
+        // so corporate addresses land in the right slot automatically.
+        ...classifyEmail(normalizeEmail(form.email)),
         phone: form.phone.trim() || null,
-        linkedin_url: form.linkedin_url.trim() || null,
+        linkedin_url: linkedinUrl,
         title: form.title.trim() || null,
         department: form.department.trim() || null,
         company_id: form.company_id || null,
         status: form.status,
         owner_user_id: userId,
-      } as any).select('id').single();
+        // Queue the resolve-unipile-ids cron to populate unipile_provider_id
+        // via the v2 endpoint. No more direct edge-function call from the
+        // dialog — keeps the v1 path out of the frontend entirely.
+        unipile_resolve_status: linkedinUrl ? 'pending' : null,
+      } as any);
       if (error) throw error;
 
       invalidatePersonScope(queryClient);
       toast.success('Contact created');
-
-      // Resolve Unipile ID in background (non-blocking)
-      if (form.linkedin_url.trim() && inserted?.id) {
-        resolveUnipileIdInBackground(inserted.id, form.linkedin_url.trim());
-      }
 
       setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'active' });
       onOpenChange(false);
