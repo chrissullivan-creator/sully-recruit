@@ -12,6 +12,7 @@ import {
   delay,
 } from "./lib/resume-parsing";
 import { parseResume } from "../lib/resume-parser";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 type Verdict = "matched" | "created" | "failed" | "skipped";
 interface ResumeOutcome {
@@ -226,8 +227,12 @@ export const reconcileOrphanedResumes = schedules.task({
       return { skipped: true, reason: "no_ai_keys" };
     }
     const parseOpts = {
-      geminiKey: geminiKey || undefined,
-      openaiKey: openaiKey || undefined,
+      callAI: (req: any) =>
+        callAIWithFallback({
+          ...req,
+          geminiKey: geminiKey || undefined,
+          openaiKey: openaiKey || undefined,
+        }),
       log: logger,
     };
 

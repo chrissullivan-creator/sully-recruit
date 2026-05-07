@@ -16,12 +16,13 @@
  * Both Vercel and Trigger.dev run Node 20+ with global fetch / Buffer.
  */
 
-// frontend/package.json declares `"type": "module"`, so when Vercel
-// bundles serverless functions the resolver runs in Node ESM mode —
-// which requires the explicit `.js` extension on relative imports.
-// Without it the function fails to load with ERR_MODULE_NOT_FOUND
-// (surfacing as Vercel's "A server error has occurred" page).
-import { callAIWithFallback } from "./ai-fallback.js";
+// No static imports. Earlier we imported callAIWithFallback here, but
+// Vercel's serverless ESM bundler couldn't follow the resulting
+// second-hop relative import (api/parse-resume → resume-parser →
+// ai-fallback) and the function failed to load with
+// ERR_MODULE_NOT_FOUND, surfacing as Vercel's "A server error has
+// occurred" HTML. parseResume() now takes a callAI callback so the
+// caller wires in the AI cascade and resume-parser.ts stays leaf.
 
 export interface ParsedResume {
   first_name?: string;
@@ -41,16 +42,22 @@ export interface ParseResumeResult {
   /** Raw text extracted from the file before AI parsing. */
   rawText: string | null;
   /** Which provider in the cascade actually answered. */
-  via: "gemini" | "claude" | "openai";
+  via: string;
 }
 
+/**
+ * Caller-supplied AI invocation. Decoupled so parseResume() doesn't
+ * have to import the cascade — see the file-level comment for why.
+ */
+export type CallAI = (req: {
+  systemPrompt: string;
+  userContent: string;
+  maxTokens: number;
+  jsonOutput: boolean;
+}) => Promise<{ text: string; via: string }>;
+
 export interface ParseResumeOptions {
-  /** Gemini key — first in the cascade. */
-  geminiKey?: string;
-  /** OpenAI key — fallback. */
-  openaiKey?: string;
-  /** Anthropic key — optional middle stage if you want Claude as a fallback. */
-  anthropicKey?: string;
+  callAI: CallAI;
   log?: { warn: (msg: string, meta?: any) => void };
 }
 
@@ -86,8 +93,8 @@ export async function parseResume(
   fileName: string,
   opts: ParseResumeOptions,
 ): Promise<ParseResumeResult> {
-  if (!opts.geminiKey && !opts.openaiKey && !opts.anthropicKey) {
-    throw new Error("parseResume: at least one AI key (gemini/openai/anthropic) is required");
+  if (typeof opts.callAI !== "function") {
+    throw new Error("parseResume: opts.callAI is required");
   }
 
   const rawText = await extractResumeText(fileBytes, fileName);
@@ -100,10 +107,7 @@ export async function parseResume(
 
   const userContent = USER_PROMPT_TEMPLATE.replace("__TEXT__", rawText.slice(0, 60_000));
 
-  const { text, via } = await callAIWithFallback({
-    geminiKey: opts.geminiKey || undefined,
-    anthropicKey: opts.anthropicKey || undefined,
-    openaiKey: opts.openaiKey || undefined,
+  const { text, via } = await opts.callAI({
     systemPrompt: SYSTEM_PROMPT,
     userContent,
     maxTokens: 2048,
