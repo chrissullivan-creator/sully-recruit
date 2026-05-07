@@ -102,8 +102,9 @@ export async function fallbackTextSearch(
 
   const { data: candidates } = await supabase
     .from("candidates")
-    .select("id, full_name, current_title, current_company, location, status, joe_says")
+    .select("id, full_name, current_title, current_company, location, status, joe_says, roles")
     .or(orFilter)
+    .contains("roles", ["candidate"])
     .limit(limit);
 
   return (candidates || []).map((c: any) => ({
@@ -136,11 +137,16 @@ export async function enrichMatches(
 
   const { data: candidates } = await supabase
     .from("candidates")
-    .select("id, full_name, current_title, current_company, location, email, phone, status, joe_says")
-    .in("id", ids);
+    .select("id, full_name, current_title, current_company, location, email, phone, status, joe_says, roles")
+    .in("id", ids)
+    .contains("roles", ["candidate"]);
 
   const byId = new Map((candidates || []).map((c: any) => [c.id, c]));
 
+  // Filter out matches whose underlying person is no longer (or never was) a
+  // candidate — e.g. someone we placed years ago who's now only a hiring
+  // manager. Resume embeddings might still reference them, but they
+  // shouldn't show up in a candidate search.
   return matches
     .map((m) => {
       const c = byId.get(m.candidate_id);
