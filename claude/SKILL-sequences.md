@@ -107,11 +107,26 @@ WHERE status = 'active';
 linkedin_connection     connection request (300 char limit, 24/7)
 linkedin_message        classic LinkedIn DM (must have prior connection step)
 linkedin_recruiter      Recruiter InMail (Chris + Nancy)
-sales_nav               Sales Nav InMail (Chris only)
-email                   Outlook via Microsoft Graph
+email                   Outlook via Microsoft Graph or Unipile v2 (kill-switch USE_UNIPILE_EMAIL)
 sms                     RingCentral (Chris + Nancy only, NOT Ashley — no RingCentral)
 phone                   Call log/script
 ```
+
+Sales Navigator is NOT a separate bucket — `canonicalChannel()` folds it into `linkedin`.
+
+### Send shape (Unipile v2)
+For all LinkedIn sends, `sendLinkedIn` uses:
+```
+POST /api/v2/{account_id}/chats
+body: { attendees_ids: [providerId], text, linkedin?: { api: 'recruiter' } }
+```
+The `linkedin: { api: 'recruiter' }` flag routes through Recruiter InMail. Omit it for Classic DMs. Do NOT use `message_type: "INMAIL"` (that was v1).
+
+### InMail credit guard
+`sendLinkedIn` reads `integration_accounts.inmail_credits_remaining` for the resolved account before any InMail send. Throws fast when 0 ("InMail credits exhausted on …") so the step doesn't waste a send. Successful InMails decrement the cache locally; `sync-inmail-credits` re-syncs hourly.
+
+### Sequence sends use personal email
+Recipient resolution reads `entity.email` from the `candidates` / `contacts` views, which both compute `email = COALESCE(personal_email, work_email)` — personal first. To force a work address, write directly to `work_email` on a stub row or extend the resolver. Bounce + reply matching uses the multi-column `matchPersonByEmail` so the same person matches whether they reply from gmail or work.
 
 ---
 

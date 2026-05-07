@@ -2,45 +2,58 @@
 
 ## Channel Architecture
 
-| Channel | Provider | Webhook Function | Account Owner |
+| Channel | Provider | Webhook Receiver | Account Owner |
 |---|---|---|---|
-| LinkedIn | Unipile | `unipile-webhook` | Chris (sales nav), Nancy (recruiter), both (classic) |
-| Email | Microsoft Graph / Outlook | `outlook-webhook` | Chris, Nancy, House |
-| SMS | RingCentral | `ringcentral-webhook` | Chris, Nancy (NOT Ashley) |
+| LinkedIn | Unipile **v2** | `/api/webhooks/unipile` (Vercel) → `process-unipile-event` (Trigger.dev) | Chris (recruiter), Nancy (recruiter), Ashley (classic) |
+| Email | Microsoft Graph / Outlook + Unipile v2 (parallel) | `/api/webhooks/microsoft` + `process-unipile-event` email branch | Chris, Nancy, Ashley, House |
+| SMS | RingCentral | `webhook-ringcentral` Trigger.dev task | Chris, Nancy (NOT Ashley) |
 
 ---
 
-## Unipile (LinkedIn)
+## Unipile v2 (LinkedIn + Outlook)
 
-### API Pattern
-```ts
-// Trigger.dev tasks: use getUnipileBaseUrl() from ./lib/supabase (reads app_settings.UNIPILE_BASE_URL)
-// Supabase edge functions: Deno.env.get("UNIPILE_BASE_URL") with fallback
-const baseUrl = await getUnipileBaseUrl(); // https://api19.unipile.com:14926/api/v1
-headers: { "X-API-KEY": account.access_token, "Accept": "application/json" }
-```
+We migrated everything off v1. **Use `frontend/src/trigger/lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)`** — it handles auth + the v2 path shape (`/api/v2/{account_id}/...`) and pulls config from `app_settings`.
+
+### API path conventions (v2)
+- Profile: `linkedin/users/{slug-or-provider-id}`
+- Connection invite: `POST linkedin/users/invite`
+- Send (Classic OR InMail): `POST chats` — body is `{ attendees_ids: [providerId], text, linkedin?: { api: 'recruiter'|'classic', inmail?: true } }`. **Don't** use `message_type: "INMAIL"` (v1 shape).
+- Recruiter projects: `linkedin/recruiter/projects` (and `/talent-pool/applicants` is POST in v2)
+- Chat list / messages: `chats`, `chats/{chat_id}/messages`
+- Account meta (for health checks): `accounts/{id}` — same in both versions
+
+### Inbound classification (`webhook-unipile.ts`)
+The chat object's `content_type === 'inmail'` OR `folder` array including `'INBOX_LINKEDIN_RECRUITER'` → bucket as `linkedin_recruiter`. Everything else → `linkedin`. **Don't** fall back to `integration_account.account_type` alone — a Recruiter seat handles BOTH InMails and Classic DMs, so account_type tagged every Chris message as Recruiter.
+
+`conversations.content_type` is now persisted on insert; `reclassify-linkedin-chats-once` task back-stamps historical rows.
+
+### Webhook signature verification (`/api/webhooks/unipile.ts`)
+Unipile sends the secret in any of: `x-unipile-secret`, `x-webhook-secret`, `x-unipile-signature`, `x-webhook-signature`, `x-signature`, `unipile-signature`, or `Authorization: Bearer <secret>`. Verifier accepts all formats + HMAC-SHA256 of the body. Stored in `app_settings.UNIPILE_WEBHOOK_SECRET`.
 
 ### LinkedIn Slug Resolution
-- Use `resolve-unipile-id` edge function, NOT direct Unipile API calls
-- Pass just the slug (e.g. `christophersullivan15`), not full URL
-- Filter garbage slugs: skip anything starting with `ACo` or `acw` (Unipile URNs stored incorrectly)
+- Resolution sweep: `unipile-resolve.ts` (Trigger.dev). Hits `linkedin/users/{slug}`.
+- Filter garbage slugs: skip anything starting with `ACo` or `acw` (Unipile URNs stored incorrectly as URLs).
+
+### InMail Credit Guard
+- `sync-inmail-credits` cron stamps `integration_accounts.inmail_credits_remaining` hourly.
+- `sendLinkedIn` refuses to fire an InMail when the cached balance is 0; successful InMails decrement locally between hourly polls.
+- Surface in UI when a sequence step is `linkedin_recruiter` and the recruiter's account is low.
 
 ### Known Error Codes
 | Code | Meaning | Action |
 |---|---|---|
-| `limit_exceeded` | Daily LinkedIn message cap hit | Circuit breaker — skip all LinkedIn for this account run |
+| `limit_exceeded` | Daily LinkedIn cap hit | Circuit breaker — skip all LinkedIn for this account run |
 | `no_connection_with_recipient` | Not 1st-degree connection | Skip message step, don't fail enrollment |
 | `connection_request_already_sent` | Pending request exists | Park enrollment, set waiting_for_connection_acceptance |
 
 ### `unipile-webhook` Events
-- `new_message` → log message, run sentiment if inbound
+- `new_message` → match sender via `matchPersonByEmail` (multi-column!), bucket via `content_type`/`folder`, log message, run sentiment if inbound
 - `connection_accepted` → advance enrollment (unpark from waiting state)
 - `message_sent` → update step execution status
+- `mail_sent` / `mail_received` → email branch (Outlook via Unipile)
 
-### Unipile ID Resolution
-570 candidates still need Unipile IDs resolved (as of last run).
-Script: `resolve_unipile_bulk.py` on Ashley's Desktop.
-Calls `resolve-unipile-id` edge function at 3 concurrent req/sec with resume capability.
+### Inbound invitations
+`sync-linkedin-invitations` (every 30 min) pulls `users/invitations/received`, persists into `linkedin_invitations` table, auto-creates a candidate when the inviter doesn't match an existing person (source=`linkedin_inbound_invite`).
 
 ---
 

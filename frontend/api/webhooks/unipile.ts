@@ -46,10 +46,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (expectedSecret) {
     if (!verifyUnipileSecret(req, expectedSecret)) {
-      // Log header NAMES only (no values, no PII) so we can see which
-      // header Unipile is actually using on a fresh install.
+      // Log header names + an 8-char prefix of every value so we can
+      // see WHICH header is carrying Unipile's secret signature on a
+      // fresh install. Truncated to keep the secret out of logs.
+      const headerSnapshot: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        const s = Array.isArray(v) ? v.join(",") : String(v ?? "");
+        headerSnapshot[k] = s.length > 0 ? s.slice(0, 8) + "…" : "";
+      }
       console.warn("Unipile webhook: secret mismatch", {
-        headerNames: Object.keys(req.headers).sort(),
+        expectedPrefix: expectedSecret.slice(0, 8),
+        headers: headerSnapshot,
       });
       return res.status(401).json({ error: "Invalid webhook secret" });
     }
