@@ -146,10 +146,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
           status: 'active',
-          current_step_order: 0,
-          next_step_at: new Date().toISOString(),
           enrolled_by: userId,
-          account_id: selectedAccountId,
         });
       }
 
@@ -162,7 +159,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
         const { data: inserted, error } = await supabase
           .from('sequence_enrollments')
           .insert(enrollments)
-          .select('id, sequence_id, candidate_id, contact_id, enrolled_by, account_id');
+          .select('id, sequence_id, candidate_id, contact_id, enrolled_by');
         if (error) throw error;
 
         const session = (await supabase.auth.getSession()).data.session;
@@ -181,7 +178,6 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 candidate_id: row.candidate_id,
                 contact_id: row.contact_id,
                 enrolled_by: row.enrolled_by,
-                account_id: row.account_id,
               }),
             });
             if (!resp.ok) {

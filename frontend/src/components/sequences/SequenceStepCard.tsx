@@ -158,7 +158,7 @@ export function SequenceStepCard({
     }
   }, []);
 
-  const cardTitle = title || `${stepNumber ? `Step ${stepNumber}` : ""}${label && label !== `Step ${stepNumber}` ? (stepNumber ? `: ${label}` : label) : ""}`;
+  const cardTitle = _title || `${stepNumber ? `Step ${stepNumber}` : ""}${label && label !== `Step ${stepNumber}` ? (stepNumber ? `: ${label}` : label) : ""}`;
 
   return (
     <Card className="shadow-sm border-slate-200 bg-white">

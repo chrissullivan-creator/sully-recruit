@@ -29,9 +29,9 @@ interface EnrollmentRow {
   contact_id: string | null;
   status: string;
   enrolled_at: string;
-  reply_received_at: string | null;
-  reply_sentiment: string | null;
-  stopped_reason: string | null;
+  stopped_at: string | null;
+  stop_reason: string | null;
+  stop_trigger: string | null;
 }
 
 interface PersonRow {
@@ -91,7 +91,7 @@ export function EnrolledPeopleDialog({
     queryFn: async (): Promise<{ enrollments: EnrollmentRow[]; people: Map<string, PersonRow>; steps: Map<string, StepCount> }> => {
       const { data: enrollments } = await supabase
         .from("sequence_enrollments")
-        .select("id, candidate_id, contact_id, status, enrolled_at, reply_received_at, reply_sentiment, stopped_reason")
+        .select("id, candidate_id, contact_id, status, enrolled_at, stopped_at, stop_reason, stop_trigger")
         .eq("sequence_id", sequenceId!)
         .order("enrolled_at", { ascending: false });
 
@@ -142,12 +142,16 @@ export function EnrolledPeopleDialog({
     staleTime: 30_000,
   });
 
+  const isReplied = (e: EnrollmentRow) =>
+    !!(e.stop_trigger && /reply/i.test(e.stop_trigger))
+    || !!(e.stop_reason && /reply/i.test(e.stop_reason));
+
   const counts = useMemo(() => {
     const list = data?.enrollments ?? [];
     return {
       total: list.length,
       active: list.filter((e) => e.status === "active").length,
-      replied: list.filter((e) => e.reply_received_at).length,
+      replied: list.filter(isReplied).length,
       stopped: list.filter((e) => e.status === "stopped").length,
       completed: list.filter((e) => e.status === "completed").length,
     };
@@ -198,9 +202,9 @@ export function EnrolledPeopleDialog({
                         <Badge variant="outline" className="text-[9px] capitalize">
                           {e.candidate_id ? "candidate" : "contact"}
                         </Badge>
-                        {statusBadge(e.status, !!e.reply_received_at)}
-                        {e.stopped_reason && (
-                          <span className="text-[10px] text-muted-foreground italic">· {e.stopped_reason}</span>
+                        {statusBadge(e.status, isReplied(e))}
+                        {(e.stop_reason || e.stop_trigger) && (
+                          <span className="text-[10px] text-muted-foreground italic">· {e.stop_reason || e.stop_trigger}</span>
                         )}
                       </div>
                       <div className="text-[11px] text-muted-foreground truncate mt-0.5">
