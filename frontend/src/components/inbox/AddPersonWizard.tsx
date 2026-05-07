@@ -201,6 +201,8 @@ export function AddPersonWizard({
     try {
       const token = await getToken();
 
+      let signatureLinkedIn = '';
+
       if (channel === 'email' && rawBody) {
         // Parse email signature via Claude. Pass the sender name/address as
         // hints so Claude prefers the header identity over any random names
@@ -216,6 +218,7 @@ export function AddPersonWizard({
         });
         if (res.ok) {
           const parsed = await res.json();
+          if (parsed.linkedin_url) signatureLinkedIn = parsed.linkedin_url;
           setForm(prev => ({
             ...prev,
             first_name: parsed.first_name || prev.first_name,
@@ -233,6 +236,16 @@ export function AddPersonWizard({
         await resolveLinkedInProfile(token);
       }
       // SMS — no enrichment, form is already seeded with phone
+
+      // Chain Unipile enrichment whenever we end up with a LinkedIn URL on a
+      // non-LinkedIn channel — the signature parser usually only finds first/
+      // last + maybe a bare URL, so this fills in title/company/location/etc.
+      // from the public profile. fillBlanks=true means anything the signature
+      // already produced wins; Unipile only fills gaps.
+      const liUrl = signatureLinkedIn || prefill.linkedinUrl || '';
+      if (channel !== 'linkedin' && channel !== 'linkedin_recruiter' && /linkedin\.com\/(?:in|pub)\//i.test(liUrl)) {
+        await resolveLinkedInProfile(token, { fillBlanks: true, urlOverride: liUrl });
+      }
     } catch (err) {
       console.error('Enrichment failed:', err);
     }
@@ -243,11 +256,20 @@ export function AddPersonWizard({
   // LinkedIn resolution — delegates to /api/lookup-linkedin, which reads the
   // Unipile API key from app_settings and handles both slug-based and
   // chat-attendee-based resolution server-side.
-  const resolveLinkedInProfile = async (token: string) => {
-    // Only pass linkedin_url if it actually looks like a URL (not a raw URN/provider_id,
-    // which is what inbound LinkedIn messages from backfill commonly contain).
-    const rawUrl = prefill.linkedinUrl || '';
-    const looksLikeUrl = /linkedin\.com\/in\//.test(rawUrl);
+  /**
+   * Resolve a LinkedIn profile via Unipile and merge into the form.
+   *
+   * Default (LinkedIn-channel adds): Unipile data wins — public profile is
+   * the source of truth. fillBlanks=true (email-channel chained enrichment):
+   * the signature parse already wrote whatever it found, so Unipile only
+   * fills empty fields and never overwrites.
+   */
+  const resolveLinkedInProfile = async (
+    token: string,
+    opts: { fillBlanks?: boolean; urlOverride?: string } = {},
+  ) => {
+    const rawUrl = opts.urlOverride || prefill.linkedinUrl || '';
+    const looksLikeUrl = /linkedin\.com\/(?:in|pub)\//.test(rawUrl);
     const body: Record<string, string> = {};
     if (looksLikeUrl) body.linkedin_url = rawUrl;
     if (externalConversationId) body.chat_id = externalConversationId;
@@ -263,17 +285,33 @@ export function AddPersonWizard({
     });
     if (!res.ok) return;
     const profile = await res.json();
-    setForm(prev => ({
-      ...prev,
-      first_name: profile.first_name || prev.first_name,
-      last_name: profile.last_name || prev.last_name,
-      email: profile.email || prev.email,
-      phone: profile.phone || prev.phone,
-      title: profile.title || prev.title,
-      company: profile.company_name || profile.company || prev.company,
-      location: profile.location || prev.location,
-      linkedin_url: profile.linkedin_url || prev.linkedin_url,
-    }));
+    if (!profile || Object.keys(profile).length === 0) return;
+
+    if (opts.fillBlanks) {
+      setForm(prev => ({
+        ...prev,
+        first_name: prev.first_name || profile.first_name || '',
+        last_name: prev.last_name || profile.last_name || '',
+        email: prev.email || profile.email || '',
+        phone: prev.phone || profile.phone || '',
+        title: prev.title || profile.title || '',
+        company: prev.company || profile.company_name || profile.company || '',
+        location: prev.location || profile.location || '',
+        linkedin_url: prev.linkedin_url || profile.linkedin_url || '',
+      }));
+    } else {
+      setForm(prev => ({
+        ...prev,
+        first_name: profile.first_name || prev.first_name,
+        last_name: profile.last_name || prev.last_name,
+        email: profile.email || prev.email,
+        phone: profile.phone || prev.phone,
+        title: profile.title || prev.title,
+        company: profile.company_name || profile.company || prev.company,
+        location: profile.location || prev.location,
+        linkedin_url: profile.linkedin_url || prev.linkedin_url,
+      }));
+    }
   };
 
   // ── Connect to existing match ──────────────────────────────────────────────
