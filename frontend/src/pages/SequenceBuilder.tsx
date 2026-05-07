@@ -37,6 +37,7 @@ export default function SequenceBuilder() {
     sendWindowEnd: "18:00",
     timezone: "America/New_York",
     senderUserId: null,
+    weekdaysOnly: false,
   });
 
   const [branches, setBranches] = useState<SequenceBranch[]>(createEmptyBranches());
@@ -86,6 +87,7 @@ export default function SequenceBuilder() {
         sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
         timezone: seq.timezone || "America/New_York",
         senderUserId: seq.sender_user_id || seq.created_by,
+        weekdaysOnly: seq.weekdays_only === true,
       });
 
       const [{ data: nodes }, { data: stepsLegacy }] = await Promise.all([
@@ -222,6 +224,7 @@ export default function SequenceBuilder() {
             send_window_start: setup.sendWindowStart,
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
+            weekdays_only: setup.weekdaysOnly,
             created_by: user.id,
             sender_user_id: setup.senderUserId || user.id,
             status,
@@ -232,7 +235,7 @@ export default function SequenceBuilder() {
         if (error) throw error;
         sequenceId = seq.id;
       } else {
-        await supabase
+        const { error: seqUpdateErr } = await supabase
           .from("sequences")
           .update({
             name: setup.name,
@@ -243,36 +246,89 @@ export default function SequenceBuilder() {
             send_window_start: setup.sendWindowStart,
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
+            weekdays_only: setup.weekdaysOnly,
             sender_user_id: setup.senderUserId || user.id,
             status,
           } as any)
           .eq("id", sequenceId);
 
-        // Clear existing nodes/branches for re-save
-        await supabase.from("sequence_nodes").delete().eq("sequence_id", sequenceId);
+        if (seqUpdateErr) throw seqUpdateErr;
       }
 
-      // 2. Create nodes in deterministic branch order
-      for (const step of flattenBranchSteps(branches)) {
-        const { data: dbNode, error } = await supabase
+      // UPSERT nodes + actions by id. The previous delete-and-recreate
+      // pattern silently failed when sequence_step_logs referenced the
+      // existing nodes/actions (their FKs are NO ACTION, not CASCADE),
+      // so saves appended duplicate rows instead of replacing the
+      // original. Now we update existing rows in place by their UUID
+      // and only delete rows the editor removed.
+      const incomingSteps = flattenBranchSteps(branches);
+      const incomingNodeIds = new Set(incomingSteps.map((s) => s.id));
+
+      const { data: existingNodes } = await supabase
+        .from("sequence_nodes")
+        .select("id, sequence_actions(id)")
+        .eq("sequence_id", sequenceId);
+
+      const existingNodeRows = (existingNodes || []) as Array<{ id: string; sequence_actions: Array<{ id: string }> | null }>;
+      const existingNodeIds = new Set(existingNodeRows.map((n) => n.id));
+      const existingActionIdsByNode = new Map<string, Set<string>>(
+        existingNodeRows.map((n) => [n.id, new Set((n.sequence_actions || []).map((a) => a.id))]),
+      );
+
+      // Delete nodes that the editor removed. Cascade clears their
+      // sequence_actions. If a node has step_logs referencing its
+      // actions, the FK blocks the delete; we surface a warning rather
+      // than silently swallowing it.
+      const removedNodeIds = [...existingNodeIds].filter((nid) => !incomingNodeIds.has(nid));
+      if (removedNodeIds.length) {
+        const { error: nodeDelErr } = await supabase
           .from("sequence_nodes")
-          .insert({
-            sequence_id: sequenceId,
-            node_order: step.nodeOrder,
-            node_type: "action",
-            label: step.label,
-            branch_id: step.branchId,
-            branch_step_order: step.branchStepOrder,
-          } as any)
-          .select("id")
-          .single();
+          .delete()
+          .in("id", removedNodeIds);
+        if (nodeDelErr) {
+          toast.warning(`Couldn't remove ${removedNodeIds.length} step(s) — they're referenced by active enrollments. Stop the enrollments first.`);
+        }
+      }
 
-        if (error) throw error;
+      for (const step of incomingSteps) {
+        const nodePayload = {
+          node_order: step.nodeOrder,
+          node_type: "action",
+          label: step.label,
+          branch_id: step.branchId,
+          branch_step_order: step.branchStepOrder,
+        };
 
-        // 3. Create actions for action nodes
+        if (existingNodeIds.has(step.id)) {
+          const { error: nodeErr } = await supabase
+            .from("sequence_nodes")
+            .update(nodePayload as any)
+            .eq("id", step.id);
+          if (nodeErr) throw new Error(`Step update failed: ${nodeErr.message}`);
+        } else {
+          const { error: nodeErr } = await supabase
+            .from("sequence_nodes")
+            .insert({ id: step.id, sequence_id: sequenceId, ...nodePayload } as any);
+          if (nodeErr) throw new Error(`Step insert failed: ${nodeErr.message}`);
+        }
+
+        const existingActionIds = existingActionIdsByNode.get(step.id) || new Set<string>();
+        const incomingActionIds = new Set((step.actions || []).map((a) => a.id));
+
+        const removedActionIds = [...existingActionIds].filter((aid) => !incomingActionIds.has(aid));
+        if (removedActionIds.length) {
+          const { error: actDelErr } = await supabase
+            .from("sequence_actions")
+            .delete()
+            .in("id", removedActionIds);
+          if (actDelErr) {
+            toast.warning(`Couldn't remove ${removedActionIds.length} action(s) — referenced by active enrollments.`);
+          }
+        }
+
         for (const action of step.actions || []) {
-          const { error: actionErr } = await supabase.from("sequence_actions").insert({
-            node_id: dbNode.id,
+          const actionPayload = {
+            node_id: step.id,
             channel: action.channel,
             message_body: action.messageBody,
             base_delay_hours: action.baseDelayHours,
@@ -281,10 +337,6 @@ export default function SequenceBuilder() {
             post_connection_hardcoded_hours: action.postConnectionHardcodedHours,
             respect_send_window: action.respectSendWindow,
             use_signature: action.channel === "email" ? (action.useSignature !== false) : false,
-            // Attachments persist for channels that actually send a
-            // file: email (Microsoft Graph fileAttachment) and Unipile
-            // LinkedIn message / InMail (multipart `attachments` field).
-            // SMS / connection requests / manual_call don't carry files.
             // Attachments persist on email + LinkedIn message + InMail.
             // attachment_urls is the canonical list; attachment_url is
             // mirrored to the first entry for back-compat with read
@@ -304,8 +356,20 @@ export default function SequenceBuilder() {
             // Subject + threading are email-only.
             subject_line: action.channel === "email" ? (action.subjectLine || null) : null,
             reply_to_previous: action.channel === "email" ? (action.replyToPrevious === true) : false,
-          } as any);
-          if (actionErr) throw new Error(`Action save failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actionErr.message}`);
+          };
+
+          if (existingActionIds.has(action.id)) {
+            const { error: actUpdErr } = await supabase
+              .from("sequence_actions")
+              .update(actionPayload as any)
+              .eq("id", action.id);
+            if (actUpdErr) throw new Error(`Action update failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actUpdErr.message}`);
+          } else {
+            const { error: actInsErr } = await supabase
+              .from("sequence_actions")
+              .insert({ id: action.id, ...actionPayload } as any);
+            if (actInsErr) throw new Error(`Action insert failed (${step.label || `${step.branchId} step ${step.branchStepOrder}`}): ${actInsErr.message}`);
+          }
         }
       }
       return sequenceId;

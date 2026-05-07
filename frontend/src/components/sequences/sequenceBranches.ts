@@ -131,17 +131,20 @@ export function normalizeBranches(branches?: SequenceBranch[]): SequenceBranch[]
     });
   }
 
+  // Renumber based on the ARRAY position rather than the (possibly stale)
+  // branchStepOrder field. After moveStep / deleteStep mutates the array,
+  // each step's stored branchStepOrder still points at its old position;
+  // sorting by it would undo the user's reorder. Use array order as the
+  // source of truth and rewrite branchStepOrder + nodeOrder to match.
   let globalOrder = 1;
   return (["branch_a", "branch_b"] as const).map((branchId) => {
     const branch = map.get(branchId)!;
-    const steps = [...branch.steps]
-      .sort(sortSteps)
-      .map((step, index) => ({
-        ...step,
-        branchId,
-        branchStepOrder: index + 1,
-        nodeOrder: globalOrder++,
-      }));
+    const steps = branch.steps.map((step, index) => ({
+      ...step,
+      branchId,
+      branchStepOrder: index + 1,
+      nodeOrder: globalOrder++,
+    }));
 
     return {
       ...branch,

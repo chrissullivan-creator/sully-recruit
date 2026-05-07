@@ -122,7 +122,8 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     const failed = extractFailedRecipient(bodyForSearch);
     if (failed) {
       // Multi-email match — bounce on a work address still flags the
-      // person even if their primary on file is personal.
+      // person even if their primary on file is personal. The plain
+      // people.email column was retired; use the helper.
       const bouncedMatch = await matchPersonByEmail(supabase, failed);
       const cand = bouncedMatch && bouncedMatch.entityType !== "contact"
         ? { id: bouncedMatch.entityId }
@@ -159,6 +160,7 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   }
 
   // ── Match sender to candidate or contact (multi-email, all 3 columns) ─
+  // The plain people.email column was retired; use the shared helper.
   const senderMatch = await matchPersonByEmail(supabase, senderEmail);
   const match = senderMatch
     ? {
