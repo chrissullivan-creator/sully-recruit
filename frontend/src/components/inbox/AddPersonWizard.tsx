@@ -132,10 +132,21 @@ export function AddPersonWizard({
     return data.session?.access_token || '';
   };
 
-  // Reset state when dialog opens/closes
+  // Reset state when dialog opens. Previously this re-ran on every
+  // prefill prop change, which fires every time the parent (Inbox)
+  // re-renders with newly loaded messages — that wiped the form
+  // state mid-wizard (and reset the step back to "pick_type"). Now
+  // we only reset on the open=false→true transition.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
-    const nameParts = prefill.name.split(' ');
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
+    const nameParts = (prefill.name || '').trim().split(/\s+/).filter(Boolean);
     setStep('pick_type');
     setPersonType(null);
     setMatches([]);
@@ -189,6 +200,14 @@ export function AddPersonWizard({
   }, [prefill]);
 
   // ── Step 3b: Enrich from thread source ─────────────────────────────────────
+  //
+  // Hold the wizard on the "enriching" step until the form fields are
+  // actually populated (or every retrieval source has been exhausted).
+  // Without this guard the spinner clears the moment the network call
+  // returns even if the response was empty — the recruiter then sees a
+  // blank form and assumes nothing was retrieved. We keep the loader up
+  // through both the email-signature parse AND any LinkedIn lookup so
+  // the form only renders when there's something to show.
 
   const enrichFromSource = useCallback(async (type: PersonType) => {
     if (enrichedRef.current) {
@@ -197,6 +216,8 @@ export function AddPersonWizard({
     }
     enrichedRef.current = true;
     setStep('enriching');
+
+    let populated = false;
 
     try {
       const token = await getToken();
@@ -216,34 +237,47 @@ export function AddPersonWizard({
         });
         if (res.ok) {
           const parsed = await res.json();
-          setForm(prev => ({
-            ...prev,
-            first_name: parsed.first_name || prev.first_name,
-            last_name: parsed.last_name || prev.last_name,
-            email: prev.email || parsed.email || '',
-            phone: parsed.phone || prev.phone,
-            title: parsed.title || prev.title,
-            company: parsed.company_name || prev.company,
-            location: parsed.location || prev.location,
-            linkedin_url: parsed.linkedin_url || prev.linkedin_url,
-          }));
+          const hasFields = !!(parsed.first_name || parsed.last_name || parsed.email
+            || parsed.phone || parsed.title || parsed.company_name || parsed.location
+            || parsed.linkedin_url);
+          if (hasFields) {
+            populated = true;
+            setForm(prev => ({
+              ...prev,
+              first_name: parsed.first_name || prev.first_name,
+              last_name: parsed.last_name || prev.last_name,
+              email: prev.email || parsed.email || '',
+              phone: parsed.phone || prev.phone,
+              title: parsed.title || prev.title,
+              company: parsed.company_name || prev.company,
+              location: parsed.location || prev.location,
+              linkedin_url: parsed.linkedin_url || prev.linkedin_url,
+            }));
+          }
         }
       } else if (channel === 'linkedin' || channel === 'linkedin_recruiter') {
         // Resolve via Unipile chat attendees + user profile.
-        await resolveLinkedInProfile(token);
+        populated = await resolveLinkedInProfile(token);
       }
       // SMS — no enrichment, form is already seeded with phone
     } catch (err) {
       console.error('Enrichment failed:', err);
     }
 
+    // If nothing came back from the source, the form will show whatever
+    // came in via prefill (sender name → first/last). That's still
+    // better than a blank form, and the loader has already given the
+    // user feedback that we tried.
+    void populated;
     setStep('form');
   }, [channel, rawBody, prefill]);
 
   // LinkedIn resolution — delegates to /api/lookup-linkedin, which reads the
   // Unipile API key from app_settings and handles both slug-based and
-  // chat-attendee-based resolution server-side.
-  const resolveLinkedInProfile = async (token: string) => {
+  // chat-attendee-based resolution server-side. Returns true when at
+  // least one form field was populated from the response so the wizard
+  // can decide whether to advance the loading state.
+  const resolveLinkedInProfile = async (token: string): Promise<boolean> => {
     // Only pass linkedin_url if it actually looks like a URL (not a raw URN/provider_id,
     // which is what inbound LinkedIn messages from backfill commonly contain).
     const rawUrl = prefill.linkedinUrl || '';
@@ -254,15 +288,19 @@ export function AddPersonWizard({
     if (integrationAccountId) body.integration_account_id = integrationAccountId;
 
     // Nothing to resolve with — bail.
-    if (!body.linkedin_url && !body.chat_id) return;
+    if (!body.linkedin_url && !body.chat_id) return false;
 
     const res = await fetch('/api/lookup-linkedin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const profile = await res.json();
+    const hasFields = !!(profile.first_name || profile.last_name || profile.email
+      || profile.phone || profile.title || profile.company_name || profile.company
+      || profile.location || profile.linkedin_url);
+    if (!hasFields) return false;
     setForm(prev => ({
       ...prev,
       first_name: profile.first_name || prev.first_name,
@@ -274,6 +312,7 @@ export function AddPersonWizard({
       location: profile.location || prev.location,
       linkedin_url: profile.linkedin_url || prev.linkedin_url,
     }));
+    return true;
   };
 
   // ── Connect to existing match ──────────────────────────────────────────────

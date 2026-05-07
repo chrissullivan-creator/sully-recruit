@@ -4,12 +4,13 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import {
-  Loader2, ChevronRight, Users,
+  Loader2, ChevronRight, Users, Search, ExternalLink,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -85,6 +86,12 @@ export default function Source() {
   // ---- Projects state ----
   const [projects, setProjects] = useState<HiringProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
+
+  // ---- Recruiter Search state ----
+  const [searchUrl, setSearchUrl] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchAccount, setSearchAccount] = useState<AccountOption | null>(null);
 
   // ---- Load accounts on mount ----
   useEffect(() => {
@@ -194,6 +201,50 @@ export default function Source() {
     navigate(`/source/${encodeURIComponent(project.id)}?${params}`);
   };
 
+  // ---- Run a LinkedIn Recruiter search-from-URL ----
+  // Pastes a Recruiter saved-search URL and surfaces the matching
+  // profiles. Runs against the currently filtered recruiter (or the
+  // first available account when "all" is selected).
+  const runRecruiterSearch = useCallback(async () => {
+    const trimmed = searchUrl.trim();
+    if (!trimmed) {
+      toast.error('Paste a LinkedIn Recruiter search URL first');
+      return;
+    }
+    const candidate = recruiterFilter === 'all'
+      ? accounts.find(a => a.accountId)
+      : accounts.find(a => a.mode === recruiterFilter && a.accountId);
+    if (!candidate?.accountId) {
+      toast.error('No LinkedIn Recruiter account connected for the selected filter');
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not authenticated'); return; }
+
+    setSearchLoading(true);
+    setSearchAccount(candidate);
+    try {
+      const data = await callSourceApi({
+        action: 'search_from_url',
+        account_id: candidate.accountId,
+        search_url: trimmed,
+        limit: 25,
+      }, session);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setSearchResults(items);
+      if (items.length === 0) {
+        toast.info('Search returned no results');
+      } else {
+        toast.success(`Found ${items.length} profile${items.length === 1 ? '' : 's'}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Recruiter search failed');
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [searchUrl, accounts, recruiterFilter]);
+
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -225,6 +276,80 @@ export default function Source() {
           {projectsLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
           Refresh
         </Button>
+      </div>
+
+      {/* Recruiter Search-from-URL */}
+      <div className="mb-6 rounded-lg border border-card-border bg-page-bg/40 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs font-display font-semibold uppercase tracking-wider text-muted-foreground">
+            LinkedIn Recruiter Search
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Paste a LinkedIn Recruiter saved-search URL to surface matching profiles on the selected recruiter's seat.
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            value={searchUrl}
+            onChange={(e) => setSearchUrl(e.target.value)}
+            placeholder="https://www.linkedin.com/talent/search?..."
+            className="h-9"
+            onKeyDown={(e) => { if (e.key === 'Enter') runRecruiterSearch(); }}
+          />
+          <Button
+            variant="gold"
+            size="sm"
+            onClick={runRecruiterSearch}
+            disabled={searchLoading || !searchUrl.trim()}
+            className="shrink-0"
+          >
+            {searchLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Search className="h-4 w-4 mr-1" />}
+            Search
+          </Button>
+        </div>
+        {searchResults.length > 0 && (
+          <div className="mt-3 space-y-1.5 max-h-72 overflow-y-auto">
+            {searchResults.map((p: any, i: number) => {
+              const name = p.display_name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+              const headline = p.headline || '';
+              const location = p.location || '';
+              const exp = Array.isArray(p.work_experience) ? p.work_experience[0] : null;
+              const titleCompany = exp
+                ? [exp.job_title, exp.company?.name].filter(Boolean).join(' @ ')
+                : '';
+              const url = p.profile_url || (p.public_identifier ? `https://www.linkedin.com/in/${p.public_identifier}` : null);
+              return (
+                <div
+                  key={p.id || i}
+                  className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-xs"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-foreground truncate">{name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      {[titleCompany, headline, location].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  {url && (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 shrink-0"
+                    >
+                      <ExternalLink className="h-3 w-3" /> View
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+            {searchAccount && (
+              <p className="text-[10px] text-muted-foreground/70 pt-1">
+                Run on {searchAccount.label}'s LinkedIn Recruiter seat
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Loading */}

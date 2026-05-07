@@ -1,11 +1,9 @@
 {
   "mcpServers": {
     "unipile": {
-      "command": "uvx",
-      "args": ["mcp-server-unipile"],
-      "env": {
-        "UNIPILE_BASE_URL": "https://api19.unipile.com:14926/api/v1",
-        "UNIPILE_API_KEY": "vqxVUUYs.gJux2OaPKhqMhCsB2PdPqa3QbFn4Rp+uXb8zgQWhTRw="
+      "url": "https://developer.unipile.com/mcp?branch=v2.0",
+      "headers": {
+        "X-API-KEY": "vqxVUUYs.gJux2OaPKhqMhCsB2PdPqa3QbFn4Rp+uXb8zgQWhTRw="
       }
     },
     "supabase": {
