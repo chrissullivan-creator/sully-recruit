@@ -80,13 +80,17 @@ async function buildEmailLookup(
   // Paginate explicitly until we hit a partial page.
   const PAGE = 1000;
   const loadAll = async (table: "people" | "contacts", as: "candidate" | "contact") => {
+    // Plain people.email column was retired; primary_email is the
+    // generated COALESCE that the backfill needs to filter on. The
+    // contacts view still exposes `email` (computed), but use
+    // primary_email here too for consistency — it works on both.
     let from = 0;
     while (true) {
       const { data } = await supabase
         .from(table)
-        .select("id, email, owner_user_id, type")
-        .not("email", "is", null)
-        .neq("email", "")
+        .select("id, email:primary_email, owner_user_id, type")
+        .not("primary_email", "is", null)
+        .neq("primary_email", "")
         .range(from, from + PAGE - 1);
       const rows = data ?? [];
       for (const c of rows) {
