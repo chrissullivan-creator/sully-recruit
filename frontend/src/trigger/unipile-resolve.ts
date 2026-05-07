@@ -21,9 +21,18 @@ export const resolveUnipileIds = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
 
-    // 1. Get Unipile API key from app_settings and account ID from integration_accounts
-    const apiKey = await getAppSetting("UNIPILE_API_KEY");
-    const UNIPILE_BASE_URL = await getUnipileBaseUrl();
+    // 1. Get Unipile v2 base + API key. The v1 path /api/v1/users/{slug}
+    //    started returning 404s; v2 routes lookups under
+    //    /api/v2/{account_id}/users/{slug} with the v2 API key.
+    const [v2Base, v2Key, v1Base, v1Key] = await Promise.all([
+      getAppSetting("UNIPILE_BASE_V2_URL").catch(() => ""),
+      getAppSetting("UNIPILE_API_KEY_V2").catch(() => ""),
+      getUnipileBaseUrl(),
+      getAppSetting("UNIPILE_API_KEY"),
+    ]);
+    const UNIPILE_BASE_URL = (v2Base || v1Base.replace(/\/api\/v1$/, "/api/v2")).replace(/\/+$/, "");
+    const apiKey = v2Key || v1Key;
+    const usingV2 = !!v2Base && !!v2Key;
 
     // Use a LinkedIn Recruiter account for resolution — recruiter IDs are
     // needed for InMail matching. Fall back to any LinkedIn account.
@@ -94,18 +103,19 @@ export const resolveUnipileIds = schedules.task({
           continue;
         }
 
-        // Call Unipile user lookup API directly
+        // Call Unipile user lookup API. v2 puts the Unipile account_id
+        // in the path; v1 (legacy fallback) does not.
         const headers: Record<string, string> = {
-          Authorization: `Bearer ${apiKey}`,
+          "X-API-KEY": apiKey,
           Accept: "application/json",
           "X-UNIPILE-CLIENT": "sully-recruit",
         };
 
-        const resp = await fetchWithTimeout(
-          `${UNIPILE_BASE_URL}/users/${encodeURIComponent(slug)}`,
-          { headers },
-          FETCH_TIMEOUT_MS
-        );
+        const lookupUrl = usingV2 && unipileAccountId
+          ? `${UNIPILE_BASE_URL}/${encodeURIComponent(unipileAccountId)}/users/${encodeURIComponent(slug)}`
+          : `${UNIPILE_BASE_URL}/users/${encodeURIComponent(slug)}`;
+
+        const resp = await fetchWithTimeout(lookupUrl, { headers }, FETCH_TIMEOUT_MS);
 
         if (!resp.ok) {
           const status = resp.status;

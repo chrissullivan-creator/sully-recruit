@@ -616,11 +616,29 @@ export async function resolveRecipient(
     return { to: entity.phone, conversationId: null };
   }
 
-  // LinkedIn channels — keep the legacy candidate-channel cache lookup,
-  // but resolve linkedin_url from the unified people table.
-  const table = entityType === "candidate" ? "candidates" : "contacts";
+  // LinkedIn channels — resolve Unipile provider_id.
+  //
+  // Cache lookup order (no Unipile API call needed if we hit any of these):
+  //   1. people.unipile_provider_id  (populated by the resolve-unipile-ids
+  //      task — works for candidates AND clients)
+  //   2. candidate_channels.provider_id  (legacy cache, candidate-only)
+  //
+  // Only hit Unipile's user-lookup endpoint as a last resort. The lookup
+  // moved to v2 (`/api/v2/{account_id}/users/{slug}`); the legacy v1 path
+  // returns 404 for many slugs and was the cause of this morning's 14
+  // InMail skips.
+  const { data: peopleRow } = await supabase
+    .from("people")
+    .select("unipile_provider_id, unipile_classic_id, unipile_recruiter_id, linkedin_url")
+    .eq("id", entityId)
+    .maybeSingle();
+  const cachedFromPeople =
+    peopleRow?.unipile_provider_id || peopleRow?.unipile_classic_id || peopleRow?.unipile_recruiter_id;
+  if (cachedFromPeople) {
+    return { to: cachedFromPeople, conversationId: null };
+  }
 
-  // LinkedIn channels — resolve Unipile provider_id
+  // Legacy candidate_channels cache (kept for already-resolved candidates).
   if (entityType === "candidate") {
     const { data: cachedChannel } = await supabase
       .from("candidate_channels")
@@ -637,28 +655,74 @@ export async function resolveRecipient(
     }
   }
 
-  // Resolve from LinkedIn URL
-  const { data: entity } = await supabase.from(table).select("linkedin_url").eq("id", entityId).single();
-  if (!entity?.linkedin_url) throw new Error(`No LinkedIn URL for ${entityType} ${entityId}`);
+  if (!peopleRow?.linkedin_url) throw new Error(`No LinkedIn URL for ${entityType} ${entityId}`);
 
-  const match = entity.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
-  if (!match) throw new Error(`Invalid LinkedIn URL: ${entity.linkedin_url}`);
+  const match = peopleRow.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
+  if (!match) throw new Error(`Invalid LinkedIn URL: ${peopleRow.linkedin_url}`);
 
-  // Get Unipile API key for this user
-  const { apiKey } = await getUnipileApiKey(supabase, userId, accountId);
-  const baseUrl = await getUnipileBaseUrl();
+  // Resolve via Unipile v2: GET /api/v2/{account_id}/users/{slug}
+  // V2 base + V2 API key live in app_settings; the v1 fallback path ran
+  // into 404s on Unipile's side ("Cannot GET /api/v2/{acct}/linkedin/users/...").
+  const [{ data: v2BaseRow }, { data: v2KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+  ]);
+  const v2Base = (v2BaseRow?.value || "").replace(/\/+$/, "");
+  const v2ApiKey = v2KeyRow?.value;
+  if (!v2Base || !v2ApiKey) {
+    // Legacy v1 fallback (for orgs that haven't migrated yet).
+    const { apiKey: v1Key } = await getUnipileApiKey(supabase, userId, accountId);
+    const v1Base = await getUnipileBaseUrl();
+    const v1Resp = await fetch(`${v1Base}/users/${encodeURIComponent(match[1])}`, {
+      headers: { "X-API-KEY": v1Key, Accept: "application/json" },
+    });
+    if (!v1Resp.ok) throw new Error(`Unipile lookup failed for ${match[1]}: ${v1Resp.status}`);
+    const userData = await v1Resp.json();
+    const resolvedId = userData.provider_id || userData.id;
+    if (resolvedId) {
+      await supabase
+        .from("people")
+        .update({ unipile_provider_id: resolvedId, unipile_resolve_status: "resolved" } as any)
+        .eq("id", entityId);
+    }
+    return { to: resolvedId, conversationId: null };
+  }
 
-  const lookupResp = await fetch(`${baseUrl}/users/${encodeURIComponent(match[1])}`, {
-    headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-  });
+  // Need the recruiter's Unipile account_id for the v2 path.
+  const { data: account } = await supabase
+    .from("integration_accounts")
+    .select("unipile_account_id, account_type")
+    .or("account_type.eq.linkedin_recruiter,account_type.eq.linkedin_classic,account_type.eq.linkedin")
+    .eq("is_active", true)
+    .not("unipile_account_id", "is", null)
+    .order("account_type", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const unipileAcct = account?.unipile_account_id;
+  if (!unipileAcct) throw new Error(`No Unipile account configured for LinkedIn lookup`);
 
-  if (!lookupResp.ok) throw new Error(`Unipile lookup failed for ${match[1]}: ${lookupResp.status}`);
+  const lookupResp = await fetch(
+    `${v2Base}/${encodeURIComponent(unipileAcct)}/users/${encodeURIComponent(match[1])}`,
+    {
+      headers: { "X-API-KEY": v2ApiKey, Accept: "application/json" },
+    },
+  );
+
+  if (!lookupResp.ok) throw new Error(`Unipile v2 lookup failed for ${match[1]}: ${lookupResp.status}`);
 
   const userData = await lookupResp.json();
   const resolvedId = userData.provider_id || userData.id;
+  if (!resolvedId) throw new Error(`Unipile returned no provider_id for ${match[1]}`);
 
-  // Cache resolved ID
-  if (entityType === "candidate" && resolvedId) {
+  // Cache to people.unipile_provider_id so future sends skip the lookup
+  // (works for both candidates and clients — single source of truth).
+  await supabase
+    .from("people")
+    .update({ unipile_provider_id: resolvedId, unipile_resolve_status: "resolved" } as any)
+    .eq("id", entityId);
+
+  // Mirror to candidate_channels for legacy reads (candidate-only).
+  if (entityType === "candidate") {
     await supabase.from("candidate_channels").upsert(
       {
         candidate_id: entityId,
@@ -669,7 +733,6 @@ export async function resolveRecipient(
       },
       { onConflict: "candidate_id,channel" },
     );
-    logger.info("Cached Unipile ID", { entityId, resolvedId });
   }
 
   return { to: resolvedId, conversationId: null };
