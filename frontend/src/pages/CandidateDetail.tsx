@@ -34,6 +34,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
+import { CANONICAL_PIPELINE, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
