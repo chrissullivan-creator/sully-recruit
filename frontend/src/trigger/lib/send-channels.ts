@@ -479,6 +479,29 @@ export async function sendLinkedIn(
     stepChannel === "linkedin_recruiter";
   const isConnectionRequest = stepChannel === "linkedin_connection";
 
+  // Credit guard: InMails cost real money. The hourly sync stamps
+  // remaining credits onto integration_accounts; if we know the
+  // bucket is empty, fail fast with a clear message instead of
+  // letting Unipile 422 us with a generic error.
+  if (isInMailChannel) {
+    const { data: acct } = await supabase
+      .from("integration_accounts")
+      .select("inmail_credits_remaining, inmail_credits_updated_at, account_label")
+      .eq("unipile_account_id", resolvedAccountId)
+      .maybeSingle();
+    if (
+      acct?.inmail_credits_remaining !== null &&
+      acct?.inmail_credits_remaining !== undefined &&
+      acct.inmail_credits_remaining <= 0
+    ) {
+      throw new Error(
+        `InMail credits exhausted on ${acct.account_label || resolvedAccountId}` +
+        ` (last checked ${acct.inmail_credits_updated_at}). ` +
+        `Top up before re-running.`,
+      );
+    }
+  }
+
   // ── Connection request via v2 ───────────────────────────────────
   // v2 path: POST /api/v2/{account_id}/linkedin/users/invite
   // (account_id moves to path; body no longer needs it)
@@ -555,6 +578,7 @@ export async function sendLinkedIn(
           `chats`,
           { method: "POST", body: fd as any },
         );
+        if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
         return {
           message_id: data.id || data.message_id || `msg_${Date.now()}`,
           conversation_id: data.chat_id || data.conversation_id || "",
@@ -583,6 +607,7 @@ export async function sendLinkedIn(
         body: JSON.stringify(sendPayload),
       },
     );
+    if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
     return {
       message_id: data.id || data.message_id || `msg_${Date.now()}`,
       conversation_id: data.chat_id || data.conversation_id || "",
@@ -592,6 +617,31 @@ export async function sendLinkedIn(
       throw new Error(`InMail ${err.message}`);
     }
     throw new Error(`Unipile send error: ${err.message}`);
+  }
+}
+
+/**
+ * Best-effort: subtract 1 from the cached credit count after a
+ * confirmed InMail send. The hourly sync overwrites with the truth,
+ * so a brief race here is harmless. Failure is silent — never block
+ * a successful send because the local counter couldn't update.
+ */
+async function decrementInmailCredit(supabase: any, unipileAccountId: string): Promise<void> {
+  try {
+    const { data: row } = await supabase
+      .from("integration_accounts")
+      .select("inmail_credits_remaining")
+      .eq("unipile_account_id", unipileAccountId)
+      .maybeSingle();
+    const current = row?.inmail_credits_remaining;
+    if (typeof current === "number" && current > 0) {
+      await supabase
+        .from("integration_accounts")
+        .update({ inmail_credits_remaining: current - 1 } as any)
+        .eq("unipile_account_id", unipileAccountId);
+    }
+  } catch {
+    // Silent — the cached counter is decorative, not authoritative.
   }
 }
 
