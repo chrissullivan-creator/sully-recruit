@@ -18,10 +18,15 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const unipileApiKey = Deno.env.get("UNIPILE_API_KEY");
-    const unipileBaseUrl = Deno.env.get("UNIPILE_BASE_URL");
+    // Prefer v2 credentials; fall back to v1 for orgs that haven't migrated.
+    // The v1 endpoint /api/v1/users/{slug} started returning 404 for slugs
+    // v2 still resolves, so default to v2 whenever it's configured.
+    const v2ApiKey = Deno.env.get("UNIPILE_API_KEY_V2") || Deno.env.get("UNIPILE_API_KEY");
+    const v2BaseUrl =
+      Deno.env.get("UNIPILE_BASE_V2_URL") ||
+      Deno.env.get("UNIPILE_BASE_URL")?.replace(/\/api\/v1\/?$/, "/api/v2");
 
-    if (!unipileApiKey || !unipileBaseUrl) {
+    if (!v2ApiKey || !v2BaseUrl) {
       throw new Error("Unipile not configured");
     }
 
@@ -32,17 +37,20 @@ Deno.serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    if (!account_id) {
+      return new Response(
+        JSON.stringify({ error: "account_id is required for v2 lookups" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    // Resolve the LinkedIn profile via Unipile's user profile endpoint
-    const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
-    const profileUrl = `${base}/api/v1/users/${linkedin_slug}`;
+    // v2 path: /api/v2/{account_id}/linkedin/users/{slug}
+    const base = v2BaseUrl.replace(/\/+$/, "");
+    const profileUrl = `${base}/${encodeURIComponent(account_id)}/linkedin/users/${encodeURIComponent(linkedin_slug)}`;
     const headers: Record<string, string> = {
-      "X-API-KEY": unipileApiKey,
+      "X-API-KEY": v2ApiKey,
       "Accept": "application/json",
     };
-    if (account_id) {
-      headers["X-ACCOUNT-ID"] = account_id;
-    }
 
     const resp = await fetch(profileUrl, { headers });
 

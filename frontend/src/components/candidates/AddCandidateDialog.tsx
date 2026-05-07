@@ -114,10 +114,12 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
 
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
+      const trimmedLinkedin = linkedinUrl?.trim() || null;
       const { data: inserted, error } = await supabase
         .from('people')
         .insert([
           {
+            type: 'candidate',
             first_name: firstName,
             last_name: lastName,
             full_name: `${firstName} ${lastName}`.trim() || null,
@@ -125,10 +127,14 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             phone: phone || null,
             current_title: currentTitle || null,
             current_company: currentCompany || null,
-            linkedin_url: linkedinUrl || null,
+            linkedin_url: trimmedLinkedin,
             location_text: locationText || null,
             status: 'new',
             owner_user_id: userId,
+            // Queue the resolve-unipile-ids cron (v2 lookup) to populate
+            // unipile_provider_id. No live API call here — keeps the dialog
+            // snappy and avoids the v1 endpoint that's been returning 404s.
+            unipile_resolve_status: trimmedLinkedin ? 'pending' : null,
           },
         ])
         .select('id')
