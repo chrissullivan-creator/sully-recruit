@@ -1,6 +1,7 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting, getUnipileBaseUrl } from "./lib/supabase";
-import { normalizeLinkedIn, delay } from "./lib/resume-parsing";
+import { getSupabaseAdmin } from "./lib/supabase";
+import { normalizeLinkedIn } from "./lib/resume-parsing";
+import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
 
 // Backfill LinkedIn messages from Unipile for a specific account.
 //
@@ -116,9 +117,6 @@ export const backfillLinkedinMessages = schedules.task({
     const maxChats = 20; // Keep small since this runs every 5 min
 
     const supabase = getSupabaseAdmin();
-    const baseUrl = await getUnipileBaseUrl();
-    const apiKey = await getAppSetting("UNIPILE_API_KEY");
-    const uniHeaders = { "X-API-KEY": apiKey, Accept: "application/json" };
 
     const { data: account } = await supabase
       .from("integration_accounts")
@@ -135,15 +133,13 @@ export const backfillLinkedinMessages = schedules.task({
 
     const stats = { chats_scanned: 0, messages_scanned: 0, inserted: 0, skipped: 0, errors: 0 };
 
-    // Fetch chats from Unipile
-    const chatsUrl = `${baseUrl}/chats?account_id=${account.unipile_account_id}&limit=${maxChats}`;
-    const chatsResp = await fetch(chatsUrl, { headers: uniHeaders });
-    if (!chatsResp.ok) {
-      const err = await chatsResp.text();
-      throw new Error(`Unipile chats ${chatsResp.status}: ${err.slice(0, 200)}`);
-    }
-
-    const chatsData = await chatsResp.json();
+    // v2 path: GET /api/v2/{account_id}/chats
+    const chatsData: any = await unipileFetch(
+      supabase,
+      account.unipile_account_id,
+      `chats`,
+      { method: "GET", query: { limit: maxChats } },
+    );
     const chats = chatsData.items ?? chatsData.chats ?? chatsData.data ?? [];
 
     logger.info(`Fetched ${chats.length} chats for ${accountEmail}`);
@@ -156,14 +152,17 @@ export const backfillLinkedinMessages = schedules.task({
       try {
         // Detect channel from folder/content_type, falling back to integration
         // account_type when Unipile doesn't surface folder info reliably.
+        // Run through canonicalChannel so legacy values (linkedin_inmail,
+        // linkedin_classic, etc.) collapse into our two buckets.
         const folders = (chat.folder ?? []) as string[];
         const contentType = String(chat.content_type ?? "").toLowerCase();
         const acctType = (account as any).account_type ?? "";
-        const channel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail" || acctType === "linkedin_recruiter"
+        const rawChannel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail" || acctType === "linkedin_recruiter"
           ? "linkedin_recruiter"
           : folders.includes("INBOX_LINKEDIN_SALES_NAV") || acctType === "sales_navigator"
             ? "linkedin_sales_nav"
             : "linkedin";
+        const channel = canonicalChannel(rawChannel);
 
         const attendees: any[] = chat.attendees ?? chat.members ?? [];
         const otherAttendee = attendees.find(
@@ -200,17 +199,20 @@ export const backfillLinkedinMessages = schedules.task({
 
         const conversationId = await upsertConversation(supabase, chatId, entity, channel, account.id);
 
-        // Fetch messages (only latest 20 since this runs every 5 min)
-        const msgsResp = await fetch(
-          `${baseUrl}/chats/${chatId}/messages?account_id=${account.unipile_account_id}&limit=20`,
-          { headers: uniHeaders },
-        );
-        if (!msgsResp.ok) {
+        // Fetch messages (only latest 20 since this runs every 5 min).
+        // v2 path: GET /api/v2/{account_id}/chats/{chat_id}/messages
+        let msgsData: any;
+        try {
+          msgsData = await unipileFetch(
+            supabase,
+            account.unipile_account_id,
+            `chats/${encodeURIComponent(chatId)}/messages`,
+            { method: "GET", query: { limit: 20 } },
+          );
+        } catch {
           stats.errors++;
           continue;
         }
-
-        const msgsData = await msgsResp.json();
         const messages = msgsData.items ?? msgsData.messages ?? msgsData.data ?? [];
 
         // Batch dedup: load all known unipile_message_ids for this chat in one query

@@ -4,8 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * POST /api/lookup-linkedin
  *
- * Fetches a LinkedIn profile via the Unipile API and normalizes it to
- * form-compatible fields for the Add Person wizard.
+ * Fetches a LinkedIn profile via the Unipile **v2** API and normalizes
+ * it to form-compatible fields for the Add Person wizard.
+ *
+ *   v2 paths (account_id moves into the URL):
+ *     GET /api/v2/{account_id}/linkedin/users/{slug-or-provider-id}
+ *     GET /api/v2/{account_id}/chats/{chat_id}
+ *     GET /api/v2/{account_id}/chats/{chat_id}/attendees
  *
  * Resolution order (first hit wins):
  *   1. unipile_id           — direct user fetch
@@ -33,22 +38,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
 
   try {
-    // Get Unipile config from app_settings table
-    const { data: apiUrlRow } = await supabase
-      .from("app_settings")
-      .select("value")
-      .eq("key", "UNIPILE_BASE_URL")
-      .single();
-    const { data: apiKeyRow } = await supabase
-      .from("app_settings")
-      .select("value")
-      .eq("key", "UNIPILE_API_KEY")
-      .single();
-
-    const baseUrl = apiUrlRow?.value;
-    const apiKey = apiKeyRow?.value;
-    if (!baseUrl || !apiKey) {
-      console.error("Unipile config not found in app_settings");
+    // Resolve v2 base + key. Fall back to v1 settings (rewriting the
+    // suffix) and v1 key when the v2-specific keys aren't set yet —
+    // most installs use a single key for both products.
+    const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    ]);
+    const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
+      || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+    const apiKey = v2KeyRow?.value || v1KeyRow?.value;
+    if (!v2Base || !apiKey) {
+      console.error("Unipile v2 config not found in app_settings");
       return res.status(200).json({});
     }
 
@@ -78,27 +81,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const uniHeaders = { "X-API-KEY": apiKey, Accept: "application/json" };
-    // UNIPILE_BASE_URL already contains /api/v1 — don't double-prefix it.
-    const apiBase = baseUrl.replace(/\/+$/, "");
+    const acctSeg = encodeURIComponent(acctId);
     let profileData: any = null;
     let attendeeData: any = null;
 
-    // Try direct fetch by Unipile ID
+    // Try direct fetch by Unipile ID — v2: /linkedin/users/{id}
     if (unipile_id) {
       const r = await fetch(
-        `${apiBase}/users/${encodeURIComponent(unipile_id)}?account_id=${acctId}`,
+        `${v2Base}/${acctSeg}/linkedin/users/${encodeURIComponent(unipile_id)}`,
         { headers: uniHeaders },
       );
       if (r.ok) profileData = await r.json();
     }
 
-    // Try resolving by LinkedIn URL slug
+    // Try resolving by LinkedIn URL slug — v2: /linkedin/users/{slug}
     if (!profileData && linkedin_url) {
       const match = linkedin_url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/);
       const slug = match?.[1];
       if (slug) {
         const r = await fetch(
-          `${apiBase}/users/${encodeURIComponent(slug)}?account_id=${acctId}`,
+          `${v2Base}/${acctSeg}/linkedin/users/${encodeURIComponent(slug)}`,
           { headers: uniHeaders },
         );
         if (r.ok) profileData = await r.json();
@@ -108,12 +110,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Try resolving via chat attendees — used when the inbound message has no
     // LinkedIn URL (common: backfill-populated LinkedIn threads store only the
     // Unipile provider_id, not a URL).
+    //   v2: /chats/{id} and /chats/{id}/attendees (account_id in path)
     if (!profileData && chat_id) {
-      // Unipile's /chats/{id} response typically embeds attendees; we also
-      // try /chats/{id}/attendees as a backup.
       let attendees: any[] = [];
       const chatResp = await fetch(
-        `${apiBase}/chats/${encodeURIComponent(chat_id)}?account_id=${acctId}`,
+        `${v2Base}/${acctSeg}/chats/${encodeURIComponent(chat_id)}`,
         { headers: uniHeaders },
       );
       if (chatResp.ok) {
@@ -122,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (attendees.length === 0) {
         const attResp = await fetch(
-          `${apiBase}/chats/${encodeURIComponent(chat_id)}/attendees?account_id=${acctId}`,
+          `${v2Base}/${acctSeg}/chats/${encodeURIComponent(chat_id)}/attendees`,
           { headers: uniHeaders },
         );
         if (attResp.ok) {
@@ -140,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const providerId = other.provider_id ?? other.id;
         if (providerId) {
           const r = await fetch(
-            `${apiBase}/users/${encodeURIComponent(providerId)}?account_id=${acctId}`,
+            `${v2Base}/${acctSeg}/linkedin/users/${encodeURIComponent(providerId)}`,
             { headers: uniHeaders },
           );
           if (r.ok) profileData = await r.json();

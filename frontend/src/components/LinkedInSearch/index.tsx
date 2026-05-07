@@ -161,14 +161,19 @@ export default function LinkedInSearch() {
     setResults([]);
 
     try {
-      const url = `${unipileDsn}/api/v1/linkedin/search?account_id=${encodeURIComponent(activeAccount.accountId)}`;
+      // Unipile v2 splits LinkedIn search by product. Recruiter search lives
+      // at /api/v2/{account_id}/linkedin/recruiter/search; account_id is now
+      // a path segment (no longer a query param). The `api` body field is
+      // gone — the path encodes that.
+      // Convert the configured DSN (which usually ends in /api/v1) to v2.
+      const v2Dsn = unipileDsn.replace(/\/api\/v1$/, '/api/v2');
+      const url = `${v2Dsn}/${encodeURIComponent(activeAccount.accountId)}/linkedin/recruiter/search`;
 
       let body: any;
       if (tab === 'url' && pastedUrl.trim()) {
         body = { url: pastedUrl.trim() };
       } else {
         body = {
-          api: 'recruiter',
           category: 'people',
           keywords: keywords || undefined,
           role: title ? [{ keywords: title }] : undefined,

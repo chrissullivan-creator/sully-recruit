@@ -4,6 +4,7 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
+import { canonicalChannel } from "./lib/unipile-v2";
 
 interface UnipileWebhookPayload {
   body: {
@@ -251,13 +252,13 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     event.account_type ??
     ""
   ).toLowerCase();
-  let channel = providerType.includes("sales")
+  let rawChannel = providerType.includes("sales")
     ? "linkedin_sales_nav"
     : providerType.includes("recruiter")
       ? "linkedin_recruiter"
       : "linkedin";
   // If event metadata didn't classify it, check the integration account type
-  if (channel === "linkedin") {
+  if (rawChannel === "linkedin") {
     const eventAccountId = messageData.account_id ?? event.account_id ?? messageData.chat?.account_id;
     if (eventAccountId) {
       const { data: ia } = await supabase
@@ -265,10 +266,14 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         .select("account_type")
         .eq("unipile_account_id", eventAccountId)
         .maybeSingle();
-      if (ia?.account_type === "linkedin_recruiter") channel = "linkedin_recruiter";
-      else if (ia?.account_type === "sales_navigator") channel = "linkedin_sales_nav";
+      if (ia?.account_type === "linkedin_recruiter") rawChannel = "linkedin_recruiter";
+      else if (ia?.account_type === "sales_navigator") rawChannel = "linkedin_sales_nav";
     }
   }
+  // Collapse to the 3-bucket model used everywhere else (linkedin /
+  // linkedin_recruiter / sms / email). Sales Nav messages join the
+  // generic linkedin bucket.
+  const channel = canonicalChannel(rawChannel);
 
   if (!senderId) {
     logger.info("No sender ID in message event");

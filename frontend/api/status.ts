@@ -56,7 +56,9 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     .select("key, value")
     .in("key", [
       "UNIPILE_BASE_URL",
+      "UNIPILE_BASE_V2_URL",
       "UNIPILE_API_KEY",
+      "UNIPILE_API_KEY_V2",
       "MICROSOFT_GRAPH_CLIENT_ID",
       "MICROSOFT_GRAPH_CLIENT_SECRET",
       "MICROSOFT_GRAPH_TENANT_ID",
@@ -92,12 +94,14 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };
     }),
 
-    // Unipile — accounts endpoint (cheapest authenticated call).
+    // Unipile v2 — accounts endpoint (cheapest authenticated call).
+    // Prefer the v2 settings, fall back to v1 settings (rewriting suffix).
     check("Unipile", async () => {
-      const baseUrl = (cfg.get("UNIPILE_BASE_URL") || "").replace(/\/+$/, "");
-      const apiKey = cfg.get("UNIPILE_API_KEY");
-      if (!baseUrl || !apiKey) return { ok: false, detail: "credentials missing" };
-      const r = await fetch(`${baseUrl}/accounts?limit=1`, {
+      const v2Base = (cfg.get("UNIPILE_BASE_V2_URL") || "").replace(/\/+$/, "")
+        || (cfg.get("UNIPILE_BASE_URL") || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+      const apiKey = cfg.get("UNIPILE_API_KEY_V2") || cfg.get("UNIPILE_API_KEY");
+      if (!v2Base || !apiKey) return { ok: false, detail: "credentials missing" };
+      const r = await fetch(`${v2Base}/accounts?limit=1`, {
         headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       });
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };
