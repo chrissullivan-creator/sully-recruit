@@ -280,14 +280,23 @@ export default function SequenceBuilder() {
             // file: email (Microsoft Graph fileAttachment) and Unipile
             // LinkedIn message / InMail (multipart `attachments` field).
             // SMS / connection requests / manual_call don't carry files.
+            // Attachments persist on email + LinkedIn message + InMail.
+            // attachment_urls is the canonical list; attachment_url is
+            // mirrored to the first entry for back-compat with read
+            // paths that haven't been updated.
+            attachment_urls:
+              action.channel === "email"
+                || action.channel === "linkedin_message"
+                || action.channel === "linkedin_inmail"
+                ? (action.attachmentUrls ?? [])
+                : [],
             attachment_url:
               action.channel === "email"
                 || action.channel === "linkedin_message"
                 || action.channel === "linkedin_inmail"
-                ? (action.attachmentUrl || null)
+                ? (action.attachmentUrls?.[0] ?? null)
                 : null,
-            // Subject + threading are email-only. Other channels ignore
-            // them entirely.
+            // Subject + threading are email-only.
             subject_line: action.channel === "email" ? (action.subjectLine || null) : null,
             reply_to_previous: action.channel === "email" ? (action.replyToPrevious === true) : false,
           } as any);

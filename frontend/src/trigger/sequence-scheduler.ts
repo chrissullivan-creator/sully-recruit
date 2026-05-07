@@ -308,10 +308,16 @@ export const sequenceActionExecute = task({
             }
           }
 
+          // attachment_urls is the canonical multi-file list; fall
+          // back to the legacy single attachment_url for older rows.
+          const emailAttachments: string[] | undefined =
+            Array.isArray(action.attachment_urls) && action.attachment_urls.length
+              ? action.attachment_urls
+              : (action.attachment_url ? [action.attachment_url] : undefined);
           sendResult = await sendEmail(
             supabase, to, subject || undefined, formatEmailBody(messageBody), senderUserId,
             threadingOptions, action.use_signature !== false, payload.stepLogId,
-            action.attachment_url || undefined,
+            emailAttachments,
           );
           break;
         }
@@ -323,18 +329,28 @@ export const sequenceActionExecute = task({
           // on Unipile's invite endpoint), so attachmentUrl is omitted.
           sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_connection");
           break;
-        case "linkedin_message":
+        case "linkedin_message": {
+          const liAttachments: string[] | undefined =
+            Array.isArray(action.attachment_urls) && action.attachment_urls.length
+              ? action.attachment_urls
+              : (action.attachment_url ? [action.attachment_url] : undefined);
           sendResult = await sendLinkedIn(
             supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_message",
-            action.attachment_url || undefined,
+            liAttachments,
           );
           break;
-        case "linkedin_inmail":
+        }
+        case "linkedin_inmail": {
+          const inmailAttachments: string[] | undefined =
+            Array.isArray(action.attachment_urls) && action.attachment_urls.length
+              ? action.attachment_urls
+              : (action.attachment_url ? [action.attachment_url] : undefined);
           sendResult = await sendLinkedIn(
             supabase, to, messageBody, senderUserId, payload.accountId, "recruiter_inmail",
-            action.attachment_url || undefined,
+            inmailAttachments,
           );
           break;
+        }
         default:
           await markStepLog(supabase, payload.stepLogId, "failed");
           return { action: "failed", reason: `unsupported_channel` };

@@ -12,13 +12,10 @@ export interface ActionData {
   postConnectionHardcodedHours: number;
   respectSendWindow: boolean;
   useSignature?: boolean;
-  /** Public URL of an attachment (résumé, branded PDF, etc.) the send
-   *  path should attach to outgoing email or LinkedIn message. Stored on
-   *  sequence_actions.attachment_url. */
-  attachmentUrl?: string;
-  /** Original filename — kept so the recipient sees a sensible name
-   *  rather than a Storage hash. Optional. */
-  attachmentName?: string;
+  /** Public URLs of files to attach to the outgoing email or LinkedIn
+   *  message. Stored on sequence_actions.attachment_urls (text[]). The
+   *  send path fetches each URL at send-time and attaches them. */
+  attachmentUrls?: string[];
   /** Email subject line. Empty for non-email channels. When
    *  reply_to_previous is on this is ignored and the previous sent
    *  step's subject is reused with "Re: " prefix. */

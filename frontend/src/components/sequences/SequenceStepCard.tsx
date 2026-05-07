@@ -325,11 +325,8 @@ export function SequenceStepCard({
                 || action.channel === "linkedin_message"
                 || action.channel === "linkedin_inmail") && (
                 <AttachmentPicker
-                  action={action}
-                  onUpdate={(url, name) => {
-                    updateAction(i, "attachmentUrl", url);
-                    updateAction(i, "attachmentName", name);
-                  }}
+                  attachmentUrls={action.attachmentUrls ?? []}
+                  onChange={(urls) => updateAction(i, "attachmentUrls", urls)}
                 />
               )}
               <p className="text-[9px] text-muted-foreground italic">
@@ -433,36 +430,49 @@ export function SequenceStepCard({
 }
 
 /**
- * Attachment picker for an email-channel action. Uploads to the
- * `sequence-attachments` Storage bucket under the user's id and stores
- * the resulting public URL on action.attachmentUrl. The send path
- * (lib/send-channels.ts:sendEmail) fetches that URL at send-time and
- * attaches the file to the outbound Microsoft Graph message.
+ * Multi-attachment picker for a step. Uploads each file to the
+ * `sequence-attachments` Storage bucket and stores the resulting public
+ * URLs on action.attachmentUrls (text[]). The send path
+ * (lib/send-channels.ts:sendEmail / sendLinkedIn) fetches every URL at
+ * send-time and attaches them to the outbound message.
+ *
+ * Multiple uploads are allowed — recruiters often want a résumé +
+ * cover letter, or résumé + one-pager. Each row shows the file with
+ * an X to remove it; the Add button at the bottom appends.
  */
 function AttachmentPicker({
-  action,
-  onUpdate,
+  attachmentUrls,
+  onChange,
 }: {
-  action: ActionData;
-  onUpdate: (url: string | undefined, name: string | undefined) => void;
+  attachmentUrls: string[];
+  onChange: (urls: string[]) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: FileList) => {
     setUploading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `${session.user.id}/${Date.now()}_${safeName}`;
-      const { error: upErr } = await supabase.storage
-        .from("sequence-attachments")
-        .upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
-      if (upErr) throw new Error(upErr.message);
-      const { data: pub } = supabase.storage.from("sequence-attachments").getPublicUrl(path);
-      onUpdate(pub.publicUrl, file.name);
-      toast.success("Attachment uploaded");
+      const newUrls: string[] = [];
+      for (const file of Array.from(files)) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `${session.user.id}/${Date.now()}_${safeName}`;
+        const { error: upErr } = await supabase.storage
+          .from("sequence-attachments")
+          .upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
+        if (upErr) {
+          toast.error(`${file.name}: ${upErr.message}`);
+          continue;
+        }
+        const { data: pub } = supabase.storage.from("sequence-attachments").getPublicUrl(path);
+        newUrls.push(pub.publicUrl);
+      }
+      if (newUrls.length) {
+        onChange([...attachmentUrls, ...newUrls]);
+        toast.success(newUrls.length === 1 ? "Attachment uploaded" : `${newUrls.length} attachments uploaded`);
+      }
     } catch (e: any) {
       toast.error(e.message || "Upload failed");
     } finally {
@@ -470,40 +480,53 @@ function AttachmentPicker({
     }
   };
 
-  if (action.attachmentUrl) {
-    return (
-      <div className="flex items-center gap-2 rounded border border-emerald/30 bg-emerald-light/10 px-2 py-1.5">
-        <Paperclip className="h-3.5 w-3.5 text-emerald-dark shrink-0" />
-        <a
-          href={action.attachmentUrl}
-          target="_blank" rel="noopener noreferrer"
-          className="text-[11px] text-emerald-dark hover:underline truncate flex-1"
-          title={action.attachmentUrl}
-        >
-          {action.attachmentName || "Attachment"}
-        </a>
-        <button
-          type="button"
-          onClick={() => onUpdate(undefined, undefined)}
-          className="text-muted-foreground hover:text-destructive"
-          title="Remove attachment"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      </div>
-    );
-  }
+  const filenameFromUrl = (url: string) => {
+    try {
+      const u = new URL(url);
+      const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+      return last.replace(/^\d+_/, "") || "Attachment";
+    } catch { return "Attachment"; }
+  };
 
   return (
-    <div>
+    <div className="space-y-1.5">
+      {attachmentUrls.length > 0 && (
+        <div className="space-y-1">
+          {attachmentUrls.map((url, idx) => (
+            <div
+              key={`${url}-${idx}`}
+              className="flex items-center gap-2 rounded border border-emerald/30 bg-emerald-light/10 px-2 py-1.5"
+            >
+              <Paperclip className="h-3.5 w-3.5 text-emerald-dark shrink-0" />
+              <a
+                href={url}
+                target="_blank" rel="noopener noreferrer"
+                className="text-[11px] text-emerald-dark hover:underline truncate flex-1"
+                title={url}
+              >
+                {filenameFromUrl(url)}
+              </a>
+              <button
+                type="button"
+                onClick={() => onChange(attachmentUrls.filter((_, i) => i !== idx))}
+                className="text-muted-foreground hover:text-destructive"
+                title="Remove attachment"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         className="hidden"
         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
+          const files = e.target.files;
+          if (files && files.length > 0) handleFiles(files);
           e.target.value = "";
         }}
       />
@@ -516,7 +539,9 @@ function AttachmentPicker({
         {uploading ? (
           <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Uploading…</>
         ) : (
-          <><Paperclip className="h-3 w-3 mr-1" /> Add attachment</>
+          <><Paperclip className="h-3 w-3 mr-1" />
+            {attachmentUrls.length === 0 ? "Add attachment" : "Add another"}
+          </>
         )}
       </Button>
     </div>
