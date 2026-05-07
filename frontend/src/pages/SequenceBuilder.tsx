@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { mergeVarsFromPerson } from "@/lib/merge-tags";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
@@ -40,6 +42,9 @@ export default function SequenceBuilder() {
   const [branches, setBranches] = useState<SequenceBranch[]>(createEmptyBranches());
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
+  // Live preview: merge-vars dict for whichever recipient the
+  // recruiter picked from the "Preview as" selector. null = preview off.
+  const [previewVars, setPreviewVars] = useState<Record<string, string> | null>(null);
 
   // Load existing sequence when editing.
   //
@@ -366,10 +371,16 @@ export default function SequenceBuilder() {
           </TabsContent>
 
           <TabsContent value="flow" className="mt-4">
+            <PreviewAsPicker
+              audience={setup.audienceType}
+              previewVars={previewVars}
+              onChange={setPreviewVars}
+            />
             <FlowBuilder
               initialBranches={branches}
               onChange={handleFlowChange}
               onAskJoe={handleAskJoe}
+              previewMergeVars={previewVars ?? undefined}
             />
             <div className="mt-4 flex justify-between items-center">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
@@ -403,5 +414,107 @@ export default function SequenceBuilder() {
         </Tabs>
       </div>
     </MainLayout>
+  );
+}
+
+/**
+ * "Preview as <contact>" picker. Sits above the FlowBuilder tab
+ * content. When a person is chosen, builds a merge-vars dictionary
+ * via mergeVarsFromPerson() and lifts it into the SequenceBuilder
+ * state — every step's body summary then renders with {{tags}}
+ * substituted to that person's values.
+ */
+function PreviewAsPicker({
+  audience,
+  previewVars,
+  onChange,
+}: {
+  audience: "candidates" | "contacts";
+  previewVars: Record<string, string> | null;
+  onChange: (v: Record<string, string> | null) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+
+  const runSearch = useCallback(async (q: string) => {
+    setSearch(q);
+    if (q.trim().length < 2) { setResults([]); return; }
+    setLoading(true);
+    try {
+      const table = audience === "contacts" ? "contacts" : "people";
+      const fields = audience === "contacts"
+        ? "id, full_name, first_name, last_name, email, title, company_name"
+        : "id, full_name, first_name, last_name, email, current_title, current_company";
+      const { data } = await supabase
+        .from(table)
+        .select(fields)
+        .or(`full_name.ilike.%${q}%,first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`)
+        .limit(8);
+      setResults(data ?? []);
+    } finally { setLoading(false); }
+  }, [audience]);
+
+  const handlePick = (person: any) => {
+    const vars = mergeVarsFromPerson(person);
+    onChange(vars);
+    setSelectedName(person.full_name || `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim() || person.email || "Unknown");
+    setSearch("");
+    setResults([]);
+  };
+
+  return (
+    <div className="mb-4 rounded-lg border border-card-border bg-page-bg/40 p-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
+          Preview as
+        </span>
+        {previewVars ? (
+          <>
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald/30 bg-emerald-light/15 px-2.5 py-1 text-xs text-emerald-dark">
+              {selectedName ?? "Selected"}
+            </span>
+            <Button
+              variant="ghost" size="sm"
+              onClick={() => { onChange(null); setSelectedName(null); }}
+              className="h-7 text-[11px] text-muted-foreground"
+            >
+              Show raw template
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              All step bodies render with {`{{tags}}`} substituted to this person's values.
+            </span>
+          </>
+        ) : (
+          <div className="relative flex-1 max-w-sm">
+            <Input
+              value={search}
+              onChange={(e) => runSearch(e.target.value)}
+              placeholder={`Search ${audience === "contacts" ? "contacts" : "candidates"} to preview…`}
+              className="h-8 text-xs"
+            />
+            {results.length > 0 && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card shadow-md max-h-56 overflow-y-auto">
+                {results.map((p: any) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onMouseDown={() => handlePick(p)}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-accent/10 flex flex-col"
+                  >
+                    <span className="font-medium text-foreground">{p.full_name || p.email || "Unknown"}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {[p.current_title ?? p.title, p.current_company ?? p.company_name, p.email].filter(Boolean).join(" · ")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {loading && <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">…</div>}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

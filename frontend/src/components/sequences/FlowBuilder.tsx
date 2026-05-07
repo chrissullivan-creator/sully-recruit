@@ -26,6 +26,11 @@ interface Props {
     stepLabel: string,
     previousMessages: Array<{ channel: string; body: string }>,
   ) => Promise<string>;
+  /** Merge-vars dictionary for live preview. When set, every step's
+   *  body summary renders with {{tags}} substituted to the chosen
+   *  recipient's values (so the recruiter sees what each contact will
+   *  actually receive). Updated by SequenceBuilder's "Preview as" picker. */
+  previewMergeVars?: Record<string, string>;
 }
 
 function serializeSnapshot(branches?: SequenceBranch[]) {
@@ -132,6 +137,7 @@ function BranchColumn({
   onLabelChange,
   onActionsChange,
   onAskJoe,
+  previewMergeVars,
 }: {
   branch: SequenceBranch;
   onAddStep: () => void;
@@ -140,6 +146,7 @@ function BranchColumn({
   onLabelChange: (stepId: string, label: string) => void;
   onActionsChange: (stepId: string, actions: ActionData[]) => void;
   onAskJoe?: (stepId: string, actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string) => Promise<string>;
+  previewMergeVars?: Record<string, string>;
 }) {
   return (
     <Card className="bg-slate-50/60 border-slate-200">
@@ -218,6 +225,7 @@ function BranchColumn({
                           onAskJoe(step.id, actionIndex, action, stepNumber, stepLabel)
                       : undefined
                   }
+                  previewMergeVars={previewMergeVars}
                 />
               </div>
 
@@ -234,7 +242,7 @@ function BranchColumn({
   );
 }
 
-export function FlowBuilder({ initialBranches, onChange, onAskJoe }: Props) {
+export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeVars }: Props) {
   // Initial state computed once. The earlier `useMemo([initialBranches])` made
   // a new memo object on every parent render, but the value was only used
   // for the initial useState seed — wasted work + churn.
@@ -383,6 +391,7 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe }: Props) {
             onAskJoe={(stepId, actionIndex, action, stepNumber, stepLabel) =>
               handleAskJoe(branch.id, stepId, actionIndex, action, stepNumber, stepLabel)
             }
+            previewMergeVars={previewMergeVars}
           />
         ))}
       </div>

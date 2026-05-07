@@ -33,10 +33,11 @@ interface ActionNodeData {
   onUpdate: (actions: ActionData[]) => void;
   onAskJoe?: (actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string) => Promise<string>;
   isAfterConnection?: boolean;
+  previewMergeVars?: Record<string, string>;
 }
 
 function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
-  const { actions, onUpdate, onAskJoe, label, stepNumber } = data;
+  const { actions, onUpdate, onAskJoe, label, stepNumber, previewMergeVars } = data;
 
   return (
     <div className="min-w-[320px] max-w-[400px]">
@@ -47,6 +48,7 @@ function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
         stepNumber={stepNumber}
         onUpdate={onUpdate}
         onAskJoe={onAskJoe}
+        previewMergeVars={previewMergeVars}
       />
       <Handle type="source" position={Position.Bottom} className="!bg-slate-400" />
     </div>
