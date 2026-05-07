@@ -95,11 +95,9 @@ export const resumeIngestion = task({
       if (parsedJson.email) {
         // Word docx extraction leaks "HYPERLINK" garbage and sometimes a
         // comma-joined pair of addresses; normalize first, then classify.
+        // Plain `email` column was retired — only write personal/work.
         const cleaned = normalizeEmail(parsedJson.email);
-        if (cleaned) {
-          updates.email = cleaned;
-          Object.assign(updates, classifyEmail(cleaned));
-        }
+        if (cleaned) Object.assign(updates, classifyEmail(cleaned));
       }
       if (parsedJson.phone) {
         updates.phone = parsedJson.phone;

@@ -136,10 +136,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const lastNameGuess = rest.join(" ") || fromAddress.split("@")[0];
 
   let candidateId: string;
+  // Plain people.email retired — match across all three address
+  // columns so a candidate already stored under personal/work still
+  // attaches to the inbound resume instead of creating a duplicate.
+  const lower = fromAddress.toLowerCase();
   const { data: existing } = await supabase
     .from("people")
     .select("id")
-    .eq("email", fromAddress)
+    .or(`personal_email.ilike.${lower},work_email.ilike.${lower},primary_email.ilike.${lower}`)
+    .limit(1)
     .maybeSingle();
   if (existing?.id) {
     candidateId = existing.id;
