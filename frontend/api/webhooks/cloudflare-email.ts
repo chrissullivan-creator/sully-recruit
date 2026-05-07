@@ -144,6 +144,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (existing?.id) {
     candidateId = existing.id;
   } else {
+    // Plain people.email retired — route the sender's address to
+    // personal_email or work_email by domain heuristic. Mirrors the
+    // SQL is_consumer_email_domain() helper.
+    const fromDomain = (fromAddress.split("@")[1] || "").toLowerCase();
+    const isPersonal = /^(gmail|yahoo|hotmail|outlook|icloud|me|mac|aol|msn|live|protonmail|proton|fastmail|comcast|verizon|sbcglobal|att|optonline|ymail|hush|gmx|zoho|tutanota|cox|charter|earthlink|bellsouth|hanmail|naver)\.[a-z.]+$/i.test(fromDomain)
+      || fromDomain.endsWith(".edu");
+
     const { data: created, error: createErr } = await supabase
       .from("people")
       .insert({
@@ -151,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         first_name: firstNameGuess || null,
         last_name: lastNameGuess || null,
         full_name: senderDisplay || fromAddress,
-        email: fromAddress,
+        ...(isPersonal ? { personal_email: fromAddress } : { work_email: fromAddress }),
         status: "new",
         source: "resumes_inbox",
         source_detail: envelopeTo || "cloudflare_email",

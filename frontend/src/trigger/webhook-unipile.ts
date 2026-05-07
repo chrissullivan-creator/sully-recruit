@@ -4,6 +4,8 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
+import { canonicalChannel } from "./lib/unipile-v2";
+import { matchPersonByEmail } from "./lib/match-person-by-email";
 
 interface UnipileWebhookPayload {
   body: {
@@ -119,10 +121,16 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   if (isBounce) {
     const failed = extractFailedRecipient(bodyForSearch);
     if (failed) {
-      const [{ data: cand }, { data: cont }] = await Promise.all([
-        supabase.from("people").select("id").eq("email", failed).maybeSingle(),
-        supabase.from("contacts").select("id").eq("email", failed).maybeSingle(),
-      ]);
+      // Multi-email match — bounce on a work address still flags the
+      // person even if their primary on file is personal. The plain
+      // people.email column was retired; use the helper.
+      const bouncedMatch = await matchPersonByEmail(supabase, failed);
+      const cand = bouncedMatch && bouncedMatch.entityType !== "contact"
+        ? { id: bouncedMatch.entityId }
+        : null;
+      const cont = bouncedMatch?.entityType === "contact"
+        ? { id: bouncedMatch.entityId }
+        : null;
       const reason = (subject || "ndr").slice(0, 200);
       const now = new Date().toISOString();
       if (cand?.id) {
@@ -151,16 +159,16 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     }
   }
 
-  // ── Match sender to candidate or contact ──────────────────────
-  const [{ data: cand }, { data: cont }] = await Promise.all([
-    supabase.from("people").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
-    supabase.from("contacts").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
-  ]);
-  const match = cand
-    ? { entityId: cand.id, entityType: "candidate", entityColumn: "candidate_id" as const }
-    : cont
-      ? { entityId: cont.id, entityType: "contact", entityColumn: "contact_id" as const }
-      : null;
+  // ── Match sender to candidate or contact (multi-email, all 3 columns) ─
+  // The plain people.email column was retired; use the shared helper.
+  const senderMatch = await matchPersonByEmail(supabase, senderEmail);
+  const match = senderMatch
+    ? {
+        entityId: senderMatch.entityId,
+        entityType: senderMatch.entityType,
+        entityColumn: senderMatch.entityColumn,
+      }
+    : null;
   if (!match) {
     logger.info("Unipile email: no entity match", { senderEmail });
     return { action: "no_match", senderEmail };
@@ -239,36 +247,32 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
-  // Detect LinkedIn variant (classic / Recruiter / Sales Navigator).
-  // Primary: check event metadata from Unipile.
-  // Fallback: look up the integration account's account_type by unipile_account_id,
-  // since Unipile event metadata is often missing the provider type.
-  const providerType = String(
-    messageData.provider_type ??
-    messageData.chat?.provider_type ??
-    messageData.account_type ??
-    messageData.folder ??
-    event.account_type ??
-    ""
+  // Detect Recruiter InMail vs Classic DM using the canonical Unipile
+  // v2 signals from the chat object (per the unipile-node-sdk types):
+  //   chat.content_type === 'inmail'                         → InMail
+  //   chat.folder includes 'INBOX_LINKEDIN_RECRUITER'        → InMail
+  //
+  // We don't fall back to subject — Classic DMs CAN carry a subject
+  // (group chats etc.) and InMails sometimes don't surface one in the
+  // webhook payload. We don't fall back to integration_account.account_type
+  // either: a Recruiter seat handles BOTH InMails AND Classic DMs, so
+  // tagging every Chris message based on his account type would (and did)
+  // dump every Classic chat into the Recruiter tab.
+  const chat = messageData.chat ?? {};
+  const contentType = String(
+    messageData.content_type ?? chat.content_type ?? "",
   ).toLowerCase();
-  let channel = providerType.includes("sales")
-    ? "linkedin_sales_nav"
-    : providerType.includes("recruiter")
-      ? "linkedin_recruiter"
-      : "linkedin";
-  // If event metadata didn't classify it, check the integration account type
-  if (channel === "linkedin") {
-    const eventAccountId = messageData.account_id ?? event.account_id ?? messageData.chat?.account_id;
-    if (eventAccountId) {
-      const { data: ia } = await supabase
-        .from("integration_accounts")
-        .select("account_type")
-        .eq("unipile_account_id", eventAccountId)
-        .maybeSingle();
-      if (ia?.account_type === "linkedin_recruiter") channel = "linkedin_recruiter";
-      else if (ia?.account_type === "sales_navigator") channel = "linkedin_sales_nav";
-    }
-  }
+  const folders: string[] = []
+    .concat(messageData.folder ?? [])
+    .concat(chat.folder ?? [])
+    .map((f: any) => String(f).toUpperCase());
+
+  const isInMail =
+    contentType === "inmail" ||
+    folders.includes("INBOX_LINKEDIN_RECRUITER");
+
+  const rawChannel = isInMail ? "linkedin_recruiter" : "linkedin";
+  const channel = canonicalChannel(rawChannel);
 
   if (!senderId) {
     logger.info("No sender ID in message event");
@@ -382,6 +386,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       id: conversationId,
       [entityColumn]: entityId,
       channel,
+      // Stamp content_type so the reclassify task can skip this row
+      // on the next pass. NULL for Classic DMs (Unipile omits the
+      // field there); 'inmail' for Recruiter InMails.
+      content_type: contentType || null,
       external_conversation_id: externalConversationId,
       last_message_at: receivedAt,
     } as any);

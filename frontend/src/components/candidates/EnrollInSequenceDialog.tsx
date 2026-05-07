@@ -389,7 +389,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
 
             const stepIcon = (ch: string) => {
               if (ch === 'email') return <Mail className="h-3 w-3" />;
-              if (ch.includes('linkedin') || ch.includes('recruiter') || ch.includes('sales_nav')) return <Linkedin className="h-3 w-3" />;
+              if (ch.includes('linkedin') || ch.includes('recruiter')) return <Linkedin className="h-3 w-3" />;
               if (ch === 'sms') return <MessageSquare className="h-3 w-3" />;
               if (ch === 'phone') return <Phone className="h-3 w-3" />;
               return <Mail className="h-3 w-3" />;
@@ -398,7 +398,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             const channelLabel = (ch: string) => {
               if (ch === 'linkedin_connection') return 'Connection Request';
               if (ch === 'linkedin_message') return 'LinkedIn Message';
-              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail' || ch === 'sales_nav' || ch === 'sales_nav_inmail') return 'Recruiter InMail';
+              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail') return 'Recruiter InMail';
               if (ch === 'sms') return 'SMS';
               if (ch === 'phone') return 'Phone';
               return 'Email';

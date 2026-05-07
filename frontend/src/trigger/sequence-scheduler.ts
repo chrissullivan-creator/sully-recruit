@@ -11,6 +11,7 @@ import { getSupabaseAdmin } from "./lib/supabase";
 import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./lib/send-channels";
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./lib/merge-tags";
 import { calculateSendTime, incrementDailySend } from "./lib/send-time-calculator";
+import { canonicalChannel } from "./lib/unipile-v2";
 import { compareSequenceNodes } from "@/components/sequences/sequenceBranches";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -483,12 +484,15 @@ export const sequenceActionExecute = task({
     const dateStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, "0")}-${String(estDate.getDate()).padStart(2, "0")}`;
     await incrementDailySend(supabase, senderUserId, action.channel, dateStr);
 
-    // Log outbound message
+    // Log outbound message. Canonicalise channel so sequence sends
+    // share buckets with inbound replies (linkedin_inmail →
+    // linkedin_recruiter, linkedin_message/connection → linkedin) —
+    // otherwise threads would split across two channel values.
     const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
     await supabase.from("messages").insert({
       [entityColumn]: entityId,
       conversation_id: conversationId || `seq_${payload.enrollmentId}`,
-      channel: action.channel,
+      channel: canonicalChannel(action.channel),
       direction: "outbound",
       body: messageBody,
       sent_at: sentAt.toISOString(),

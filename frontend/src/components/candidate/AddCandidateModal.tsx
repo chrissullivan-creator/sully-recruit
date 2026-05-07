@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
 import type { CanonicalStage } from '@/lib/pipeline';
 import { invalidateSendOutScope } from '@/lib/invalidate';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 
 export interface AddCandidateModalProps {
   open: boolean;
@@ -92,7 +93,9 @@ export function AddCandidateModal({
           current_title: form.current_title.trim() || null,
           current_company: companyName,
           target_total_comp: targetComp,
-          email: form.email.trim() || null,
+          // Plain `email` column was retired — classifier puts the
+          // address into personal_email or work_email by domain.
+          ...classifyEmail(normalizeEmail(form.email)),
           phone: form.phone.trim() || null,
           status: 'new',
           created_by_user_id: userId,

@@ -285,10 +285,9 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           first_name: applicant.first_name || parsedData.first_name || null,
           last_name: applicant.last_name || parsedData.last_name || null,
           full_name: `${applicant.first_name || parsedData.first_name || ''} ${applicant.last_name || parsedData.last_name || ''}`.trim() || null,
-          email: resolvedEmail,
           // Route via classifier — LinkedIn/resume usually surfaces a personal
           // address, but corporate or .edu go to the right field (see
-          // email-classifier rules).
+          // email-classifier rules). Plain `email` column was retired.
           ...classifyEmail(resolvedEmail),
           phone: resolvedPhone,
           mobile_phone: resolvedPhone,         // phone from LinkedIn/resume = mobile

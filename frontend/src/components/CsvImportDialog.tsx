@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope, invalidateJobScope } from '@/lib/invalidate';
 import { Upload, CheckCircle2, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { classifyEmail } from '@/lib/email-classifier';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Step = 'upload' | 'preview' | 'done';
@@ -191,8 +192,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
               first_name: c.first_name || undefined,
               last_name: c.last_name || undefined,
               full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined,
-              email: c.email || undefined,
-              normalized_email: normalizeEmail(c.email),
+              // Plain `email` retired — split into personal/work via classifier.
+              ...(c.email ? classifyEmail(normalizeEmail(c.email) ?? undefined) : {}),
               phone: c.phone || undefined,
               current_title: c.current_title || undefined,
               current_company: c.current_company || undefined,

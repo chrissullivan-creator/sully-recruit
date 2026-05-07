@@ -228,7 +228,7 @@ export function AddPersonWizard({
             linkedin_url: parsed.linkedin_url || prev.linkedin_url,
           }));
         }
-      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter' || channel === 'linkedin_sales_nav') {
+      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter') {
         // Resolve via Unipile chat attendees + user profile.
         await resolveLinkedInProfile(token);
       }
@@ -365,7 +365,7 @@ export function AddPersonWizard({
       }
 
       const saved = await res.json();
-      const label = personType === 'candidate' ? 'Candidate' : 'Contact';
+      const label = personType === 'candidate' ? 'Candidate' : 'Client';
       toast.success(`${label} "${form.first_name} ${form.last_name}" created & linked`);
       invalidateQueries();
       onOpenChange(false);
@@ -407,13 +407,13 @@ export function AddPersonWizard({
       case 'searching': return 'Searching...';
       case 'matches': return 'Possible Matches';
       case 'enriching': return 'Looking Up Details...';
-      case 'form': return `New ${personType === 'candidate' ? 'Candidate' : 'Contact'}`;
+      case 'form': return `New ${personType === 'candidate' ? 'Candidate' : 'Client'}`;
     }
   };
 
   const stepDescription = () => {
     switch (step) {
-      case 'pick_type': return 'Is this person a contact or a candidate?';
+      case 'pick_type': return 'Is this person a candidate or a client?';
       case 'searching': return 'Checking for existing records...';
       case 'matches': return `Found ${matches.length} possible ${matches.length === 1 ? 'match' : 'matches'}`;
       case 'enriching':
@@ -460,8 +460,8 @@ export function AddPersonWizard({
                 )}
               >
                 <Users className="h-8 w-8 text-info" />
-                <span className="text-sm font-semibold text-foreground">Contact</span>
-                <span className="text-xs text-muted-foreground text-center">Client, hiring manager, BD lead</span>
+                <span className="text-sm font-semibold text-foreground">Client</span>
+                <span className="text-xs text-muted-foreground text-center">Hiring manager, BD lead, decision-maker</span>
               </button>
             </div>
           )}
@@ -471,7 +471,7 @@ export function AddPersonWizard({
             <div className="flex flex-col items-center py-12 gap-4">
               <Loader2 className="h-10 w-10 animate-spin text-accent" />
               <p className="text-sm text-muted-foreground">
-                Checking for existing {personType}s...
+                Checking for existing {personType === 'contact' ? 'clients' : 'candidates'}...
               </p>
             </div>
           )}
@@ -579,7 +579,7 @@ export function AddPersonWizard({
                   )}
                 >
                   <Users className="h-4 w-4" />
-                  Contact
+                  Client
                 </button>
               </div>
 
