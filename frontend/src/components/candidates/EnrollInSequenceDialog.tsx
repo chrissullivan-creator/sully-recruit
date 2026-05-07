@@ -154,8 +154,48 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       }
 
       if (enrollments.length > 0) {
-        const { error } = await supabase.from('sequence_enrollments').insert(enrollments);
+        // Insert + return ids so we can fan-out the enrollment-init
+        // Trigger.dev task per row. Without that hand-off no
+        // sequence_step_logs get pre-scheduled and the sequence sits
+        // dormant — exactly what just bit the 27 enrollments on
+        // Brian's sequence.
+        const { data: inserted, error } = await supabase
+          .from('sequence_enrollments')
+          .insert(enrollments)
+          .select('id, sequence_id, candidate_id, contact_id, enrolled_by, account_id');
         if (error) throw error;
+
+        const session = (await supabase.auth.getSession()).data.session;
+        const authToken = session?.access_token;
+        const initResults = await Promise.allSettled(
+          (inserted ?? []).map(async (row: any) => {
+            const resp = await fetch('/api/trigger-sequence-enroll', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+              },
+              body: JSON.stringify({
+                enrollment_id: row.id,
+                sequence_id: row.sequence_id,
+                candidate_id: row.candidate_id,
+                contact_id: row.contact_id,
+                enrolled_by: row.enrolled_by,
+                account_id: row.account_id,
+              }),
+            });
+            if (!resp.ok) {
+              const detail = await resp.text().catch(() => '');
+              throw new Error(`enroll-init ${resp.status}: ${detail.slice(0, 120)}`);
+            }
+          }),
+        );
+        const initFailed = initResults.filter((r) => r.status === 'rejected').length;
+        if (initFailed > 0) {
+          // eslint-disable-next-line no-console
+          console.error('Some enrollment-init triggers failed', initResults);
+          toast.warning(`${initFailed} of ${initResults.length} enrollments didn't pre-schedule — re-enroll those`);
+        }
       }
 
       const parts: string[] = [];
