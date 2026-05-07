@@ -82,14 +82,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── list_projects ─────────────────────────────────────────────
-    // Unipile v2 uses different path names across builds:
-    //   newer: /linkedin/hiring-projects  (matches the docs reference
-    //          `linkedincontroller_gethiringprojects`)
-    //   older: /linkedin/recruiter/projects
-    // Try both so Source keeps working through Unipile rollouts.
+    // Unipile v2 path probe — the docs name the controller "recruiter"
+    // and the action "hiringProjectList" / "pipelineCandidates" /
+    // "hiringProject" (createrecruiterhiringproject), so the canonical
+    // path is /linkedin/recruiter/hiring-projects with pipeline-
+    // candidates under each project. We probe newest → oldest so we
+    // keep working through Unipile path rollouts.
     if (action === "list_projects") {
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
       const candidatePaths = [
+        `linkedin/recruiter/hiring-projects`,
         `linkedin/hiring-projects`,
         `linkedin/recruiter/projects`,
       ];
@@ -121,6 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
       const projectBases = [
+        `linkedin/recruiter/hiring-projects`,
         `linkedin/hiring-projects`,
         `linkedin/recruiter/projects`,
       ];
@@ -149,33 +152,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // 2) Applicants — reuse whichever base served project detail; fall
-      //    back to scanning both if the detail probe also failed.
+      // 2) Candidates — try the new v2 GET pipeline-candidates path
+      //    first (matches the docs reference `getrecruiterpipelinecandidates`),
+      //    fall back to the legacy POST talent-pool/applicants for older
+      //    Unipile builds.
       const applicantBases = workingBase ? [workingBase] : projectBases;
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
+      const variants: Array<{
+        suffix: string;
+        method: "GET" | "POST";
+        body?: string;
+      }> = [
+        { suffix: `pipeline-candidates?limit=100&offset=${offset}`, method: "GET" },
+        {
+          suffix: `talent-pool/applicants`,
+          method: "POST",
+          body: JSON.stringify({ limit: 100, offset }),
+        },
+      ];
       let applicants: any[] = [];
-      for (const base of applicantBases) {
-        const applicantsUrl = `${v2Base}/${acct}/${base}/${projectId}/talent-pool/applicants`;
-        try {
-          const r = await fetch(applicantsUrl, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ limit: 100, offset }),
-          });
-          const t: any = { url: applicantsUrl, method: "POST", status: r.status, ok: r.ok };
-          if (r.ok) {
-            const d = await r.json();
-            applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
-            t.count = applicants.length;
-            workingBase = base;
+      outer: for (const base of applicantBases) {
+        for (const v of variants) {
+          const applicantsUrl = `${v2Base}/${acct}/${base}/${projectId}/${v.suffix}`;
+          try {
+            const r = await fetch(applicantsUrl, {
+              method: v.method,
+              headers: v.method === "POST"
+                ? { ...headers, "Content-Type": "application/json" }
+                : headers,
+              body: v.body,
+            });
+            const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
+            if (r.ok) {
+              const d = await r.json();
+              applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
+              t.count = applicants.length;
+              workingBase = base;
+              tries.push(t);
+              break outer;
+            } else {
+              t.error = (await r.text()).slice(0, 500);
+            }
             tries.push(t);
-            break;
-          } else {
-            t.error = (await r.text()).slice(0, 500);
+          } catch (err: any) {
+            tries.push({ url: applicantsUrl, method: v.method, ok: false, error: err.message });
           }
-          tries.push(t);
-        } catch (err: any) {
-          tries.push({ url: applicantsUrl, method: "POST", ok: false, error: err.message });
         }
       }
 
@@ -210,7 +231,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!job_id || !applicant_id) {
         return res.status(400).json({ error: "Missing job_id or applicant_id" });
       }
-      const projectBases = [`linkedin/hiring-projects`, `linkedin/recruiter/projects`];
+      const projectBases = [
+        `linkedin/recruiter/hiring-projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/recruiter/projects`,
+      ];
       const tries: Array<{ url: string; status: number; bodyPrefix?: string }> = [];
       for (const base of projectBases) {
         const url =
