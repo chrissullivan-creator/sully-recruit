@@ -88,11 +88,19 @@ function firstNonEmpty(arr: any[]): string {
  * candidate schema. Defensive about field names — Eden has shifted shapes
  * more than once.
  */
+function asArray(v: any): any[] {
+  if (Array.isArray(v)) return v;
+  if (v == null) return [];
+  // Affinda occasionally returns a single object instead of an array
+  // (e.g. one-job résumés with `work_experience: { ... }`). Wrap it.
+  return [v];
+}
+
 function mapAffindaOutput(output: any): ParsedResume {
   const ed = output?.extracted_data ?? output ?? {};
   const personal = ed.personal_infos ?? ed.personalInfos ?? {};
-  const work = (ed.work_experience ?? ed.workExperience ?? ed.experiences ?? []) as any[];
-  const skillsRaw = (ed.skills ?? []) as any[];
+  const work = asArray(ed.work_experience ?? ed.workExperience ?? ed.experiences);
+  const skillsRaw = asArray(ed.skills);
   const name = personal.name ?? {};
 
   let firstName = name.first_name ?? name.firstName ?? name.first ?? "";
@@ -106,9 +114,9 @@ function mapAffindaOutput(output: any): ParsedResume {
     }
   }
 
-  const mails = personal.mails ?? personal.emails ?? ed.emails ?? [];
-  const phones = personal.phones ?? ed.phones ?? [];
-  const urls: any[] = personal.urls ?? ed.urls ?? [];
+  const mails = asArray(personal.mails ?? personal.emails ?? ed.emails);
+  const phones = asArray(personal.phones ?? ed.phones);
+  const urls: any[] = asArray(personal.urls ?? ed.urls);
 
   let linkedinUrl = "";
   for (const u of urls) {
@@ -164,11 +172,11 @@ function extractRawTextFromOutput(output: any): string {
   if (Array.isArray(ed.summary)) lines.push(...ed.summary);
   else if (typeof ed.summary === "string") lines.push(ed.summary);
 
-  for (const w of ed.work_experience ?? ed.workExperience ?? []) {
+  for (const w of asArray(ed.work_experience ?? ed.workExperience)) {
     lines.push([w?.title, w?.company].filter(Boolean).join(" — "));
     if (w?.description) lines.push(String(w.description));
   }
-  for (const e of ed.education ?? []) {
+  for (const e of asArray(ed.education)) {
     lines.push([e?.establishment, e?.title, e?.dates?.from?.text].filter(Boolean).join(" · "));
   }
   return lines.join("\n").slice(0, 16_000);
