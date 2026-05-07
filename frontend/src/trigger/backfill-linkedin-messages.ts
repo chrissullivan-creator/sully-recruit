@@ -150,18 +150,15 @@ export const backfillLinkedinMessages = schedules.task({
       if (!chatId) continue;
 
       try {
-        // Detect Recruiter InMail vs Classic from per-chat signals only.
-        // Account type alone isn't a signal: Recruiter seats also handle
-        // Classic DMs through the same Unipile account, so falling back
-        // to acctType would tag every Chris/Nancy chat as Recruiter.
-        const folders = (chat.folder ?? []) as string[];
+        // Per Unipile v2 SDK chat object: content_type='inmail' and
+        // folder='INBOX_LINKEDIN_RECRUITER' are the canonical InMail
+        // markers. account_type alone is NOT a signal — a Recruiter
+        // seat handles Classic DMs too.
+        const folders = ((chat.folder ?? []) as string[]).map((f) => String(f).toUpperCase());
         const contentType = String(chat.content_type ?? "").toLowerCase();
-        const subject = String(chat.subject ?? "").trim();
         const isInMail =
-          folders.includes("INBOX_LINKEDIN_RECRUITER") ||
-          folders.some((f) => String(f).toUpperCase().includes("INMAIL")) ||
           contentType === "inmail" ||
-          !!subject;
+          folders.includes("INBOX_LINKEDIN_RECRUITER");
         const channel = canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin");
 
         const attendees: any[] = chat.attendees ?? chat.members ?? [];

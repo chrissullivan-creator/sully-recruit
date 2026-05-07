@@ -240,50 +240,31 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
-  // Detect LinkedIn variant (Classic vs Recruiter InMail).
+  // Detect Recruiter InMail vs Classic DM using the canonical Unipile
+  // v2 signals from the chat object (per the unipile-node-sdk types):
+  //   chat.content_type === 'inmail'                         → InMail
+  //   chat.folder includes 'INBOX_LINKEDIN_RECRUITER'        → InMail
   //
-  // Recruiters use a single Unipile account that handles BOTH their
-  // Classic LinkedIn DMs AND their Recruiter InMails — so we can't
-  // route based on account_type alone or every Chris message ends up
-  // in the Recruiter tab. Look at per-message signals first; only use
-  // account_type as a last resort, and only for Sales Nav.
-  //
-  // InMail signals (any one wins):
-  //   - message_type === "INMAIL"
-  //   - is_inmail === true
-  //   - content_type === "inmail"
-  //   - folder includes "INBOX_LINKEDIN_RECRUITER" or "INMAIL"
-  //   - provider_type includes "recruiter"
-  //   - chat has a subject (Classic DMs are subject-less, InMails have one)
-  const folderField = String(
-    messageData.folder ?? messageData.chat?.folder ?? "",
-  ).toUpperCase();
-  const providerType = String(
-    messageData.provider_type ??
-    messageData.chat?.provider_type ??
-    messageData.account_type ??
-    event.account_type ??
-    "",
-  ).toLowerCase();
-  const messageType = String(
-    messageData.message_type ?? messageData.type ?? "",
-  ).toUpperCase();
+  // We don't fall back to subject — Classic DMs CAN carry a subject
+  // (group chats etc.) and InMails sometimes don't surface one in the
+  // webhook payload. We don't fall back to integration_account.account_type
+  // either: a Recruiter seat handles BOTH InMails AND Classic DMs, so
+  // tagging every Chris message based on his account type would (and did)
+  // dump every Classic chat into the Recruiter tab.
+  const chat = messageData.chat ?? {};
   const contentType = String(
-    messageData.content_type ?? messageData.chat?.content_type ?? "",
+    messageData.content_type ?? chat.content_type ?? "",
   ).toLowerCase();
-  const chatSubject = String(messageData.chat?.subject ?? messageData.subject ?? "").trim();
+  const folders: string[] = []
+    .concat(messageData.folder ?? [])
+    .concat(chat.folder ?? [])
+    .map((f: any) => String(f).toUpperCase());
 
   const isInMail =
-    messageType === "INMAIL" ||
-    messageData.is_inmail === true ||
     contentType === "inmail" ||
-    folderField.includes("INMAIL") ||
-    folderField.includes("LINKEDIN_RECRUITER") ||
-    providerType.includes("recruiter") ||
-    !!chatSubject;
+    folders.includes("INBOX_LINKEDIN_RECRUITER");
 
   const rawChannel = isInMail ? "linkedin_recruiter" : "linkedin";
-  // Collapse to the canonical bucket used everywhere else.
   const channel = canonicalChannel(rawChannel);
 
   if (!senderId) {

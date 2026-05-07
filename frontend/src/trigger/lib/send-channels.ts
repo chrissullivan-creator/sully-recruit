@@ -566,7 +566,13 @@ export async function sendLinkedIn(
       const fd = new FormData();
       fd.append("attendees_ids", providerId);
       fd.append("text", body);
-      if (isInMailChannel) fd.append("message_type", "INMAIL");
+      // Per Unipile v2 SDK (chat-start.types.ts): use the `linkedin`
+      // field, not a top-level message_type.
+      //   InMail (Recruiter seat):  { linkedin: { api: 'recruiter' } }
+      //   Classic DM:               omit linkedin (defaults to classic)
+      if (isInMailChannel) {
+        fd.append("linkedin", JSON.stringify({ api: "recruiter" }));
+      }
       for (const { blob, name } of blobs) {
         fd.append("attachments", blob, name);
       }
@@ -595,7 +601,9 @@ export async function sendLinkedIn(
   }
 
   const sendPayload: any = { attendees_ids: [providerId], text: body };
-  if (isInMailChannel) sendPayload.message_type = "INMAIL";
+  // Per Unipile v2 SDK: route InMail through linkedin.api='recruiter'.
+  // Classic DMs need no extras (default).
+  if (isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
 
   try {
     const data: any = await unipileFetch(
