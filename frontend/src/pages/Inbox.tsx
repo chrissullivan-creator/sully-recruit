@@ -18,6 +18,7 @@ import {
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
+  CheckSquare, Square, MailOpen, Archive,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -115,11 +116,17 @@ const CHANNEL_COLORS: Record<string, string> = {
 function ThreadItem({
   thread,
   isSelected,
+  isChecked,
+  selectionActive,
   onClick,
+  onToggleCheck,
 }: {
   thread: InboxThread;
   isSelected: boolean;
+  isChecked: boolean;
+  selectionActive: boolean;
   onClick: () => void;
+  onToggleCheck: (shiftKey: boolean) => void;
 }) {
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
   const entityName = thread.candidate_name || thread.contact_name;
@@ -133,15 +140,45 @@ function ThreadItem({
   const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
 
   return (
-    <button
-      onClick={onClick}
+    <div
       className={cn(
-        'w-full text-left px-4 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors relative',
+        'group w-full text-left px-3 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
         isSelected && 'bg-accent/8 border-l-2 border-l-accent',
-        !thread.is_read && !isSelected && 'bg-muted/20'
+        isChecked && 'bg-accent/12',
+        !thread.is_read && !isSelected && !isChecked && 'bg-muted/20'
       )}
+      onClick={(e) => {
+        // Cmd/Ctrl-click toggles selection; plain click opens
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          onToggleCheck(e.shiftKey);
+          return;
+        }
+        onClick();
+      }}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2">
+        {/* Checkbox column — always reserves space when selection is active so
+            the rest of the row doesn't jump around mid-select. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCheck(e.shiftKey);
+          }}
+          className={cn(
+            'shrink-0 mt-1 transition-opacity',
+            selectionActive || isChecked
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-70',
+          )}
+          title="Select"
+        >
+          {isChecked ? (
+            <CheckSquare className="h-4 w-4 text-accent" />
+          ) : (
+            <Square className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
         <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
           <Icon className="h-4 w-4" />
         </div>
@@ -187,7 +224,7 @@ function ThreadItem({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -1211,6 +1248,99 @@ const ADMIN_EMAILS = [
   'emeraldrecruit@theemeraldrecruitinggroup.com',
 ];
 
+// ---------- Bulk Action Bar ----------
+function BulkActionBar({
+  count,
+  filteredCount,
+  allFilteredChecked,
+  busy,
+  onSelectAll,
+  onClear,
+  onMarkRead,
+  onMarkUnread,
+  onArchive,
+  onDelete,
+}: {
+  count: number;
+  filteredCount: number;
+  allFilteredChecked: boolean;
+  busy: boolean;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onMarkRead: () => void;
+  onMarkUnread: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="px-3 py-2 border-b border-border/60 bg-accent/8 flex items-center gap-1.5">
+      <button
+        onClick={onClear}
+        title="Clear selection"
+        className="text-muted-foreground hover:text-foreground"
+      >
+        <XIcon className="h-3.5 w-3.5" />
+      </button>
+      <span className="text-xs font-medium text-foreground">
+        {count} selected
+      </span>
+      {!allFilteredChecked && filteredCount > count && (
+        <button
+          onClick={onSelectAll}
+          className="text-[11px] text-accent hover:underline ml-1"
+        >
+          Select all {filteredCount}
+        </button>
+      )}
+      <div className="flex-1" />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onMarkRead}
+        disabled={busy}
+        title="Mark read"
+        className="h-7 px-2"
+      >
+        <MailOpen className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onMarkUnread}
+        disabled={busy}
+        title="Mark unread"
+        className="h-7 px-2"
+      >
+        <Mail className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onArchive}
+        disabled={busy}
+        title="Archive"
+        className="h-7 px-2"
+      >
+        <Archive className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onDelete}
+        disabled={busy}
+        title="Delete"
+        className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+      >
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5" />
+        )}
+      </Button>
+    </div>
+  );
+}
+
 // ---------- Main Page ----------
 export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -1218,6 +1348,14 @@ export default function Inbox() {
   const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
+  // Bulk-select state: thread IDs the user has checked. The toolbar
+  // appears whenever this is non-empty. lastCheckedId enables shift-click
+  // range selection on long inbox lists.
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [lastCheckedId, setLastCheckedId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const queryClient = useQueryClient();
 
   // Get current user for permission check
   const { data: currentUser } = useQuery({
@@ -1450,6 +1588,75 @@ export default function Inbox() {
             </div>
           </div>
 
+          {/* Bulk-action toolbar — only shown while at least one row is checked. */}
+          {checkedIds.size > 0 && (
+            <BulkActionBar
+              count={checkedIds.size}
+              filteredCount={filtered.length}
+              allFilteredChecked={
+                filtered.length > 0 &&
+                filtered.every((t) => checkedIds.has(t.id))
+              }
+              busy={bulkBusy}
+              onSelectAll={() => {
+                setCheckedIds(new Set(filtered.map((t) => t.id)));
+              }}
+              onClear={() => {
+                setCheckedIds(new Set());
+                setLastCheckedId(null);
+              }}
+              onMarkRead={async () => {
+                setBulkBusy(true);
+                const ids = Array.from(checkedIds);
+                const { error } = await supabase
+                  .from('conversations')
+                  .update({ is_read: true } as any)
+                  .in('id', ids);
+                setBulkBusy(false);
+                if (error) {
+                  toast.error(`Mark read failed: ${error.message}`);
+                  return;
+                }
+                toast.success(`${ids.length} marked read`);
+                setCheckedIds(new Set());
+                invalidateCommsScope(queryClient);
+              }}
+              onMarkUnread={async () => {
+                setBulkBusy(true);
+                const ids = Array.from(checkedIds);
+                const { error } = await supabase
+                  .from('conversations')
+                  .update({ is_read: false } as any)
+                  .in('id', ids);
+                setBulkBusy(false);
+                if (error) {
+                  toast.error(`Mark unread failed: ${error.message}`);
+                  return;
+                }
+                toast.success(`${ids.length} marked unread`);
+                setCheckedIds(new Set());
+                invalidateCommsScope(queryClient);
+              }}
+              onArchive={async () => {
+                setBulkBusy(true);
+                const ids = Array.from(checkedIds);
+                const { error } = await supabase
+                  .from('conversations')
+                  .update({ is_archived: true } as any)
+                  .in('id', ids);
+                setBulkBusy(false);
+                if (error) {
+                  toast.error(`Archive failed: ${error.message}`);
+                  return;
+                }
+                toast.success(`${ids.length} archived`);
+                setCheckedIds(new Set());
+                invalidateCommsScope(queryClient);
+              }}
+              onDelete={() => setConfirmBulkDelete(true)}
+            />
+          )}
+
           {/* Thread list */}
           <ScrollArea className="flex-1">
             {isLoading ? (
@@ -1471,7 +1678,28 @@ export default function Inbox() {
                     key={thread.id}
                     thread={thread}
                     isSelected={selectedId === thread.id}
+                    isChecked={checkedIds.has(thread.id)}
+                    selectionActive={checkedIds.size > 0}
                     onClick={() => setSelectedId(thread.id)}
+                    onToggleCheck={(shiftKey) => {
+                      const next = new Set(checkedIds);
+                      // Shift-click: select range from lastCheckedId to this id.
+                      if (shiftKey && lastCheckedId) {
+                        const startIdx = filtered.findIndex((t) => t.id === lastCheckedId);
+                        const endIdx = filtered.findIndex((t) => t.id === thread.id);
+                        if (startIdx >= 0 && endIdx >= 0) {
+                          const [a, b] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+                          for (let i = a; i <= b; i++) next.add(filtered[i].id);
+                          setCheckedIds(next);
+                          setLastCheckedId(thread.id);
+                          return;
+                        }
+                      }
+                      if (next.has(thread.id)) next.delete(thread.id);
+                      else next.add(thread.id);
+                      setCheckedIds(next);
+                      setLastCheckedId(thread.id);
+                    }}
                   />
                 ))}
               </div>
@@ -1484,6 +1712,62 @@ export default function Inbox() {
           <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
         </div>
       </div>
+
+      {/* Bulk-delete confirm */}
+      <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {checkedIds.size} conversation{checkedIds.size === 1 ? '' : 's'}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the conversation thread and every
+              message inside it. There's no undo. Linked candidates and
+              contacts are not affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={bulkBusy}
+              onClick={async (e) => {
+                e.preventDefault();
+                setBulkBusy(true);
+                try {
+                  const ids = Array.from(checkedIds);
+                  const { data: { session } } = await supabase.auth.getSession();
+                  const token = session?.access_token;
+                  const res = await fetch('/api/delete-conversation', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ conversation_ids: ids }),
+                  });
+                  if (!res.ok) {
+                    const j = await res.json().catch(() => ({}));
+                    throw new Error(j.error || `HTTP ${res.status}`);
+                  }
+                  if (selectedId && checkedIds.has(selectedId)) setSelectedId(null);
+                  setCheckedIds(new Set());
+                  setConfirmBulkDelete(false);
+                  toast.success(`${ids.length} deleted`);
+                  invalidateCommsScope(queryClient);
+                } catch (err: any) {
+                  toast.error(`Delete failed: ${err.message}`);
+                } finally {
+                  setBulkBusy(false);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {bulkBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

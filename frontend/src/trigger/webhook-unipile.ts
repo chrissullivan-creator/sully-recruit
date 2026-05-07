@@ -240,24 +240,56 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
-  // Detect LinkedIn variant (classic / Recruiter / Sales Navigator).
-  // Primary: check event metadata from Unipile.
-  // Fallback: look up the integration account's account_type by unipile_account_id,
-  // since Unipile event metadata is often missing the provider type.
+  // Detect LinkedIn variant (Classic vs Recruiter InMail).
+  //
+  // Recruiters use a single Unipile account that handles BOTH their
+  // Classic LinkedIn DMs AND their Recruiter InMails — so we can't
+  // route based on account_type alone or every Chris message ends up
+  // in the Recruiter tab. Look at per-message signals first; only use
+  // account_type as a last resort, and only for Sales Nav.
+  //
+  // InMail signals (any one wins):
+  //   - message_type === "INMAIL"
+  //   - is_inmail === true
+  //   - content_type === "inmail"
+  //   - folder includes "INBOX_LINKEDIN_RECRUITER" or "INMAIL"
+  //   - provider_type includes "recruiter"
+  //   - chat has a subject (Classic DMs are subject-less, InMails have one)
+  const folderField = String(
+    messageData.folder ?? messageData.chat?.folder ?? "",
+  ).toUpperCase();
   const providerType = String(
     messageData.provider_type ??
     messageData.chat?.provider_type ??
     messageData.account_type ??
-    messageData.folder ??
     event.account_type ??
-    ""
+    "",
   ).toLowerCase();
-  let rawChannel = providerType.includes("sales")
-    ? "linkedin_sales_nav"
-    : providerType.includes("recruiter")
-      ? "linkedin_recruiter"
+  const messageType = String(
+    messageData.message_type ?? messageData.type ?? "",
+  ).toUpperCase();
+  const contentType = String(
+    messageData.content_type ?? messageData.chat?.content_type ?? "",
+  ).toLowerCase();
+  const chatSubject = String(messageData.chat?.subject ?? messageData.subject ?? "").trim();
+
+  const isInMail =
+    messageType === "INMAIL" ||
+    messageData.is_inmail === true ||
+    contentType === "inmail" ||
+    folderField.includes("INMAIL") ||
+    folderField.includes("LINKEDIN_RECRUITER") ||
+    providerType.includes("recruiter") ||
+    !!chatSubject;
+
+  let rawChannel = isInMail
+    ? "linkedin_recruiter"
+    : providerType.includes("sales") || folderField.includes("SALES_NAV")
+      ? "linkedin_sales_nav"
       : "linkedin";
-  // If event metadata didn't classify it, check the integration account type
+
+  // Sales Nav can still fall through to account_type since it's a
+  // dedicated account product, not a feature that overlaps Classic.
   if (rawChannel === "linkedin") {
     const eventAccountId = messageData.account_id ?? event.account_id ?? messageData.chat?.account_id;
     if (eventAccountId) {
@@ -266,8 +298,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         .select("account_type")
         .eq("unipile_account_id", eventAccountId)
         .maybeSingle();
-      if (ia?.account_type === "linkedin_recruiter") rawChannel = "linkedin_recruiter";
-      else if (ia?.account_type === "sales_navigator") rawChannel = "linkedin_sales_nav";
+      if (ia?.account_type === "sales_navigator") rawChannel = "linkedin_sales_nav";
     }
   }
   // Collapse to the 3-bucket model used everywhere else (linkedin /
