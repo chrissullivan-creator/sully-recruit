@@ -190,7 +190,7 @@ export function hydrateBranchesFromNodes(nodeRows?: NodeRowLike[] | null, sequen
             branchId: "branch_a" as const,
             branchStepOrder: index + 1,
             nodeOrder: index + 1,
-            actions: [mapActionRow(step)],
+            actions: [mapActionRow(step as unknown as Record<string, unknown>)],
           })),
       },
       { id: "branch_b", label: getBranchLabel("branch_b"), steps: [] },

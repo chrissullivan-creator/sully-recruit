@@ -343,10 +343,12 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
               </div>
             </div>
             <div className="space-y-1.5">
-              {entity.email && (
+              {((entity as any).personal_email || (entity as any).work_email || (entity as any).primary_email) && (
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="truncate">{entity.email}</span>
+                  <span className="truncate">
+                    {(entity as any).personal_email || (entity as any).work_email || (entity as any).primary_email}
+                  </span>
                 </div>
               )}
               {entity.phone && (

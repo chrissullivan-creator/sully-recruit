@@ -9,6 +9,7 @@ import {
   createBranchStep,
   createEmptyBranches,
   createDefaultAction,
+  flattenBranchSteps,
   normalizeBranches,
   type BranchStepData,
   type SequenceBranch,

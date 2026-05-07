@@ -1,13 +1,12 @@
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StopCircle } from "lucide-react";
 
-interface EndNodeData {
-  label: string;
-}
+type EndNodeData = { label: string } & Record<string, unknown>;
+type EndNodeType = Node<EndNodeData, "end">;
 
-function EndNodeComponent({ data }: NodeProps<EndNodeData>) {
+function EndNodeComponent({ data }: NodeProps<EndNodeType>) {
   return (
     <div className="min-w-[150px]">
       <Handle type="target" position={Position.Top} className="!bg-slate-400" />

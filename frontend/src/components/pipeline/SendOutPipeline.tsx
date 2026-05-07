@@ -111,8 +111,10 @@ export const SendOutPipeline = ({
 
   const handleRemove = async (recordId: string) => {
     try {
+      // Was `send_out_board` (a view that no longer exists at runtime).
+      // Delete from the underlying send_outs table instead.
       const { error } = await supabase
-        .from('send_out_board')
+        .from('send_outs')
         .delete()
         .eq('id', recordId);
 

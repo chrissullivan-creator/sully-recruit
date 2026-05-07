@@ -59,7 +59,7 @@ export const resumeIngestion = task({
     // resume. shared extractor handles PDF/DOCX/DOC/TXT; the parser will
     // re-extract internally too — that's fine, it's a tiny cost vs. the
     // value of skipping junk.
-    const sniffText = await extractResumeText(fileBytes, fileName, { log: logger });
+    const sniffText = await extractResumeText(fileBytes, fileName);
     if (!looksLikeResume(sniffText)) {
       logger.warn("File does not look like a resume; skipping AI parse", {
         fileName, textLength: sniffText.length,
