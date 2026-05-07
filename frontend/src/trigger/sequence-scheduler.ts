@@ -84,12 +84,20 @@ export const sequenceEnrollmentInit = task({
     let scheduled = 0;
     let pendingConnection = 0;
 
-    // Pre-schedule every action across all nodes
+    // Each action's `base_delay_hours` is the gap *between* this step and
+    // the previous one — not from enrollment. We carry the previous step's
+    // computed send time forward and use it as the start time for the next
+    // step's delay calculation. This matches how recruiters think about
+    // sequences ("wait 2h after the email before the InMail") and prevents
+    // the bug where step 3 with d=2h would fire BEFORE step 2 with d=3h.
+    let prevSendTime = enrolledAt;
     for (const node of orderedNodes) {
       const actions = (node as any).sequence_actions || [];
       for (const action of actions) {
         if (action.channel === "linkedin_message") {
-          // Park as pending_connection — will be scheduled when connection is accepted
+          // Park as pending_connection — will be scheduled when connection is accepted.
+          // Don't advance prevSendTime; the webhook handler will use 4h post-accept
+          // and downstream steps stay anchored to the last scheduled action.
           await supabase.from("sequence_step_logs").insert({
             enrollment_id: payload.enrollmentId,
             action_id: action.id,
@@ -100,9 +108,10 @@ export const sequenceEnrollmentInit = task({
           });
           pendingConnection++;
         } else {
-          // Calculate send time using business-hours model
+          // Calculate send time using business-hours model, anchored to the
+          // previous step's send time (cumulative).
           const scheduledAt = await calculateSendTime(supabase, {
-            startTime: enrolledAt,
+            startTime: prevSendTime,
             delayHours: Number(action.base_delay_hours) || 0,
             delayMinutes: action.delay_interval_minutes || 0,
             jiggleMinutes: action.jiggle_minutes || 0,
@@ -120,6 +129,7 @@ export const sequenceEnrollmentInit = task({
             scheduled_at: scheduledAt.toISOString(),
             status: "scheduled",
           });
+          prevSendTime = scheduledAt;
           scheduled++;
         }
       }

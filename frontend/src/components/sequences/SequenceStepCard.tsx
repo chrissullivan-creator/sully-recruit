@@ -262,7 +262,7 @@ export function SequenceStepCard({
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <Label className="text-[10px]" title="Hours of delay counted within the send window (not calendar hours)">Delay (window hrs)</Label>
+                  <Label className="text-[10px]" title="Hours to wait AFTER the previous step before sending this one. Counted within the send window, not calendar hours. Step 1 uses this from enrollment time.">Wait (hrs after prev step)</Label>
                   <Input
                     type="number"
                     min={0}
@@ -272,7 +272,7 @@ export function SequenceStepCard({
                   />
                 </div>
                 <div>
-                  <Label className="text-[10px]" title="Additional minutes to add on top of base delay">+ delay (min)</Label>
+                  <Label className="text-[10px]" title="Additional minutes to add on top of the wait above">+ Wait (min)</Label>
                   <Select
                     value={String(action.delayIntervalMinutes)}
                     onValueChange={(v) => updateAction(i, "delayIntervalMinutes", Number(v))}
