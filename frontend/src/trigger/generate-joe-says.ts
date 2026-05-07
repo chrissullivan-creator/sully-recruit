@@ -278,7 +278,7 @@ Sentiment: ${candidate.last_sequence_sentiment ?? "—"}`);
     .from("resumes")
     .select("ai_summary, parsed_json")
     .eq("candidate_id", candidateId)
-    .eq("parse_status", "completed")
+    .eq("parsing_status", "completed")
     .order("created_at", { ascending: false })
     .limit(1);
 

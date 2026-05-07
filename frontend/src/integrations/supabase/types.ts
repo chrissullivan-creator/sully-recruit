@@ -151,7 +151,7 @@ export type Database = {
           id: string
           mime_type: string | null
           parse_error: string | null
-          parse_status: string | null
+          parsing_status: string | null
           parsed_json: Json | null
           raw_text: string | null
           source: string | null
@@ -168,7 +168,7 @@ export type Database = {
           id?: string
           mime_type?: string | null
           parse_error?: string | null
-          parse_status?: string | null
+          parsing_status?: string | null
           parsed_json?: Json | null
           raw_text?: string | null
           source?: string | null
@@ -185,7 +185,7 @@ export type Database = {
           id?: string
           mime_type?: string | null
           parse_error?: string | null
-          parse_status?: string | null
+          parsing_status?: string | null
           parsed_json?: Json | null
           raw_text?: string | null
           source?: string | null
