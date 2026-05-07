@@ -4,7 +4,7 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { resumeIngestion } from "./resume-ingestion";
-import { matchPersonByEmail } from "./lib/match-person-by-email";
+import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -250,7 +250,8 @@ async function processResumesInboxEmail(
         first_name: firstNameGuess || null,
         last_name: lastNameGuess || null,
         full_name: senderDisplay || senderEmail,
-        email: senderEmail,
+        // Plain `email` retired — sender goes to personal/work via classifier.
+        ...classifyEmail(senderEmail),
         status: "new",
         source: "resumes_inbox",
         source_detail: recipientEmail,

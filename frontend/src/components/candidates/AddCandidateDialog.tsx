@@ -121,7 +121,6 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             first_name: firstName,
             last_name: lastName,
             full_name: `${firstName} ${lastName}`.trim() || null,
-            email: normalizeEmail(email),
             ...classifyEmail(normalizeEmail(email)),
             phone: phone || null,
             current_title: currentTitle || null,

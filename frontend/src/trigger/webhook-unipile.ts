@@ -5,6 +5,7 @@ import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction
 import { stopEnrollment } from "./sequence-scheduler";
 import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
 import { canonicalChannel } from "./lib/unipile-v2";
+import { matchPersonByEmail } from "./lib/match-person-by-email";
 
 interface UnipileWebhookPayload {
   body: {
@@ -120,10 +121,15 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   if (isBounce) {
     const failed = extractFailedRecipient(bodyForSearch);
     if (failed) {
-      const [{ data: cand }, { data: cont }] = await Promise.all([
-        supabase.from("people").select("id").eq("email", failed).maybeSingle(),
-        supabase.from("contacts").select("id").eq("email", failed).maybeSingle(),
-      ]);
+      // Multi-email match — bounce on a work address still flags the
+      // person even if their primary on file is personal.
+      const bouncedMatch = await matchPersonByEmail(supabase, failed);
+      const cand = bouncedMatch && bouncedMatch.entityType !== "contact"
+        ? { id: bouncedMatch.entityId }
+        : null;
+      const cont = bouncedMatch?.entityType === "contact"
+        ? { id: bouncedMatch.entityId }
+        : null;
       const reason = (subject || "ndr").slice(0, 200);
       const now = new Date().toISOString();
       if (cand?.id) {
@@ -152,16 +158,15 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     }
   }
 
-  // ── Match sender to candidate or contact ──────────────────────
-  const [{ data: cand }, { data: cont }] = await Promise.all([
-    supabase.from("people").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
-    supabase.from("contacts").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
-  ]);
-  const match = cand
-    ? { entityId: cand.id, entityType: "candidate", entityColumn: "candidate_id" as const }
-    : cont
-      ? { entityId: cont.id, entityType: "contact", entityColumn: "contact_id" as const }
-      : null;
+  // ── Match sender to candidate or contact (multi-email, all 3 columns) ─
+  const senderMatch = await matchPersonByEmail(supabase, senderEmail);
+  const match = senderMatch
+    ? {
+        entityId: senderMatch.entityId,
+        entityType: senderMatch.entityType,
+        entityColumn: senderMatch.entityColumn,
+      }
+    : null;
   if (!match) {
     logger.info("Unipile email: no entity match", { senderEmail });
     return { action: "no_match", senderEmail };

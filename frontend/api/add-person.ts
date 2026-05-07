@@ -1,6 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 
+/** Mirror of the Postgres is_consumer_email_domain() helper so the
+ *  client-side resolver matches what the contacts INSTEAD-OF trigger
+ *  would do server-side. Add new providers here AND in the SQL fn. */
+const CONSUMER_EMAIL_DOMAINS = /^(gmail|yahoo|hotmail|outlook|icloud|me|mac|aol|msn|live|protonmail|proton|fastmail|comcast|verizon|sbcglobal|att|optonline|ymail|hush|gmx|zoho|tutanota|cox|charter|earthlink|bellsouth|hanmail|naver)\.[a-z.]+$/i;
+
+function isConsumerDomain(addr: string): boolean {
+  const at = addr.indexOf("@");
+  if (at < 0) return false;
+  return CONSUMER_EMAIL_DOMAINS.test(addr.slice(at + 1).toLowerCase());
+}
+
 /**
  * POST /api/add-person
  *
@@ -79,15 +90,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq("id", existing.id);
       if (upErr) throw upErr;
     } else {
+      // Plain `email` is gone — figure out which typed column the
+      // submitted address belongs in if the caller didn't already
+      // pass personal/work directly. Consumer-domain → personal,
+      // anything else → work.
+      let resolvedPersonal = personalEmail;
+      let resolvedWork = workEmail;
+      if (email && !resolvedPersonal && !resolvedWork) {
+        if (isConsumerDomain(email)) resolvedPersonal = email;
+        else resolvedWork = email;
+      }
+
       const payload: Record<string, any> = {
         first_name: data.first_name.trim(),
         last_name: data.last_name.trim(),
         full_name: fullName,
-        // Keep the bare `email` populated for now — it doubles as the
-        // primary preferred-address until plain `email` gets retired.
-        email: email,
-        personal_email: personalEmail,
-        work_email: workEmail,
+        personal_email: resolvedPersonal,
+        work_email: resolvedWork,
         phone: data.phone?.trim() || null,
         linkedin_url: data.linkedin_url?.trim() || null,
         roles: [role],

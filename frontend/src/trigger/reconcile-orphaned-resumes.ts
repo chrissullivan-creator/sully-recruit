@@ -2,7 +2,7 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getEdenAIKey } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
-import { matchPersonByEmail } from "./lib/match-person-by-email";
+import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -303,7 +303,7 @@ export const reconcileOrphanedResumes = schedules.task({
               first_name: parsed.first_name || null,
               last_name: parsed.last_name || null,
               full_name: fullName || null,
-              email: parsed.email || null,
+              ...classifyEmail(parsed.email || null),
               phone: parsed.phone || null,
               linkedin_url: parsed.linkedin_url || null,
               current_title: parsed.current_title || null,

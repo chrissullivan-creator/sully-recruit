@@ -1,4 +1,33 @@
 /**
+ * Domains we treat as personal mailboxes. Mirror of the Postgres
+ * is_consumer_email_domain() helper and the frontend `email-classifier`
+ * — keep all three in sync.
+ */
+const CONSUMER_DOMAIN_RE =
+  /^(gmail|yahoo|hotmail|outlook|icloud|me|mac|aol|msn|live|protonmail|proton|fastmail|comcast|verizon|sbcglobal|att|optonline|ymail|hush|gmx|zoho|tutanota|cox|charter|earthlink|bellsouth|hanmail|naver)\.[a-z.]+$/i;
+
+/**
+ * Routes an incoming address into the right typed people column.
+ * Returns either { personal_email } or { work_email } (never both,
+ * never plain `email`). Empty input → empty object.
+ */
+export function classifyEmail(email: string | null | undefined): {
+  personal_email?: string;
+  work_email?: string;
+} {
+  if (!email) return {};
+  const trimmed = email.trim();
+  const at = trimmed.indexOf("@");
+  if (at < 0) return {};
+  const domain = trimmed.slice(at + 1).toLowerCase();
+  // Consumer mailboxes + .edu (almost always alumni/student) → personal.
+  if (CONSUMER_DOMAIN_RE.test(domain) || domain.endsWith(".edu")) {
+    return { personal_email: trimmed };
+  }
+  return { work_email: trimmed };
+}
+
+/**
  * One source of truth for matching an inbound email address back to a
  * person. Searches across all three address columns —
  *   people.email

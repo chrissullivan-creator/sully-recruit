@@ -242,7 +242,7 @@ export function usePeople() {
           .select(
             'id, type, full_name, first_name, last_name, ' +
             'title, current_title, company_name, current_company, company_id, ' +
-            'work_email, personal_email, email, mobile_phone, phone, linkedin_url, ' +
+            'work_email, personal_email, email:primary_email, mobile_phone, phone, linkedin_url, ' +
             'avatar_url, roles, status, ' +
             'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +
             'owner_user_id, created_at, updated_at',
@@ -368,7 +368,7 @@ export function useJobSendOuts(jobId: string | undefined) {
       if (ids.length) {
         const { data: people } = await supabase
           .from('people')
-          .select('id, full_name, first_name, last_name, current_title, current_company, email, phone, resume_url')
+          .select('id, full_name, first_name, last_name, current_title, current_company, email:primary_email, phone, resume_url')
           .in('id', ids);
         byId = new Map(((people ?? []) as any[]).map((p) => [p.id, p]));
       }
@@ -406,7 +406,7 @@ export function useSendOutBoard() {
       if (ids.length) {
         const { data: people } = await supabase
           .from('people')
-          .select('id, full_name, current_title, current_company, email, resume_url')
+          .select('id, full_name, current_title, current_company, email:primary_email, resume_url')
           .in('id', ids);
         byId = new Map(((people ?? []) as any[]).map((p) => [p.id, p]));
       }
@@ -661,7 +661,7 @@ export function useJobCandidates(jobId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('people')
-        .select('id, first_name, last_name, full_name, current_title, current_company, job_status, status, email')
+        .select('id, first_name, last_name, full_name, current_title, current_company, job_status, status, email:primary_email')
         .eq('job_id', jobId!)
         .order('created_at', { ascending: false });
       if (error) throw error;

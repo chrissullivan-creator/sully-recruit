@@ -275,7 +275,7 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
     setLinkSearching(true);
     const q = linkSearch.trim();
     const [cRes, ctRes] = await Promise.all([
-      supabase.from('people').select('id, full_name, email, current_title, current_company').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
+      supabase.from('people').select('id, full_name, email:primary_email, current_title, current_company').or(`full_name.ilike.%${q}%,primary_email.ilike.%${q}%`).limit(5),
       supabase.from('contacts').select('id, full_name, email, title').or(`full_name.ilike.%${q}%,email.ilike.%${q}%`).limit(5),
     ]);
     const results = [
