@@ -155,20 +155,6 @@ export async function getOpenAIKey(): Promise<string> {
 }
 
 /**
- * Get Eden AI API key from app_settings. Used as a deeper fallback for
- * resume parsing — Eden's `ocr/resume_parser` providers (affinda etc.)
- * handle scanned / image-only PDFs that text-extraction can't read.
- * Returns empty string when not configured.
- */
-export async function getEdenAIKey(): Promise<string> {
-  try {
-    return await getAppSetting("EDEN_AI_API_KEY");
-  } catch {
-    return "";
-  }
-}
-
-/**
  * Get Voyage AI API key from app_settings.
  */
 export async function getVoyageKey(): Promise<string> {
