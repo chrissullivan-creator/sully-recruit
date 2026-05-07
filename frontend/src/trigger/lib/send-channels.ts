@@ -2,6 +2,7 @@ import { logger } from "@trigger.dev/sdk/v3";
 import { getUnipileBaseUrl, getAppSetting } from "./supabase";
 import { getMicrosoftAccessToken } from "./microsoft-graph";
 import { fetchWithRetry } from "./fetch-retry";
+import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -167,6 +168,35 @@ export async function sendEmail(
       }
     }
     if (built.length) message.attachments = built;
+  }
+
+  // Phase 2 of the Unipile-everywhere migration: when the kill-switch
+  // app_settings.USE_UNIPILE_EMAIL is on, route the send through
+  // Unipile Outlook instead. The body already has signature +
+  // tracking pixel appended, so we just hand it across.
+  // Failure falls back to Graph so a misconfigured Unipile account
+  // never blocks a live sequence step.
+  if (await shouldUseUnipileEmail()) {
+    try {
+      const result = await unipileSendEmail(supabase, {
+        fromEmail,
+        to: [{ address: to }],
+        subject: subject || "",
+        htmlBody: body,
+        inReplyTo: threadingOptions?.inReplyTo,
+        attachmentUrls: urlList,
+      });
+      logger.info("Email sent via Unipile", { from: fromEmail, to, hasThreading: !!threadingOptions?.inReplyTo });
+      return {
+        messageId: result.messageId,
+        sender: fromEmail,
+        internetMessageId: result.internetMessageId,
+      };
+    } catch (err: any) {
+      logger.warn("sendEmail: Unipile failed, falling back to Graph", {
+        fromEmail, to, error: err.message,
+      });
+    }
   }
 
   const response = await fetchWithRetry(
