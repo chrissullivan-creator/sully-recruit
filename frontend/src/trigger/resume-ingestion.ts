@@ -1,10 +1,11 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getEdenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
 import { matchPersonByEmail } from "./lib/match-person-by-email";
-import { parseResume, extractResumeText } from "../lib/resume-parser";
+import { extractResumeText } from "../lib/resume-parser";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 interface ResumeIngestionPayload {
   resumeId: string;
@@ -59,13 +60,48 @@ export const resumeIngestion = task({
       return { skipped: true, reason: "not_a_resume" };
     }
 
-    // ── 3. Parse via Affinda (Eden AI) ──────────────────────────────
-    const edenKey = await getEdenAIKey();
-    if (!edenKey) throw new Error("EDEN_AI_API_KEY missing in app_settings");
-    const { parsed: parsedJson, rawText, via } = await parseResume(fileBytes, fileName, {
-      edenKey,
-      log: logger,
+    // ── 3. Parse via Claude (Anthropic, with OpenAI fallback) ───────
+    // Affinda/Eden AI was retired; we now extract raw text from the
+    // file and ask Claude to map it into our flat ParsedResume shape.
+    // The system prompt mirrors api/parse-resume-ai.ts so the structured
+    // output stays consistent with the manual API endpoint.
+    const rawText = sniffText;
+    const [anthropicKey, openaiKey] = await Promise.all([
+      getAnthropicKey(),
+      getOpenAIKey().catch(() => ""),
+    ]);
+    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY missing in app_settings");
+
+    const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
+
+Extract:
+{
+  "first_name": "First",
+  "last_name": "Last",
+  "email": "email@example.com or null",
+  "phone": "phone number or null",
+  "linkedin_url": "linkedin URL or null",
+  "current_title": "most recent job title",
+  "current_company": "most recent company",
+  "location": "city, state or null",
+  "skills": ["skill1", "skill2"]
+}
+
+Resume text:
+${rawText.slice(0, 60000)}`;
+
+    const { text, via } = await callAIWithFallback({
+      anthropicKey,
+      openaiKey: openaiKey || undefined,
+      systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
+      userContent: userPrompt,
+      maxTokens: 2048,
+      jsonOutput: true,
     });
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Resume parse: no JSON in response");
+    const parsedJson = JSON.parse(jsonMatch[0]);
     const parser = `trigger-${via}`;
     logger.info("Parsed resume", { parsed: parsedJson, parser });
 
