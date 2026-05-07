@@ -5,7 +5,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Users, MessageSquare, Calendar, TrendingUp, PieChart } from "lucide-react";
+import { ArrowLeft, Users, MessageSquare, Calendar, TrendingUp, PieChart, Eye, Send } from "lucide-react";
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 
 const SENTIMENT_COLORS: Record<string, string> = {
@@ -60,13 +60,32 @@ export default function SequenceAnalyticsPage() {
 
     const sent = stepLogs.filter((l) => l.status === "sent").length;
     const failed = stepLogs.filter((l) => l.status === "failed").length;
+    const skipped = stepLogs.filter((l) => l.status === "skipped").length;
     const scheduled = stepLogs.filter((l) => l.status === "scheduled").length;
+
+    // Email-only open metrics — opens come from the 1×1 tracking pixel
+    // appended to outbound sequence emails (see send-channels.ts).
+    // open_count tracks repeated opens; opened_at marks the first open.
+    const sentEmails = stepLogs.filter((l) => l.status === "sent" && l.channel === "email");
+    const openedEmails = sentEmails.filter((l) => l.opened_at);
+    const totalOpens = sentEmails.reduce((sum, l) => sum + (Number(l.open_count) || 0), 0);
+    const openRate = sentEmails.length > 0
+      ? ((openedEmails.length / sentEmails.length) * 100).toFixed(1)
+      : "0";
 
     const replyRate = total > 0 ? ((replied / total) * 100).toFixed(1) : "0";
     const meetingRate = total > 0 ? ((calendarBooked / total) * 100).toFixed(1) : "0";
     const completionRate = total > 0 ? ((completed / total) * 100).toFixed(1) : "0";
 
-    return { total, active, stopped, completed, replied, calendarBooked, sent, failed, scheduled, replyRate, meetingRate, completionRate };
+    return {
+      total, active, stopped, completed, replied, calendarBooked,
+      sent, failed, skipped, scheduled,
+      sentEmailsCount: sentEmails.length,
+      uniqueOpens: openedEmails.length,
+      totalOpens,
+      openRate,
+      replyRate, meetingRate, completionRate,
+    };
   }, [enrollments, stepLogs]);
 
   // Sentiment breakdown
@@ -123,7 +142,7 @@ export default function SequenceAnalyticsPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-2">
@@ -132,6 +151,30 @@ export default function SequenceAnalyticsPage() {
             </div>
             <p className="text-2xl font-bold mt-1">{metrics.total}</p>
             <p className="text-xs text-muted-foreground">{metrics.active} active</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <Send className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Sends</span>
+            </div>
+            <p className="text-2xl font-bold mt-1">{metrics.sent}</p>
+            <p className="text-xs text-muted-foreground">
+              {metrics.scheduled} scheduled, {metrics.skipped} skipped, {metrics.failed} failed
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <Eye className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Open Rate</span>
+            </div>
+            <p className="text-2xl font-bold mt-1">{metrics.openRate}%</p>
+            <p className="text-xs text-muted-foreground">
+              {metrics.uniqueOpens}/{metrics.sentEmailsCount} email{metrics.sentEmailsCount === 1 ? "" : "s"} ({metrics.totalOpens} total opens)
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -161,7 +204,7 @@ export default function SequenceAnalyticsPage() {
               <span className="text-sm text-muted-foreground">Completion Rate</span>
             </div>
             <p className="text-2xl font-bold mt-1">{metrics.completionRate}%</p>
-            <p className="text-xs text-muted-foreground">{metrics.sent} sent, {metrics.failed} failed</p>
+            <p className="text-xs text-muted-foreground">{metrics.completed} completed</p>
           </CardContent>
         </Card>
       </div>
@@ -200,10 +243,10 @@ export default function SequenceAnalyticsPage() {
           </CardContent>
         </Card>
 
-        {/* Per-channel reply rates */}
+        {/* Per-channel funnel: Sent → Opens → Replies */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Reply Rate by Channel</CardTitle>
+            <CardTitle className="text-sm">Funnel by Channel (Sent → Opens → Replies)</CardTitle>
           </CardHeader>
           <CardContent>
             {channelStats.length === 0 ? (
@@ -217,6 +260,7 @@ export default function SequenceAnalyticsPage() {
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="sent" fill="#94a3b8" name="Sent" />
+                  <Bar dataKey="opens" fill="#3b82f6" name="Opens" />
                   <Bar dataKey="replies" fill="#22c55e" name="Replies" />
                 </BarChart>
               </ResponsiveContainer>
