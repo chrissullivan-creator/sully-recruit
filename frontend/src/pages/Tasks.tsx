@@ -5,6 +5,7 @@ import { useTasks, useBulkUpdateTasks, useBulkDeleteTasks } from '@/hooks/useTas
 import { useQueryClient } from '@tanstack/react-query';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
+import { PipelineTodoList } from '@/components/tasks/PipelineTodoList';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -321,32 +322,40 @@ export default function Tasks() {
           <p className="text-sm text-muted-foreground py-8 text-center">Loading tasks…</p>
         ) : viewTab === 'calendar' ? (
           <CalendarView tasks={filtered} isAdmin={isAdmin} />
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12 space-y-2">
-            <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No tasks match your filters</p>
-          </div>
         ) : (
-          <div className="space-y-2 max-w-3xl">
-            <div className="flex items-center gap-2 px-3 py-1">
-              <Checkbox
-                checked={selectedIds.length === filtered.length && filtered.length > 0}
-                onCheckedChange={toggleAll}
-              />
-              <span className="text-xs text-muted-foreground">Select all</span>
-            </div>
-            {filtered.map((task) => (
-              <div key={task.id} className="flex items-start gap-2">
-                <Checkbox
-                  checked={selectedIds.includes(task.id)}
-                  onCheckedChange={() => toggleSelect(task.id)}
-                  className="mt-3.5"
-                />
-                <div className="flex-1">
-                  <TaskCard task={task} />
-                </div>
+          <div className="space-y-6">
+            {/* Pipeline to-dos: open pitches / send-outs / submissions that need
+                recruiter action. Self-hides when there are no open rows. */}
+            <PipelineTodoList userId={user?.id} isAdmin={isAdmin} />
+
+            {filtered.length === 0 ? (
+              <div className="text-center py-12 space-y-2">
+                <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No tasks match your filters</p>
               </div>
-            ))}
+            ) : (
+              <div className="space-y-2 max-w-3xl">
+                <div className="flex items-center gap-2 px-3 py-1">
+                  <Checkbox
+                    checked={selectedIds.length === filtered.length && filtered.length > 0}
+                    onCheckedChange={toggleAll}
+                  />
+                  <span className="text-xs text-muted-foreground">Select all</span>
+                </div>
+                {filtered.map((task) => (
+                  <div key={task.id} className="flex items-start gap-2">
+                    <Checkbox
+                      checked={selectedIds.includes(task.id)}
+                      onCheckedChange={() => toggleSelect(task.id)}
+                      className="mt-3.5"
+                    />
+                    <div className="flex-1">
+                      <TaskCard task={task} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
