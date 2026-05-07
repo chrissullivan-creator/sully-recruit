@@ -363,7 +363,7 @@ async function getUnipileApiKey(
       .from("integration_accounts")
       .select("id, unipile_account_id")
       .eq("owner_user_id", userId)
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .limit(1);
@@ -377,7 +377,7 @@ async function getUnipileApiKey(
   const { data: accounts } = await supabase
     .from("integration_accounts")
     .select("id, unipile_account_id")
-    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator,account_type.eq.linkedin_sales_nav")
+    .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
     .eq("is_active", true)
     .not("unipile_account_id", "is", null)
     .limit(1);

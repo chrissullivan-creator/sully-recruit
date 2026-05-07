@@ -9,7 +9,6 @@
  *   - Each LinkedIn product has its own prefix:
  *       Classic:        /api/v2/{account_id}/linkedin/...
  *       Recruiter:      /api/v2/{account_id}/linkedin/recruiter/...
- *       Sales Navigator /api/v2/{account_id}/linkedin/sales-navigator/...
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */
@@ -159,17 +158,13 @@ export async function getUnipileAccountIdForEmail(
 
 /**
  * Map a sequence step's action.channel (or webhook-derived channel
- * label) to the canonical bucket we use in messages.channel. Three
- * LinkedIn-side buckets the UI cares about:
+ * label) to the canonical bucket we use in messages.channel. Four
+ * buckets total:
  *
- *   email                                   → email
- *   sms                                     → sms
- *   regular LinkedIn DMs (Classic/Sales Nav) → linkedin
- *   Recruiter InMail                         → linkedin_recruiter
- *
- * Sales Navigator messages collapse into `linkedin` so the inbox
- * stays a 3-way split — Recruiter InMail is the only channel users
- * route differently in practice.
+ *   email                                → email
+ *   sms                                  → sms
+ *   regular LinkedIn DMs (Classic)        → linkedin
+ *   Recruiter InMail                      → linkedin_recruiter
  */
 export function canonicalChannel(channel: string | null | undefined): string {
   const c = String(channel || "").toLowerCase();
@@ -179,9 +174,7 @@ export function canonicalChannel(channel: string | null | undefined): string {
     c === "linkedin" ||
     c === "linkedin_message" ||
     c === "linkedin_connection" ||
-    c === "linkedin_classic" ||
-    c === "linkedin_sales_nav" ||
-    c === "sales_navigator"
+    c === "linkedin_classic"
   ) return "linkedin";
   // Pass-through for anything we don't recognise; logs surface it.
   return c || "unknown";

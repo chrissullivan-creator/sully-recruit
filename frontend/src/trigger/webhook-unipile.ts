@@ -282,28 +282,8 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     providerType.includes("recruiter") ||
     !!chatSubject;
 
-  let rawChannel = isInMail
-    ? "linkedin_recruiter"
-    : providerType.includes("sales") || folderField.includes("SALES_NAV")
-      ? "linkedin_sales_nav"
-      : "linkedin";
-
-  // Sales Nav can still fall through to account_type since it's a
-  // dedicated account product, not a feature that overlaps Classic.
-  if (rawChannel === "linkedin") {
-    const eventAccountId = messageData.account_id ?? event.account_id ?? messageData.chat?.account_id;
-    if (eventAccountId) {
-      const { data: ia } = await supabase
-        .from("integration_accounts")
-        .select("account_type")
-        .eq("unipile_account_id", eventAccountId)
-        .maybeSingle();
-      if (ia?.account_type === "sales_navigator") rawChannel = "linkedin_sales_nav";
-    }
-  }
-  // Collapse to the 3-bucket model used everywhere else (linkedin /
-  // linkedin_recruiter / sms / email). Sales Nav messages join the
-  // generic linkedin bucket.
+  const rawChannel = isInMail ? "linkedin_recruiter" : "linkedin";
+  // Collapse to the canonical bucket used everywhere else.
   const channel = canonicalChannel(rawChannel);
 
   if (!senderId) {

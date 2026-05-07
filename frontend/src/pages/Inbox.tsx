@@ -89,7 +89,6 @@ const CHANNEL_ICONS: Record<string, React.ElementType> = {
   sms: MessageSquare,
   linkedin: Linkedin,
   linkedin_recruiter: Linkedin,
-  linkedin_sales_nav: Linkedin,
   phone: Phone,
   call: Phone,
 };
@@ -98,7 +97,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   sms: 'SMS',
   linkedin: 'LinkedIn',
   linkedin_recruiter: 'Recruiter',
-  linkedin_sales_nav: 'Sales Nav',
   phone: 'Phone',
   call: 'Call',
 };
@@ -106,7 +104,6 @@ const CHANNEL_COLORS: Record<string, string> = {
   email: 'bg-info/10 text-info',
   linkedin: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   linkedin_recruiter: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
-  linkedin_sales_nav: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   sms: 'bg-success/10 text-success',
   phone: 'bg-accent/10 text-accent',
   call: 'bg-[#C9A84C]/10 text-[#C9A84C]',

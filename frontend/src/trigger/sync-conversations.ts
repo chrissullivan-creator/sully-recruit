@@ -26,7 +26,7 @@ export const syncConversations = schedules.task({
     const { data: accounts } = await supabase
       .from("integration_accounts")
       .select("id, unipile_account_id, owner_user_id, account_type")
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null);
 

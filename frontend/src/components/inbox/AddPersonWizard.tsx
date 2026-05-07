@@ -228,7 +228,7 @@ export function AddPersonWizard({
             linkedin_url: parsed.linkedin_url || prev.linkedin_url,
           }));
         }
-      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter' || channel === 'linkedin_sales_nav') {
+      } else if (channel === 'linkedin' || channel === 'linkedin_recruiter') {
         // Resolve via Unipile chat attendees + user profile.
         await resolveLinkedInProfile(token);
       }

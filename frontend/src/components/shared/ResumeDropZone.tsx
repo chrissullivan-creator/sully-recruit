@@ -188,7 +188,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const { data: linkedinAcct } = await supabase
         .from('integration_accounts')
         .select('unipile_account_id')
-        .or('account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
+        .or('account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter')
         .eq('is_active', true)
         .not('unipile_account_id', 'is', null)
         .limit(1)

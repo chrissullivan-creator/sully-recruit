@@ -150,19 +150,19 @@ export const backfillLinkedinMessages = schedules.task({
       if (!chatId) continue;
 
       try {
-        // Detect channel from folder/content_type, falling back to integration
-        // account_type when Unipile doesn't surface folder info reliably.
-        // Run through canonicalChannel so legacy values (linkedin_inmail,
-        // linkedin_classic, etc.) collapse into our two buckets.
+        // Detect Recruiter InMail vs Classic from per-chat signals only.
+        // Account type alone isn't a signal: Recruiter seats also handle
+        // Classic DMs through the same Unipile account, so falling back
+        // to acctType would tag every Chris/Nancy chat as Recruiter.
         const folders = (chat.folder ?? []) as string[];
         const contentType = String(chat.content_type ?? "").toLowerCase();
-        const acctType = (account as any).account_type ?? "";
-        const rawChannel = folders.includes("INBOX_LINKEDIN_RECRUITER") || contentType === "inmail" || acctType === "linkedin_recruiter"
-          ? "linkedin_recruiter"
-          : folders.includes("INBOX_LINKEDIN_SALES_NAV") || acctType === "sales_navigator"
-            ? "linkedin_sales_nav"
-            : "linkedin";
-        const channel = canonicalChannel(rawChannel);
+        const subject = String(chat.subject ?? "").trim();
+        const isInMail =
+          folders.includes("INBOX_LINKEDIN_RECRUITER") ||
+          folders.some((f) => String(f).toUpperCase().includes("INMAIL")) ||
+          contentType === "inmail" ||
+          !!subject;
+        const channel = canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin");
 
         const attendees: any[] = chat.attendees ?? chat.members ?? [];
         const otherAttendee = attendees.find(
