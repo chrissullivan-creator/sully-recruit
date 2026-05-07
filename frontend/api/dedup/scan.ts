@@ -29,9 +29,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ error: "Unauthorized" });
   if (token !== serviceKey) {
-    const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
-    if (!anonKey) return res.status(500).json({ error: "Server misconfigured" });
-    const supabaseAuth = createClient(supabaseUrl, anonKey);
+    const verifierKey =
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.VITE_SUPABASE_ANON_KEY ||
+      serviceKey;
+    const supabaseAuth = createClient(supabaseUrl, verifierKey);
     const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
     if (error || !user) return res.status(401).json({ error: "Unauthorized" });
   }

@@ -10,16 +10,24 @@ import { createClient } from "@supabase/supabase-js";
  *   const auth = await requireAuth(req, res);
  *   if (!auth) return;        // response already sent
  *   const { userId } = auth;  // null if service-role
+ *
+ * Note on env: server-side Vercel functions don't see VITE_* vars by default
+ * (those are baked into the client build). We try the unprefixed names first,
+ * fall through to VITE_* if the project exposes them server-side too, and
+ * finally use the service key client to verify the token. `auth.getUser(token)`
+ * only does cryptographic signature verification — it doesn't depend on RLS,
+ * so the service-key client is fine for that purpose.
  */
 export async function requireAuth(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<{ userId: string | null } | null> {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl =
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL;
 
-  if (!serviceKey || !supabaseUrl || !anonKey) {
+  if (!serviceKey || !supabaseUrl) {
     res.status(500).json({ error: "Server misconfigured" });
     return null;
   }
@@ -35,7 +43,12 @@ export async function requireAuth(
     return { userId: null };
   }
 
-  const client = createClient(supabaseUrl, anonKey);
+  const verifierKey =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    serviceKey;
+
+  const client = createClient(supabaseUrl, verifierKey);
   const { data, error } = await client.auth.getUser(token);
   if (error || !data?.user) {
     res.status(401).json({ error: "Unauthorized" });
