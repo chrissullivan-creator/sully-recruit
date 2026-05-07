@@ -57,12 +57,15 @@ export async function sendEmail(
    */
   trackingStepLogId?: string,
   /**
-   * Optional URL of an attachment to include with the email. The file is
-   * fetched server-side and embedded as a Microsoft Graph fileAttachment.
-   * Used by sequence steps that ship a branded résumé / one-pager.
-   * 25MB total Graph limit per message; we cap at 24MB to leave headroom.
+   * Optional URLs of files to attach. Each is fetched server-side and
+   * embedded as a Microsoft Graph fileAttachment. 25MB Graph limit per
+   * message — we cap the *total* across all attachments at 24MB and
+   * skip subsequent files once the budget is exhausted.
+   *
+   * String form is accepted for backward-compat — old call sites passed
+   * a single URL.
    */
-  attachmentUrl?: string,
+  attachmentUrls?: string | string[],
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
   const fromEmail = await resolveSenderEmail(supabase, userId);
@@ -122,38 +125,48 @@ export async function sendEmail(
     ];
   }
 
-  // Attach a file (sequence step's branded résumé / collateral). We
-  // download the bytes ourselves so the recipient gets it inline as a
-  // standard Graph fileAttachment — no Storage signed-URL hand-off
-  // required on their end.
-  if (attachmentUrl) {
-    try {
-      const fileResp = await fetch(attachmentUrl, { signal: AbortSignal.timeout(20_000) });
-      if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
-      const buf = Buffer.from(await fileResp.arrayBuffer());
-      const MAX_BYTES = 24 * 1024 * 1024;
-      if (buf.length > MAX_BYTES) throw new Error(`attachment > ${MAX_BYTES} bytes`);
-      // Pull a sensible filename out of the URL.
-      let fileName = "attachment";
+  // Attach files (sequence step's branded résumé, cover letter, etc.).
+  // Each is fetched server-side and embedded as a standard Graph
+  // fileAttachment so the recipient gets them inline. Total payload
+  // capped at 24MB across all files (Graph hard-limits at 25MB).
+  const urlList = !attachmentUrls
+    ? []
+    : Array.isArray(attachmentUrls)
+      ? attachmentUrls.filter(Boolean)
+      : [attachmentUrls];
+
+  if (urlList.length) {
+    const TOTAL_MAX_BYTES = 24 * 1024 * 1024;
+    const built: any[] = [];
+    let totalBytes = 0;
+    for (const url of urlList) {
       try {
-        const u = new URL(attachmentUrl);
-        const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
-        if (last) fileName = last.replace(/^\d+_/, ""); // strip our `${ts}_` prefix
-      } catch { /* keep default */ }
-      const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
-      message.attachments = [
-        {
+        const fileResp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+        if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
+        const buf = Buffer.from(await fileResp.arrayBuffer());
+        if (totalBytes + buf.length > TOTAL_MAX_BYTES) {
+          logger.warn("Skipping attachment — would exceed 24MB total", { url, totalBytes, fileBytes: buf.length });
+          continue;
+        }
+        let fileName = "attachment";
+        try {
+          const u = new URL(url);
+          const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+          if (last) fileName = last.replace(/^\d+_/, ""); // strip our `${ts}_` prefix
+        } catch { /* keep default */ }
+        const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
+        built.push({
           "@odata.type": "#microsoft.graph.fileAttachment",
           name: fileName,
           contentType,
           contentBytes: buf.toString("base64"),
-        },
-      ];
-    } catch (err: any) {
-      logger.warn("Email attachment fetch failed — sending without attachment", {
-        attachmentUrl, error: err.message,
-      });
+        });
+        totalBytes += buf.length;
+      } catch (err: any) {
+        logger.warn("Email attachment fetch failed — skipping that file", { url, error: err.message });
+      }
     }
+    if (built.length) message.attachments = built;
   }
 
   const response = await fetchWithRetry(
@@ -381,12 +394,14 @@ export async function sendLinkedIn(
   accountId?: string,
   stepChannel?: string,
   /**
-   * Optional URL of a file to attach. Unipile's /messages endpoint
-   * supports multipart with one or more `attachments` fields. Connection
-   * requests have a hard 200-char-only payload (no files), so the
-   * attachment is silently dropped on that path.
+   * Optional URLs of files to attach. Unipile's /messages endpoint
+   * accepts one or more `attachments` form-data fields. Connection
+   * requests have a hard 200-char-only payload (no files), so any
+   * attachments are silently dropped on that path.
+   *
+   * String form is accepted for back-compat with old call sites.
    */
-  attachmentUrl?: string,
+  attachmentUrls?: string | string[],
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { apiKey, accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
   const baseUrl = await getUnipileBaseUrl();
@@ -444,37 +459,48 @@ export async function sendLinkedIn(
     return { message_id: data.id || `invite_${Date.now()}`, conversation_id: data.conversation_id || "" };
   }
 
-  // Regular messages and InMails. Use multipart when an attachment is
-  // present so Unipile picks up the `attachments` file field.
-  if (attachmentUrl) {
-    let fileBlob: Blob | null = null;
-    let fileName = "attachment";
-    try {
-      const fileResp = await fetch(attachmentUrl, { signal: AbortSignal.timeout(20_000) });
-      if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
-      const buf = await fileResp.arrayBuffer();
-      const MAX_BYTES = 20 * 1024 * 1024;
-      if (buf.byteLength > MAX_BYTES) throw new Error(`attachment > ${MAX_BYTES} bytes`);
-      const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
-      fileBlob = new Blob([buf], { type: contentType });
+  // Regular messages and InMails. Use multipart when one or more
+  // attachments are present so Unipile picks up each file via its
+  // `attachments` field.
+  const linkedinUrls = !attachmentUrls
+    ? []
+    : Array.isArray(attachmentUrls)
+      ? attachmentUrls.filter(Boolean)
+      : [attachmentUrls];
+
+  if (linkedinUrls.length) {
+    const blobs: { blob: Blob; name: string }[] = [];
+    const PER_FILE_MAX = 20 * 1024 * 1024;
+    for (const url of linkedinUrls) {
       try {
-        const u = new URL(attachmentUrl);
-        const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
-        if (last) fileName = last.replace(/^\d+_/, "");
-      } catch { /* keep default */ }
-    } catch (err: any) {
-      logger.warn("LinkedIn attachment fetch failed — sending without attachment", {
-        attachmentUrl, error: err.message,
-      });
-      fileBlob = null;
+        const fileResp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+        if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
+        const buf = await fileResp.arrayBuffer();
+        if (buf.byteLength > PER_FILE_MAX) {
+          logger.warn("Skipping LinkedIn attachment — over 20MB", { url, bytes: buf.byteLength });
+          continue;
+        }
+        const contentType = fileResp.headers.get("content-type") || "application/octet-stream";
+        let fileName = "attachment";
+        try {
+          const u = new URL(url);
+          const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+          if (last) fileName = last.replace(/^\d+_/, "");
+        } catch { /* keep default */ }
+        blobs.push({ blob: new Blob([buf], { type: contentType }), name: fileName });
+      } catch (err: any) {
+        logger.warn("LinkedIn attachment fetch failed — skipping that file", { url, error: err.message });
+      }
     }
 
-    if (fileBlob) {
+    if (blobs.length) {
       const fd = new FormData();
       fd.append("provider_id", providerId);
       fd.append("text", body);
       if (isInMailChannel) fd.append("message_type", "INMAIL");
-      fd.append("attachments", fileBlob, fileName);
+      for (const { blob, name } of blobs) {
+        fd.append("attachments", blob, name);
+      }
 
       const response = await fetchWithRetry(`${baseUrl}/messages`, {
         method: "POST",
@@ -497,7 +523,8 @@ export async function sendLinkedIn(
       const data = await response.json();
       return { message_id: data.id, conversation_id: data.conversation_id };
     }
-    // Fall through to the JSON path if attachment fetch failed.
+    // Every attachment failed — fall through to the JSON path so the
+    // message itself still goes out.
   }
 
   const sendPayload: any = { provider_id: providerId, text: body };
