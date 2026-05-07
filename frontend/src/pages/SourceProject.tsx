@@ -61,18 +61,33 @@ async function callSourceApi(body: Record<string, any>, session: any) {
 }
 
 function normalizeApplicant(raw: any): Applicant {
+  // v2 talent-pool applicant shape mostly mirrors v1 but renames a few
+  // fields. Read both so we keep working if Unipile flips the response
+  // shape mid-deploy or one stage of the pipeline still returns the
+  // legacy keys.
+  const display =
+    raw.display_name ||
+    [raw.first_name || raw.firstName, raw.last_name || raw.lastName].filter(Boolean).join(" ");
+  const [firstFromDisplay, ...restFromDisplay] = (display || "").split(/\s+/);
+  const work = (raw.work_experience && raw.work_experience[0]) || raw.work_experience || {};
+
   return {
     ...raw,
-    id: raw.id || raw.applicant_id || raw.urn || `app-${Math.random()}`,
-    first_name: raw.first_name || raw.firstName || '',
-    last_name: raw.last_name || raw.lastName || '',
+    id: raw.candidate_id || raw.applicant_id || raw.id || raw.urn || `app-${Math.random()}`,
+    first_name: raw.first_name || raw.firstName || firstFromDisplay || '',
+    last_name: raw.last_name || raw.lastName || restFromDisplay.join(' ') || '',
     headline: raw.headline || '',
-    current_title: raw.title || raw.current_title || raw.headline || '',
-    current_company: raw.company || raw.current_company || raw.company_name || '',
+    current_title:
+      raw.current_title || raw.title || work?.job_title || work?.role || raw.headline || '',
+    current_company:
+      raw.current_company || raw.company || work?.company?.name || work?.company || raw.company_name || '',
     location: raw.location || raw.region || '',
-    linkedin_url: raw.linkedin_url || raw.public_profile_url || raw.url || '',
-    profile_picture_url: raw.profile_picture_url || raw.picture_url || raw.avatar_url || '',
-    stage: (raw.stage || raw.status || raw.pipeline_stage || 'unknown').toLowerCase(),
+    linkedin_url: raw.profile_url || raw.linkedin_url || raw.public_profile_url || raw.url || '',
+    profile_picture_url:
+      raw.public_picture_url || raw.profile_picture_url || raw.picture_url || raw.avatar_url || '',
+    // Backend already canonicalised stage; keep that. pipeline_stage is
+    // the v2 raw column name, kept as a passthrough fallback.
+    stage: (raw.stage || raw.pipeline_stage || 'unknown').toLowerCase(),
     has_resume: raw.has_resume ?? raw.resume_available ?? false,
   };
 }
