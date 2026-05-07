@@ -75,7 +75,7 @@ function useContactSendOuts(contactId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('send_outs')
-        .select('*, candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, email, phone, status), jobs(id, title, company_name, location, status)')
+        .select('*, candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, email:primary_email, phone, status), jobs(id, title, company_name, location, status)')
         .eq('contact_id', contactId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -562,7 +562,7 @@ const ContactDetail = () => {
           id: contact.id,
           type: 'contact',
           name: contact.full_name || `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim() || 'Contact',
-          email: contact.email,
+          email: (contact as any).work_email ?? (contact as any).personal_email ?? (contact as any).email ?? null,
         }}
         defaultSubject={`Meeting w/ ${contact.full_name || contact.first_name || 'contact'}`}
       />
@@ -620,10 +620,7 @@ const ContactDetail = () => {
               <EditableField
                 label="Work Email"
                 value={c.work_email}
-                onSave={async v => {
-                  await updateField('work_email', v);
-                  if (v) await updateField('email', v);
-                }}
+                onSave={v => updateField('work_email', v)}
                 type="email"
                 placeholder="work@firm.com"
               />

@@ -34,6 +34,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
+import { CANONICAL_PIPELINE, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
@@ -1091,11 +1092,15 @@ const CandidateDetail = () => {
               <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Work Email" value={c.work_email} onSave={async v => {
-                await updateField('work_email', v);
-                // Keep legacy email in sync
-                if (v) await updateField('email', v);
-              }} type="email" placeholder="work@firm.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField
+                label="Work Email"
+                value={c.work_email}
+                onSave={v => updateField('work_email', v)}
+                type="email"
+                placeholder="work@firm.com"
+                disabled={!canEdit}
+                highlight={editingInfo}
+              />
               <EditableField label="Personal Email" value={c.personal_email} onSave={v => updateField('personal_email', v)} type="email" placeholder="personal@gmail.com" disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
                 await updateField('mobile_phone', v);
@@ -2277,7 +2282,7 @@ const CandidateDetail = () => {
           id: candidate.id,
           type: 'candidate',
           name: candidate.full_name || `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`.trim() || 'Candidate',
-          email: (candidate as any).email ?? null,
+          email: (candidate as any).primary_email ?? (candidate as any).personal_email ?? (candidate as any).work_email ?? null,
         } : undefined}
         defaultSubject={candidate ? `Meeting w/ ${candidate.full_name || candidate.first_name || 'candidate'}` : undefined}
       />
@@ -2323,7 +2328,7 @@ const CandidateDetail = () => {
             id: candidate.id,
             first_name: candidate.first_name,
             last_name: candidate.last_name,
-            email: candidate.email,
+            email: (candidate as any).primary_email ?? (candidate as any).personal_email ?? (candidate as any).work_email ?? null,
             current_title: candidate.current_title,
             current_company: candidate.current_company,
           }}

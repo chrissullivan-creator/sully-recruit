@@ -82,66 +82,122 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── list_projects ─────────────────────────────────────────────
-    // GET /v2/{account_id}/linkedin/recruiter/projects?limit=100&offset=0
+    // Unipile v2 path probe — the docs name the controller "recruiter"
+    // and the action "hiringProjectList" / "pipelineCandidates" /
+    // "hiringProject" (createrecruiterhiringproject), so the canonical
+    // path is /linkedin/recruiter/hiring-projects with pipeline-
+    // candidates under each project. We probe newest → oldest so we
+    // keep working through Unipile path rollouts.
     if (action === "list_projects") {
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
-      const url = `${v2Base}/${acct}/linkedin/recruiter/projects?limit=100&offset=${offset}`;
-      const resp = await fetch(url, { headers });
-      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      if (!resp.ok) {
-        return res.status(resp.status).json({ error: `Unipile ${resp.status}`, detail: (await resp.text()).slice(0, 500) });
+      const candidatePaths = [
+        `linkedin/recruiter/hiring-projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/recruiter/projects`,
+      ];
+      const tries: Array<{ url: string; status: number; ok: boolean; bodyPrefix?: string }> = [];
+      for (const path of candidatePaths) {
+        const url = `${v2Base}/${acct}/${path}?limit=100&offset=${offset}`;
+        const resp = await fetch(url, { headers });
+        if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+        if (resp.ok) {
+          const data = await resp.json();
+          const items = data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
+          return res.status(200).json({ items, raw: data, used_path: path });
+        }
+        tries.push({ url, status: resp.status, ok: false, bodyPrefix: (await resp.text()).slice(0, 200) });
       }
-      const data = await resp.json();
-      const items = data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
-      return res.status(200).json({ items, raw: data });
+      // None worked — return the LAST status so the UI surfaces a real error.
+      const last = tries[tries.length - 1];
+      return res.status(last?.status || 500).json({
+        error: `Unipile ${last?.status}: hiring projects endpoint not found`,
+        detail: tries,
+      });
     }
 
     // ── list_applicants ──────────────────────────────────────────
     // 1. GET project for header info
     // 2. POST talent-pool/applicants (v2 expects POST + body, not GET)
+    // Path bases probed in order — same fallback logic as list_projects.
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
+      const projectBases = [
+        `linkedin/recruiter/hiring-projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/recruiter/projects`,
+      ];
       const tries: { url: string; method: string; status?: number; ok: boolean; count?: number; error?: string; keys?: string[] }[] = [];
 
       // 1) Project detail
       let projectData: any = null;
-      const projectUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
-      try {
-        const r = await fetch(projectUrl, { headers });
-        const t: any = { url: projectUrl, method: "GET", status: r.status, ok: r.ok };
-        if (r.ok) {
-          projectData = await r.json();
-          t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
-        } else {
-          t.error = (await r.text()).slice(0, 500);
+      let workingBase: string | null = null;
+      for (const base of projectBases) {
+        const projectUrl = `${v2Base}/${acct}/${base}/${projectId}`;
+        try {
+          const r = await fetch(projectUrl, { headers });
+          const t: any = { url: projectUrl, method: "GET", status: r.status, ok: r.ok };
+          if (r.ok) {
+            projectData = await r.json();
+            t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
+            workingBase = base;
+            tries.push(t);
+            break;
+          } else {
+            t.error = (await r.text()).slice(0, 500);
+          }
+          tries.push(t);
+        } catch (err: any) {
+          tries.push({ url: projectUrl, method: "GET", ok: false, error: err.message });
         }
-        tries.push(t);
-      } catch (err: any) {
-        tries.push({ url: projectUrl, method: "GET", ok: false, error: err.message });
       }
 
-      // 2) Applicants
+      // 2) Candidates — try the new v2 GET pipeline-candidates path
+      //    first (matches the docs reference `getrecruiterpipelinecandidates`),
+      //    fall back to the legacy POST talent-pool/applicants for older
+      //    Unipile builds.
+      const applicantBases = workingBase ? [workingBase] : projectBases;
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
-      const applicantsUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}/talent-pool/applicants`;
-      let applicants: any[] = [];
-      try {
-        const r = await fetch(applicantsUrl, {
+      const variants: Array<{
+        suffix: string;
+        method: "GET" | "POST";
+        body?: string;
+      }> = [
+        { suffix: `pipeline-candidates?limit=100&offset=${offset}`, method: "GET" },
+        {
+          suffix: `talent-pool/applicants`,
           method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({ limit: 100, offset }),
-        });
-        const t: any = { url: applicantsUrl, method: "POST", status: r.status, ok: r.ok };
-        if (r.ok) {
-          const d = await r.json();
-          applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
-          t.count = applicants.length;
-        } else {
-          t.error = (await r.text()).slice(0, 500);
+        },
+      ];
+      let applicants: any[] = [];
+      outer: for (const base of applicantBases) {
+        for (const v of variants) {
+          const applicantsUrl = `${v2Base}/${acct}/${base}/${projectId}/${v.suffix}`;
+          try {
+            const r = await fetch(applicantsUrl, {
+              method: v.method,
+              headers: v.method === "POST"
+                ? { ...headers, "Content-Type": "application/json" }
+                : headers,
+              body: v.body,
+            });
+            const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
+            if (r.ok) {
+              const d = await r.json();
+              applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
+              t.count = applicants.length;
+              workingBase = base;
+              tries.push(t);
+              break outer;
+            } else {
+              t.error = (await r.text()).slice(0, 500);
+            }
+            tries.push(t);
+          } catch (err: any) {
+            tries.push({ url: applicantsUrl, method: v.method, ok: false, error: err.message });
+          }
         }
-        tries.push(t);
-      } catch (err: any) {
-        tries.push({ url: applicantsUrl, method: "POST", ok: false, error: err.message });
       }
 
       // Normalise stage values: v2 uses `pipeline_stage`. Keep the
@@ -170,31 +226,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── download_resume ──────────────────────────────────────────
-    // GET /v2/{account_id}/linkedin/recruiter/projects/{project_id}/talent-pool/applicants/{applicant_id}/resume
+    // Try both v2 path bases in order, same as list_*.
     if (action === "download_resume") {
       if (!job_id || !applicant_id) {
         return res.status(400).json({ error: "Missing job_id or applicant_id" });
       }
-      const url =
-        `${v2Base}/${acct}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}` +
-        `/talent-pool/applicants/${encodeURIComponent(applicant_id)}/resume`;
-      const resp = await fetch(url, { headers });
-      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      if (!resp.ok) {
-        return res.status(resp.status).json({
-          error: `Unipile ${resp.status}`,
-          detail: (await resp.text()).slice(0, 500),
-        });
+      const projectBases = [
+        `linkedin/recruiter/hiring-projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/recruiter/projects`,
+      ];
+      const tries: Array<{ url: string; status: number; bodyPrefix?: string }> = [];
+      for (const base of projectBases) {
+        const url =
+          `${v2Base}/${acct}/${base}/${encodeURIComponent(job_id)}` +
+          `/talent-pool/applicants/${encodeURIComponent(applicant_id)}/resume`;
+        const resp = await fetch(url, { headers });
+        if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+        if (resp.ok) {
+          const contentType = resp.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            return res.status(200).json(await resp.json());
+          }
+          const buffer = Buffer.from(await resp.arrayBuffer());
+          return res.status(200).json({
+            content_type: contentType || "application/pdf",
+            data_base64: buffer.toString("base64"),
+            size_bytes: buffer.length,
+          });
+        }
+        tries.push({ url, status: resp.status, bodyPrefix: (await resp.text()).slice(0, 200) });
       }
-      const contentType = resp.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        return res.status(200).json(await resp.json());
-      }
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      return res.status(200).json({
-        content_type: contentType || "application/pdf",
-        data_base64: buffer.toString("base64"),
-        size_bytes: buffer.length,
+      const last = tries[tries.length - 1];
+      return res.status(last?.status || 500).json({
+        error: `Unipile ${last?.status}: resume endpoint not found`,
+        detail: tries,
       });
     }
 

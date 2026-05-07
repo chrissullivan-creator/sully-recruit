@@ -130,40 +130,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ action: "no_resume_attachments", created: 0 });
   }
 
-  // Find or create candidate stub.
+  // Find or create the candidate row this résumé belongs to.
+  //
+  // The From on these emails is almost always one of OUR recruiters
+  // forwarding from their own inbox — Chris/Nancy/Ashley — not the
+  // candidate themselves. Using `fromAddress` as the candidate's
+  // email would tag the recruiter as a candidate (or just dump a
+  // stub under chris.sullivan@…). The right answer:
+  //
+  //   1. If the From belongs to one of us, this is a forward.
+  //      Create a blank stub owned by that recruiter; resume-
+  //      ingestion will fill in the candidate's real identity (name,
+  //      email, LI url) from parsed_json once Affinda finishes,
+  //      and re-point or merge the stub if the parsed candidate
+  //      already exists in the DB.
+  //
+  //   2. If the From is NOT a recruiter, it's a candidate emailing
+  //      their resume directly. Multi-column lookup; create a stub
+  //      with the From-address routed to personal/work via domain.
   const senderDisplay = fromName.trim();
-  const [firstNameGuess, ...rest] = senderDisplay.split(/\s+/);
-  const lastNameGuess = rest.join(" ") || fromAddress.split("@")[0];
+  const lowerFrom = fromAddress.toLowerCase();
+
+  // Resolve the forwarder, if any. Recruiters have profiles rows.
+  const { data: forwarderProfile } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .ilike("email", lowerFrom)
+    .maybeSingle();
+  const isForward = !!forwarderProfile?.id;
+  const forwarderUserId: string | null = forwarderProfile?.id ?? null;
 
   let candidateId: string;
-  const { data: existing } = await supabase
-    .from("people")
-    .select("id")
-    .eq("email", fromAddress)
-    .maybeSingle();
-  if (existing?.id) {
-    candidateId = existing.id;
-  } else {
+
+  if (isForward) {
+    // Blank stub — identity comes from parsed_json. We tag with
+    // owner_user_id so the candidate inherits the forwarder's
+    // ownership; full_name is filled in later by resume-ingestion.
     const { data: created, error: createErr } = await supabase
       .from("people")
       .insert({
         type: "candidate",
-        first_name: firstNameGuess || null,
-        last_name: lastNameGuess || null,
-        full_name: senderDisplay || fromAddress,
-        email: fromAddress,
+        full_name: "Pending résumé parse",
         status: "new",
         source: "resumes_inbox",
         source_detail: envelopeTo || "cloudflare_email",
         is_stub: true,
+        owner_user_id: forwarderUserId,
+        created_by_user_id: forwarderUserId,
       } as any)
       .select("id")
       .single();
     if (createErr || !created?.id) {
-      console.error("Cloudflare email: create candidate failed", createErr);
+      console.error("Cloudflare email: create candidate stub failed", createErr);
       return res.status(500).json({ error: "candidate insert failed" });
     }
     candidateId = created.id;
+  } else {
+    // Direct candidate-email path — match across all three address
+    // columns so an existing candidate isn't duplicated.
+    const { data: existing } = await supabase
+      .from("people")
+      .select("id")
+      .or(`personal_email.ilike.${lowerFrom},work_email.ilike.${lowerFrom},primary_email.ilike.${lowerFrom}`)
+      .limit(1)
+      .maybeSingle();
+    if (existing?.id) {
+      candidateId = existing.id;
+    } else {
+      // Domain heuristic mirrors the SQL is_consumer_email_domain() helper.
+      const [firstNameGuess, ...rest] = senderDisplay.split(/\s+/);
+      const lastNameGuess = rest.join(" ") || fromAddress.split("@")[0];
+      const fromDomain = (fromAddress.split("@")[1] || "").toLowerCase();
+      const isPersonal = /^(gmail|yahoo|hotmail|outlook|icloud|me|mac|aol|msn|live|protonmail|proton|fastmail|comcast|verizon|sbcglobal|att|optonline|ymail|hush|gmx|zoho|tutanota|cox|charter|earthlink|bellsouth|hanmail|naver)\.[a-z.]+$/i.test(fromDomain)
+        || fromDomain.endsWith(".edu");
+
+      const { data: created, error: createErr } = await supabase
+        .from("people")
+        .insert({
+          type: "candidate",
+          first_name: firstNameGuess || null,
+          last_name: lastNameGuess || null,
+          full_name: senderDisplay || fromAddress,
+          ...(isPersonal ? { personal_email: fromAddress } : { work_email: fromAddress }),
+          status: "new",
+          source: "resumes_inbox",
+          source_detail: envelopeTo || "cloudflare_email",
+          is_stub: true,
+        } as any)
+        .select("id")
+        .single();
+      if (createErr || !created?.id) {
+        console.error("Cloudflare email: create candidate failed", createErr);
+        return res.status(500).json({ error: "candidate insert failed" });
+      }
+      candidateId = created.id;
+    }
   }
 
   let created = 0;

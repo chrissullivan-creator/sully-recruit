@@ -4,6 +4,7 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { resumeIngestion } from "./resume-ingestion";
+import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -227,44 +228,83 @@ async function processResumesInboxEmail(
 
   if (resumeAtts.length === 0) return { created: 0, skipped: 0 };
 
-  // Reuse an existing candidate if the sender already has one. Otherwise
-  // create a stub — name extracted from displayName or local-part of email,
-  // ingestion will overwrite once the resume parses cleanly.
+  // Resumes inbox: the sender is almost always one of our recruiters
+  // forwarding from Outlook — not the candidate. Two paths:
+  //
+  //   - Forward (sender is a profiles row): create a blank stub owned
+  //     by the forwarder. resume-ingestion will redirect or fill the
+  //     stub once parsed_json surfaces the candidate's real identity.
+  //
+  //   - Direct send (sender is NOT in profiles): the sender IS the
+  //     candidate. Match across all three email columns and reuse;
+  //     otherwise create a stub with their email routed to
+  //     personal/work via classifyEmail.
   const senderDisplay = (message.from?.emailAddress?.name as string) || "";
-  const [firstNameGuess, ...rest] = senderDisplay.trim().split(/\s+/);
-  const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
+  const lowerSender = senderEmail.toLowerCase();
+
+  const { data: forwarderProfile } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .ilike("email", lowerSender)
+    .maybeSingle();
+  const isForward = !!forwarderProfile?.id;
+  const forwarderUserId: string | null = forwarderProfile?.id ?? null;
 
   let candidateId: string;
-  const { data: existing } = await supabase
-    .from("people")
-    .select("id")
-    .eq("email", senderEmail)
-    .maybeSingle();
-  if (existing?.id) {
-    candidateId = existing.id;
-  } else {
+
+  if (isForward) {
     const { data: created, error: createErr } = await supabase
       .from("people")
       .insert({
         type: "candidate",
-        first_name: firstNameGuess || null,
-        last_name: lastNameGuess || null,
-        full_name: senderDisplay || senderEmail,
-        email: senderEmail,
+        full_name: "Pending résumé parse",
         status: "new",
         source: "resumes_inbox",
         source_detail: recipientEmail,
         is_stub: true,
+        owner_user_id: forwarderUserId,
+        created_by_user_id: forwarderUserId,
       } as any)
       .select("id")
       .single();
     if (createErr || !created?.id) {
-      logger.error("Resumes inbox: failed to create candidate stub", {
+      logger.error("Resumes inbox: failed to create forwarded stub", {
         senderEmail, error: createErr?.message,
       });
       return { created: 0, skipped: 0 };
     }
     candidateId = created.id;
+  } else {
+    const [firstNameGuess, ...rest] = senderDisplay.trim().split(/\s+/);
+    const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
+
+    const existingMatch = await matchPersonByEmail(supabase, senderEmail);
+    if (existingMatch?.entityId) {
+      candidateId = existingMatch.entityId;
+    } else {
+      const { data: created, error: createErr } = await supabase
+        .from("people")
+        .insert({
+          type: "candidate",
+          first_name: firstNameGuess || null,
+          last_name: lastNameGuess || null,
+          full_name: senderDisplay || senderEmail,
+          ...classifyEmail(senderEmail),
+          status: "new",
+          source: "resumes_inbox",
+          source_detail: recipientEmail,
+          is_stub: true,
+        } as any)
+        .select("id")
+        .single();
+      if (createErr || !created?.id) {
+        logger.error("Resumes inbox: failed to create candidate stub", {
+          senderEmail, error: createErr?.message,
+        });
+        return { created: 0, skipped: 0 };
+      }
+      candidateId = created.id;
+    }
   }
 
   let created = 0;
@@ -782,25 +822,16 @@ async function getMicrosoftAccessToken(): Promise<string | null> {
   }
 }
 
+// Routes inbound senders + meeting attendees to a person via the
+// shared matcher (email / personal_email / work_email).
 async function matchByEmail(
   supabase: any,
   email: string,
 ): Promise<{ entityId: string; entityType: string; entityColumn: string } | null> {
-  const normalizedEmail = email.toLowerCase().trim();
-
-  const [candidateRes, contactRes] = await Promise.all([
-    supabase.from("people").select("id").ilike("email", normalizedEmail).limit(1),
-    supabase.from("contacts").select("id").ilike("email", normalizedEmail).limit(1),
-  ]);
-
-  if (candidateRes.data?.[0]) {
-    return { entityId: candidateRes.data[0].id, entityType: "candidate", entityColumn: "candidate_id" };
-  }
-  if (contactRes.data?.[0]) {
-    return { entityId: contactRes.data[0].id, entityType: "contact", entityColumn: "contact_id" };
-  }
-
-  return null;
+  const m = await matchPersonByEmail(supabase, email);
+  return m
+    ? { entityId: m.entityId, entityType: m.entityType, entityColumn: m.entityColumn }
+    : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -859,11 +890,15 @@ async function maybeHandleBounce(
     return null;
   }
 
-  // Find the candidate / contact by email.
-  const [{ data: cand }, { data: cont }] = await Promise.all([
-    supabase.from("people").select("id").eq("email", failedRecipient).maybeSingle(),
-    supabase.from("contacts").select("id").eq("email", failedRecipient).maybeSingle(),
-  ]);
+  // Find the candidate / contact by ANY of their stored emails so a
+  // bounce on someone's work address still flags their record.
+  const bouncedMatch = await matchPersonByEmail(supabase, failedRecipient);
+  const cand = bouncedMatch?.entityType !== "contact"
+    ? (bouncedMatch ? { id: bouncedMatch.entityId } : null)
+    : null;
+  const cont = bouncedMatch?.entityType === "contact"
+    ? { id: bouncedMatch.entityId }
+    : null;
 
   const reason = subject.slice(0, 200) || "ndr";
   const now = new Date().toISOString();

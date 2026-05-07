@@ -24,8 +24,10 @@ function useGlobalSearch(query: string) {
       const [people, jobs, companies] = await Promise.all([
         supabase
           .from('people')
-          .select('id, type, full_name, first_name, last_name, current_title, current_company, email, title')
-          .or(`full_name.ilike.${q},email.ilike.${q},current_title.ilike.${q},current_company.ilike.${q}`)
+          // Plain people.email retired — alias primary_email and search
+          // both typed columns explicitly.
+          .select('id, type, full_name, first_name, last_name, current_title, current_company, email:primary_email, title')
+          .or(`full_name.ilike.${q},personal_email.ilike.${q},work_email.ilike.${q},current_title.ilike.${q},current_company.ilike.${q}`)
           .limit(8),
         supabase
           .from('jobs')

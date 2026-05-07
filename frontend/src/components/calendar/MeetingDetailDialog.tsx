@@ -88,7 +88,7 @@ function useMeetingDetails(task: MeetingTask | null) {
 
       const [peopleRes, contactsRes] = await Promise.all([
         candidateIds.length
-          ? supabase.from('people').select('id, full_name, email, current_title, current_company, status, last_contacted_at, last_responded_at').in('id', candidateIds)
+          ? supabase.from('people').select('id, full_name, email:primary_email, current_title, current_company, status, last_contacted_at, last_responded_at').in('id', candidateIds)
           : Promise.resolve({ data: [] as any[] }),
         contactIds.length
           ? supabase.from('contacts').select('id, full_name, email, current_title, current_company, status, last_contacted_at, last_responded_at').in('id', contactIds)

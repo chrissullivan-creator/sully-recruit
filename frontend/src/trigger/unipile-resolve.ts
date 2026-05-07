@@ -1,5 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin } from "./lib/supabase";
+import { unipileFetch } from "./lib/unipile-v2";
 const BATCH_SIZE = 50;
 const DELAY_MS = 350;
 const FETCH_TIMEOUT_MS = 5_000; // 5s timeout per API call
@@ -21,19 +22,6 @@ export const resolveUnipileIds = schedules.task({
   run: async () => {
     const supabase = getSupabaseAdmin();
 
-    // 1. Get Unipile v2 base + API key. The v1 path /api/v1/users/{slug}
-    //    started returning 404s; v2 routes lookups under
-    //    /api/v2/{account_id}/users/{slug} with the v2 API key.
-    const [v2Base, v2Key, v1Base, v1Key] = await Promise.all([
-      getAppSetting("UNIPILE_BASE_V2_URL").catch(() => ""),
-      getAppSetting("UNIPILE_API_KEY_V2").catch(() => ""),
-      getUnipileBaseUrl(),
-      getAppSetting("UNIPILE_API_KEY"),
-    ]);
-    const UNIPILE_BASE_URL = (v2Base || v1Base.replace(/\/api\/v1$/, "/api/v2")).replace(/\/+$/, "");
-    const apiKey = v2Key || v1Key;
-    const usingV2 = !!v2Base && !!v2Key;
-
     // Use a LinkedIn Recruiter account for resolution — recruiter IDs are
     // needed for InMail matching. Fall back to any LinkedIn account.
     const { data: accounts } = await supabase
@@ -49,6 +37,10 @@ export const resolveUnipileIds = schedules.task({
 
     const account = accounts?.[0];
     const unipileAccountId = account?.unipile_account_id as string | null;
+    if (!unipileAccountId) {
+      logger.warn("No active Unipile LinkedIn account — skipping resolve sweep");
+      return { resolved: 0, failed: 0, skipped: 0 };
+    }
 
     // 2. Find candidates with linkedin_url but no resolved candidate_channels entry
     //    Order by created_at DESC (newest first) as user requested
@@ -103,42 +95,41 @@ export const resolveUnipileIds = schedules.task({
           continue;
         }
 
-        // Call Unipile user lookup API. v2 puts the Unipile account_id
-        // in the path; v1 (legacy fallback) does not.
-        const headers: Record<string, string> = {
-          "X-API-KEY": apiKey,
-          Accept: "application/json",
-          "X-UNIPILE-CLIENT": "sully-recruit",
-        };
-
-        const lookupUrl = usingV2 && unipileAccountId
-          ? `${UNIPILE_BASE_URL}/${encodeURIComponent(unipileAccountId)}/users/${encodeURIComponent(slug)}`
-          : `${UNIPILE_BASE_URL}/users/${encodeURIComponent(slug)}`;
-
-        const resp = await fetchWithTimeout(lookupUrl, { headers }, FETCH_TIMEOUT_MS);
-
-        if (!resp.ok) {
-          const status = resp.status;
-          if (status === 404) {
-            // Profile not found on Unipile
+        // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug}
+        let profile: any;
+        try {
+          profile = await Promise.race([
+            unipileFetch(
+              supabase,
+              unipileAccountId,
+              `linkedin/users/${encodeURIComponent(slug)}`,
+              {
+                method: "GET",
+                headers: { "X-UNIPILE-CLIENT": "sully-recruit" },
+              },
+            ),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("timeout")), FETCH_TIMEOUT_MS),
+            ),
+          ]);
+        } catch (err: any) {
+          const msg = err.message || "";
+          if (/\b404\b/.test(msg)) {
             await supabase
               .from("people")
               .update({ unipile_resolve_status: "not_found" } as any)
               .eq("id", candidate.id);
             skipped++;
-          } else if (status === 429) {
-            // Rate limited — stop processing this batch
+          } else if (/\b429\b/.test(msg)) {
             logger.warn("Rate limited by Unipile — stopping batch", { resolved, failed, skipped });
             break;
           } else {
-            logger.warn("Unipile API error", { candidateId: candidate.id, status });
+            logger.warn("Unipile API error", { candidateId: candidate.id, error: msg });
             failed++;
           }
           await delay(DELAY_MS);
           continue;
         }
-
-        const profile = await resp.json();
         const unipileId = profile.id ?? null;
         const providerId =
           profile.provider_id ?? profile.public_identifier ?? null;
@@ -244,18 +235,4 @@ function extractLinkedInSlug(url: string | null): string | null {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
 }

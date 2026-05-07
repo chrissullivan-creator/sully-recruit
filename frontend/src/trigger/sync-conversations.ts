@@ -1,5 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin } from "./lib/supabase";
+import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
 
 const BATCH_SIZE = 20;
 const DELAY_MS = 400;
@@ -19,14 +20,13 @@ export const syncConversations = schedules.task({
   maxDuration: 240,
   run: async () => {
     const supabase = getSupabaseAdmin();
-    const baseUrl = await getUnipileBaseUrl();
-    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
-    // Get active LinkedIn accounts
+    // Get active LinkedIn accounts. Each row gets its own v2 sweep —
+    // account_id moves into the URL path in v2 (no more query param).
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id, owner_user_id")
-      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator")
+      .select("id, unipile_account_id, owner_user_id, account_type")
+      .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null);
 
@@ -39,22 +39,31 @@ export const syncConversations = schedules.task({
     let totalMessages = 0;
 
     for (const account of accounts) {
+      // Bucket inbound LinkedIn conversations: recruiter accounts produce
+      // InMails (linkedin_recruiter), classic accounts produce regular
+      // LinkedIn messages (linkedin).
+      const channelBucket = canonicalChannel(
+        account.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
+      );
       try {
-        // Fetch recent conversations from Unipile
-        const resp = await fetch(
-          `${baseUrl}/conversations?account_id=${account.unipile_account_id}&limit=${BATCH_SIZE}&sort=latest`,
-          {
-            headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-            signal: AbortSignal.timeout(10_000),
-          },
-        );
-
-        if (!resp.ok) {
-          logger.warn("Failed to fetch conversations", { accountId: account.id, status: resp.status });
+        // v2 paths:
+        //   GET /api/v2/{account_id}/chats?limit&sort
+        let data: any;
+        try {
+          data = await unipileFetch(
+            supabase,
+            account.unipile_account_id,
+            `chats`,
+            {
+              method: "GET",
+              query: { limit: BATCH_SIZE, sort: "latest" },
+            },
+          );
+        } catch (err: any) {
+          logger.warn("Failed to fetch chats", { accountId: account.id, error: err.message });
           continue;
         }
 
-        const data = await resp.json();
         const conversations = data.items || data || [];
 
         for (const conv of conversations) {
@@ -86,10 +95,12 @@ export const syncConversations = schedules.task({
 
           if (!candidateChannel && !contactChannel) continue;
 
-          // Upsert conversation record
+          // Upsert conversation record. Bucket using channelBucket so
+          // recruiter InMails go to linkedin_recruiter and classic
+          // chats go to linkedin (matches sequence-scheduler writes).
           const convRecord: any = {
             external_conversation_id: convId,
-            channel: "linkedin",
+            channel: channelBucket,
             last_message_at: conv.last_message_at || conv.updated_at,
             last_message_preview: conv.last_message_preview || conv.snippet,
             account_id: account.id,
@@ -117,17 +128,24 @@ export const syncConversations = schedules.task({
               .eq("channel", "linkedin");
           }
 
-          // Fetch latest messages for this conversation
-          const msgResp = await fetch(
-            `${baseUrl}/messages?conversation_id=${convId}&limit=10`,
-            {
-              headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-              signal: AbortSignal.timeout(5_000),
-            },
-          );
+          // Fetch latest messages for this conversation.
+          // v2 path: GET /api/v2/{account_id}/chats/{chat_id}/messages
+          let msgData: any = null;
+          try {
+            msgData = await unipileFetch(
+              supabase,
+              account.unipile_account_id,
+              `chats/${encodeURIComponent(convId)}/messages`,
+              {
+                method: "GET",
+                query: { limit: 10 },
+              },
+            );
+          } catch (err: any) {
+            logger.warn("Failed to fetch chat messages", { convId, error: err.message });
+          }
 
-          if (msgResp.ok) {
-            const msgData = await msgResp.json();
+          if (msgData) {
             const messages = msgData.items || msgData || [];
 
             for (const msg of messages) {
@@ -146,7 +164,7 @@ export const syncConversations = schedules.task({
                 conversation_id: convId,
                 candidate_id: candidateChannel?.candidate_id || null,
                 contact_id: contactChannel?.contact_id || null,
-                channel: "linkedin",
+                channel: channelBucket,
                 direction: msg.is_sender ? "outbound" : "inbound",
                 body: msg.text || msg.body,
                 sender_name: msg.sender_name,

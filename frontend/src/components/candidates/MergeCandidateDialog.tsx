@@ -135,11 +135,13 @@ export function MergeCandidateDialog({
     setSearching(true);
     try {
       const q = searchQuery.trim();
+      // Plain people.email retired — alias primary_email and search
+      // across the typed columns instead.
       const { data, error } = await supabase
         .from('people')
-        .select('id, first_name, last_name, email, phone, linkedin_url, current_title, current_company, location_text, status, created_at')
+        .select('id, first_name, last_name, email:primary_email, phone, linkedin_url, current_title, current_company, location_text, status, created_at')
         .neq('id', currentCandidate.id)
-        .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,current_company.ilike.%${q}%,linkedin_url.ilike.%${q}%`)
+        .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,personal_email.ilike.%${q}%,work_email.ilike.%${q}%,phone.ilike.%${q}%,current_company.ilike.%${q}%,linkedin_url.ilike.%${q}%`)
         .order('updated_at', { ascending: false })
         .limit(20);
 

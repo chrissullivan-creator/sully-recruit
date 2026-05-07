@@ -27,15 +27,17 @@ export const syncPeopleToOutlook = schedules.task({
     // Pick a batch — newly added or recently updated, owned + has email,
     // not yet synced or stale (>24h since last sync).
     const stale = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // primary_email is the new generated column = COALESCE(work_email, personal_email).
+    // The plain `people.email` column was retired in 20260507140000.
     const { data: rows, error } = await supabase
       .from("people")
       .select(`
-        id, type, first_name, last_name, full_name, email, phone,
+        id, type, first_name, last_name, full_name, primary_email, phone,
         current_title, current_company, linkedin_url,
         owner_user_id, outlook_contact_id, outlook_contact_synced_at
       `)
       .not("owner_user_id", "is", null)
-      .not("email", "is", null)
+      .not("primary_email", "is", null)
       .or(`outlook_contact_id.is.null,outlook_contact_synced_at.lt.${stale}`)
       .limit(50);
 
@@ -74,7 +76,7 @@ export const syncPeopleToOutlook = schedules.task({
             first_name: r.first_name,
             last_name: r.last_name,
             full_name: r.full_name,
-            email: r.email,
+            email: r.primary_email,
             phone: r.phone,
             current_title: r.current_title,
             current_company: r.current_company,

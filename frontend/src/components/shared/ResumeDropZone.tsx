@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
 
@@ -188,7 +189,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
       const { data: linkedinAcct } = await supabase
         .from('integration_accounts')
         .select('unipile_account_id')
-        .or('account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter,account_type.eq.sales_navigator')
+        .or('account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter')
         .eq('is_active', true)
         .not('unipile_account_id', 'is', null)
         .limit(1)
@@ -290,7 +291,9 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           first_name:      entry.first_name.trim() || undefined,
           last_name:       entry.last_name.trim() || undefined,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
-          email:           entry.email.trim() || undefined,
+          // Plain `email` column was retired — route via classifier so the
+          // address lands in personal_email or work_email by domain.
+          ...(entry.email.trim() ? classifyEmail(normalizeEmail(entry.email.trim())) : {}),
           phone:           entry.phone.trim() || undefined,
           current_company: entry.current_company.trim() || undefined,
           current_title:   entry.current_title.trim() || undefined,
@@ -301,13 +304,16 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         .eq('id', entry.candidate_id);
       if (error) throw error;
     } else {
-      // Check if candidate with this email already exists
+      // Check if candidate with this email already exists. Plain `email`
+      // is gone; OR across all three address columns.
       let existing: any = null;
       if (entry.email.trim()) {
+        const e = entry.email.trim().toLowerCase();
         const { data } = await supabase
           .from('people')
           .select('id')
-          .eq('email', entry.email.trim())
+          .or(`personal_email.ilike.${e},work_email.ilike.${e},primary_email.ilike.${e}`)
+          .limit(1)
           .maybeSingle();
         existing = data;
       }
@@ -333,7 +339,8 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           first_name:      entry.first_name.trim() || null,
           last_name:       entry.last_name.trim() || null,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || null,
-          email:           entry.email.trim() || null,
+          // Plain `email` retired — split into personal/work via classifier.
+          ...classifyEmail(normalizeEmail(entry.email.trim())),
           phone:           entry.phone.trim() || null,
           current_company: entry.current_company.trim() || null,
           current_title:   entry.current_title.trim() || null,

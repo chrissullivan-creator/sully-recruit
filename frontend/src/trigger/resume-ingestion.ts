@@ -1,9 +1,11 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getEdenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
-import { parseResume, extractResumeText } from "../lib/resume-parser";
+import { matchPersonByEmail } from "./lib/match-person-by-email";
+import { extractResumeText } from "../lib/resume-parser";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 interface ResumeIngestionPayload {
   resumeId: string;
@@ -58,13 +60,48 @@ export const resumeIngestion = task({
       return { skipped: true, reason: "not_a_resume" };
     }
 
-    // ── 3. Parse via Affinda (Eden AI) ──────────────────────────────
-    const edenKey = await getEdenAIKey();
-    if (!edenKey) throw new Error("EDEN_AI_API_KEY missing in app_settings");
-    const { parsed: parsedJson, rawText, via } = await parseResume(fileBytes, fileName, {
-      edenKey,
-      log: logger,
+    // ── 3. Parse via Claude (Anthropic, with OpenAI fallback) ───────
+    // Affinda/Eden AI was retired; we now extract raw text from the
+    // file and ask Claude to map it into our flat ParsedResume shape.
+    // The system prompt mirrors api/parse-resume-ai.ts so the structured
+    // output stays consistent with the manual API endpoint.
+    const rawText = sniffText;
+    const [anthropicKey, openaiKey] = await Promise.all([
+      getAnthropicKey(),
+      getOpenAIKey().catch(() => ""),
+    ]);
+    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY missing in app_settings");
+
+    const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
+
+Extract:
+{
+  "first_name": "First",
+  "last_name": "Last",
+  "email": "email@example.com or null",
+  "phone": "phone number or null",
+  "linkedin_url": "linkedin URL or null",
+  "current_title": "most recent job title",
+  "current_company": "most recent company",
+  "location": "city, state or null",
+  "skills": ["skill1", "skill2"]
+}
+
+Resume text:
+${rawText.slice(0, 60000)}`;
+
+    const { text, via } = await callAIWithFallback({
+      anthropicKey,
+      openaiKey: openaiKey || undefined,
+      systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
+      userContent: userPrompt,
+      maxTokens: 2048,
+      jsonOutput: true,
     });
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Resume parse: no JSON in response");
+    const parsedJson = JSON.parse(jsonMatch[0]);
     const parser = `trigger-${via}`;
     logger.info("Parsed resume", { parsed: parsedJson, parser });
 
@@ -79,10 +116,71 @@ export const resumeIngestion = task({
       })
       .eq("id", resumeId);
 
+    // ── 4b. Redirect-to-existing-candidate ─────────────────────────
+    // Forwards (cloudflare-email + Outlook resumes inbox) hand us a
+    // fresh stub since they don't know the candidate's real identity
+    // — that lives in parsed_json. If the parsed email or linkedin_url
+    // already belongs to someone in the DB, re-point this resume row
+    // to them and delete the placeholder stub. Otherwise the stub
+    // becomes the candidate (next block fills in the parsed fields).
+    let workingCandidateId = candidateId;
+    if (parsedJson) {
+      const parsedEmail = normalizeEmail(parsedJson.email);
+      const parsedLi = (parsedJson.linkedin_url || "").trim() || null;
+
+      let match: { id: string } | null = null;
+      if (parsedEmail) {
+        const m = await matchPersonByEmail(supabase, parsedEmail);
+        if (m && m.entityId !== candidateId) match = { id: m.entityId };
+      }
+      if (!match && parsedLi) {
+        const slug = (parsedLi.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/i)?.[1] ?? "").toLowerCase();
+        if (slug) {
+          const { data } = await supabase
+            .from("people")
+            .select("id")
+            .ilike("linkedin_url", `%${slug}%`)
+            .neq("id", candidateId)
+            .limit(1)
+            .maybeSingle();
+          if (data?.id) match = data;
+        }
+      }
+
+      if (match) {
+        // Re-point the resumes row to the real candidate and drop
+        // the placeholder stub so we don't leave dangling rows.
+        await supabase
+          .from("resumes")
+          .update({ candidate_id: match.id })
+          .eq("id", resumeId);
+
+        // Only delete the stub if it has no other resumes attached
+        // and is_stub=true (i.e. truly a forwarder placeholder).
+        const { data: stub } = await supabase
+          .from("people")
+          .select("id, is_stub")
+          .eq("id", candidateId)
+          .maybeSingle();
+        const { count: otherResumes } = await supabase
+          .from("resumes")
+          .select("id", { count: "exact", head: true })
+          .eq("candidate_id", candidateId);
+        if (stub?.is_stub && (otherResumes ?? 0) === 0) {
+          await supabase.from("people").delete().eq("id", candidateId);
+        }
+
+        logger.info("Resume re-pointed to existing candidate", {
+          stub: candidateId, real: match.id, parsedEmail, parsedLi,
+        });
+        workingCandidateId = match.id;
+      }
+    }
+
     // ── 5. Update candidate with parsed fields ──────────────────────
     // parsedJson.email = email found IN the resume = candidate's personal email.
     // Always tag as candidate and clear is_stub on successful resume parse.
-    if (parsedJson && candidateId) {
+    if (parsedJson && workingCandidateId) {
       const updates: any = {
         roles: ["candidate"],
         is_stub: false,
@@ -95,11 +193,9 @@ export const resumeIngestion = task({
       if (parsedJson.email) {
         // Word docx extraction leaks "HYPERLINK" garbage and sometimes a
         // comma-joined pair of addresses; normalize first, then classify.
+        // Plain `email` column was retired — only write personal/work.
         const cleaned = normalizeEmail(parsedJson.email);
-        if (cleaned) {
-          updates.email = cleaned;
-          Object.assign(updates, classifyEmail(cleaned));
-        }
+        if (cleaned) Object.assign(updates, classifyEmail(cleaned));
       }
       if (parsedJson.phone) {
         updates.phone = parsedJson.phone;
@@ -111,17 +207,17 @@ export const resumeIngestion = task({
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
 
-      await supabase.from("people").update(updates).eq("id", candidateId);
+      await supabase.from("people").update(updates).eq("id", workingCandidateId);
     }
 
     // ── 6. Embed full profile with Voyage and store in resume_embeddings ──
     const textForEmbed = rawText ?? sniffText;
-    if (candidateId && textForEmbed.length > 50) {
+    if (workingCandidateId && textForEmbed.length > 50) {
       try {
         const { data: candidate } = await supabase
           .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
-          .eq("id", candidateId)
+          .eq("id", workingCandidateId)
           .single();
 
         if (candidate) {
@@ -131,11 +227,11 @@ export const resumeIngestion = task({
           await supabase
             .from("resume_embeddings")
             .delete()
-            .eq("candidate_id", candidateId)
+            .eq("candidate_id", workingCandidateId)
             .eq("embed_type", "full_profile");
 
           await supabase.from("resume_embeddings").insert({
-            candidate_id: candidateId,
+            candidate_id: workingCandidateId,
             resume_id: resumeId,
             embedding: JSON.stringify(embedding),
             source_text: profileText.slice(0, 2000),
@@ -145,7 +241,7 @@ export const resumeIngestion = task({
             embed_model: "voyage-finance-2",
           });
 
-          logger.info("Embedded resume with Voyage", { candidateId });
+          logger.info("Embedded resume with Voyage", { candidateId: workingCandidateId });
         }
       } catch (err: any) {
         logger.warn("Voyage embedding failed, will retry on next ingestion", { error: err.message });
@@ -154,11 +250,11 @@ export const resumeIngestion = task({
 
     // Chain-trigger Joe Says refresh after resume parsing
     await generateJoeSays.trigger({
-      entityId: candidateId,
+      entityId: workingCandidateId,
       entityType: "candidate",
     });
 
-    return { success: true, resumeId, candidateId };
+    return { success: true, resumeId, candidateId: workingCandidateId };
   },
 });
 

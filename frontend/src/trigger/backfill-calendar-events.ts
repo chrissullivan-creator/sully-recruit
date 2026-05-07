@@ -1,5 +1,6 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
+import { matchPersonByEmail as matchPersonByEmailHelper } from "./lib/match-person-by-email";
 
 /**
  * One-shot backfill: pull historical Outlook calendar events and sync them
@@ -423,20 +424,8 @@ async function matchByEmail(
   supabase: any,
   email: string,
 ): Promise<{ entityId: string; entityType: string } | null> {
-  const normalized = email.toLowerCase().trim();
-
-  const [candidateRes, contactRes] = await Promise.all([
-    supabase.from("people").select("id").ilike("email", normalized).limit(1),
-    supabase.from("contacts").select("id").ilike("email", normalized).limit(1),
-  ]);
-
-  if (candidateRes.data?.[0]) {
-    return { entityId: candidateRes.data[0].id, entityType: "candidate" };
-  }
-  if (contactRes.data?.[0]) {
-    return { entityId: contactRes.data[0].id, entityType: "contact" };
-  }
-  return null;
+  const m = await matchPersonByEmailHelper(supabase, email);
+  return m ? { entityId: m.entityId, entityType: m.entityType } : null;
 }
 
 async function refreshAccessToken(

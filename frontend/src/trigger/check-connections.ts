@@ -1,5 +1,6 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getUnipileBaseUrl, getAppSetting } from "./lib/supabase";
+import { getSupabaseAdmin } from "./lib/supabase";
+import { unipileFetch } from "./lib/unipile-v2";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;
@@ -20,8 +21,6 @@ export const checkConnections = schedules.task({
   maxDuration: 180,
   run: async () => {
     const supabase = getSupabaseAdmin();
-    const baseUrl = await getUnipileBaseUrl();
-    const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
     // Find enrollments stuck waiting for connection acceptance
     const { data: enrollments, error } = await supabase
@@ -76,22 +75,22 @@ export const checkConnections = schedules.task({
         }
 
         // Check the user's profile — if we can see their full profile,
-        // the connection was likely accepted
-        const resp = await fetch(
-          `${baseUrl}/users/${encodeURIComponent(channel.provider_id)}?account_id=${account.unipile_account_id}`,
-          {
-            headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-            signal: AbortSignal.timeout(5_000),
-          },
-        );
-
-        if (!resp.ok) {
+        // the connection was likely accepted.
+        // v2 path: GET /api/v2/{account_id}/linkedin/users/{provider_id}
+        let profile: any;
+        try {
+          profile = await unipileFetch(
+            supabase,
+            account.unipile_account_id,
+            `linkedin/users/${encodeURIComponent(channel.provider_id)}`,
+            { method: "GET" },
+          );
+        } catch {
           checked++;
           await delay(DELAY_MS);
           continue;
         }
 
-        const profile = await resp.json();
         const isConnected =
           profile.is_connected === true ||
           profile.connection_status === "CONNECTED" ||
