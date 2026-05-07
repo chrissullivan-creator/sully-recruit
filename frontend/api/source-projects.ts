@@ -44,20 +44,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!account_id) return res.status(400).json({ error: "Missing account_id" });
 
   try {
-    // Pull both base URLs. v2 is the canonical for new code; v1 stays
-    // for action=list_accounts which still lives at /api/v1/accounts.
-    const [{ data: v2Row }, { data: v1Row }, { data: keyRow }] = await Promise.all([
+    // Pull both base URLs + both keys. v2 is the canonical for new code;
+    // v1 stays for action=list_accounts and for message/send routes that
+    // haven't migrated. Prefer the v2-specific key (UNIPILE_API_KEY_V2)
+    // when set, fall back to UNIPILE_API_KEY otherwise. Same single key
+    // is fine for both products in most Unipile setups.
+    const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
     ]);
 
     const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-      // Best-effort fallback: derive v2 from v1 (`/api/v1` → `/api/v2`)
-      // when UNIPILE_BASE_V2_URL hasn't been set explicitly.
       || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
     const v1Base = (v1Row?.value || "").replace(/\/+$/, "");
-    const apiKey = keyRow?.value;
+    const apiKey = v2KeyRow?.value || v1KeyRow?.value;
 
     if (!v2Base || !apiKey) {
       return res.status(500).json({ error: "Unipile config missing (UNIPILE_BASE_V2_URL or UNIPILE_API_KEY)" });
