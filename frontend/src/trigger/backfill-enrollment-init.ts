@@ -33,14 +33,21 @@ export const backfillEnrollmentInit = schedules.task({
     // Pull active enrollments older than the grace window.
     const { data: candidates, error: enrollErr } = await supabase
       .from("sequence_enrollments")
-      .select("id, sequence_id, candidate_id, contact_id, enrolled_by, account_id")
+      .select("id, sequence_id, candidate_id, contact_id, enrolled_by")
       .eq("status", "active")
       .lt("enrolled_at", fiveMinAgo)
       .order("enrolled_at", { ascending: true })
       .limit(200);
 
     if (enrollErr) {
-      await notifyError({ taskId: "backfill-enrollment-init", error: enrollErr, context: { phase: "enrollments_query" } });
+      // PostgREST errors are plain objects, not Error instances; pass
+      // the message string explicitly so notifyError doesn't render
+      // [object Object] in the alert.
+      await notifyError({
+        taskId: "backfill-enrollment-init",
+        error: new Error(`enrollments_query: ${enrollErr.message ?? JSON.stringify(enrollErr)}`),
+        context: { phase: "enrollments_query", details: enrollErr.details, hint: enrollErr.hint },
+      });
       return { error: enrollErr.message };
     }
     const list = (candidates ?? []) as any[];
@@ -77,7 +84,6 @@ export const backfillEnrollmentInit = schedules.task({
           candidateId: e.candidate_id || undefined,
           contactId: e.contact_id || undefined,
           enrolledBy: e.enrolled_by,
-          accountId: e.account_id || undefined,
         });
         triggered++;
       } catch (err: any) {

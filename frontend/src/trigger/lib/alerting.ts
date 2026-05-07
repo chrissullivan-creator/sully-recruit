@@ -42,10 +42,26 @@ interface NotifyErrorArgs {
   severity?: "ERROR" | "WARN" | "INFO";
 }
 
+function readableError(err: unknown): string {
+  if (err == null) return "unknown";
+  if (err instanceof Error) return err.message || err.name || "Error";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const o = err as any;
+    // Supabase / PostgREST errors are plain objects with .message;
+    // String(obj) on those gives "[object Object]" which is what we
+    // were burning email alerts on.
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.error === "string" && o.error) return o.error;
+    if (typeof o.details === "string" && o.details) return o.details;
+    try { return JSON.stringify(o).slice(0, 500); } catch { return "[unserialisable]"; }
+  }
+  return String(err);
+}
+
 function errorSignature(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err ?? "unknown");
   // Strip volatile bits so the same error doesn't dedupe to different keys.
-  return msg
+  return readableError(err)
     .replace(/[a-f0-9]{8,}/gi, "*")
     .replace(/\d{6,}/g, "*")
     .slice(0, 200);
@@ -88,7 +104,7 @@ export async function notifyError(args: NotifyErrorArgs): Promise<void> {
   }
 
   // Always log first — that's the source-of-truth even if email fails.
-  const errMsg = error instanceof Error ? error.message : String(error ?? "");
+  const errMsg = readableError(error);
   const errStack = error instanceof Error ? error.stack : undefined;
   logger.error(`[${taskId}] ${errMsg}`, { context, stack: errStack?.slice(0, 1000) });
 
