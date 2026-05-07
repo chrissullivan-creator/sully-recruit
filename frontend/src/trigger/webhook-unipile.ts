@@ -379,6 +379,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       id: conversationId,
       [entityColumn]: entityId,
       channel,
+      // Stamp content_type so the reclassify task can skip this row
+      // on the next pass. NULL for Classic DMs (Unipile omits the
+      // field there); 'inmail' for Recruiter InMails.
+      content_type: contentType || null,
       external_conversation_id: externalConversationId,
       last_message_at: receivedAt,
     } as any);

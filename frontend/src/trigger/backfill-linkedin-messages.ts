@@ -69,6 +69,7 @@ async function upsertConversation(
   entity: { type: string; id: string; owner_user_id: string | null } | null,
   channel: string,
   integrationAccountId: string,
+  contentType: string | null,
 ): Promise<string> {
   const { data: existing } = await supabase
     .from("conversations")
@@ -85,6 +86,7 @@ async function upsertConversation(
       candidate_id: entity?.type === "candidate" ? entity.id : null,
       contact_id: entity?.type === "contact" ? entity.id : null,
       channel,
+      content_type: contentType,
       integration_account_id: integrationAccountId,
       external_conversation_id: chatId,
       is_read: true,
@@ -194,7 +196,10 @@ export const backfillLinkedinMessages = schedules.task({
           }
         }
 
-        const conversationId = await upsertConversation(supabase, chatId, entity, channel, account.id);
+        const conversationId = await upsertConversation(
+          supabase, chatId, entity, channel, account.id,
+          contentType || null,
+        );
 
         // Fetch messages (only latest 20 since this runs every 5 min).
         // v2 path: GET /api/v2/{account_id}/chats/{chat_id}/messages
