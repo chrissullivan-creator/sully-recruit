@@ -394,6 +394,10 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
           ))}
       </div>
 
+      <SchedulePreview branches={branches} />
+
+      <SequenceWarnings branches={branches} />
+
       <div className="bg-white/90 backdrop-blur p-3 rounded-md shadow-sm border text-[10px] text-muted-foreground space-y-1">
         <p className="font-medium text-foreground">Engine rules (automatic):</p>
         <p>&#8226; Any reply on any channel stops the sequence + Joe sentiment</p>
@@ -403,6 +407,87 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
         <p>&#8226; Email/SMS skipped if no email/phone on record</p>
         <p>&#8226; Delay hours count only within send window</p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Cumulative-from-previous schedule preview. Walks the steps in order,
+ * adding each action's wait (base_delay_hours + delay_interval_minutes)
+ * to the running total. Mirrors the engine's cumulative logic in
+ * sequenceEnrollmentInit so the editor preview matches what actually fires.
+ */
+function SchedulePreview({ branches }: { branches: SequenceBranch[] }) {
+  const steps = flattenBranchSteps(branches);
+  if (steps.length === 0) return null;
+
+  let cumulativeMinutes = 0;
+  const rows = steps.map((step, idx) => {
+    const action = step.actions?.[0];
+    const waitH = Number(action?.baseDelayHours) || 0;
+    const waitM = Number(action?.delayIntervalMinutes) || 0;
+    cumulativeMinutes += waitH * 60 + waitM;
+    const channel = action?.channel || "—";
+    const cumulativeLabel = formatCumulative(cumulativeMinutes);
+    const waitLabel = idx === 0
+      ? "fires at enrollment"
+      : `+${waitH}h${waitM ? ` ${waitM}m` : ""} after step ${idx}`;
+    return { idx: idx + 1, channel, waitLabel, cumulativeLabel };
+  });
+
+  return (
+    <div className="bg-white/90 backdrop-blur p-3 rounded-md shadow-sm border text-[11px] space-y-1">
+      <p className="font-medium text-foreground">Schedule preview (window-hours, cumulative):</p>
+      {rows.map((r) => (
+        <p key={r.idx} className="text-muted-foreground">
+          <span className="font-mono">Step {r.idx}</span>{" "}
+          <span className="capitalize">{r.channel.replace(/_/g, " ")}</span> —{" "}
+          {r.waitLabel} <span className="text-foreground/70">({r.cumulativeLabel})</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function formatCumulative(minutes: number): string {
+  if (minutes === 0) return "T+0";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `T+${m}m`;
+  if (m === 0) return `T+${h}h`;
+  return `T+${h}h ${m}m`;
+}
+
+/**
+ * Editor-side guardrails. Currently flags the engine's hard rule that a
+ * linkedin_message step needs a preceding linkedin_connection in the same
+ * sequence — without it, the engine skips the message at fire time and
+ * the recruiter sees a quiet failure.
+ */
+function SequenceWarnings({ branches }: { branches: SequenceBranch[] }) {
+  const steps = flattenBranchSteps(branches);
+  const warnings: string[] = [];
+
+  let sawConnection = false;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    for (const action of step.actions || []) {
+      if (action.channel === "linkedin_connection") sawConnection = true;
+      if (action.channel === "linkedin_message" && !sawConnection) {
+        warnings.push(
+          `Step ${i + 1}: LinkedIn message has no preceding connection request — the engine will skip it at fire time. Add a linkedin_connection step earlier.`,
+        );
+      }
+    }
+  }
+
+  if (warnings.length === 0) return null;
+  return (
+    <div className="bg-amber-50 border border-amber-200 p-3 rounded-md text-[11px] space-y-1">
+      <p className="font-medium text-amber-900">Heads up before you save:</p>
+      {warnings.map((w, i) => (
+        <p key={i} className="text-amber-800">&#8226; {w}</p>
+      ))}
     </div>
   );
 }

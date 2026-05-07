@@ -286,6 +286,13 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         if (candidateId && resumeFilePath && resumeFileName) {
           triggerResumeIngestion(candidateId, resumeFilePath, resumeFileName);
         }
+        if (candidateId && (applicant.linkedin_url || parsedData.linkedin_url)) {
+          fetch('/api/resolve-person-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ person_id: candidateId }),
+          }).catch(() => {});
+        }
 
         // TODO: enrichment API call here — if email or phone is missing,
         // call enrichment service to fill in contact information.

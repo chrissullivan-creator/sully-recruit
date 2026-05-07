@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { sequence_id, enrolled_by } = req.body ?? {};
+  const { sequence_id, enrolled_by, force_imminent } = req.body ?? {};
   if (!sequence_id || !enrolled_by) {
     return res.status(400).json({ error: "Missing sequence_id or enrolled_by" });
   }
@@ -39,6 +39,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const enrollmentIds = enrollments.map((e) => e.id);
+
+    // Safeguard: if any pending step_log is set to fire within the next 10
+    // minutes, the sweep may already have claimed it. Cancelling under
+    // that race risks losing a send (or worse, double-sending if the
+    // claim already went out). Surface a confirmation to the caller and
+    // require an explicit `force_imminent: true` to proceed.
+    if (!force_imminent) {
+      const tenMinFromNow = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      const { count: imminent } = await supabase
+        .from("sequence_step_logs")
+        .select("id", { count: "exact", head: true })
+        .in("enrollment_id", enrollmentIds)
+        .in("status", ["scheduled", "in_flight"])
+        .lte("scheduled_at", tenMinFromNow);
+      if ((imminent ?? 0) > 0) {
+        return res.status(409).json({
+          imminent_count: imminent,
+          message: `${imminent} send${imminent === 1 ? "" : "s"} fire within 10 minutes — re-pace would race the sweep. Re-send with force_imminent=true to override.`,
+        });
+      }
+    }
 
     // Cancel pending step_logs (scheduled + pending_connection) so the
     // next enrollment-init run starts from a clean slate. Keep history

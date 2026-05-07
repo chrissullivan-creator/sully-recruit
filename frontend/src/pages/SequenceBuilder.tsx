@@ -406,12 +406,34 @@ export default function SequenceBuilder() {
     if (!confirmed) return;
 
     try {
-      const resp = await fetch("/api/repace-sequence-enrollments", {
+      let resp = await fetch("/api/repace-sequence-enrollments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sequence_id: seqId, enrolled_by: user.id }),
       });
-      const result = await resp.json();
+      let result = await resp.json();
+
+      // Safeguard: backend returns 409 when a pending send is within 10
+      // minutes. Confirm again before forcing — spells out the race so
+      // the recruiter can choose to wait or override.
+      if (resp.status === 409 && result.imminent_count) {
+        const force = window.confirm(
+          `${result.imminent_count} send${result.imminent_count === 1 ? "" : "s"} fire within the next 10 minutes.\n\n` +
+          `Re-pacing now risks racing the send sweep — the imminent send may go out anyway, or get cancelled mid-flight.\n\n` +
+          `Override and re-pace anyway?`,
+        );
+        if (!force) {
+          toast.message("Re-pace cancelled — imminent sends preserved");
+          return;
+        }
+        resp = await fetch("/api/repace-sequence-enrollments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sequence_id: seqId, enrolled_by: user.id, force_imminent: true }),
+        });
+        result = await resp.json();
+      }
+
       if (!resp.ok) throw new Error(result.error || `HTTP ${resp.status}`);
       toast.success(`Re-paced ${result.repaced} enrollment${result.repaced === 1 ? "" : "s"}`);
     } catch (err: any) {
