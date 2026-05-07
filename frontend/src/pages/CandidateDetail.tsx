@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
+import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -328,6 +329,7 @@ const CandidateDetail = () => {
   const [addingSendOut, setAddingSendOut] = useState(false);
   const [selectedJobForSendOut, setSelectedJobForSendOut] = useState<string>('');
   const [savingSendOut, setSavingSendOut] = useState(false);
+  const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
 
@@ -461,23 +463,53 @@ const CandidateDetail = () => {
     },
   });
 
-  const handleAddSendOut = async () => {
+  // Open the notes dialog (instead of inserting directly) so the
+  // recruiter has a chance to capture context — candidate fit, comp
+  // expectations, why this role — that follows the candidate into
+  // the activity feed. Note is optional; "Skip notes" still creates
+  // the send-out.
+  const handleAddSendOut = () => {
+    if (!id || !selectedJobForSendOut) return;
+    setSendOutNotesOpen(true);
+  };
+
+  const performAddSendOut = async (note: string) => {
     if (!id || !selectedJobForSendOut) return;
     setSavingSendOut(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const { error } = await supabase.from('send_outs').insert({
-        candidate_id: id,
-        job_id: selectedJobForSendOut,
-        // 'pitch' is the canonical first stage — candidate has been added
-        // to the pipeline and now needs to be pitched the role.
-        stage: 'pitch',
-        recruiter_id: session?.user?.id ?? null,
-      } as any);
+      const userId = session?.user?.id ?? null;
+      // 'pitch' is the canonical first stage — candidate has been added
+      // to the pipeline and now needs to be pitched the role.
+      const { data: created, error } = await supabase
+        .from('send_outs')
+        .insert({
+          candidate_id: id,
+          job_id: selectedJobForSendOut,
+          stage: 'pitch',
+          recruiter_id: userId,
+        } as any)
+        .select('id')
+        .single();
       if (error) throw error;
+
+      // Optional kickoff note → polymorphic notes row pointing at the
+      // new send_out so it appears in the candidate's activity feed.
+      const trimmed = note.trim();
+      if (created?.id && trimmed) {
+        await supabase.from('notes').insert({
+          entity_type: 'send_out',
+          entity_id: created.id,
+          note: trimmed,
+          created_by: userId,
+          note_source: 'add_send_out',
+        } as any);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
       setSelectedJobForSendOut('');
       setAddingSendOut(false);
+      setSendOutNotesOpen(false);
       toast.success('Candidate added to job pipeline');
     } catch (e: any) {
       toast.error(e.message);
@@ -2319,6 +2351,17 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      <SendOutNotesDialog
+        open={sendOutNotesOpen}
+        onOpenChange={(v) => { if (!savingSendOut) setSendOutNotesOpen(v); }}
+        onConfirm={(note) => performAddSendOut(note)}
+        candidateName={fullName || null}
+        jobTitle={jobs.find((j: any) => j.id === selectedJobForSendOut)?.title ?? null}
+        saving={savingSendOut}
+        title="Add to Send Out"
+        confirmLabel="Add to pipeline"
+      />
 
       {candidate && (
         <MergeCandidateDialog

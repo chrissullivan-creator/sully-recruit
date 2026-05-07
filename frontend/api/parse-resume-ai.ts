@@ -1,9 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient } from "@supabase/supabase-js";
 import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/parse-resume-ai
- * Parses raw resume text using Claude and returns structured data.
+ * Parses raw resume text via Gemini → OpenAI fallback and returns
+ * structured JSON.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -17,9 +19,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing required field: resume_text" });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+    // Pull keys from env first, falling back to app_settings so the
+    // function works regardless of which deployment surface stored
+    // them. Gemini is the primary; OpenAI is the fallback.
+    let geminiKey = process.env.GEMINI_API_KEY || "";
+    let openaiKey = process.env.OPENAI_API_KEY || "";
+    if (!geminiKey || !openaiKey) {
+      const supaUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (supaUrl && svc) {
+        const admin = createClient(supaUrl, svc);
+        const { data } = await admin
+          .from("app_settings")
+          .select("key, value")
+          .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY"]);
+        for (const row of data ?? []) {
+          if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
+          if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+        }
+      }
+    }
+    if (!geminiKey && !openaiKey) {
+      return res.status(500).json({ error: "Resume parser: neither GEMINI_API_KEY nor OPENAI_API_KEY configured" });
     }
 
     const jobContext = job_title
@@ -52,11 +73,10 @@ Resume text:
 ${resume_text}`;
 
     const { text } = await callAIWithFallback({
-      anthropicKey: apiKey,
-      openaiKey: process.env.OPENAI_API_KEY,
+      geminiKey: geminiKey || undefined,
+      openaiKey: openaiKey || undefined,
       systemPrompt: "You parse resumes into structured JSON.",
       userContent: userPrompt,
-      model: "claude-sonnet-4-20250514",
       maxTokens: 2048,
       jsonOutput: true,
     });
