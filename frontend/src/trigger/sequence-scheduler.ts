@@ -200,15 +200,27 @@ export const sequenceActionExecute = task({
       return { action: "manual_call_logged" };
     }
 
-    // Pre-flight: check recipient has required contact info
-    const entityTable = entityType === "candidate" ? "candidates" : "contacts";
+    // Pre-flight: check recipient has required contact info.
+    // Both candidate_id and contact_id reference the unified `people` table
+    // (`candidates` / `contacts` are now views over it).
+    //
+    // Email column choice depends on the person's role:
+    //   - candidates → personal_email (their personal address; work emails
+    //     leak via corporate filters and tip off the candidate's employer)
+    //   - clients    → work_email (we engage with them in their pro context)
+    // The legacy `email` column is the fallback during the migration off it.
     const { data: entityRow } = await supabase
-      .from(entityTable)
-      .select("email, phone, linkedin_url, email_invalid")
+      .from("people")
+      .select("type, email, work_email, personal_email, phone, linkedin_url, email_invalid")
       .eq("id", entityId)
       .maybeSingle();
 
-    if (action.channel === "email" && !entityRow?.email) {
+    const resolvedEmail =
+      entityRow?.type === "candidate"
+        ? (entityRow?.personal_email || entityRow?.email || "")
+        : (entityRow?.work_email || entityRow?.email || "");
+
+    if (action.channel === "email" && !resolvedEmail) {
       await markStepSkipped(supabase, payload.stepLogId, "no_email_on_record");
       await checkSequenceComplete(supabase, enrollment);
       return { action: "skipped", reason: "no_email_on_record" };

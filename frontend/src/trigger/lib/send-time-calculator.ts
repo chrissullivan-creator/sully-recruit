@@ -295,16 +295,51 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
     result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
   }
 
-  // Randomize exact minute within the assigned hour (avoid all sends at :00)
-  const finalEst = toEST(result);
-  const winEnd = parseTimeToMinutes(input.sendWindowEnd);
-  const currentMin = finalEst.hours * 60 + finalEst.minutes;
-  const remainingInHour = Math.min(60 - (currentMin % 60), winEnd - currentMin);
-  if (remainingInHour > 1) {
-    result.setSeconds(Math.floor(Math.random() * 60));
-  }
+  // Snap to a bursty hot-spot within the assigned hour. Each hour has 6
+  // deterministic hot-spots derived from the hour timestamp, so multiple
+  // enrollments landing in the same hour cluster around the same few moments
+  // instead of bunching at HH:00:XX (re-clamp / hour-roll bug) or spreading
+  // evenly (which looks robotic). ±90s jitter per send breaks ties.
+  result = snapToHotSpot(result, input.sendWindowEnd);
 
   return result;
+}
+
+/** Cheap LCG so we get reproducible "random" hot-spots per hour. */
+function lcg(seed: number): () => number {
+  let state = seed | 0;
+  return () => {
+    state = (Math.imul(state, 1103515245) + 12345) | 0;
+    return (state >>> 0) % 2147483648;
+  };
+}
+
+/**
+ * Snap a scheduled time to one of 6 deterministic hot-spots in its hour, with
+ * small ±90s jitter. Ensures bursty clustering across independently-scheduled
+ * enrollments while keeping the result inside the send window.
+ */
+function snapToHotSpot(result: Date, sendWindowEnd: string): Date {
+  const hourStart = new Date(result.getTime());
+  hourStart.setUTCMinutes(0, 0, 0);
+
+  const hourSeed = Math.floor(hourStart.getTime() / 3600000);
+  const rand = lcg(hourSeed);
+  const hotSpots: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    hotSpots.push((rand() % 3300) + 60); // 60..3360 sec
+  }
+
+  const winEnd = parseTimeToMinutes(sendWindowEnd);
+  const finalEst = toEST(hourStart);
+  const hourStartMin = finalEst.hours * 60 + finalEst.minutes;
+  const maxOffsetSec = Math.min(3540, Math.max(0, (winEnd - hourStartMin) * 60 - 30));
+
+  const chosenSpot = hotSpots[Math.floor(Math.random() * hotSpots.length)];
+  const jitterSec = Math.floor(Math.random() * 200) - 100;
+  const offsetSec = Math.max(30, Math.min(maxOffsetSec, chosenSpot + jitterSec));
+
+  return new Date(hourStart.getTime() + offsetSec * 1000);
 }
 
 /**
