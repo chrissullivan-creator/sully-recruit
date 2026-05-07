@@ -60,15 +60,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // ── Dual-role merge: do we already know this person? ────────
+    // Check primary_email (the renamed legacy column) plus the typed
+    // personal_email / work_email columns. Older rows still carry an
+    // address in primary_email; new rows go through classifyEmail and
+    // land directly in personal_email or work_email.
     let existing: { id: string; roles: string[] | null } | null = null;
     const candidates = [email, personalEmail, workEmail].filter(Boolean) as string[];
     for (const e of candidates) {
-      // Hand-built OR (PostgREST mini-DSL) — match on any of the three
-      // address columns. ilike for case-insensitive equality.
       const { data: rows } = await supabase
         .from("people")
         .select("id, roles")
-        .or(`email.ilike.${e},personal_email.ilike.${e},work_email.ilike.${e}`)
+        .or(`primary_email.ilike.${e},personal_email.ilike.${e},work_email.ilike.${e}`)
         .limit(1);
       if (rows?.[0]) { existing = rows[0]; break; }
     }
@@ -101,6 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         else resolvedWork = email;
       }
 
+      const linkedinUrl = data.linkedin_url?.trim() || null;
       const payload: Record<string, any> = {
         first_name: data.first_name.trim(),
         last_name: data.last_name.trim(),
@@ -108,12 +111,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         personal_email: resolvedPersonal,
         work_email: resolvedWork,
         phone: data.phone?.trim() || null,
-        linkedin_url: data.linkedin_url?.trim() || null,
+        linkedin_url: linkedinUrl,
         roles: [role],
         // Sync trigger keeps the singular `type` aligned with `roles`.
         status: "new",
         owner_user_id: user.id,
         created_by_user_id: user.id,
+        // Queue Unipile v2 resolve via the cron task whenever a LinkedIn
+        // URL is provided.
+        unipile_resolve_status: linkedinUrl ? "pending" : null,
       };
       if (role === "candidate") {
         payload.current_title = data.title?.trim() || null;
