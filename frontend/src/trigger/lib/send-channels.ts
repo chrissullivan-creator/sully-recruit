@@ -596,16 +596,16 @@ export async function resolveRecipient(
   if (channel === "email") {
     // Pick the right email column for the role: candidates → personal_email,
     // clients (entityType="contact") → work_email. Falls back to the legacy
-    // `email` column during the migration off it.
+    // `primary_email` column during the migration off it.
     const { data: entity } = await supabase
       .from("people")
-      .select("type, email, work_email, personal_email")
+      .select("type, primary_email, work_email, personal_email")
       .eq("id", entityId)
       .single();
     const to =
       entity?.type === "candidate"
-        ? (entity?.personal_email || entity?.email)
-        : (entity?.work_email || entity?.email);
+        ? (entity?.personal_email || entity?.primary_email)
+        : (entity?.work_email || entity?.primary_email);
     if (!to) throw new Error(`No email for ${entityType} ${entityId}`);
     return { to, conversationId: null };
   }
