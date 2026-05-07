@@ -1,5 +1,7 @@
 import { logger } from "@trigger.dev/sdk/v3";
 import { getMicrosoftGraphCredentials } from "./supabase";
+import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email";
+import { getSupabaseAdmin } from "./supabase";
 
 /**
  * Shared Microsoft Graph helpers.
@@ -48,6 +50,27 @@ export async function sendInternalEmail(
   htmlBody: string,
 ): Promise<void> {
   if (!fromEmail || toEmails.length === 0) return;
+
+  // Phase 2 of the Unipile-everywhere migration: when the kill-switch
+  // USE_UNIPILE_EMAIL is on, route through Unipile Outlook. Falls back
+  // to Graph on any error so a misconfigured Unipile account never
+  // silently drops alerts/digests.
+  if (await shouldUseUnipileEmail()) {
+    try {
+      await unipileSendEmail(getSupabaseAdmin(), {
+        fromEmail,
+        to: toEmails,
+        subject,
+        htmlBody,
+      });
+      return;
+    } catch (err: any) {
+      logger.warn("sendInternalEmail: Unipile failed, falling back to Graph", {
+        fromEmail, error: err.message,
+      });
+    }
+  }
+
   const accessToken = await getMicrosoftAccessToken();
   const resp = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
