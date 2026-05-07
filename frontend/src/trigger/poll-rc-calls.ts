@@ -75,12 +75,145 @@ async function findEntityByPhone(
   return null;
 }
 
+// Insert one call_log row from an RC call-log API record. Returns "inserted",
+// "skipped" (dedup hit / no id), or "error". Pulled out so we can run it
+// against both extension- and account-level call-log responses.
+async function processCallRecord(
+  supabase: any,
+  call: any,
+  acct: any,
+  results: any[],
+): Promise<"inserted" | "skipped" | "error"> {
+  const callId = call.id ?? call.sessionId;
+  if (!callId) return "skipped";
+
+  const { data: existing } = await supabase
+    .from("call_logs")
+    .select("id")
+    .eq("external_call_id", callId)
+    .maybeSingle();
+  if (existing) return "skipped";
+
+  const duration = call.duration ?? 0;
+  const direction = (call.direction ?? "Outbound").toLowerCase();
+  const otherParty = direction === "outbound" ? call.to : call.from;
+  const otherPhone = otherParty?.phoneNumber ?? otherParty?.extensionNumber ?? null;
+  const entity = otherPhone ? await findEntityByPhone(supabase, otherPhone) : null;
+
+  let status = "completed";
+  if (call.result === "Missed") status = "missed";
+  else if (call.result === "Voicemail") status = "voicemail";
+  else if (duration === 0) status = "missed";
+
+  const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
+  const endedAt =
+    startedAt && duration > 0
+      ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
+      : null;
+
+  const { error: insertErr } = await supabase.from("call_logs").insert({
+    owner_id: acct.owner_user_id,
+    phone_number: otherPhone,
+    direction,
+    duration_seconds: duration,
+    started_at: startedAt,
+    ended_at: endedAt,
+    status,
+    external_call_id: callId,
+    linked_entity_type: entity?.type ?? null,
+    linked_entity_id: entity?.id ?? null,
+    linked_entity_name: entity?.name ?? null,
+    notes: call.result ?? null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (insertErr) {
+    logger.error(`Insert error for call ${callId}`, { error: insertErr.message });
+    return "error";
+  }
+
+  results.push({
+    call_id: callId,
+    direction,
+    duration,
+    status,
+    phone: otherPhone,
+    entity: entity?.name ?? "unlinked",
+    account: acct.account_label,
+  });
+
+  if (duration >= 30 && status === "completed") {
+    const { data: inserted } = await supabase
+      .from("call_logs")
+      .select("id")
+      .eq("external_call_id", callId)
+      .maybeSingle();
+    if (inserted?.id) {
+      await processCallDeepgram.trigger(
+        { call_log_id: inserted.id },
+        { delay: "90s" },
+      );
+      logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
+    }
+  }
+  return "inserted";
+}
+
+// Walk a paginated RC call-log endpoint. Caller decides which path to hit
+// (`extension/~/call-log` vs `account/~/call-log`) and what filter to apply.
+async function walkCallLog(
+  endpoint: string,
+  token: string,
+  since: string,
+  acctLabel: string,
+  filter: (call: any) => boolean,
+  onCall: (call: any) => Promise<void>,
+): Promise<void> {
+  let page = 1;
+  while (page <= 30) {
+    const params = new URLSearchParams({
+      type: "Voice",
+      view: "Detailed",
+      dateFrom: since,
+      perPage: "100",
+      page: String(page),
+    });
+
+    const logRes = await fetch(`${RC_SERVER}${endpoint}?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!logRes.ok) {
+      // 403 on account-level is expected when the JWT app lacks
+      // ReadCallLog at account scope — log as info so it doesn't pollute
+      // alerting; everything else is a real warning.
+      const msg = `Call-log ${logRes.status} on ${endpoint}`;
+      const meta = { account: acctLabel };
+      if (logRes.status === 403) logger.info(msg, meta);
+      else logger.warn(msg, meta);
+      return;
+    }
+
+    const logData = await logRes.json();
+    const records = (logData.records ?? []) as any[];
+    logger.info(`${acctLabel} ${endpoint} page ${page}: ${records.length} calls`);
+
+    for (const call of records) {
+      if (filter(call)) await onCall(call);
+    }
+    if (records.length < 100) return;
+    page++;
+  }
+}
+
 async function runPoll(lookbackMinutes: number) {
   const supabase = getSupabaseAdmin();
 
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, owner_user_id, account_label, rc_jwt, access_token, token_expires_at, metadata")
+    .select("id, owner_user_id, account_label, rc_jwt, rc_extension, access_token, token_expires_at, metadata")
     .eq("provider", "sms")
     .eq("is_active", true)
     .not("rc_jwt", "is", null);
@@ -102,116 +235,42 @@ async function runPoll(lookbackMinutes: number) {
       continue;
     }
 
-    // RC paginates at 100/page. Walk pages until we exhaust the window
-    // (matters for large lookbacks like the 24h backfill).
-    let page = 1;
-    while (page <= 30) {
-      const params = new URLSearchParams({
-        type: "Voice",
-        view: "Detailed",
-        dateFrom: since,
-        perPage: "100",
-        page: String(page),
-      });
+    const tally = async (call: any) => {
+      totalProcessed++;
+      const result = await processCallRecord(supabase, call, acct, results);
+      if (result === "inserted") totalInserted++;
+      else totalSkipped++;
+    };
 
-      const logRes = await fetch(
-        `${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log?${params}`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+    // 1) Extension-level call-log: covers calls dialed from / answered on
+    //    this user's specific extension.
+    await walkCallLog(
+      "/restapi/v1.0/account/~/extension/~/call-log",
+      token,
+      since,
+      acct.account_label,
+      () => true,
+      tally,
+    );
+
+    // 2) Account-level call-log: catches inbound calls routed via the main
+    //    number / IVR / queue that never get recorded against the extension's
+    //    own log. We filter to records whose extension matches this acct's
+    //    rc_extension, and let dedup-by-external_call_id ignore overlaps.
+    //    If the JWT lacks account-scope ReadCallLog (403), walkCallLog logs
+    //    once and returns; this stays a best-effort backstop.
+    if (acct.rc_extension) {
+      const ext = String(acct.rc_extension);
+      await walkCallLog(
+        "/restapi/v1.0/account/~/call-log",
+        token,
+        since,
+        acct.account_label,
+        (call: any) =>
+          String(call.extension?.extensionNumber ?? "") === ext ||
+          String(call.extension?.id ?? "") === ext,
+        tally,
       );
-
-      if (!logRes.ok) {
-        logger.warn(`Call-log error ${logRes.status} for ${acct.account_label}`);
-        break;
-      }
-
-      const logData = await logRes.json();
-      const records = logData.records ?? [];
-      logger.info(`${acct.account_label} page ${page}: ${records.length} calls since ${since}`);
-
-      for (const call of records) {
-        totalProcessed++;
-        const callId = call.id ?? call.sessionId;
-        if (!callId) { totalSkipped++; continue; }
-
-        const { data: existing } = await supabase
-          .from("call_logs")
-          .select("id")
-          .eq("external_call_id", callId)
-          .maybeSingle();
-        if (existing) { totalSkipped++; continue; }
-
-        const duration = call.duration ?? 0;
-        const direction = (call.direction ?? "Outbound").toLowerCase();
-        const otherParty = direction === "outbound" ? call.to : call.from;
-        const otherPhone = otherParty?.phoneNumber ?? otherParty?.extensionNumber ?? null;
-        const entity = otherPhone ? await findEntityByPhone(supabase, otherPhone) : null;
-
-        let status = "completed";
-        if (call.result === "Missed") status = "missed";
-        else if (call.result === "Voicemail") status = "voicemail";
-        else if (duration === 0) status = "missed";
-
-        const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
-        const endedAt =
-          startedAt && duration > 0
-            ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
-            : null;
-
-        const { error: insertErr } = await supabase.from("call_logs").insert({
-          owner_id: acct.owner_user_id,
-          phone_number: otherPhone,
-          direction,
-          duration_seconds: duration,
-          started_at: startedAt,
-          ended_at: endedAt,
-          status,
-          external_call_id: callId,
-          linked_entity_type: entity?.type ?? null,
-          linked_entity_id: entity?.id ?? null,
-          linked_entity_name: entity?.name ?? null,
-          notes: call.result ?? null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-
-        if (insertErr) {
-          logger.error(`Insert error for call ${callId}`, { error: insertErr.message });
-          totalSkipped++;
-        } else {
-          totalInserted++;
-          results.push({
-            call_id: callId,
-            direction,
-            duration,
-            status,
-            phone: otherPhone,
-            entity: entity?.name ?? "unlinked",
-            account: acct.account_label,
-          });
-
-          if (duration >= 30 && status === "completed") {
-            const { data: inserted } = await supabase
-              .from("call_logs")
-              .select("id")
-              .eq("external_call_id", callId)
-              .maybeSingle();
-            if (inserted?.id) {
-              // Delay 90s — RC recordings often aren't exposed in the
-              // call-log API for 1-2 min after the call ends. The
-              // retry-stuck-call-transcripts sweep is the safety net
-              // if even 90s isn't enough.
-              await processCallDeepgram.trigger(
-                { call_log_id: inserted.id },
-                { delay: "90s" },
-              );
-              logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
-            }
-          }
-        }
-      }
-
-      if (records.length < 100) break;
-      page++;
     }
   }
 
