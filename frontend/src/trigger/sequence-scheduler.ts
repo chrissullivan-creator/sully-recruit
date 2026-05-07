@@ -83,17 +83,72 @@ export const sequenceEnrollmentInit = task({
     const enrolledAt = new Date(enrollment.enrolled_at);
     let scheduled = 0;
     let pendingConnection = 0;
+    let preSkipped = 0;
+
+    // Pre-fetch the recipient's contact fields once so we can pre-skip
+    // steps the recipient can't receive (no email → skip email, no
+    // linkedin_url → skip every linkedin_*) without round-tripping at
+    // each step.
+    const recipientId = enrollment.candidate_id || enrollment.contact_id;
+    let recipientEmail: string | null = null;
+    let recipientLinkedin: string | null = null;
+    let recipientPhone: string | null = null;
+    if (recipientId) {
+      const { data: person } = await supabase
+        .from("people")
+        .select("type, email, work_email, personal_email, phone, linkedin_url")
+        .eq("id", recipientId)
+        .maybeSingle();
+      if (person) {
+        recipientEmail =
+          person.type === "candidate"
+            ? (person.personal_email || person.email)
+            : (person.work_email || person.email);
+        recipientLinkedin = person.linkedin_url || null;
+        recipientPhone = person.phone || null;
+      }
+    }
+
+    function recipientHasRequired(channel: string): boolean {
+      if (channel === "email") return !!recipientEmail;
+      if (channel === "sms") return !!recipientPhone;
+      if (channel.startsWith("linkedin")) return !!recipientLinkedin;
+      return true; // manual_call, phone — no pre-flight
+    }
 
     // Each action's `base_delay_hours` is the gap *between* this step and
-    // the previous one — not from enrollment. We carry the previous step's
-    // computed send time forward and use it as the start time for the next
-    // step's delay calculation. This matches how recruiters think about
-    // sequences ("wait 2h after the email before the InMail") and prevents
-    // the bug where step 3 with d=2h would fire BEFORE step 2 with d=3h.
+    // the previous SCHEDULED one — not from enrollment. We carry the
+    // previous scheduled step's send time forward as the next step's
+    // start. Crucially: pre-skipped steps DON'T advance the cursor, so
+    // when the email step gets skipped because the person has no email,
+    // the InMail step takes over the email's slot in the schedule rather
+    // than waiting 3h behind a step that never fires.
     let prevSendTime = enrolledAt;
     for (const node of orderedNodes) {
       const actions = (node as any).sequence_actions || [];
       for (const action of actions) {
+        // Pre-skip if the recipient lacks the required field for this
+        // channel. Logged as 'skipped' with no scheduled_at so it shows
+        // up in step history but never fires. Doesn't advance the
+        // cursor, so the next eligible step takes this slot.
+        if (!recipientHasRequired(action.channel)) {
+          await supabase.from("sequence_step_logs").insert({
+            enrollment_id: payload.enrollmentId,
+            action_id: action.id,
+            node_id: node.id,
+            channel: action.channel,
+            scheduled_at: null,
+            status: "skipped",
+            skip_reason:
+              action.channel === "email" ? "no_email_on_record" :
+              action.channel === "sms" ? "no_phone_on_record" :
+              action.channel.startsWith("linkedin") ? "no_linkedin_url" :
+              "missing_recipient_field",
+          });
+          preSkipped++;
+          continue;
+        }
+
         if (action.channel === "linkedin_message") {
           // Park as pending_connection — will be scheduled when connection is accepted.
           // Don't advance prevSendTime; the webhook handler will use 4h post-accept
@@ -119,6 +174,7 @@ export const sequenceEnrollmentInit = task({
             sendWindowStart: sequence.send_window_start || "09:00",
             sendWindowEnd: sequence.send_window_end || "18:00",
             accountId: senderUserId,
+            weekdaysOnly: sequence.weekdays_only === true,
           });
 
           await supabase.from("sequence_step_logs").insert({
@@ -145,9 +201,10 @@ export const sequenceEnrollmentInit = task({
       enrollmentId: payload.enrollmentId,
       scheduled,
       pendingConnection,
+      preSkipped,
     });
 
-    return { action: "initialized", scheduled, pendingConnection };
+    return { action: "initialized", scheduled, pendingConnection, preSkipped };
   },
 });
 

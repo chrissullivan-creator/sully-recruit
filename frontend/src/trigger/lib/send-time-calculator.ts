@@ -230,6 +230,29 @@ interface SendTimeInput {
   sendWindowStart: string;     // "HH:MM" EST
   sendWindowEnd: string;       // "HH:MM" EST
   accountId: string;
+  /** When true, Sat/Sun results roll forward to Monday at window open. */
+  weekdaysOnly?: boolean;
+}
+
+/** Day-of-week in EST for a UTC date. 0=Sun, 6=Sat. */
+function estDayOfWeek(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).formatToParts(date);
+  const wd = parts.find((p) => p.type === "weekday")?.value || "";
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
+}
+
+/** If weekdaysOnly and the date lands on Sat/Sun (EST), bump to Monday at window open. */
+function rollWeekendToMonday(date: Date, sendWindowStart: string): Date {
+  const dow = estDayOfWeek(date);
+  if (dow !== 0 && dow !== 6) return date;
+  const daysToMonday = dow === 6 ? 2 : 1; // Sat → +2, Sun → +1
+  const nextMonday = new Date(date.getTime() + daysToMonday * 86400000);
+  const monEST = toEST(nextMonday);
+  const winStart = parseTimeToMinutes(sendWindowStart);
+  return estToUTC(monEST.year, monEST.month, monEST.day, Math.floor(winStart / 60), winStart % 60);
 }
 
 /**
@@ -293,6 +316,12 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
     result.setMinutes(0, 0, 0);
     // Re-clamp to window
     result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
+  }
+
+  // Roll Sat/Sun forward to Monday window-open if the sequence is set to
+  // weekdays-only. Done after the cap checks so we don't re-trigger them.
+  if (input.weekdaysOnly) {
+    result = rollWeekendToMonday(result, input.sendWindowStart);
   }
 
   // Snap to a bursty hot-spot within the assigned hour. Each hour has 6
