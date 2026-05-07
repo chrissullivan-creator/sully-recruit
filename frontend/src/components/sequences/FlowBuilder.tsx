@@ -153,7 +153,7 @@ function BranchColumn({
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-base">{branch.label}</CardTitle>
+            <CardTitle className="text-base">Steps</CardTitle>
             <p className="text-sm text-muted-foreground">
               {branch.steps.length === 0 ? "No steps yet" : `${branch.steps.length} step${branch.steps.length === 1 ? "" : "s"}`}
             </p>
@@ -173,7 +173,7 @@ function BranchColumn({
             <div key={step.id} className="space-y-3">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <GitBranch className="h-3.5 w-3.5" />
-                <span>{branch.label} Step {index + 1}</span>
+                <span>Step {index + 1}</span>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
@@ -210,7 +210,7 @@ function BranchColumn({
                   label=""
                   actions={step.actions}
                   stepNumber={index + 1}
-                  title={`${branch.label} · Step ${index + 1}`}
+                  title={`Step ${index + 1}`}
                   onUpdate={(actions) => onActionsChange(step.id, actions)}
                   onAskJoe={
                     onAskJoe
@@ -371,22 +371,27 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
         </Button>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        {branches.map((branch) => (
-          <BranchColumn
-            key={branch.id}
-            branch={branch}
-            onAddStep={() => addStep(branch.id)}
-            onDeleteStep={(stepId) => deleteStep(branch.id, stepId)}
-            onMoveStep={(stepId, direction) => moveStep(branch.id, stepId, direction)}
-            onLabelChange={(stepId, label) => updateStepLabel(branch.id, stepId, label)}
-            onActionsChange={(stepId, actions) => updateStepActions(branch.id, stepId, actions)}
-            onAskJoe={(stepId, actionIndex, action, stepNumber, stepLabel) =>
-              handleAskJoe(branch.id, stepId, actionIndex, action, stepNumber, stepLabel)
-            }
-            previewMergeVars={previewMergeVars}
-          />
-        ))}
+      {/* Single-lane linear view. The data model still carries branch_id
+          for legacy compatibility, but the UI no longer surfaces the
+          A/B split — every step lives on branch_a now. */}
+      <div className="grid gap-6">
+        {branches
+          .filter((branch) => branch.id === "branch_a")
+          .map((branch) => (
+            <BranchColumn
+              key={branch.id}
+              branch={branch}
+              onAddStep={() => addStep(branch.id)}
+              onDeleteStep={(stepId) => deleteStep(branch.id, stepId)}
+              onMoveStep={(stepId, direction) => moveStep(branch.id, stepId, direction)}
+              onLabelChange={(stepId, label) => updateStepLabel(branch.id, stepId, label)}
+              onActionsChange={(stepId, actions) => updateStepActions(branch.id, stepId, actions)}
+              onAskJoe={(stepId, actionIndex, action, stepNumber, stepLabel) =>
+                handleAskJoe(branch.id, stepId, actionIndex, action, stepNumber, stepLabel)
+              }
+              previewMergeVars={previewMergeVars}
+            />
+          ))}
       </div>
 
       <div className="bg-white/90 backdrop-blur p-3 rounded-md shadow-sm border text-[10px] text-muted-foreground space-y-1">

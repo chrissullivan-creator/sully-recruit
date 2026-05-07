@@ -155,14 +155,16 @@ export function normalizeBranches(branches?: SequenceBranch[]): SequenceBranch[]
 
 export function hydrateBranchesFromNodes(nodeRows?: NodeRowLike[] | null, sequenceSteps?: SequenceStepLike[] | null): SequenceBranch[] {
   if (nodeRows && nodeRows.length > 0) {
-    const hasExplicitBranching = nodeRows.some((node) => normalizeBranchId(node.branch_id));
+    // Single-lane UI: collapse any legacy branch_b rows into branch_a so
+    // they show up linearly in the editor. node_order keeps the
+    // canonical order across both legacy branches.
     const rawSteps: BranchStepData[] = [...nodeRows]
       .sort((a, b) => (a.node_order || 0) - (b.node_order || 0))
       .map((node, index) => ({
         id: node.id,
         label: node.label || "",
-        branchId: hasExplicitBranching ? (normalizeBranchId(node.branch_id) || "branch_a") : "branch_a",
-        branchStepOrder: Number(node.branch_step_order) || index + 1,
+        branchId: "branch_a",
+        branchStepOrder: index + 1,
         nodeOrder: Number(node.node_order) || index + 1,
         actions: (node.sequence_actions || []).map(mapActionRow),
       }));
@@ -170,7 +172,7 @@ export function hydrateBranchesFromNodes(nodeRows?: NodeRowLike[] | null, sequen
     return normalizeBranches(
       createEmptyBranches().map((branch) => ({
         ...branch,
-        steps: rawSteps.filter((step) => step.branchId === branch.id),
+        steps: branch.id === "branch_a" ? rawSteps : [],
       })),
     );
   }

@@ -381,21 +381,61 @@ export default function SequenceBuilder() {
     }
   }, [setup, branches, id, user]);
 
+  /**
+   * After saving an edit on an existing sequence, ask whether to re-pace
+   * any active enrollments so step reorders, delay changes, and the
+   * weekdays-only flag actually take effect on people mid-flight.
+   * Without this, edits only apply to fresh enrollments.
+   */
+  const repaceIfNeeded = useCallback(async (seqId: string) => {
+    if (!user?.id) return;
+    const { count } = await supabase
+      .from("sequence_enrollments")
+      .select("id", { count: "exact", head: true })
+      .eq("sequence_id", seqId)
+      .eq("status", "active");
+    const activeCount = count ?? 0;
+    if (activeCount === 0) return;
+
+    const confirmed = window.confirm(
+      `${activeCount} active enrollment${activeCount === 1 ? "" : "s"} on this sequence.\n\n` +
+      `Re-pace ${activeCount === 1 ? "it" : "them"} with the new step order + delays? ` +
+      `Pending sends will be cancelled and rebuilt from this moment forward. ` +
+      `History (sent / skipped) is preserved.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      const resp = await fetch("/api/repace-sequence-enrollments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sequence_id: seqId, enrolled_by: user.id }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || `HTTP ${resp.status}`);
+      toast.success(`Re-paced ${result.repaced} enrollment${result.repaced === 1 ? "" : "s"}`);
+    } catch (err: any) {
+      toast.error(`Re-pace failed: ${err.message}`);
+    }
+  }, [user]);
+
   const handleSaveDraft = useCallback(async () => {
     const seqId = await saveSequence("draft");
     if (seqId) {
       toast.success("Sequence saved as draft");
+      if (id) await repaceIfNeeded(seqId);
       if (!id) navigate(`/sequences/${seqId}/edit`, { replace: true });
     }
-  }, [saveSequence, id, navigate]);
+  }, [saveSequence, id, navigate, repaceIfNeeded]);
 
   const handleActivate = useCallback(async () => {
     const seqId = await saveSequence("active");
     if (seqId) {
       toast.success("Sequence activated");
+      if (id) await repaceIfNeeded(seqId);
       navigate(`/sequences/${seqId}/schedule`);
     }
-  }, [saveSequence, navigate]);
+  }, [saveSequence, navigate, id, repaceIfNeeded]);
 
   return (
     <MainLayout>
