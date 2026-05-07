@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, BarChart3, Calendar } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
 
 interface SequenceRow {
   id: string;
@@ -22,6 +24,7 @@ interface SequenceRow {
 export function SequenceList() {
   const [sequences, setSequences] = useState<SequenceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [drillSequence, setDrillSequence] = useState<SequenceRow | null>(null);
 
   useEffect(() => {
     loadSequences();
@@ -110,7 +113,20 @@ export function SequenceList() {
                   <TableCell className="text-sm text-muted-foreground">
                     {seq.jobs?.title || "—"}
                   </TableCell>
-                  <TableCell>{seq._enrollmentCount}</TableCell>
+                  <TableCell>
+                    <button
+                      type="button"
+                      onClick={() => setDrillSequence(seq)}
+                      className={cn(
+                        "underline-offset-2 hover:underline text-foreground",
+                        (seq._enrollmentCount ?? 0) === 0 && "text-muted-foreground cursor-default no-underline pointer-events-none",
+                      )}
+                      disabled={(seq._enrollmentCount ?? 0) === 0}
+                      title={(seq._enrollmentCount ?? 0) > 0 ? "View enrolled people" : "No one enrolled"}
+                    >
+                      {seq._enrollmentCount}
+                    </button>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={seq._activeCount! > 0 ? "default" : "secondary"}>
                       {seq._activeCount}
@@ -136,6 +152,13 @@ export function SequenceList() {
           </Table>
         )}
       </CardContent>
+      <EnrolledPeopleDialog
+        sequenceId={drillSequence?.id ?? null}
+        sequenceName={drillSequence?.name ?? ""}
+        audienceType={drillSequence?.audience_type ?? "candidates"}
+        open={!!drillSequence}
+        onOpenChange={(o) => { if (!o) setDrillSequence(null); }}
+      />
     </Card>
   );
 }
