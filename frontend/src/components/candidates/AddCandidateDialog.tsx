@@ -145,6 +145,17 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
         return;
       }
 
+      // Fire-and-forget Unipile resolve so the new candidate's
+      // provider_id is populated within seconds rather than waiting up
+      // to 2h for the cron sweep.
+      if (inserted?.id && trimmedLinkedin) {
+        fetch('/api/resolve-person-now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ person_id: inserted.id }),
+        }).catch(() => {});
+      }
+
       if (inserted && resumeStoragePath && resumeFile) {
         await supabase.from('resumes').insert({
           candidate_id: inserted.id,

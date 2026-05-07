@@ -31,6 +31,7 @@ export default function SequenceAnalyticsPage() {
   const [sequence, setSequence] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [stepLogs, setStepLogs] = useState<any[]>([]);
+  const [nodes, setNodes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,15 +39,19 @@ export default function SequenceAnalyticsPage() {
   }, [id]);
 
   async function loadData() {
-    const [seqRes, enrollRes, logRes] = await Promise.all([
+    const [seqRes, enrollRes, logRes, nodeRes] = await Promise.all([
       supabase.from("sequences").select("*, jobs(title)").eq("id", id).single(),
       supabase.from("sequence_enrollments").select("*").eq("sequence_id", id),
       supabase.from("sequence_step_logs").select("*, sequence_enrollments!inner(sequence_id)").eq("sequence_enrollments.sequence_id", id),
+      // Per-step funnel needs node_order so we can label each row
+      // "Step N" instead of just node_id.
+      supabase.from("sequence_nodes").select("id, node_order, label, sequence_actions(channel)").eq("sequence_id", id),
     ]);
 
     setSequence((seqRes as any).data);
     setEnrollments((enrollRes as any).data || []);
     setStepLogs((logRes as any).data || []);
+    setNodes((nodeRes as any).data || []);
     setLoading(false);
   }
 
@@ -123,6 +128,38 @@ export default function SequenceAnalyticsPage() {
       color: CHANNEL_COLORS[channel] || "#6b7280",
     }));
   }, [stepLogs]);
+
+  // Per-step funnel — group step_logs by node_id, label by node_order.
+  // Email steps surface open + reply rates; non-email steps just show
+  // sent / replied since opens don't apply.
+  const stepStats = useMemo(() => {
+    const byNode: Record<string, { sent: number; opens: number; replies: number; channel: string }> = {};
+    for (const log of stepLogs) {
+      const nid = (log as any).node_id;
+      if (!nid) continue;
+      if (!byNode[nid]) byNode[nid] = { sent: 0, opens: 0, replies: 0, channel: log.channel || "" };
+      if (log.status === "sent") byNode[nid].sent++;
+      if ((log as any).opened_at) byNode[nid].opens++;
+      if (log.reply_received_at) byNode[nid].replies++;
+    }
+    return [...nodes]
+      .sort((a: any, b: any) => (a.node_order || 0) - (b.node_order || 0))
+      .map((n: any) => {
+        const s = byNode[n.id] || { sent: 0, opens: 0, replies: 0, channel: "" };
+        const channel = n.sequence_actions?.[0]?.channel || s.channel || "—";
+        return {
+          stepLabel: `Step ${n.node_order ?? "?"}`,
+          channel,
+          sent: s.sent,
+          opens: s.opens,
+          replies: s.replies,
+          openRate: s.sent > 0 && channel === "email"
+            ? Number(((s.opens / s.sent) * 100).toFixed(1))
+            : null,
+          replyRate: s.sent > 0 ? Number(((s.replies / s.sent) * 100).toFixed(1)) : 0,
+        };
+      });
+  }, [nodes, stepLogs]);
 
   // Note: an earlier "connection accept rate" KPI lived here. It was a bogus
   // proxy (any non-reply non-active enrollment counted as accepted, which
@@ -268,6 +305,45 @@ export default function SequenceAnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Per-step funnel — sent / opens / replies for each node, in order */}
+      {stepStats.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Per-step Funnel</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[11px] text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-2 font-medium">Step</th>
+                    <th className="text-left py-2 px-2 font-medium">Channel</th>
+                    <th className="text-right py-2 px-2 font-medium">Sent</th>
+                    <th className="text-right py-2 px-2 font-medium">Opens</th>
+                    <th className="text-right py-2 px-2 font-medium">Open Rate</th>
+                    <th className="text-right py-2 px-2 font-medium">Replies</th>
+                    <th className="text-right py-2 px-2 font-medium">Reply Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stepStats.map((s) => (
+                    <tr key={s.stepLabel} className="border-b last:border-0">
+                      <td className="py-1.5 px-2">{s.stepLabel}</td>
+                      <td className="py-1.5 px-2 capitalize">{s.channel.replace(/_/g, " ")}</td>
+                      <td className="py-1.5 px-2 text-right">{s.sent}</td>
+                      <td className="py-1.5 px-2 text-right">{s.openRate === null ? "—" : s.opens}</td>
+                      <td className="py-1.5 px-2 text-right">{s.openRate === null ? "—" : `${s.openRate}%`}</td>
+                      <td className="py-1.5 px-2 text-right">{s.replies}</td>
+                      <td className="py-1.5 px-2 text-right">{s.sent > 0 ? `${s.replyRate}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pipeline outcomes (if tied to job) */}
       {sequence?.job_id && (

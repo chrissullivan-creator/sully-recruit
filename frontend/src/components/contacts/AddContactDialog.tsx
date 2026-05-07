@@ -36,7 +36,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const linkedinUrl = form.linkedin_url.trim() || null;
-      const { error } = await supabase.from('people').insert({
+      const { data: inserted, error } = await supabase.from('people').insert({
         type: 'client',
         first_name: form.first_name.trim() || null,
         last_name: form.last_name.trim() || null,
@@ -53,14 +53,23 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         status: form.status,
         owner_user_id: userId,
         // Queue the resolve-unipile-ids cron to populate unipile_provider_id
-        // via the v2 endpoint. No more direct edge-function call from the
-        // dialog — keeps the v1 path out of the frontend entirely.
+        // via the v2 endpoint. We also fire /api/resolve-person-now in the
+        // background for instant resolution; the cron is the safety net.
         unipile_resolve_status: linkedinUrl ? 'pending' : null,
-      } as any);
+      } as any).select('id').single();
       if (error) throw error;
 
       invalidatePersonScope(queryClient);
       toast.success('Contact created');
+
+      if (linkedinUrl && inserted?.id) {
+        // Fire-and-forget — endpoint never throws, just flips status.
+        fetch('/api/resolve-person-now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ person_id: inserted.id }),
+        }).catch(() => {});
+      }
 
       setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'active' });
       onOpenChange(false);

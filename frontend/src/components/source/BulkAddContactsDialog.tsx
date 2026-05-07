@@ -206,6 +206,13 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
         if (insertErr) throw insertErr;
 
         const contactId = inserted?.id;
+        if (contactId && applicant.linkedin_url) {
+          fetch('/api/resolve-person-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ person_id: contactId }),
+          }).catch(() => {});
+        }
 
         // TODO: enrichment API call here — if email is missing,
         // call enrichment service to fill in email address and mobile numbers.
