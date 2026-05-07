@@ -177,47 +177,40 @@ function BranchColumn({
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={step.label}
-                    onChange={(e) => onLabelChange(step.id, e.target.value)}
-                    placeholder={`Label for ${branch.label} step ${index + 1}`}
-                  />
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => onMoveStep(step.id, "up")}
-                      disabled={index === 0}
-                      aria-label={`Move ${branch.label} step ${index + 1} up`}
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => onMoveStep(step.id, "down")}
-                      disabled={index === branch.steps.length - 1}
-                      aria-label={`Move ${branch.label} step ${index + 1} down`}
-                    >
-                      <ArrowDown className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => onDeleteStep(step.id)}
-                      aria-label={`Delete ${branch.label} step ${index + 1}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                <div className="flex items-center justify-end gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => onMoveStep(step.id, "up")}
+                    disabled={index === 0}
+                    aria-label={`Move ${branch.label} step ${index + 1} up`}
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => onMoveStep(step.id, "down")}
+                    disabled={index === branch.steps.length - 1}
+                    aria-label={`Move ${branch.label} step ${index + 1} down`}
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => onDeleteStep(step.id)}
+                    aria-label={`Delete ${branch.label} step ${index + 1}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
 
                 <SequenceStepCard
-                  label={step.label}
+                  label=""
                   actions={step.actions}
                   stepNumber={index + 1}
-                  title={`${branch.label} · Step ${index + 1}${step.label ? `: ${step.label}` : ""}`}
+                  title={`${branch.label} · Step ${index + 1}`}
                   onUpdate={(actions) => onActionsChange(step.id, actions)}
                   onAskJoe={
                     onAskJoe
