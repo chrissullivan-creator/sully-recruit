@@ -29,17 +29,45 @@ export const processRingcentralEvent = task({
     const eventBody = event.body || event;
     const eventType = eventBody.type || eventBody.event || "";
 
+    // RC delivers call events as /restapi/v1.0/account/~/extension/~/telephony/sessions
+    // with phone numbers nested under body.parties[N].from/.to, NOT the flat
+    // shape we use for SMS/voicemail. Previously every call event fell
+    // through to `if (!otherPhone) skipped` and was silently dropped.
+    //
+    // We let poll-rc-calls (4h lookback, dedup by call-log `id`) own the
+    // canonical insert path — its IDs come from the call-log API and
+    // wouldn't dedup cleanly against the `telephonySessionId` we'd see
+    // here. Acknowledging the event surfaces it in logs without forking
+    // the schema. When real-time inserts become a requirement, fetch
+    // call-log/{telephonySessionId} after Disconnected to obtain the same
+    // ID poll uses.
+    const isTelephonySession =
+      eventType.includes("/telephony/sessions") || Array.isArray(eventBody.parties);
+    const isSmsEvent = eventType.includes("SMS") || eventBody.messageType === "SMS";
+
+    if (isTelephonySession) {
+      const parties = (eventBody.parties as any[]) ?? [];
+      const myParty = parties.find((p) => p.extensionId) ?? parties[0];
+      const status = myParty?.status?.code as string | undefined;
+      logger.info("Telephony session event acknowledged (poll handles insert)", {
+        telephonySessionId: eventBody.telephonySessionId,
+        sessionId: eventBody.sessionId,
+        status,
+        direction: myParty?.direction,
+        missed: myParty?.missedCall,
+      });
+      return { action: "acknowledged", reason: "telephony_session", status };
+    }
+
     const fromPhone = eventBody.from?.phoneNumber || eventBody.from?.extensionNumber || "";
     const fromExtension = eventBody.from?.extensionNumber || "";
     const toPhone = eventBody.to?.[0]?.phoneNumber || eventBody.to?.phoneNumber || "";
     const toExtension = eventBody.to?.[0]?.extensionNumber || eventBody.to?.extensionNumber || "";
-    const direction = eventBody.direction === "Inbound" ? "inbound" : "outbound";
+    const direction: "inbound" | "outbound" =
+      eventBody.direction === "Inbound" ? "inbound" : "outbound";
     const otherPhone = direction === "inbound" ? fromPhone : toPhone;
-    // User-side identity (which Sully user this event belongs to)
     const userPhone = direction === "inbound" ? toPhone : fromPhone;
     const userExtension = direction === "inbound" ? toExtension : fromExtension;
-
-    const isSmsEvent = eventType.includes("SMS") || eventBody.messageType === "SMS";
 
     // Resolve owner_id from integration_accounts (provider='sms', match extension or phone).
     const ownerId = await lookupOwnerId(supabase, userExtension, userPhone);

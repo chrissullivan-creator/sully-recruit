@@ -228,7 +228,12 @@ async function runPoll(lookbackMinutes: number) {
 export const pollRcCalls = schedules.task({
   id: "poll-rc-calls",
   maxDuration: 120,
-  run: async () => runPoll(10),
+  // RC's call-log only surfaces a call after it ends, and `dateFrom` filters
+  // by call *start* time. With a 10-min lookback, any call longer than the
+  // poll cadence (5 min) silently misses the window. Use 4h so calls up to
+  // ~4 hours long are still caught by the next poll. Dedup on
+  // external_call_id keeps the redundant pages cheap.
+  run: async () => runPoll(240),
 });
 
 /**
