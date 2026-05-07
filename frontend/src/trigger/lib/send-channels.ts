@@ -563,19 +563,32 @@ export async function resolveRecipient(
   userId?: string,
   accountId?: string,
 ): Promise<{ to: string; conversationId: string | null }> {
-  const table = entityType === "candidate" ? "candidates" : "contacts";
-
   if (channel === "email") {
-    const { data: entity } = await supabase.from(table).select("email").eq("id", entityId).single();
-    if (!entity?.email) throw new Error(`No email for ${entityType} ${entityId}`);
-    return { to: entity.email, conversationId: null };
+    // Pick the right email column for the role: candidates → personal_email,
+    // clients (entityType="contact") → work_email. Falls back to the legacy
+    // `email` column during the migration off it.
+    const { data: entity } = await supabase
+      .from("people")
+      .select("type, email, work_email, personal_email")
+      .eq("id", entityId)
+      .single();
+    const to =
+      entity?.type === "candidate"
+        ? (entity?.personal_email || entity?.email)
+        : (entity?.work_email || entity?.email);
+    if (!to) throw new Error(`No email for ${entityType} ${entityId}`);
+    return { to, conversationId: null };
   }
 
   if (channel === "sms") {
-    const { data: entity } = await supabase.from(table).select("phone").eq("id", entityId).single();
+    const { data: entity } = await supabase.from("people").select("phone").eq("id", entityId).single();
     if (!entity?.phone) throw new Error(`No phone for ${entityType} ${entityId}`);
     return { to: entity.phone, conversationId: null };
   }
+
+  // LinkedIn channels — keep the legacy candidate-channel cache lookup,
+  // but resolve linkedin_url from the unified people table.
+  const table = entityType === "candidate" ? "candidates" : "contacts";
 
   // LinkedIn channels — resolve Unipile provider_id
   if (entityType === "candidate") {
