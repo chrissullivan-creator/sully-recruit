@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
+import { authHeaders } from '@/lib/api-auth';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Upload, Loader2, FileText, X } from 'lucide-react';
@@ -168,11 +169,13 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
           parsing_status: 'completed',
         } as any);
 
-        fetch('/api/trigger-resume-ingestion', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidateId: inserted.id }),
-        }).catch(() => {});
+        authHeaders().then(headers =>
+          fetch('/api/trigger-resume-ingestion', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ candidateId: inserted.id }),
+          })
+        ).catch(() => {});
       }
 
       toast.success('Candidate added');

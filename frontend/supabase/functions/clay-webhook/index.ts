@@ -44,23 +44,30 @@ Deno.serve(async (req: Request) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Optional: verify shared secret
+    // Required: verify shared secret. We previously fell open if the secret
+    // was missing in app_settings; that meant a misconfigured server silently
+    // accepted any Clay-shaped payload. Now an unset secret rejects all
+    // requests, which is louder but correct.
     const { data: secretRow } = await supabase
       .from("app_settings")
       .select("value")
       .eq("key", "CLAY_WEBHOOK_SECRET")
       .maybeSingle();
 
-    if (secretRow?.value) {
-      const headerSecret =
-        req.headers.get("x-clay-secret") ||
-        req.headers.get("x-webhook-secret");
-      if (headerSecret !== secretRow.value) {
-        return new Response(JSON.stringify({ error: "Invalid secret" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    if (!secretRow?.value) {
+      return new Response(JSON.stringify({ error: "Webhook secret not configured" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const headerSecret =
+      req.headers.get("x-clay-secret") ||
+      req.headers.get("x-webhook-secret");
+    if (headerSecret !== secretRow.value) {
+      return new Response(JSON.stringify({ error: "Invalid secret" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const body = await req.json();

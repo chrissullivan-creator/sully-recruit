@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useNotes, useJobs } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
@@ -348,7 +349,7 @@ const ContactDetail = () => {
     try {
       const res = await fetch('/api/trigger-generate-joe-says', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ entityId: id, entityType: 'contact' }),
       });
       const data = await res.json();

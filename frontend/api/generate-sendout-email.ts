@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { callAIWithFallback } from "../src/lib/ai-fallback";
+import { requireAuth } from "./lib/auth";
 
 /**
  * POST /api/generate-sendout-email
@@ -9,6 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   try {
     const {

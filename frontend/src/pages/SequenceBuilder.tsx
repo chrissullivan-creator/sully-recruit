@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { mergeVarsFromPerson } from "@/lib/merge-tags";
+import { authHeaders } from "@/lib/api-auth";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
@@ -156,7 +157,7 @@ export default function SequenceBuilder() {
 
         const response = await fetch("/api/draft-sequence-message", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({
             channel: action.channel,
             step_type: action.channel,
@@ -406,9 +407,9 @@ export default function SequenceBuilder() {
     if (!confirmed) return;
 
     try {
-      let resp = await fetch("/api/repace-sequence-enrollments", {
+      let resp = await fetch("/api/replace-sequence-enrollments", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({ sequence_id: seqId, enrolled_by: user.id }),
       });
       let result = await resp.json();
@@ -426,9 +427,9 @@ export default function SequenceBuilder() {
           toast.message("Re-pace cancelled — imminent sends preserved");
           return;
         }
-        resp = await fetch("/api/repace-sequence-enrollments", {
+        resp = await fetch("/api/replace-sequence-enrollments", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({ sequence_id: seqId, enrolled_by: user.id, force_imminent: true }),
         });
         result = await resp.json();

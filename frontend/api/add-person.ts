@@ -58,6 +58,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const personalEmail = data.personal_email?.trim().toLowerCase() || null;
   const workEmail = data.work_email?.trim().toLowerCase() || null;
 
+  // Reject malformed emails before they hit Postgres — the table has no
+  // CHECK constraint, so junk like "not an email" would otherwise persist
+  // and contaminate match keys / dedup scans.
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  for (const [label, addr] of [
+    ["email", email],
+    ["personal_email", personalEmail],
+    ["work_email", workEmail],
+  ] as const) {
+    if (addr && !EMAIL_RE.test(addr)) {
+      return res.status(400).json({ error: `Invalid ${label} format` });
+    }
+  }
+
   try {
     // ── Dual-role merge: do we already know this person? ────────
     // Check primary_email (the renamed legacy column) plus the typed

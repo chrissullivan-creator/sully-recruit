@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
+import { requireAuth } from "./lib/auth";
 
 /**
  * Trigger enrollment initialization for the v2 sequence scheduler.
@@ -9,6 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   try {
     const {

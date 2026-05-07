@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { callAIWithFallback } from "../src/lib/ai-fallback";
+import { requireAuth } from "./lib/auth";
 
 /**
  * POST /api/parse-resume-ai
@@ -11,6 +12,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   try {
     const { resume_text, job_title, job_description } = req.body;

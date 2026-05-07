@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateTaskScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
@@ -112,7 +113,7 @@ export default function CalendarPage() {
   const handleSync = async () => {
     toast.info('Syncing Outlook events…');
     try {
-      const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST' });
+      const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: await authHeaders() });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'Sync failed');
       toast.success('Sync triggered — events will appear in a moment');

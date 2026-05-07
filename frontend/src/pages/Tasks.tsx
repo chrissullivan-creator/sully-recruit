@@ -11,12 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Bell, Video } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { invalidateTaskScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 
 const ADMIN_EMAILS = [
   'chris.sullivan@emeraldrecruit.com',
@@ -242,7 +243,7 @@ export default function Tasks() {
           <Button variant="ghost" size="sm" onClick={async () => {
             toast.info('Syncing Outlook events...');
             try {
-              const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+              const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: await authHeaders() });
               const data = await resp.json();
               if (data.error) { toast.error(data.error); return; }
               toast.success('Outlook sync triggered — events will appear shortly');
@@ -251,20 +252,6 @@ export default function Tasks() {
           }}>
             <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
           </Button>
-          {isAdmin && (
-            <Button variant="ghost" size="sm" onClick={async () => {
-              toast.info('Running nudge check...');
-              try {
-                const resp = await fetch('/api/trigger-nudge-check', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-                const data = await resp.json();
-                if (data.error) { toast.error(data.error); return; }
-                toast.success('Nudge check triggered — tasks will be created shortly');
-                setTimeout(() => invalidateTaskScope(queryClient), 8000);
-              } catch (err: any) { toast.error(err.message || 'Nudge check failed'); }
-            }}>
-              <Bell className="h-4 w-4 mr-1" /> Run Nudge
-            </Button>
-          )}
           <Button variant="outline" onClick={() => { setCreateMode('meeting'); setCreateOpen(true); }}>
             <Video className="h-4 w-4 mr-1" /> New Meeting
           </Button>

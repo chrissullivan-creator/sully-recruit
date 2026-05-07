@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { authHeaders } from "@/lib/api-auth";
 
 interface CandidateMatch {
   id: string;
@@ -54,7 +55,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
   const fetchMatches = useCallback(async (p: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${jobId}/matches?page=${p}&per_page=${perPage}`);
+      const res = await fetch(`/api/jobs/${jobId}/matches?page=${p}&per_page=${perPage}`, { headers: await authHeaders() });
       const data = await res.json();
       setMatches(data.matches || []);
       setTotalPages(data.totalPages || 0);
@@ -83,7 +84,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
       const maxAttempts = 30;
       for (let i = 0; i < maxAttempts; i++) {
         await new Promise((r) => setTimeout(r, 4000));
-        const pollRes = await fetch(`/api/jobs/${jobId}/match-run-status?runId=${runId}`);
+        const pollRes = await fetch(`/api/jobs/${jobId}/match-run-status?runId=${runId}`, { headers: await authHeaders() });
         if (pollRes.ok) {
           const { status } = await pollRes.json();
           if (status === "completed" || status === "failed") break;

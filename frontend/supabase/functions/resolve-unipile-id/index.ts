@@ -17,6 +17,34 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Reject unauthenticated callers — this endpoint hits Unipile and burns API
+  // quota, so allowing anonymous traffic invites abuse. Accept either a
+  // Supabase JWT (logged-in user) or the service role key.
+  const authHeader = req.headers.get("authorization") ?? "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!token) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (token !== serviceKey) {
+    if (!supabaseUrl || !anonKey) {
+      return new Response(JSON.stringify({ error: "Server misconfigured" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const client = createClient(supabaseUrl, anonKey);
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data?.user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   try {
     // Prefer v2 credentials; fall back to v1 for orgs that haven't migrated.
     // The v1 endpoint /api/v1/users/{slug} started returning 404 for slugs

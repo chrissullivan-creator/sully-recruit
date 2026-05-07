@@ -28,6 +28,20 @@ export const resumeIngestion = task({
       .update({ parsing_status: "processing" })
       .eq("id", resumeId);
 
+    try {
+      return await runIngestion();
+    } catch (err: any) {
+      // Without this, parsing_status sticks on "processing" forever and the UI spinner never resolves.
+      logger.error("Resume ingestion failed", { resumeId, candidateId, error: err?.message });
+      await supabase
+        .from("resumes")
+        .update({ parsing_status: "failed" })
+        .eq("id", resumeId);
+      throw err;
+    }
+
+    async function runIngestion() {
+
     // ── 1. Download file from Supabase Storage ──────────────────────
     const { data: downloadData, error: downloadErr } = await supabase.storage
       .from("resumes")
@@ -208,7 +222,16 @@ ${rawText.slice(0, 60000)}`;
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
 
-      await supabase.from("people").update(updates).eq("id", workingCandidateId);
+      const { error: peopleUpdateErr } = await supabase
+        .from("people")
+        .update(updates)
+        .eq("id", workingCandidateId);
+      if (peopleUpdateErr) {
+        logger.error("Failed to update candidate after resume parse", {
+          candidateId: workingCandidateId, error: peopleUpdateErr.message,
+        });
+        throw new Error(`Candidate update failed: ${peopleUpdateErr.message}`);
+      }
     }
 
     // ── 6. Embed full profile with Voyage and store in resume_embeddings ──
@@ -249,13 +272,22 @@ ${rawText.slice(0, 60000)}`;
       }
     }
 
-    // Chain-trigger Joe Says refresh after resume parsing
-    await generateJoeSays.trigger({
-      entityId: workingCandidateId,
-      entityType: "candidate",
-    });
+    // Chain-trigger Joe Says refresh after resume parsing.
+    // Best-effort — ingestion has already committed the parsed data,
+    // so a Joe Says failure shouldn't fail the run or burn retries.
+    try {
+      await generateJoeSays.trigger({
+        entityId: workingCandidateId,
+        entityType: "candidate",
+      });
+    } catch (err: any) {
+      logger.warn("generateJoeSays.trigger failed after resume ingestion", {
+        candidateId: workingCandidateId, error: err?.message,
+      });
+    }
 
     return { success: true, resumeId, candidateId: workingCandidateId };
+    }
   },
 });
 

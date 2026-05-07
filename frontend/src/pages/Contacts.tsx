@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -67,6 +68,7 @@ const Contacts = () => {
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
+  const [togglingTagId, setTogglingTagId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const handleBulkDelete = async () => {
@@ -515,7 +517,7 @@ const Contacts = () => {
                               try {
                                 const resp = await fetch('/api/trigger-fetch-history', {
                                   method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
+                                  headers: await authHeaders(),
                                   body: JSON.stringify({ contact_id: contact.id }),
                                 });
                                 const data = await resp.json();
@@ -548,15 +550,30 @@ const Contacts = () => {
                             <Play className="h-3.5 w-3.5 mr-2" /> Enroll in Sequence
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={async () => {
-                            const currentRoles: string[] = (contact as any).roles ?? ['client'];
-                            const newRoles = currentRoles.includes('candidate')
-                              ? currentRoles.filter((r: string) => r !== 'candidate')
-                              : [...currentRoles, 'candidate'];
-                            await supabase.from('contacts').update({ roles: newRoles } as any).eq('id', contact.id);
-                            toast.success(newRoles.includes('candidate') ? 'Tagged as Candidate' : 'Candidate tag removed');
-                            queryClient.invalidateQueries({ queryKey: ['contacts'] });
-                          }}>
+                          <DropdownMenuItem
+                            disabled={togglingTagId === contact.id}
+                            onSelect={(e) => { e.preventDefault(); }}
+                            onClick={async () => {
+                              if (togglingTagId === contact.id) return;
+                              setTogglingTagId(contact.id);
+                              const currentRoles: string[] = (contact as any).roles ?? ['client'];
+                              const newRoles = currentRoles.includes('candidate')
+                                ? currentRoles.filter((r: string) => r !== 'candidate')
+                                : [...currentRoles, 'candidate'];
+                              try {
+                                const { error } = await supabase
+                                  .from('contacts')
+                                  .update({ roles: newRoles } as any)
+                                  .eq('id', contact.id);
+                                if (error) throw error;
+                                toast.success(newRoles.includes('candidate') ? 'Tagged as Candidate' : 'Candidate tag removed');
+                                queryClient.invalidateQueries({ queryKey: ['contacts'] });
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Failed to update candidate tag');
+                              } finally {
+                                setTogglingTagId(null);
+                              }
+                            }}>
                             {((contact as any).roles ?? ['client']).includes('candidate')
                               ? '— Remove Candidate Tag'
                               : '+ Tag as Candidate'}
