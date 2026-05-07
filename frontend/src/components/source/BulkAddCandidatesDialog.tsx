@@ -298,7 +298,8 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
         // TODO: enrichment API call here — if email or phone is missing,
         // call enrichment service to fill in contact information.
         // User will provide enrichment API details in a follow-up session.
-        if (candidateId && (!candidateData.email || !candidateData.phone)) {
+        const hasAnyEmail = (candidateData as any).personal_email || (candidateData as any).work_email;
+        if (candidateId && (!hasAnyEmail || !candidateData.phone)) {
           console.warn(`[Source] Enrichment not configured — missing email/phone for ${name}`);
         }
 

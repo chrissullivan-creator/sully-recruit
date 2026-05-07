@@ -60,7 +60,9 @@ const typeToEntity = (t: string | null | undefined): 'candidate' | 'contact' =>
 interface PersonSearchRow {
   id: string;
   full_name: string | null;
-  email: string | null;
+  primary_email: string | null;
+  personal_email: string | null;
+  work_email: string | null;
   phone: string | null;
   current_title: string | null;
   title: string | null;
@@ -300,8 +302,8 @@ function LinkCallDialog({
     const q = search.trim();
     const { data, error } = await supabase
       .from('people')
-      .select('id, full_name, email, phone, current_title, title, type')
-      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
+      .select('id, full_name, primary_email, personal_email, work_email, phone, current_title, title, type')
+      .or(`full_name.ilike.%${q}%,personal_email.ilike.%${q}%,work_email.ilike.%${q}%,phone.ilike.%${q}%`)
       .limit(10);
     if (error) {
       toast.error(error.message);
@@ -324,7 +326,7 @@ function LinkCallDialog({
     if (!e164) { setResults([]); setSearching(false); return; }
     const { data } = await supabase
       .from('people')
-      .select('id, full_name, email, phone, current_title, title, type')
+      .select('id, full_name, primary_email, personal_email, work_email, phone, current_title, title, type')
       .or(`phone.eq.${e164},mobile_phone.eq.${e164}`)
       .limit(10);
     const matches = (data ?? []).map((r: PersonSearchRow) => ({
@@ -488,7 +490,7 @@ const Calls = () => {
         .select('id, full_name')
         .order('full_name');
       if (error) throw error;
-      return (data ?? []) as { id: string; full_name: string }[];
+      return (data ?? []) as unknown as { id: string; full_name: string }[];
     },
   });
 

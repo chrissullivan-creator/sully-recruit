@@ -101,18 +101,25 @@ export function EnrolledPeopleDialog({
 
       const peopleMap = new Map<string, PersonRow>();
       if (candIds.length) {
+        // people has personal_email/work_email/primary_email; contacts view
+        // exposes the alias `email`. Normalize at consumption.
         const { data: cands } = await supabase
           .from("people")
-          .select("id, full_name, email, current_title, current_company")
+          .select("id, full_name, primary_email, personal_email, work_email, current_title, current_company")
           .in("id", candIds);
-        for (const p of (cands ?? []) as PersonRow[]) peopleMap.set(p.id, p);
+        for (const p of ((cands ?? []) as any[])) {
+          peopleMap.set(p.id, {
+            ...p,
+            email: p.personal_email ?? p.work_email ?? p.primary_email ?? null,
+          } as PersonRow);
+        }
       }
       if (contIds.length) {
         const { data: contacts } = await supabase
           .from("contacts")
           .select("id, full_name, email, current_title, current_company")
           .in("id", contIds);
-        for (const p of (contacts ?? []) as PersonRow[]) peopleMap.set(p.id, p);
+        for (const p of ((contacts ?? []) as unknown as PersonRow[])) peopleMap.set(p.id, p);
       }
 
       // Step counts per enrollment, in one round trip.

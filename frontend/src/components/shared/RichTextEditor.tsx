@@ -197,7 +197,10 @@ export function RichTextEditor({
   // Sync external value changes
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value || '', false);
+      // TipTap v2 changed the second arg from `emitUpdate: boolean` to
+      // an options object. Pass `emitUpdate: false` so this sync
+      // doesn't re-fire onUpdate and ping-pong with the parent.
+      editor.commands.setContent(value || '', { emitUpdate: false });
     }
   }, [value, editor]);
 

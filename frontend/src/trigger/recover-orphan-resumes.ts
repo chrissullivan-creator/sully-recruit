@@ -57,13 +57,16 @@ export const recoverOrphanResumes = task({
 
     // Find orphans — storage objects in `resumes` bucket whose path
     // doesn't appear on any resumes row.
-    const { data: orphans, error } = await supabase
-      .rpc("list_orphan_resume_files", { p_since: since, p_limit: limit })
-      .returns<Array<{ name: string; created_at: string }>>();
+    const { data: orphansRaw, error } = await supabase
+      .rpc("list_orphan_resume_files", { p_since: since, p_limit: limit });
     if (error) throw new Error(`list_orphan_resume_files failed: ${error.message}`);
+    // The RPC's generated return type was widened by recent type regen and
+    // collapses to a SelectQueryError union; the runtime shape is still an
+    // array of { name, created_at }, so cast through unknown.
+    const orphans = (orphansRaw ?? []) as unknown as Array<{ name: string; created_at: string }>;
 
-    logger.info("Orphan recovery starting", { count: orphans?.length ?? 0, since, limit });
-    return await processOrphans(supabase, orphans ?? []);
+    logger.info("Orphan recovery starting", { count: orphans.length, since, limit });
+    return await processOrphans(supabase, orphans);
   },
 });
 

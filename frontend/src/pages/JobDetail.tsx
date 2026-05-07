@@ -407,7 +407,7 @@ const JobDetail = () => {
     queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
       prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
     );
-    const res = row.send_out_id
+    const res: { ok: boolean; error?: string } = row.send_out_id
       ? await moveStage({
           sendOutId: row.send_out_id,
           candidateJobId: row.id,
@@ -418,23 +418,29 @@ const JobDetail = () => {
           entityType: 'candidate_job',
           note,
         })
-      : (async () => {
+      : await (async () => {
           const { error } = await supabase
             .from('candidate_jobs')
             .update({ pipeline_stage: target, stage_updated_at: new Date().toISOString() })
             .eq('id', row.id);
-          if (error) return { ok: false, error: error.message };
+          if (error) return { ok: false as const, error: error.message };
+          // stage_transitions requires moved_by — pass the current user's id
+          // as actor; the schema rejects null so we resolve it inline.
+          const { data: { user } } = await supabase.auth.getUser();
           await supabase.from('stage_transitions').insert({
-            entity_type: 'candidate_job', entity_id: row.id,
-            from_stage: row.pipeline_stage, to_stage: target,
+            entity_type: 'candidate_job',
+            entity_id: row.id,
+            from_stage: row.pipeline_stage,
+            to_stage: target,
+            moved_by: user?.id ?? 'system',
             trigger_source: 'drag',
+            triggered_by_user_id: user?.id ?? null,
           });
           // candidate_job-only path doesn't have a send_out yet, so
           // hang the kickoff note off the candidate instead — still
           // surfaces in the activity feed and keeps the move atomic.
           const trimmed = (note ?? '').trim();
           if (trimmed) {
-            const { data: { user } } = await supabase.auth.getUser();
             await supabase.from('notes').insert({
               entity_type: 'candidate',
               entity_id: row.candidate_id,
@@ -443,7 +449,7 @@ const JobDetail = () => {
               note_source: 'stage_move',
             } as any);
           }
-          return { ok: true };
+          return { ok: true as const };
         })();
 
     if (!res.ok) {
@@ -490,7 +496,7 @@ const JobDetail = () => {
     // recruiter can capture context (pitch angle, comp, why this fit)
     // that follows the candidate into the activity feed. Other stages
     // commit immediately.
-    if (target === 'send_out' || target === 'submitted') {
+    if (target === 'ready_to_send' || target === 'submitted') {
       setPendingMove({ row, target });
       setSendOutNotesOpen(true);
       return;
@@ -518,8 +524,8 @@ const JobDetail = () => {
     try {
       const { data } = await supabase
         .from('people')
-        .select('id, full_name, first_name, last_name, current_title, current_company, email')
-        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%,email.ilike.%${query}%`)
+        .select('id, full_name, first_name, last_name, current_title, current_company, primary_email, personal_email, work_email')
+        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%,current_title.ilike.%${query}%,current_company.ilike.%${query}%,personal_email.ilike.%${query}%,work_email.ilike.%${query}%`)
         .limit(15);
       // Filter out candidates already in send outs for this job
       const existingIds = new Set((sendOuts as any[]).map((so: any) => so.candidate_id));

@@ -321,8 +321,10 @@ export function useSequenceListMetrics() {
   return useQuery({
     queryKey: ['sequence_list_metrics'],
     queryFn: async () => {
+      // Was `sequence_step_executions` (legacy v1 table). The v2 schema
+      // tracks deliveries in sequence_step_logs.
       const { data, error } = await supabase
-        .from('sequence_step_executions')
+        .from('sequence_step_logs')
         .select('status, sequence_enrollments!inner(sequence_id)');
       if (error) throw error;
       const metrics: Record<string, { sent: number; delivered: number; opened: number; replied: number; bounced: number }> = {};

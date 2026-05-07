@@ -90,11 +90,13 @@ function useContactJobs(contactId: string | undefined) {
     queryKey: ['contact_jobs', contactId],
     enabled: !!contactId,
     queryFn: async () => {
-      // Jobs where this contact is hiring manager
+      // Jobs where this contact is the hiring manager. The column was
+      // renamed from hiring_manager → contact_id during the contacts
+      // unification migration; the runtime column is contact_id.
       const { data: hiringManagerJobs, error: err1 } = await supabase
         .from('jobs')
         .select('*')
-        .eq('hiring_manager', contactId!)
+        .eq('contact_id', contactId!)
         .order('created_at', { ascending: false });
       if (err1) throw err1;
 

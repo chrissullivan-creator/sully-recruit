@@ -91,16 +91,17 @@ export default function SequenceBuilder() {
         weekdaysOnly: seq.weekdays_only === true,
       });
 
-      const [{ data: nodes }, { data: stepsLegacy }] = await Promise.all([
-        supabase
-          .from("sequence_nodes")
-          .select("id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)")
-          .eq("sequence_id", id),
-        supabase.from("sequence_steps").select("*").eq("sequence_id", id),
-      ]);
+      // sequence_steps was the v1 schema; it was dropped in the v2
+      // sequence rebuild. The hydrate function still accepts a legacy
+      // step list as a backfill for older sequences, but we no longer
+      // query it (the table is gone). Cast preserves the parameter shape.
+      const { data: nodes } = await supabase
+        .from("sequence_nodes")
+        .select("id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)")
+        .eq("sequence_id", id);
 
       const nodeRows = ((nodes ?? []) as any[]).sort(compareSequenceNodes);
-      setBranches(hydrateBranchesFromNodes(nodeRows, stepsLegacy ?? []));
+      setBranches(hydrateBranchesFromNodes(nodeRows, []));
     })();
   }, [id]);
 
@@ -571,13 +572,19 @@ function PreviewAsPicker({
     setLoading(true);
     try {
       const table = audience === "contacts" ? "contacts" : "people";
+      // contacts view exposes `email` (aliased from primary_email); the
+      // people table has personal_email + work_email. Query the right
+      // shape per branch and normalize at consumption.
       const fields = audience === "contacts"
         ? "id, full_name, first_name, last_name, email, title, company_name"
-        : "id, full_name, first_name, last_name, email, current_title, current_company";
-      const { data } = await supabase
+        : "id, full_name, first_name, last_name, primary_email, personal_email, work_email, current_title, current_company";
+      const orFilter = audience === "contacts"
+        ? `full_name.ilike.%${q}%,first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`
+        : `full_name.ilike.%${q}%,first_name.ilike.%${q}%,last_name.ilike.%${q}%,personal_email.ilike.%${q}%,work_email.ilike.%${q}%`;
+      const { data } = await (supabase as any)
         .from(table)
         .select(fields)
-        .or(`full_name.ilike.%${q}%,first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`)
+        .or(orFilter)
         .limit(8);
       setResults(data ?? []);
     } finally { setLoading(false); }

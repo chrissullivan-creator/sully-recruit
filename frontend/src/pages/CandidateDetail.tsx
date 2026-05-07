@@ -36,7 +36,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
-import { CANONICAL_PIPELINE, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
+import { CANONICAL_PIPELINE, canonicalConfig, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
@@ -978,7 +978,7 @@ const CandidateDetail = () => {
             // Prefer personal_email for candidate outreach (sequences send to
             // personal_email; work_email is shown for context). Fall back to
             // the legacy email column during the migration off it.
-            const mailto = (candidate as any).personal_email || (candidate as any).work_email || candidate.email;
+            const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
             return mailto ? (
               <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
                 <Mail className="h-4 w-4" />
@@ -1532,7 +1532,7 @@ const CandidateDetail = () => {
               <TabsContent value="communications" className="px-8 py-5 mt-0">
                 <div className="flex items-center gap-2 mb-5">
                   <Button variant="outline" size="sm" onClick={() => {
-                    const to = (candidate as any).personal_email || (candidate as any).work_email || candidate.email;
+                    const to = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
                     if (to) { window.location.href = `mailto:${to}`; }
                     else { toast.error('No email address on file'); }
                   }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>

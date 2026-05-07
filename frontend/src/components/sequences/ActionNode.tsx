@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { SequenceStepCard } from "./SequenceStepCard";
 
 export interface ActionData {
@@ -26,7 +26,10 @@ export interface ActionData {
   replyToPrevious?: boolean;
 }
 
-interface ActionNodeData {
+// xyflow v12 requires the NodeProps generic to extend
+// Node<Record<string, unknown>, string>, so wrap our data shape
+// in a Node<...> instead of passing it directly.
+type ActionNodeData = {
   label: string;
   actions: ActionData[];
   stepNumber?: number;
@@ -34,9 +37,10 @@ interface ActionNodeData {
   onAskJoe?: (actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string) => Promise<string>;
   isAfterConnection?: boolean;
   previewMergeVars?: Record<string, string>;
-}
+} & Record<string, unknown>;
+type ActionNodeType = Node<ActionNodeData, "action">;
 
-function ActionNodeComponent({ data }: NodeProps<ActionNodeData>) {
+function ActionNodeComponent({ data }: NodeProps<ActionNodeType>) {
   const { actions, onUpdate, onAskJoe, label, stepNumber, previewMergeVars } = data;
 
   return (

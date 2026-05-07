@@ -55,7 +55,10 @@ const rejectedByOptions = [
 ];
 
 type SendOutInsert = TablesInsert<'send_outs'>;
-type CandidateUpdate = TablesUpdate<'candidates'> & {
+// `candidates` is now a view in regenerated types; TablesUpdate only accepts
+// base tables. Use the underlying `people` shape; runtime queries against
+// the candidates view still take the same column names.
+type CandidateUpdate = TablesUpdate<'people'> & {
   job_id?: string | null;
   job_status?: string | null;
 };

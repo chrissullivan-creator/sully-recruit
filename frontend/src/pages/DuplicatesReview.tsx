@@ -84,12 +84,12 @@ function useDuplicates() {
         const chunk = idArr.slice(i, i + 100);
         const { data: cands, error: candErr } = await supabase
           .from("people")
-          .select("id, first_name, last_name, email, phone, current_company, current_title, created_at")
+          .select("id, first_name, last_name, primary_email, personal_email, work_email, phone, current_company, current_title, created_at")
           .in("id", chunk);
 
         if (candErr) throw candErr;
         for (const c of cands || []) {
-          candidates.set(c.id, c as CandidateInfo);
+          candidates.set((c as any).id, c as unknown as CandidateInfo);
         }
       }
 

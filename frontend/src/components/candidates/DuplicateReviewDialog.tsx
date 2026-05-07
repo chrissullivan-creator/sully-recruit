@@ -217,7 +217,7 @@ export function DuplicateReviewDialog({
         _conversationCount: convRes.count || 0,
         _enrollmentCount: enrollRes.count || 0,
         _noteCount: noteRes.count || 0,
-      } as CandidateInfo;
+      } as unknown as CandidateInfo;
     };
 
     const [a, b] = await Promise.all([
