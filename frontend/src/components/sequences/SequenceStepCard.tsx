@@ -450,23 +450,35 @@ function AttachmentPicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  const handleFiles = async (files: FileList) => {
+  const handleFiles = async (files: File[]) => {
+    if (!files.length) return;
     setUploading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not authenticated");
+      if (!session) {
+        toast.error("Not signed in — refresh and try again");
+        return;
+      }
       const newUrls: string[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `${session.user.id}/${Date.now()}_${safeName}`;
         const { error: upErr } = await supabase.storage
           .from("sequence-attachments")
           .upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
         if (upErr) {
+          // Surface the real reason — RLS misconfig, bucket missing,
+          // size cap, anything. Otherwise the user sees nothing happen.
           toast.error(`${file.name}: ${upErr.message}`);
+          // eslint-disable-next-line no-console
+          console.error("sequence-attachments upload failed", { file: file.name, error: upErr });
           continue;
         }
         const { data: pub } = supabase.storage.from("sequence-attachments").getPublicUrl(path);
+        if (!pub?.publicUrl) {
+          toast.error(`${file.name}: couldn't get public URL`);
+          continue;
+        }
         newUrls.push(pub.publicUrl);
       }
       if (newUrls.length) {
@@ -474,7 +486,9 @@ function AttachmentPicker({
         toast.success(newUrls.length === 1 ? "Attachment uploaded" : `${newUrls.length} attachments uploaded`);
       }
     } catch (e: any) {
-      toast.error(e.message || "Upload failed");
+      // eslint-disable-next-line no-console
+      console.error("AttachmentPicker upload error", e);
+      toast.error(e?.message || "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -525,9 +539,13 @@ function AttachmentPicker({
         className="hidden"
         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg"
         onChange={(e) => {
-          const files = e.target.files;
-          if (files && files.length > 0) handleFiles(files);
+          // Materialise the FileList into a real array BEFORE we reset
+          // the input. FileList is a live view in some browsers and
+          // setting value="" empties it mid-await, which is why the
+          // upload would silently no-op.
+          const files = Array.from(e.target.files ?? []);
           e.target.value = "";
+          if (files.length > 0) handleFiles(files);
         }}
       />
       <Button
