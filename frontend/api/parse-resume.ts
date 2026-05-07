@@ -1,15 +1,18 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { parseResume } from "../src/lib/resume-parser";
+import { extractResumeText } from "../src/lib/resume-parser";
+import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/parse-resume
  *
- * Downloads a resume from Supabase Storage and runs the shared parser
- * (Eden AI → Affinda). Returns parsed JSON. No DB writes — the calling
- * dialog persists candidate fields.
+ * Downloads a résumé from Supabase Storage, extracts raw text, and
+ * runs Gemini → OpenAI fallback to produce structured JSON. No DB
+ * writes — the calling dialog persists candidate fields itself.
  *
- * EDEN_AI_API_KEY: env var preferred; falls back to app_settings row.
+ * Eden AI / Affinda was retired. Gemini is the primary parser;
+ * OpenAI is the fallback when Gemini hits quota or auth errors.
+ *
  * Body: { filePath: string, fileName: string }
  * Auth: Supabase JWT (from logged-in user)
  */
@@ -39,14 +42,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // Resolve Eden key: env first, then app_settings.
-    let edenKey = process.env.EDEN_AI_API_KEY || "";
-    if (!edenKey) {
-      const { data } = await admin.from("app_settings").select("value").eq("key", "EDEN_AI_API_KEY").maybeSingle();
-      edenKey = data?.value || "";
+    // Resolve provider keys: env first, then app_settings.
+    let geminiKey = process.env.GEMINI_API_KEY || "";
+    let openaiKey = process.env.OPENAI_API_KEY || "";
+    if (!geminiKey || !openaiKey) {
+      const { data } = await admin
+        .from("app_settings")
+        .select("key, value")
+        .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY"]);
+      for (const row of data ?? []) {
+        if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
+        if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+      }
     }
-    if (!edenKey) {
-      return res.status(500).json({ error: "EDEN_AI_API_KEY not configured" });
+    if (!geminiKey && !openaiKey) {
+      return res.status(500).json({ error: "Resume parser: neither GEMINI_API_KEY nor OPENAI_API_KEY configured" });
     }
 
     const { data: downloadData, error: downloadErr } = await admin.storage
@@ -59,12 +69,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const fileBytes = new Uint8Array(await downloadData.arrayBuffer());
-    const result = await parseResume(fileBytes, fileName, {
-      edenKey,
+    const rawText = await extractResumeText(fileBytes, fileName, {
       log: { warn: (m, meta) => console.warn(m, meta) },
     });
 
-    return res.status(200).json({ parsed: result.parsed, via: result.via });
+    const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
+
+Extract:
+{
+  "first_name": "First",
+  "last_name": "Last",
+  "email": "email@example.com or null",
+  "phone": "phone number or null",
+  "linkedin_url": "linkedin URL or null",
+  "current_title": "most recent job title",
+  "current_company": "most recent company",
+  "location": "city, state or null",
+  "skills": ["skill1", "skill2"]
+}
+
+Resume text:
+${rawText.slice(0, 60000)}`;
+
+    const { text, via } = await callAIWithFallback({
+      geminiKey: geminiKey || undefined,
+      openaiKey: openaiKey || undefined,
+      systemPrompt: "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
+      userContent: userPrompt,
+      maxTokens: 2048,
+      jsonOutput: true,
+    });
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(502).json({ error: "Resume parse: no JSON in response", via });
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    return res.status(200).json({ parsed, via });
   } catch (err: any) {
     console.error("Parse resume error:", err.message);
     return res.status(500).json({ error: err.message });

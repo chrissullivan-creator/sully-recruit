@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getGeminiKey, getOpenAIKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
@@ -60,17 +60,18 @@ export const resumeIngestion = task({
       return { skipped: true, reason: "not_a_resume" };
     }
 
-    // ── 3. Parse via Claude (Anthropic, with OpenAI fallback) ───────
-    // Affinda/Eden AI was retired; we now extract raw text from the
-    // file and ask Claude to map it into our flat ParsedResume shape.
-    // The system prompt mirrors api/parse-resume-ai.ts so the structured
-    // output stays consistent with the manual API endpoint.
+    // ── 3. Parse via Gemini (with OpenAI fallback) ──────────────────
+    // Affinda/Eden AI was retired. Gemini is the primary parser
+    // (cost-efficient + fast for résumé-shaped JSON), with OpenAI
+    // as the fallback when Gemini hits quota/auth/rate-limit errors.
     const rawText = sniffText;
-    const [anthropicKey, openaiKey] = await Promise.all([
-      getAnthropicKey(),
+    const [geminiKey, openaiKey] = await Promise.all([
+      getGeminiKey(),
       getOpenAIKey().catch(() => ""),
     ]);
-    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY missing in app_settings");
+    if (!geminiKey && !openaiKey) {
+      throw new Error("Resume parser: neither GEMINI_API_KEY nor OPENAI_API_KEY set in app_settings");
+    }
 
     const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
 
@@ -91,7 +92,7 @@ Resume text:
 ${rawText.slice(0, 60000)}`;
 
     const { text, via } = await callAIWithFallback({
-      anthropicKey,
+      geminiKey: geminiKey || undefined,
       openaiKey: openaiKey || undefined,
       systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
       userContent: userPrompt,

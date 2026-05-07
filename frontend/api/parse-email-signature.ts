@@ -80,12 +80,29 @@ function trimToOriginal(text: string): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) return res.status(500).json({ error: "Server misconfigured: missing ANTHROPIC_API_KEY" });
-
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return res.status(500).json({ error: "Server misconfigured" });
+
+  // Gemini is the primary parser; OpenAI is the fallback. Pull both
+  // from env first, then app_settings. Either-or is enough — the
+  // helper handles a missing key gracefully.
+  let geminiKey = process.env.GEMINI_API_KEY || "";
+  let openaiKey = process.env.OPENAI_API_KEY || "";
+  if (!geminiKey || !openaiKey) {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY"]);
+    for (const row of data ?? []) {
+      if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
+      if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+    }
+  }
+  if (!geminiKey && !openaiKey) {
+    return res.status(500).json({ error: "Email-signature parser: neither GEMINI_API_KEY nor OPENAI_API_KEY configured" });
+  }
 
   // Auth
   const token = req.headers.authorization?.replace("Bearer ", "");
@@ -134,8 +151,8 @@ ${signatureBlock}
 JSON:`;
 
     const { text } = await callAIWithFallback({
-      anthropicKey,
-      openaiKey: process.env.OPENAI_API_KEY,
+      geminiKey: geminiKey || undefined,
+      openaiKey: openaiKey || undefined,
       systemPrompt: "You extract contact info from email signatures and return JSON.",
       userContent: userPrompt,
       model: "claude-haiku-4-5-20251001",

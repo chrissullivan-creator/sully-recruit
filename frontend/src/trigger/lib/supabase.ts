@@ -128,6 +128,19 @@ export async function getAnthropicKey(): Promise<string> {
 }
 
 /**
+ * Get Gemini API key from app_settings. Resume + email-signature
+ * parsing routes through Gemini first, falling back to OpenAI.
+ * Returns empty string when missing so callers can branch cleanly.
+ */
+export async function getGeminiKey(): Promise<string> {
+  try {
+    return await getAppSetting("GEMINI_API_KEY");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Get OpenAI API key from app_settings. Used as a fallback parser when
  * Anthropic is over quota / rate-limited / down. Returns empty string
  * (not an error) so callers can detect "fallback unavailable" without
