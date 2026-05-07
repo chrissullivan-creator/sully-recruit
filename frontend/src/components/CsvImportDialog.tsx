@@ -189,6 +189,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             // Build payload: only include fields with actual values from CSV
             // so we don't stomp existing enriched data with empty strings
             const payload: Record<string, any> = {
+              type: 'candidate',
               first_name: c.first_name || undefined,
               last_name: c.last_name || undefined,
               full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined,
@@ -204,6 +205,8 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
               status: csvStage && VALID_CANDIDATE_STAGES.includes(csvStage) ? csvStage : undefined,
               skills: skills.length > 0 ? skills : undefined,
               updated_at: new Date().toISOString(),
+              // Queue Unipile v2 resolve when a LinkedIn URL came in.
+              ...(c.linkedin_url ? { unipile_resolve_status: 'pending' } : {}),
             };
 
             // Strip undefined/empty values so existing data isn't clobbered
@@ -243,48 +246,83 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         invalidatePersonScope(queryClient);
 
       } else if (entityType === 'contacts') {
+        // Contacts (clients) live on the unified `people` table with
+        // type='client'. Email gets classified into work_email / personal_email
+        // by domain so the engine routes correctly at send time.
+        const normalizeEmail = (e: string | null | undefined): string | null => {
+          if (!e) return null;
+          const v = e.trim().toLowerCase();
+          return v || null;
+        };
+
         const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
           const row: Record<string, any> = {
-            user_id: user.id, first_name: c.first_name, last_name: c.last_name,
-            full_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
-            email: c.email || '',
+            type: 'client',
+            owner_user_id: user.id,
+            first_name: c.first_name || null,
+            last_name: c.last_name || null,
+            full_name: [c.first_name, c.last_name].filter(Boolean).join(' ') || null,
+            ...(c.email ? classifyEmail(normalizeEmail(c.email) ?? undefined) : {}),
+            updated_at: new Date().toISOString(),
           };
           if (c.phone) row.phone = c.phone;
           if (c.title) row.title = c.title;
           if (c.company_name) row.company_name = c.company_name;
-          if (c.linkedin_url) row.linkedin_url = c.linkedin_url;
+          if (c.linkedin_url) {
+            row.linkedin_url = c.linkedin_url;
+            row.unipile_resolve_status = 'pending';
+          }
           if (c.notes) row.notes = c.notes;
           return row;
         };
 
-        const emailsInCsv = valid.map(r => (r.mapped as any).email?.toLowerCase().trim()).filter(Boolean);
-        const { data: existing } = await supabase
-          .from('contacts').select('id, email').in('email', emailsInCsv);
-        const existingMap = new Map((existing ?? []).map((e: any) => [e.email?.toLowerCase().trim(), e.id]));
+        // Dedup against existing clients by normalized work_email or personal_email
+        // (both are the source-of-truth columns now that the legacy `email` is retired).
+        const emailsInCsv = valid
+          .map(r => normalizeEmail((r.mapped as any).email))
+          .filter(Boolean) as string[];
+
+        const existingMap = new Map<string, string>();
+        if (emailsInCsv.length > 0) {
+          const { data: existing } = await supabase
+            .from('people')
+            .select('id, work_email, personal_email')
+            .eq('type', 'client')
+            .or(
+              `work_email.in.(${emailsInCsv.join(',')}),personal_email.in.(${emailsInCsv.join(',')})`
+            );
+          for (const p of (existing ?? []) as any[]) {
+            const we = p.work_email?.toLowerCase().trim();
+            const pe = p.personal_email?.toLowerCase().trim();
+            if (we) existingMap.set(we, p.id);
+            if (pe) existingMap.set(pe, p.id);
+          }
+        }
 
         const toUpdate = valid.filter(r => {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
+          const e = normalizeEmail((r.mapped as any).email);
           return e && existingMap.has(e);
         });
         const toInsert = valid.filter(r => {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
+          const e = normalizeEmail((r.mapped as any).email);
           return !e || !existingMap.has(e);
         });
 
         for (const r of toUpdate) {
-          const e = (r.mapped as any).email?.toLowerCase().trim();
-          const id = existingMap.get(e);
+          const e = normalizeEmail((r.mapped as any).email)!;
+          const id = existingMap.get(e)!;
           const row = buildRow(r);
-          delete row.user_id;
-          await supabase.from('contacts').update(row).eq('id', id);
+          delete row.owner_user_id;
+          delete row.type;
+          await supabase.from('people').update(row).eq('id', id);
           processed++;
         }
 
         if (toInsert.length > 0) {
           const rows = toInsert.map(buildRow);
           for (let i = 0; i < rows.length; i += BATCH) {
-            const { error } = await supabase.from('contacts').insert(rows.slice(i, i + BATCH) as any);
+            const { error } = await supabase.from('people').insert(rows.slice(i, i + BATCH) as any);
             if (error) throw error;
             processed += Math.min(BATCH, rows.length - i);
           }

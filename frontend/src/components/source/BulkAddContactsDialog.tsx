@@ -53,49 +53,9 @@ interface ImportResult {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-async function resolveUnipileInBackground(contactId: string, linkedinUrl: string) {
-  try {
-    const match = linkedinUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
-    const slug = match ? match[1] : (/^[\w-]+$/.test(linkedinUrl.trim()) ? linkedinUrl.trim() : null);
-    if (!slug) return;
-
-    const { data: chrisAcct } = await supabase
-      .from('integration_accounts')
-      .select('unipile_account_id')
-      .ilike('account_label', '%Chris Sullivan%')
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (!chrisAcct?.unipile_account_id) return;
-
-    const resp = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-unipile-id`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ linkedin_slug: slug, account_id: chrisAcct.unipile_account_id }),
-      }
-    );
-
-    if (resp.ok) {
-      const result = await resp.json();
-      if (result.unipile_id || result.provider_id) {
-        const unipileClassicId = result.unipile_id || result.provider_id || null;
-        if (unipileClassicId) {
-          await supabase
-            .from('contacts')
-            .update({ unipile_classic_id: unipileClassicId } as any)
-            .eq('id', contactId);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Background Unipile ID resolution failed:', err);
-  }
-}
+// Unipile resolution is delegated to the resolve-unipile-ids cron task
+// (now on Unipile v2). Inserts flag rows with
+// people.unipile_resolve_status='pending' for pickup.
 
 /** Find or create a company by name, returns company_id */
 async function resolveCompany(companyName: string): Promise<string | null> {
@@ -177,21 +137,25 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
       const name = `${applicant.first_name} ${applicant.last_name}`.trim() || `Applicant ${i + 1}`;
 
       try {
-        // Duplicate check by linkedin_url or email
+        // Duplicate check on the unified people table (clients only).
+        // Match by linkedin_url first, then by either email column.
         let existing: any = null;
         if (applicant.linkedin_url) {
           const { data } = await supabase
-            .from('contacts')
+            .from('people')
             .select('id')
+            .eq('type', 'client')
             .eq('linkedin_url', applicant.linkedin_url)
             .maybeSingle();
           existing = data;
         }
-        if (!existing && applicant.email) {
+        const normalizedEmail = normalizeEmail(applicant.email);
+        if (!existing && normalizedEmail) {
           const { data } = await supabase
-            .from('contacts')
+            .from('people')
             .select('id')
-            .eq('email', applicant.email)
+            .eq('type', 'client')
+            .or(`work_email.eq.${normalizedEmail},personal_email.eq.${normalizedEmail}`)
             .maybeSingle();
           existing = data;
         }
@@ -206,17 +170,17 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
         const companyName = applicant.current_company?.trim() || null;
         const companyId = companyName ? (companyCache[companyName] ?? await resolveCompany(companyName)) : null;
 
-        // Insert contact
+        // Insert directly into the unified people table with type='client'.
+        // classifyEmail routes the inbound address into work_email or
+        // personal_email so the engine sends to the right column at fire time.
         const firstName = applicant.first_name || '';
         const lastName = applicant.last_name || '';
         const contactData = {
+          type: 'client',
           first_name: firstName || null,
           last_name: lastName || null,
           full_name: `${firstName} ${lastName}`.trim() || null,
-          email: normalizeEmail(applicant.email),
-          // Classify — contacts are typically client-side (work email), but
-          // if only a personal/.edu address is surfaced route it correctly.
-          ...classifyEmail(normalizeEmail(applicant.email)),
+          ...classifyEmail(normalizedEmail),
           phone: applicant.phone || null,
           mobile_phone: applicant.phone || null,
           title: applicant.current_title || applicant.headline || null,
@@ -229,10 +193,12 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           roles: ['client'],                    // LinkedIn hiring project imports = clients/contacts
           is_stub: false,
           owner_user_id: userId,                // FIX: was owner_id
+          // Queue v2 Unipile resolve via the cron task.
+          unipile_resolve_status: applicant.linkedin_url ? 'pending' : null,
         };
 
         const { data: inserted, error: insertErr } = await supabase
-          .from('contacts')
+          .from('people')
           .insert(contactData as any)
           .select('id')
           .single();
@@ -240,11 +206,6 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
         if (insertErr) throw insertErr;
 
         const contactId = inserted?.id;
-
-        // Background: resolve Unipile ID
-        if (contactId && contactData.linkedin_url) {
-          resolveUnipileInBackground(contactId, contactData.linkedin_url);
-        }
 
         // TODO: enrichment API call here — if email is missing,
         // call enrichment service to fill in email address and mobile numbers.

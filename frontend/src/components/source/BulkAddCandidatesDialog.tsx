@@ -70,50 +70,9 @@ async function callSourceApi(body: Record<string, any>, session: any) {
   return data;
 }
 
-async function resolveUnipileInBackground(candidateId: string, linkedinUrl: string) {
-  try {
-    const match = linkedinUrl.match(/linkedin\.com\/in\/([^/?#]+)/);
-    const slug = match ? match[1] : (/^[\w-]+$/.test(linkedinUrl.trim()) ? linkedinUrl.trim() : null);
-    if (!slug) return;
-
-    const { data: chrisAcct } = await supabase
-      .from('integration_accounts')
-      .select('unipile_account_id')
-      .ilike('account_label', '%Chris Sullivan%')
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (!chrisAcct?.unipile_account_id) return;
-
-    const resp = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-unipile-id`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ linkedin_slug: slug, account_id: chrisAcct.unipile_account_id }),
-      }
-    );
-
-    if (resp.ok) {
-      const result = await resp.json();
-      if (result.unipile_id || result.provider_id) {
-        // Store Unipile classic ID directly on the candidate record (primary lookup)
-        const unipileClassicId = result.unipile_id || result.provider_id || null;
-        if (unipileClassicId) {
-          await supabase
-            .from('people')
-            .update({ unipile_classic_id: unipileClassicId } as any)
-            .eq('id', candidateId);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Background Unipile ID resolution failed:', err);
-  }
-}
+// Unipile resolution is now handled by the resolve-unipile-ids cron task
+// (which uses the v2 endpoint). At insert time we just flag the row for
+// pickup via people.unipile_resolve_status='pending'.
 
 async function triggerResumeIngestion(candidateId: string, filePath: string, fileName: string) {
   try {
@@ -300,12 +259,16 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           linkedin_url: applicant.linkedin_url || parsedData.linkedin_url || null,
           avatar_url: applicant.profile_picture_url || null,
           status,
+          type: 'candidate',
           roles: ['candidate'],                // always a candidate from Source import
           is_stub: false,                      // real person — not a stub
           source: 'linkedin_hiring_project',
           source_detail: project?.id ?? null,
           job_id: jobId,
           owner_user_id: userId,               // FIX: was owner_id (column doesn't exist)
+          // Queue Unipile v2 resolve when a LinkedIn URL is present.
+          unipile_resolve_status:
+            (applicant.linkedin_url || parsedData.linkedin_url) ? 'pending' : null,
         };
 
         const { data: inserted, error: insertErr } = await supabase
@@ -318,10 +281,8 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
 
         const candidateId = inserted?.id;
 
-        // Background tasks (non-blocking)
-        if (candidateId && candidateData.linkedin_url) {
-          resolveUnipileInBackground(candidateId, candidateData.linkedin_url);
-        }
+        // Resume ingestion runs in background (Unipile resolution handled
+        // by the resolve-unipile-ids cron now).
         if (candidateId && resumeFilePath && resumeFileName) {
           triggerResumeIngestion(candidateId, resumeFilePath, resumeFileName);
         }
