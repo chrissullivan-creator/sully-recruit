@@ -47,6 +47,7 @@ import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPELINE } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
+import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
@@ -384,10 +385,25 @@ const JobDetail = () => {
   };
   const [activeDrag, setActiveDrag] = useState<KanbanRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ row: KanbanRow; target: CanonicalStage } | null>(null);
+  const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
+  const [savingMove, setSavingMove] = useState(false);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const { data: kanbanRows = [] } = useJobKanbanRows(id ?? '');
 
-  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage) => {
+  const handleSendOutNotesConfirm = async (note: string) => {
+    if (!pendingMove) return;
+    setSavingMove(true);
+    try {
+      await commitKanbanMove(pendingMove.row, pendingMove.target, note);
+    } finally {
+      setSavingMove(false);
+      setSendOutNotesOpen(false);
+      setPendingMove(null);
+    }
+  };
+
+  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage, note?: string) => {
     queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
       prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
     );
@@ -400,6 +416,7 @@ const JobDetail = () => {
           triggerSource: 'drag',
           entityId: row.candidate_id,
           entityType: 'candidate_job',
+          note,
         })
       : (async () => {
           const { error } = await supabase
@@ -412,6 +429,20 @@ const JobDetail = () => {
             from_stage: row.pipeline_stage, to_stage: target,
             trigger_source: 'drag',
           });
+          // candidate_job-only path doesn't have a send_out yet, so
+          // hang the kickoff note off the candidate instead — still
+          // surfaces in the activity feed and keeps the move atomic.
+          const trimmed = (note ?? '').trim();
+          if (trimmed) {
+            const { data: { user } } = await supabase.auth.getUser();
+            await supabase.from('notes').insert({
+              entity_type: 'candidate',
+              entity_id: row.candidate_id,
+              note: trimmed,
+              created_by: user?.id ?? null,
+              note_source: 'stage_move',
+            } as any);
+          }
           return { ok: true };
         })();
 
@@ -454,6 +485,16 @@ const JobDetail = () => {
     if (!target) return;
     const row = kanbanRows.find((r) => r.id === e.active.id);
     if (!row || stageToCanonical(row.pipeline_stage) === target) return;
+
+    // Moves into Send Out / Submitted pop the notes dialog so the
+    // recruiter can capture context (pitch angle, comp, why this fit)
+    // that follows the candidate into the activity feed. Other stages
+    // commit immediately.
+    if (target === 'send_out' || target === 'submitted') {
+      setPendingMove({ row, target });
+      setSendOutNotesOpen(true);
+      return;
+    }
     await commitKanbanMove(row, target);
   };
   const [selectedContactId, setSelectedContactId] = useState('');
@@ -1762,6 +1803,22 @@ const JobDetail = () => {
           placeholder={editField.placeholder}
         />
       )}
+
+      <SendOutNotesDialog
+        open={sendOutNotesOpen}
+        onOpenChange={(v) => {
+          if (!savingMove) {
+            setSendOutNotesOpen(v);
+            if (!v) setPendingMove(null);
+          }
+        }}
+        onConfirm={handleSendOutNotesConfirm}
+        candidateName={pendingMove?.row.candidate?.full_name ?? null}
+        jobTitle={job?.title ?? null}
+        saving={savingMove}
+        title={pendingMove?.target === 'submitted' ? 'Send to Client' : 'Move to Send Out'}
+        confirmLabel={pendingMove?.target === 'submitted' ? 'Save & Send' : 'Save & Move'}
+      />
     </MainLayout>
   );
 };
