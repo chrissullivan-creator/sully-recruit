@@ -96,14 +96,14 @@ export const sequenceEnrollmentInit = task({
     if (recipientId) {
       const { data: person } = await supabase
         .from("people")
-        .select("type, email, work_email, personal_email, phone, linkedin_url")
+        .select("type, primary_email, work_email, personal_email, phone, linkedin_url")
         .eq("id", recipientId)
         .maybeSingle();
       if (person) {
         recipientEmail =
           person.type === "candidate"
-            ? (person.personal_email || person.email)
-            : (person.work_email || person.email);
+            ? (person.personal_email || person.primary_email)
+            : (person.work_email || person.primary_email);
         recipientLinkedin = person.linkedin_url || null;
         recipientPhone = person.phone || null;
       }
@@ -275,17 +275,17 @@ export const sequenceActionExecute = task({
     //   - candidates → personal_email (their personal address; work emails
     //     leak via corporate filters and tip off the candidate's employer)
     //   - clients    → work_email (we engage with them in their pro context)
-    // The legacy `email` column is the fallback during the migration off it.
+    // The legacy `primary_email` column is the fallback during the migration.
     const { data: entityRow } = await supabase
       .from("people")
-      .select("type, email, work_email, personal_email, phone, linkedin_url, email_invalid")
+      .select("type, primary_email, work_email, personal_email, phone, linkedin_url, email_invalid")
       .eq("id", entityId)
       .maybeSingle();
 
     const resolvedEmail =
       entityRow?.type === "candidate"
-        ? (entityRow?.personal_email || entityRow?.email || "")
-        : (entityRow?.work_email || entityRow?.email || "");
+        ? (entityRow?.personal_email || entityRow?.primary_email || "")
+        : (entityRow?.work_email || entityRow?.primary_email || "");
 
     if (action.channel === "email" && !resolvedEmail) {
       await markStepSkipped(supabase, payload.stepLogId, "no_email_on_record");
