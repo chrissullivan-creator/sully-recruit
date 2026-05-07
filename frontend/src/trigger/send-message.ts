@@ -121,11 +121,19 @@ export const sendMessage = task({
         } as any)
         .eq("id", entityId);
 
-      // Chain-trigger Joe Says refresh (new outbound = update summary)
-      await generateJoeSays.trigger({
-        entityId,
-        entityType,
-      });
+      // Chain-trigger Joe Says refresh (new outbound = update summary).
+      // Best-effort — the message was already delivered above, so a Joe Says
+      // failure must not fail this run (otherwise retries would re-send).
+      try {
+        await generateJoeSays.trigger({
+          entityId,
+          entityType,
+        });
+      } catch (err: any) {
+        logger.warn("generateJoeSays.trigger failed after send-message", {
+          entityId, entityType, error: err?.message,
+        });
+      }
     }
 
     logger.info("Message sent and logged", {

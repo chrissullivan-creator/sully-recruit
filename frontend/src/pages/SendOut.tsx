@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import { useCandidate, useJobs, useContacts } from '@/hooks/useData';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
@@ -382,7 +383,7 @@ export default function SendOut() {
     try {
       const resp = await fetch(`${BACKEND_URL}/api/parse-resume-ai`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           resume_text: text,
           job_title: selectedJob?.title,
@@ -438,7 +439,7 @@ export default function SendOut() {
       const contactNames = jobContacts.map((jc: any) => jc.contact?.full_name).filter(Boolean);
       const resp = await fetch(`${BACKEND_URL}/api/generate-sendout-email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           candidate_name: c.full_name || resumeData.name,
           candidate_title: c.current_title || resumeData.experience[0]?.title,

@@ -16,6 +16,7 @@ import { TaskCard } from '@/components/tasks/TaskCard';
 import { EditMeetingDialog } from '@/components/tasks/EditMeetingDialog';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
@@ -811,7 +812,7 @@ const CandidateDetail = () => {
     try {
       const res = await fetch('/api/trigger-generate-joe-says', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ entityId: id, entityType: 'candidate' }),
       });
       const data = await res.json();

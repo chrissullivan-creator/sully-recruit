@@ -154,7 +154,7 @@ export default function DuplicatesReview() {
   const handleScan = async () => {
     setScanning(true);
     try {
-      const resp = await fetch("/api/dedup/trigger-scan", {
+      const resp = await fetch("/api/dedup/scan", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

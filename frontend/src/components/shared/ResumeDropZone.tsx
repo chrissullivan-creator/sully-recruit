@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { cn } from '@/lib/utils';
 import { invalidatePersonScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 
 interface Props {
   entityType: 'candidate';
@@ -197,6 +198,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
       if (!linkedinAcct?.unipile_account_id) return;
 
+      const { data: { session } } = await supabase.auth.getSession();
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-unipile-id`,
         {
@@ -204,6 +206,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           headers: {
             'Content-Type': 'application/json',
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
           },
           body: JSON.stringify({ linkedin_slug: slug, account_id: linkedinAcct.unipile_account_id }),
         }
@@ -267,7 +270,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
 
       await fetch('/api/trigger-resume-ingestion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ resumeId, candidateId, filePath, fileName }),
       });
     } catch (err) {

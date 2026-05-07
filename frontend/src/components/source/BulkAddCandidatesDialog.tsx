@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
+import { authHeaders } from '@/lib/api-auth';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, Briefcase, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -105,7 +106,7 @@ async function triggerResumeIngestion(candidateId: string, filePath: string, fil
 
     await fetch('/api/trigger-resume-ingestion', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ resumeId: resume.id, candidateId, filePath, fileName }),
     });
   } catch (err) {

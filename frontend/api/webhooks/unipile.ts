@@ -44,22 +44,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  if (expectedSecret) {
-    if (!verifyUnipileSecret(req, expectedSecret)) {
-      // Log header names + an 8-char prefix of every value so we can
-      // see WHICH header is carrying Unipile's secret signature on a
-      // fresh install. Truncated to keep the secret out of logs.
-      const headerSnapshot: Record<string, string> = {};
-      for (const [k, v] of Object.entries(req.headers)) {
-        const s = Array.isArray(v) ? v.join(",") : String(v ?? "");
-        headerSnapshot[k] = s.length > 0 ? s.slice(0, 8) + "…" : "";
-      }
-      console.warn("Unipile webhook: secret mismatch", {
-        expectedPrefix: expectedSecret.slice(0, 8),
-        headers: headerSnapshot,
-      });
-      return res.status(401).json({ error: "Invalid webhook secret" });
+  // Previously we accepted unsigned payloads when the secret was not
+  // configured ("dev convenience"). That meant any caller who guessed the
+  // URL could enqueue process-unipile-event runs. Refuse if unset.
+  if (!expectedSecret) {
+    console.error("Unipile webhook: UNIPILE_WEBHOOK_SECRET not configured");
+    return res.status(500).json({ error: "Webhook secret not configured" });
+  }
+  if (!verifyUnipileSecret(req, expectedSecret)) {
+    // Log header names + an 8-char prefix of every value so we can
+    // see WHICH header is carrying Unipile's secret signature on a
+    // fresh install. Truncated to keep the secret out of logs.
+    const headerSnapshot: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      const s = Array.isArray(v) ? v.join(",") : String(v ?? "");
+      headerSnapshot[k] = s.length > 0 ? s.slice(0, 8) + "…" : "";
     }
+    console.warn("Unipile webhook: secret mismatch", {
+      expectedPrefix: expectedSecret.slice(0, 8),
+      headers: headerSnapshot,
+    });
+    return res.status(401).json({ error: "Invalid webhook secret" });
   }
 
   try {

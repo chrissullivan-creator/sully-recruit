@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../../lib/auth";
 
 /**
  * GET /api/jobs/[id]/match-run-status?runId=xxx
@@ -9,6 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   const runId = req.query.runId as string;
   if (!runId) {

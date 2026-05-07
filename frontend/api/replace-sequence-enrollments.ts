@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "./lib/auth";
 
 /**
  * Re-pace every active enrollment of a sequence so step reorders, delay
@@ -15,6 +16,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   const { sequence_id, enrolled_by, force_imminent } = req.body ?? {};
   if (!sequence_id || !enrolled_by) {
@@ -99,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       task_run_ids: handles,
     });
   } catch (err: any) {
-    console.error("repace-sequence-enrollments error:", err.message);
+    console.error("replace-sequence-enrollments error:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }

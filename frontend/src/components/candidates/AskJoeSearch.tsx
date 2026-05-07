@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Send, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { authHeaders } from '@/lib/api-auth';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -60,7 +61,7 @@ export function AskJoeSearch({ open, onOpenChange }: Props) {
         // Use our backend with Claude
         resp = await fetch(`${BACKEND_URL}/api/resume-search-ai`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify({
             query: query,
             messages: allMessages.map((m) => ({ role: m.role, content: m.content })),

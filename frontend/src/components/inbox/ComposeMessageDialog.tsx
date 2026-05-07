@@ -220,7 +220,7 @@ export function ComposeMessageDialog({
       if (channel === 'linkedin') {
         const channelTable = selectedRecipient.entity_type === 'candidate' ? 'candidate_channels' : 'contact_channels';
         const idCol = selectedRecipient.entity_type === 'candidate' ? 'candidate_id' : 'contact_id';
-        const { data: channelData } = await supabase
+        const { data: channelData } = await (supabase as any)
           .from(channelTable)
           .select('provider_id, unipile_id')
           .eq(idCol, selectedRecipient.id)

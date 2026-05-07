@@ -5,18 +5,20 @@ import { useTasks, useBulkUpdateTasks, useBulkDeleteTasks } from '@/hooks/useTas
 import { useQueryClient } from '@tanstack/react-query';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
+import { PipelineTodoList } from '@/components/tasks/PipelineTodoList';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Bell, Video } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { invalidateTaskScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 
 const ADMIN_EMAILS = [
   'chris.sullivan@emeraldrecruit.com',
@@ -167,6 +169,7 @@ export default function Tasks() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'meeting'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [viewTab, setViewTab] = useState<'list' | 'calendar'>('list');
+  const [outlookSyncing, setOutlookSyncing] = useState(false);
 
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
 
@@ -239,32 +242,26 @@ export default function Tasks() {
               <Calendar className="h-4 w-4" />
             </button>
           </div>
-          <Button variant="ghost" size="sm" onClick={async () => {
-            toast.info('Syncing Outlook events...');
+          <Button variant="ghost" size="sm" disabled={outlookSyncing} onClick={async () => {
+            if (outlookSyncing) return;
+            setOutlookSyncing(true);
             try {
-              const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+              const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: await authHeaders() });
               const data = await resp.json();
               if (data.error) { toast.error(data.error); return; }
               toast.success('Outlook sync triggered — events will appear shortly');
               setTimeout(() => invalidateTaskScope(queryClient), 8000);
-            } catch (err: any) { toast.error(err.message || 'Sync failed'); }
+            } catch (err: any) {
+              toast.error(err.message || 'Sync failed');
+            } finally {
+              setOutlookSyncing(false);
+            }
           }}>
-            <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
+            {outlookSyncing
+              ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              : <RefreshCw className="h-4 w-4 mr-1" />}
+            Outlook Sync
           </Button>
-          {isAdmin && (
-            <Button variant="ghost" size="sm" onClick={async () => {
-              toast.info('Running nudge check...');
-              try {
-                const resp = await fetch('/api/trigger-nudge-check', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-                const data = await resp.json();
-                if (data.error) { toast.error(data.error); return; }
-                toast.success('Nudge check triggered — tasks will be created shortly');
-                setTimeout(() => invalidateTaskScope(queryClient), 8000);
-              } catch (err: any) { toast.error(err.message || 'Nudge check failed'); }
-            }}>
-              <Bell className="h-4 w-4 mr-1" /> Run Nudge
-            </Button>
-          )}
           <Button variant="outline" onClick={() => { setCreateMode('meeting'); setCreateOpen(true); }}>
             <Video className="h-4 w-4 mr-1" /> New Meeting
           </Button>
@@ -325,32 +322,40 @@ export default function Tasks() {
           <p className="text-sm text-muted-foreground py-8 text-center">Loading tasks…</p>
         ) : viewTab === 'calendar' ? (
           <CalendarView tasks={filtered} isAdmin={isAdmin} />
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12 space-y-2">
-            <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No tasks match your filters</p>
-          </div>
         ) : (
-          <div className="space-y-2 max-w-3xl">
-            <div className="flex items-center gap-2 px-3 py-1">
-              <Checkbox
-                checked={selectedIds.length === filtered.length && filtered.length > 0}
-                onCheckedChange={toggleAll}
-              />
-              <span className="text-xs text-muted-foreground">Select all</span>
-            </div>
-            {filtered.map((task) => (
-              <div key={task.id} className="flex items-start gap-2">
-                <Checkbox
-                  checked={selectedIds.includes(task.id)}
-                  onCheckedChange={() => toggleSelect(task.id)}
-                  className="mt-3.5"
-                />
-                <div className="flex-1">
-                  <TaskCard task={task} />
-                </div>
+          <div className="space-y-6">
+            {/* Pipeline to-dos: open pitches / send-outs / submissions that need
+                recruiter action. Self-hides when there are no open rows. */}
+            <PipelineTodoList userId={user?.id} isAdmin={isAdmin} />
+
+            {filtered.length === 0 ? (
+              <div className="text-center py-12 space-y-2">
+                <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No tasks match your filters</p>
               </div>
-            ))}
+            ) : (
+              <div className="space-y-2 max-w-3xl">
+                <div className="flex items-center gap-2 px-3 py-1">
+                  <Checkbox
+                    checked={selectedIds.length === filtered.length && filtered.length > 0}
+                    onCheckedChange={toggleAll}
+                  />
+                  <span className="text-xs text-muted-foreground">Select all</span>
+                </div>
+                {filtered.map((task) => (
+                  <div key={task.id} className="flex items-start gap-2">
+                    <Checkbox
+                      checked={selectedIds.includes(task.id)}
+                      onCheckedChange={() => toggleSelect(task.id)}
+                      className="mt-3.5"
+                    />
+                    <div className="flex-1">
+                      <TaskCard task={task} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

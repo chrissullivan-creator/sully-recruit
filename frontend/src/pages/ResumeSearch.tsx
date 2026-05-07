@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { authHeaders } from '@/lib/api-auth';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Search, MapPin, Briefcase, Award, Building, ArrowRight, Sparkles, Send, FileText, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -67,7 +68,7 @@ function AskJoeResumeChat() {
     try {
       const resp = await fetch(`${BACKEND_URL}/api/resume-search-ai`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           query: userMsg.content,
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
