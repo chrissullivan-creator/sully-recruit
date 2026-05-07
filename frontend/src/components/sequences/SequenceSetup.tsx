@@ -26,6 +26,9 @@ export interface SequenceSetupData {
   sendWindowEnd: string;
   timezone: string;
   senderUserId: string | null;
+  /** When true, sends only fire Mon-Fri. Saturday/Sunday slots roll
+   *  forward to the next Monday morning at window open. */
+  weekdaysOnly: boolean;
 }
 
 interface Props {
@@ -218,6 +221,25 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
               onChange={(e) => update("sendWindowEnd", e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Send Days</Label>
+          <div className="flex items-center gap-3">
+            <span className={!data.weekdaysOnly ? "font-medium" : "text-muted-foreground"}>
+              7 days/week
+            </span>
+            <Switch
+              checked={data.weekdaysOnly}
+              onCheckedChange={(checked) => update("weekdaysOnly", checked)}
+            />
+            <span className={data.weekdaysOnly ? "font-medium" : "text-muted-foreground"}>
+              Weekdays only (Mon-Fri)
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            When weekdays-only is on, sends scheduled for Sat/Sun roll forward to Monday at window open.
+          </p>
         </div>
 
         <p className="text-[11px] text-muted-foreground">

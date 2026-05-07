@@ -37,6 +37,7 @@ export default function SequenceBuilder() {
     sendWindowEnd: "18:00",
     timezone: "America/New_York",
     senderUserId: null,
+    weekdaysOnly: false,
   });
 
   const [branches, setBranches] = useState<SequenceBranch[]>(createEmptyBranches());
@@ -86,6 +87,7 @@ export default function SequenceBuilder() {
         sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
         timezone: seq.timezone || "America/New_York",
         senderUserId: seq.sender_user_id || seq.created_by,
+        weekdaysOnly: seq.weekdays_only === true,
       });
 
       const [{ data: nodes }, { data: stepsLegacy }] = await Promise.all([
@@ -222,6 +224,7 @@ export default function SequenceBuilder() {
             send_window_start: setup.sendWindowStart,
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
+            weekdays_only: setup.weekdaysOnly,
             created_by: user.id,
             sender_user_id: setup.senderUserId || user.id,
             status,
@@ -243,6 +246,7 @@ export default function SequenceBuilder() {
             send_window_start: setup.sendWindowStart,
             send_window_end: setup.sendWindowEnd,
             timezone: setup.timezone,
+            weekdays_only: setup.weekdaysOnly,
             sender_user_id: setup.senderUserId || user.id,
             status,
           } as any)
