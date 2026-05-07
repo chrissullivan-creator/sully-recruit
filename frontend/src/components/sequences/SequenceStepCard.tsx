@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X } from "lucide-react";
 import type { ActionData } from "./ActionNode";
 import { supabase } from "@/integrations/supabase/client";
+import { applyMergeTags } from "@/lib/merge-tags";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -36,6 +37,10 @@ interface SequenceStepCardProps {
   title?: string;
   onUpdate: (actions: ActionData[]) => void;
   onAskJoe?: (actionIndex: number, action: ActionData, stepNumber: number, stepLabel: string) => Promise<string>;
+  /** Optional merge-vars dictionary. When set, the body preview in
+   *  each action card renders with merge tags substituted (so the
+   *  builder shows what the recipient will actually see). */
+  previewMergeVars?: Record<string, string>;
 }
 
 export function SequenceStepCard({
@@ -44,7 +49,8 @@ export function SequenceStepCard({
   onAskJoe,
   label,
   stepNumber,
-  title,
+  title: _title,
+  previewMergeVars,
 }: SequenceStepCardProps) {
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -229,7 +235,13 @@ export function SequenceStepCard({
                     </div>
                     <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
                       {action.messageBody
-                        ? action.messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+                        ? (() => {
+                            const stripped = action.messageBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                            // Render with merge tags substituted when a
+                            // preview recipient is selected on the parent;
+                            // otherwise show the raw template.
+                            return previewMergeVars ? applyMergeTags(stripped, previewMergeVars) : stripped;
+                          })()
                         : "No message drafted yet."}
                     </p>
                   </button>
