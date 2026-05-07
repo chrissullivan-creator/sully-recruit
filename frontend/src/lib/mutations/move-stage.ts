@@ -17,6 +17,11 @@ export interface MoveStageInput {
   withdrawnReason?: string | null;
   /** Round number — stamped on send_outs.interview_round when toStage='interview'. */
   interviewRound?: number | null;
+  /** Optional note captured at the move. Persisted as a polymorphic
+   *  notes row (entity_type='send_out', entity_id=sendOutId) so it
+   *  shows up in the candidate / send-out activity feed and survives
+   *  later stage moves. */
+  note?: string | null;
 }
 
 /**
@@ -31,7 +36,7 @@ export interface MoveStageInput {
  * best-effort tail call — failing to log shouldn't break the move.
  */
 export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; error?: string }> {
-  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, interviewRound } = input;
+  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, interviewRound, note } = input;
 
   const stageSpecificPatch: Record<string, any> = {};
   if (toStage === 'submitted')          stageSpecificPatch.sent_to_client_at = new Date().toISOString();
@@ -71,19 +76,39 @@ export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; e
 
   // Best-effort log — never blocks the move. Picks up the current user as actor
   // when the session has one.
+  let actorUserId: string | null = null;
   try {
     const { data: { user } } = await supabase.auth.getUser();
+    actorUserId = user?.id ?? null;
     await supabase.from('stage_transitions').insert({
       entity_type: entityType,
       entity_id: entityId ?? sendOutId,
       from_stage: fromStage,
       to_stage: toStage,
-      moved_by: user?.id ?? null,
+      moved_by: actorUserId,
       trigger_source: triggerSource,
-      triggered_by_user_id: user?.id ?? null,
+      triggered_by_user_id: actorUserId,
     });
   } catch {
     // Ignore — logging is non-critical.
+  }
+
+  // Optional stage-move note — entered in the dialog that pops on
+  // moves into Send Out / Submitted etc. Polymorphic notes table is
+  // the canonical place; the activity feed picks it up automatically.
+  const trimmedNote = (note ?? '').trim();
+  if (trimmedNote) {
+    try {
+      await supabase.from('notes').insert({
+        entity_type: 'send_out',
+        entity_id: sendOutId,
+        note: trimmedNote,
+        created_by: actorUserId,
+        note_source: 'stage_move',
+      });
+    } catch {
+      // Non-critical — the move itself already succeeded.
+    }
   }
 
   return { ok: true };
