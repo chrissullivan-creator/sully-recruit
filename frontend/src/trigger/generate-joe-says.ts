@@ -40,6 +40,21 @@ Summary of outreach and responses. Sentiment. Last contact. What channels have b
 ## Interview Readiness & Red Flags
 Anything a recruiter should know before pitching — gaps, concerns, deal-breakers, or things that make them a slam dunk.
 
+## Call Insights
+This is the highlight reel from recent calls — the recruiter wants this section to be specific, not generic. Use the data and call transcripts to fill in:
+- **Reason looking for a new role:** Why are they exploring? Push or pull?
+- **Where else interviewed / submitted:** Firms they're already in process with or other recruiters have submitted them to. Helps avoid double-submits.
+- **What they want to do next:** Concrete direction — function, firm-type, products, level. Not a wishlist.
+- **Dislikes about current role:** Specific complaints (manager, comp, scope, hours, growth). Verbatim where useful.
+- **Current compensation:** Base / bonus / total — best numbers we have.
+- **Expected compensation:** What they need / want / would jump for.
+- **Relocation:** Target locations, willingness, family situation, blocked cities.
+- **Visa / right to work:** Status (Citizen / GC / H-1B / OPT / etc.) and any sponsorship needs.
+- **Job-move explanations:** Story for short stints, gaps, or lateral moves — pre-empt client objections.
+- **Interesting facts:** Hobbies, family, connection points — anything to build rapport later.
+
+If a bullet has no data, write "No data available" for that bullet — do not invent or imply.
+
 ## Recruiter Talking Points
 3-5 bullet points for pitching this candidate to a client.
 
@@ -163,28 +178,37 @@ async function gatherCandidateContext(supabase: any, candidateId: string): Promi
     .single();
 
   if (candidate) {
+    const structured = (candidate.call_structured_notes ?? {}) as Record<string, any>;
     parts.push(`CANDIDATE PROFILE:
 Name: ${candidate.first_name ?? ""} ${candidate.last_name ?? ""}
-Email: ${candidate.email ?? "—"}
-Phone: ${candidate.phone ?? "—"}
+Email: ${candidate.primary_email ?? candidate.personal_email ?? candidate.work_email ?? "—"}
+Phone: ${candidate.phone ?? candidate.mobile_phone ?? "—"}
 Title: ${candidate.current_title ?? "—"}
 Company: ${candidate.current_company ?? "—"}
 Location: ${candidate.location_text ?? "—"}
 LinkedIn: ${candidate.linkedin_url ?? "—"}
 Status: ${candidate.status ?? "—"}
-Stage: ${candidate.stage ?? "—"}
-Skills: ${candidate.skills?.join(", ") ?? "—"}
+Skills: ${Array.isArray(candidate.skills) ? candidate.skills.join(", ") : candidate.skills ?? "—"}
 Work Authorization: ${candidate.work_authorization ?? "—"}
+Visa Status: ${candidate.visa_status ?? "—"}
 Relocation: ${candidate.relocation_preference ?? "—"}
+Relocation Details: ${structured.relo_details ?? "—"}
 Target Locations: ${candidate.target_locations ?? "—"}
 Target Roles: ${candidate.target_roles ?? "—"}
+Looking To Do Next: ${structured.looking_to_do_next ?? "—"}
+Dislikes Current Role: ${structured.dislikes_current_role ?? "—"}
+Job Move Explanations: ${structured.job_move_explanations ?? "—"}
 Reason for Leaving: ${candidate.reason_for_leaving ?? "—"}
+Where Interviewed: ${candidate.where_interviewed ?? "—"}
+Where Submitted (other recruiters): ${candidate.where_submitted ?? "—"}
+Notice Period: ${candidate.notice_period ?? "—"}
 Current Base Comp: ${candidate.current_base_comp ?? "—"}
 Current Bonus: ${candidate.current_bonus_comp ?? "—"}
 Current Total Comp: ${candidate.current_total_comp ?? "—"}
 Target Base: ${candidate.target_base_comp ?? "—"}
 Target Total: ${candidate.target_total_comp ?? "—"}
 Comp Notes: ${candidate.comp_notes ?? "—"}
+Fun Facts: ${candidate.fun_facts ?? "—"}
 Candidate Summary: ${candidate.candidate_summary ?? "—"}
 Back of Resume Notes: ${candidate.back_of_resume_notes ?? "—"}
 Last Contacted: ${candidate.last_contacted_at ?? "—"}
@@ -239,11 +263,13 @@ Sentiment: ${candidate.last_sequence_sentiment ?? "—"}`);
     parts.push(`RECRUITER NOTES:\n${noteLines.join("\n\n")}`);
   }
 
-  // 5. Call logs with summaries
+  // 5. Call logs with summaries.
+  // Match on either candidate_id (the typed FK) OR the legacy
+  // linked_entity_id — older rows tagged via the UI only set the latter.
   const { data: callLogs } = await supabase
     .from("call_logs")
     .select("direction, started_at, duration_seconds, summary, notes")
-    .eq("candidate_id", candidateId)
+    .or(`candidate_id.eq.${candidateId},and(linked_entity_id.eq.${candidateId},linked_entity_type.eq.candidate)`)
     .order("started_at", { ascending: false })
     .limit(15);
 
@@ -372,11 +398,11 @@ Sentiment: ${contact.last_sequence_sentiment ?? "—"}`);
     parts.push(`RECRUITER NOTES:\n${noteLines.join("\n\n")}`);
   }
 
-  // 3. Call logs
+  // 3. Call logs (match contact_id OR legacy linked_entity_id)
   const { data: callLogs } = await supabase
     .from("call_logs")
     .select("direction, started_at, duration_seconds, summary, notes")
-    .eq("contact_id", contactId)
+    .or(`contact_id.eq.${contactId},and(linked_entity_id.eq.${contactId},linked_entity_type.eq.contact)`)
     .order("started_at", { ascending: false })
     .limit(15);
 

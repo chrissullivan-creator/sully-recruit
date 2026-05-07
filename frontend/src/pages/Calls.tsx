@@ -113,7 +113,11 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     if (!phone.trim() || !notes.trim()) { toast.error('Phone number and notes are required'); return; }
     setSaving(true);
     try {
-      // Insert call log
+      // Insert call log. Also populate candidate_id / contact_id (the typed
+      // FK columns) so downstream code (Joe Says, dashboards) that filters
+      // on those instead of linked_entity_* picks the call up.
+      const isCandidate = matchResult?.entity_type === 'candidate';
+      const isContact = matchResult?.entity_type === 'contact';
       const { data: callData, error: callError } = await supabase.from('call_logs' as any).insert({
         phone_number: phone.trim(),
         direction,
@@ -124,6 +128,8 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
         linked_entity_type: matchResult?.entity_type ?? null,
         linked_entity_id: matchResult?.entity_id ?? null,
         linked_entity_name: matchResult?.entity_name ?? null,
+        candidate_id: isCandidate ? matchResult?.entity_id : null,
+        contact_id: isContact ? matchResult?.entity_id : null,
         ended_at: new Date().toISOString(),
       }).select('id').single();
 
@@ -141,6 +147,18 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
         if (noteError) {
           console.error('Note error:', noteError);
           noteWarning = true;
+        }
+
+        // Promote the recruiter on the call to candidate owner. Per product
+        // direction: whoever logs the call becomes the candidate's owner —
+        // this is how ownership gets stamped during cold-call workflows.
+        // Skipped for clients (contacts) since they're not "owned" the same way.
+        if (isCandidate && user?.id) {
+          const { error: ownerErr } = await supabase
+            .from('candidates')
+            .update({ owner_user_id: user.id } as any)
+            .eq('id', matchResult.entity_id);
+          if (ownerErr) console.warn('Owner assign failed:', ownerErr.message);
         }
       }
 
@@ -323,10 +341,14 @@ function LinkCallDialog({
     if (!call) return;
     setLinking(true);
     try {
+      const isCandidate = entityType === 'candidate';
+      const isContact = entityType === 'contact';
       await supabase.from('call_logs' as any).update({
         linked_entity_type: entityType,
         linked_entity_id: entityId,
         linked_entity_name: entityName,
+        candidate_id: isCandidate ? entityId : null,
+        contact_id: isContact ? entityId : null,
       }).eq('id', call.id);
       if (call.notes) {
         const userId = (await supabase.auth.getUser()).data.user?.id;
@@ -336,6 +358,15 @@ function LinkCallDialog({
           note: `📞 Call Notes (${format(new Date(call.started_at), 'MMM d')}): ${call.notes}`,
           created_by: userId,
         });
+      }
+      // Promote the recruiter on the call to candidate owner — see same
+      // treatment in handleSave above for rationale.
+      if (isCandidate && (call as any).owner_id) {
+        const { error: ownerErr } = await supabase
+          .from('candidates')
+          .update({ owner_user_id: (call as any).owner_id } as any)
+          .eq('id', entityId);
+        if (ownerErr) console.warn('Owner assign failed:', ownerErr.message);
       }
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
       invalidateNoteScope(queryClient);

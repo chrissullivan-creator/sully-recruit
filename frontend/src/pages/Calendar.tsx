@@ -13,7 +13,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, RefreshCw,
-  MapPin, Video, Users as UsersIcon, ExternalLink, Clock, CalendarPlus,
+  MapPin, Video, Users as UsersIcon, ExternalLink, Clock, CalendarPlus, Loader2,
 } from 'lucide-react';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { MeetingDetailDialog, type MeetingTask } from '@/components/calendar/MeetingDetailDialog';
@@ -110,8 +110,10 @@ export default function CalendarPage() {
 
   const tasksByDay = useMemo(() => groupByDay(tasks, days), [tasks, days]);
 
+  const [syncing, setSyncing] = useState(false);
   const handleSync = async () => {
-    toast.info('Syncing Outlook events…');
+    if (syncing) return;
+    setSyncing(true);
     try {
       const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: await authHeaders() });
       const data = await resp.json();
@@ -123,6 +125,8 @@ export default function CalendarPage() {
       }, 8000);
     } catch (err: any) {
       toast.error(err.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -153,8 +157,9 @@ export default function CalendarPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={handleSync} className="gap-1">
-              <RefreshCw className="h-3.5 w-3.5" /> Sync Outlook
+            <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} className="gap-1">
+              {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {syncing ? 'Syncing…' : 'Sync Outlook'}
             </Button>
             <Button variant="gold" size="sm" onClick={() => setScheduleOpen(true)} className="gap-1">
               <CalendarPlus className="h-3.5 w-3.5" /> New meeting

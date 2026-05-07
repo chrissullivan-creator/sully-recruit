@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
@@ -168,6 +168,7 @@ export default function Tasks() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'meeting'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [viewTab, setViewTab] = useState<'list' | 'calendar'>('list');
+  const [outlookSyncing, setOutlookSyncing] = useState(false);
 
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
 
@@ -240,17 +241,25 @@ export default function Tasks() {
               <Calendar className="h-4 w-4" />
             </button>
           </div>
-          <Button variant="ghost" size="sm" onClick={async () => {
-            toast.info('Syncing Outlook events...');
+          <Button variant="ghost" size="sm" disabled={outlookSyncing} onClick={async () => {
+            if (outlookSyncing) return;
+            setOutlookSyncing(true);
             try {
               const resp = await fetch('/api/trigger-sync-outlook', { method: 'POST', headers: await authHeaders() });
               const data = await resp.json();
               if (data.error) { toast.error(data.error); return; }
               toast.success('Outlook sync triggered — events will appear shortly');
               setTimeout(() => invalidateTaskScope(queryClient), 8000);
-            } catch (err: any) { toast.error(err.message || 'Sync failed'); }
+            } catch (err: any) {
+              toast.error(err.message || 'Sync failed');
+            } finally {
+              setOutlookSyncing(false);
+            }
           }}>
-            <RefreshCw className="h-4 w-4 mr-1" /> Outlook Sync
+            {outlookSyncing
+              ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              : <RefreshCw className="h-4 w-4 mr-1" />}
+            Outlook Sync
           </Button>
           <Button variant="outline" onClick={() => { setCreateMode('meeting'); setCreateOpen(true); }}>
             <Video className="h-4 w-4 mr-1" /> New Meeting

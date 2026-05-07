@@ -220,7 +220,7 @@ export const processCallDeepgram = task({
           systemPrompt: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
 
 Return ONLY valid JSON in this exact shape:
-{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null}
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
 
 Field rules:
 - summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a transcript dump.
@@ -233,7 +233,11 @@ Field rules:
 - visa_status: e.g. "US Citizen", "H-1B", "Green Card", "F-1/OPT". Null if not discussed.
 - where_interviewed: firms/companies they mentioned currently interviewing at (comma-separated or short prose). Null if not discussed.
 - where_submitted: firms/companies they mentioned being submitted to by other recruiters. Null if not discussed.
-- notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.`,
+- notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.
+- looking_to_do_next: what kind of role / function / firm-type they actually want next — concrete signal of direction, not a wishlist. 1–2 sentences. Null if not discussed.
+- dislikes_current_role: specific complaints about the current seat (manager, comp, scope, hours, products, culture, growth path). Verbatim or close to it where useful. Null if not discussed.
+- relo_details: more than just yes/no — willingness, family situation, blocked cities, preferred geos, timing. Null if not discussed.
+- job_move_explanations: short prose explaining why they made each prior job change (especially short stints / gaps / lateral moves). Helps clients pre-empt questions. Null if not discussed.`,
           userContent: `Transcript:\n${transcript.slice(0, 30000)}`,
           model: "claude-sonnet-4-20250514",
           maxTokens: 2000,
@@ -329,6 +333,28 @@ Field rules:
         if (intel.where_interviewed) updates.where_interviewed = intel.where_interviewed;
         if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
         if (intel.notice_period) updates.notice_period = intel.notice_period;
+
+        // Park the qualitative call-derived signals in call_structured_notes
+        // (jsonb). They don't have first-class columns and live well as a
+        // structured blob that Joe Says reads back in its prompt.
+        const structuredKeys = ["looking_to_do_next", "dislikes_current_role", "relo_details", "job_move_explanations"] as const;
+        const structuredAdds: Record<string, string> = {};
+        for (const k of structuredKeys) {
+          const v = (intel as any)[k];
+          if (v && typeof v === "string" && v.trim()) structuredAdds[k] = v.trim();
+        }
+        if (Object.keys(structuredAdds).length) {
+          // Merge with whatever is already there so successive calls layer
+          // signal — last call wins on conflicting keys, which is what we want.
+          const { data: existing } = await supabase
+            .from("people")
+            .select("call_structured_notes")
+            .eq("id", entityId)
+            .maybeSingle();
+          const prior = (existing?.call_structured_notes as Record<string, any> | null) ?? {};
+          updates.call_structured_notes = { ...prior, ...structuredAdds, last_call_at: now };
+        }
+
         await supabase.from("people").update(updates).eq("id", entityId);
         logger.info("Updated candidate", { name: entityName, duration: cl.duration_seconds, statusFlip: (cl.duration_seconds ?? 0) >= 60 });
       }
