@@ -7,6 +7,7 @@ import {
   delay,
 } from "./lib/resume-parsing";
 import { parseResume } from "../lib/resume-parser";
+import { callAIWithFallback } from "../lib/ai-fallback";
 
 /**
  * Re-parse resumes that have a candidate_id but no raw_text.
@@ -87,8 +88,12 @@ export const reparseResumes = schedules.task({
 
         const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
         const { parsed, rawText } = await parseResume(buf, resume.fileName, {
-          geminiKey: geminiKey || undefined,
-          openaiKey: openaiKey || undefined,
+          callAI: (req) =>
+            callAIWithFallback({
+              ...req,
+              geminiKey: geminiKey || undefined,
+              openaiKey: openaiKey || undefined,
+            }),
           log: logger,
         });
         const normalizedRawText = (rawText ?? JSON.stringify(parsed)).slice(0, 50000);
