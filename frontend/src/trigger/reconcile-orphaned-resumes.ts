@@ -2,6 +2,7 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting, getEdenAIKey } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
+import { matchPersonByEmail } from "./lib/match-person-by-email";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -125,8 +126,10 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   const li = normalizeLinkedIn(parsed.linkedin_url);
 
   if (email) {
-    const { data } = await supabase.from("people").select("id").ilike("email", email).maybeSingle();
-    if (data) return data.id;
+    // Match across all three address columns so a re-uploaded résumé
+    // dedups even when the candidate uses a different mailbox now.
+    const m = await matchPersonByEmail(supabase, email);
+    if (m && m.entityType !== "contact") return m.entityId;
   }
   if (li) {
     const { data } = await supabase.from("people").select("id").ilike("linkedin_url", `%${li}%`).maybeSingle();

@@ -4,6 +4,7 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { resumeIngestion } from "./resume-ingestion";
+import { matchPersonByEmail } from "./lib/match-person-by-email";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -235,13 +236,12 @@ async function processResumesInboxEmail(
   const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
 
   let candidateId: string;
-  const { data: existing } = await supabase
-    .from("people")
-    .select("id")
-    .eq("email", senderEmail)
-    .maybeSingle();
-  if (existing?.id) {
-    candidateId = existing.id;
+  // Match across all three email columns so a candidate stored under
+  // their work address still gets recognised when they reply from
+  // gmail (and vice versa).
+  const existingMatch = await matchPersonByEmail(supabase, senderEmail);
+  if (existingMatch?.entityId) {
+    candidateId = existingMatch.entityId;
   } else {
     const { data: created, error: createErr } = await supabase
       .from("people")
@@ -782,25 +782,16 @@ async function getMicrosoftAccessToken(): Promise<string | null> {
   }
 }
 
+// Routes inbound senders + meeting attendees to a person via the
+// shared matcher (email / personal_email / work_email).
 async function matchByEmail(
   supabase: any,
   email: string,
 ): Promise<{ entityId: string; entityType: string; entityColumn: string } | null> {
-  const normalizedEmail = email.toLowerCase().trim();
-
-  const [candidateRes, contactRes] = await Promise.all([
-    supabase.from("people").select("id").ilike("email", normalizedEmail).limit(1),
-    supabase.from("contacts").select("id").ilike("email", normalizedEmail).limit(1),
-  ]);
-
-  if (candidateRes.data?.[0]) {
-    return { entityId: candidateRes.data[0].id, entityType: "candidate", entityColumn: "candidate_id" };
-  }
-  if (contactRes.data?.[0]) {
-    return { entityId: contactRes.data[0].id, entityType: "contact", entityColumn: "contact_id" };
-  }
-
-  return null;
+  const m = await matchPersonByEmail(supabase, email);
+  return m
+    ? { entityId: m.entityId, entityType: m.entityType, entityColumn: m.entityColumn }
+    : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -859,11 +850,15 @@ async function maybeHandleBounce(
     return null;
   }
 
-  // Find the candidate / contact by email.
-  const [{ data: cand }, { data: cont }] = await Promise.all([
-    supabase.from("people").select("id").eq("email", failedRecipient).maybeSingle(),
-    supabase.from("contacts").select("id").eq("email", failedRecipient).maybeSingle(),
-  ]);
+  // Find the candidate / contact by ANY of their stored emails so a
+  // bounce on someone's work address still flags their record.
+  const bouncedMatch = await matchPersonByEmail(supabase, failedRecipient);
+  const cand = bouncedMatch?.entityType !== "contact"
+    ? (bouncedMatch ? { id: bouncedMatch.entityId } : null)
+    : null;
+  const cont = bouncedMatch?.entityType === "contact"
+    ? { id: bouncedMatch.entityId }
+    : null;
 
   const reason = subject.slice(0, 200) || "ndr";
   const now = new Date().toISOString();
