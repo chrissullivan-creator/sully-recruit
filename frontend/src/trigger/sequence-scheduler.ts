@@ -200,10 +200,14 @@ export const sequenceActionExecute = task({
       return { action: "manual_call_logged" };
     }
 
-    // Pre-flight: check recipient has required contact info
-    const entityTable = entityType === "candidate" ? "candidates" : "contacts";
+    // Pre-flight: check recipient has required contact info.
+    // Both candidate_id and contact_id reference the unified `people` table
+    // (`candidates` / `contacts` are now views over it). Querying people
+    // directly avoids the email_invalid column not being exposed on the
+    // contacts view, which previously errored out and silently skipped
+    // every send as "no_email_on_record".
     const { data: entityRow } = await supabase
-      .from(entityTable)
+      .from("people")
       .select("email, phone, linkedin_url, email_invalid")
       .eq("id", entityId)
       .maybeSingle();
