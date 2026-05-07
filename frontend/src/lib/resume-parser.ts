@@ -16,7 +16,12 @@
  * Both Vercel and Trigger.dev run Node 20+ with global fetch / Buffer.
  */
 
-import { callAIWithFallback } from "./ai-fallback";
+// frontend/package.json declares `"type": "module"`, so when Vercel
+// bundles serverless functions the resolver runs in Node ESM mode —
+// which requires the explicit `.js` extension on relative imports.
+// Without it the function fails to load with ERR_MODULE_NOT_FOUND
+// (surfacing as Vercel's "A server error has occurred" page).
+import { callAIWithFallback } from "./ai-fallback.js";
 
 export interface ParsedResume {
   first_name?: string;
