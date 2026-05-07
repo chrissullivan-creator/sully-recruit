@@ -32,6 +32,19 @@ export const processUnipileEvent = task({
 
     logger.info("Processing Unipile event", { eventType });
 
+    // Phase 3: email events (Unipile Outlook). Runs in PARALLEL with the
+    // Graph webhook for the same mailbox until we're confident — dedup
+    // happens on insert via the messages.external_message_id unique
+    // constraint, so the second arrival is a no-op.
+    const isEmailEvent =
+      /^mail\.|^email\.|^message\.received|outlook|gmail/i.test(eventType)
+      || event.data?.account_type === "OUTLOOK"
+      || event.data?.account_type === "GMAIL"
+      || event.data?.attachments !== undefined && event.data?.subject !== undefined;
+    if (isEmailEvent) {
+      return await processUnipileEmailEvent(supabase, event, payload.receivedAt);
+    }
+
     if (eventType.includes("message") || event.message) {
       return await processLinkedInMessage(supabase, event, payload.receivedAt);
     }
@@ -44,6 +57,180 @@ export const processUnipileEvent = task({
     return { action: "skipped", reason: "unhandled_event_type" };
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL EVENT — Unipile Outlook
+//
+// Mirrors webhook-microsoft.ts:processEmailMessage but reads the Unipile
+// event shape instead of the Graph subscription notification. Runs in
+// parallel with Graph until Phase 3 cutover; messages.external_message_id
+// has a unique constraint so the second-arriving copy of the same email
+// is a silent no-op.
+//
+// Email-bounce / NDR detection: re-uses the same heuristics as
+// webhook-microsoft (postmaster sender or "undeliverable" subject) and
+// sets people.email_invalid + stops active enrollments. Sentiment
+// extraction runs on every inbound for the universal-stop rule.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const EMAIL_BOUNCE_SENDER_RE = /^(postmaster|mailer-daemon|mail.daemon)@/i;
+const EMAIL_BOUNCE_SUBJECT_RE = /undeliverable|delivery (status|has|failure)|delivery has failed|returned mail|mail delivery (subsystem|failed)/i;
+
+function extractFailedRecipient(body: string): string | null {
+  const final = body.match(/Final-Recipient[^\n]*?(?:rfc822;\s*)?([\w.+-]+@[\w.-]+)/i);
+  if (final?.[1]) return final[1].toLowerCase();
+  const plain = body.match(/<([\w.+-]+@[\w.-]+)>[^\n]{0,200}?(?:not be delivered|undeliverable|address not found|user (?:unknown|not found)|550 5\.\d)/i);
+  if (plain?.[1]) return plain[1].toLowerCase();
+  const all = Array.from(body.matchAll(/([\w.+-]+@[\w.-]+)/g)).map((m) => m[1].toLowerCase());
+  const candidate = all.find((e) => !/^(postmaster|mailer-daemon|noreply|no-reply)@/i.test(e));
+  return candidate ?? null;
+}
+
+async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: string) {
+  const data = event.data || event.email || event;
+
+  // Defensive field reads — Unipile has shifted shapes between
+  // accounts and even between event types within v2.
+  const fromField = data.from || data.sender || {};
+  const senderEmail = String(
+    fromField.identifier || fromField.email || fromField.address || "",
+  ).toLowerCase();
+  if (!senderEmail) {
+    logger.info("Unipile email event with no sender — skipping");
+    return { action: "skipped", reason: "no_sender_email" };
+  }
+
+  const toArr = Array.isArray(data.to) ? data.to : [];
+  const recipientEmail = String(
+    toArr[0]?.identifier || toArr[0]?.email || toArr[0]?.address || "",
+  ).toLowerCase();
+  const subject = data.subject || "";
+  const bodyHtml = data.body || data.body_html || data.html || "";
+  const bodyText = data.body_plain || data.body_text || data.text || "";
+  const bodyForSearch = bodyText || bodyHtml.replace(/<[^>]+>/g, " ");
+  const externalId = String(
+    data.id || data.message_id || data.internet_message_id || "",
+  );
+  const sentAt = data.received_at || data.date || data.timestamp || receivedAt;
+
+  // ── Hard-bounce / NDR ──────────────────────────────────────────
+  const isBounce =
+    EMAIL_BOUNCE_SENDER_RE.test(senderEmail) || EMAIL_BOUNCE_SUBJECT_RE.test(subject);
+  if (isBounce) {
+    const failed = extractFailedRecipient(bodyForSearch);
+    if (failed) {
+      const [{ data: cand }, { data: cont }] = await Promise.all([
+        supabase.from("people").select("id").eq("email", failed).maybeSingle(),
+        supabase.from("contacts").select("id").eq("email", failed).maybeSingle(),
+      ]);
+      const reason = (subject || "ndr").slice(0, 200);
+      const now = new Date().toISOString();
+      if (cand?.id) {
+        await supabase
+          .from("people")
+          .update({ email_invalid: true, email_invalid_reason: reason, email_invalid_at: now } as any)
+          .eq("id", cand.id);
+        const { data: enrollments } = await supabase
+          .from("sequence_enrollments")
+          .select("*, sequences!inner(*)")
+          .eq("candidate_id", cand.id).eq("status", "active");
+        for (const e of enrollments ?? []) await stopEnrollment(supabase, e, "email_bounced", reason);
+        logger.info("Unipile bounce handled", { failed, candidateId: cand.id });
+      } else if (cont?.id) {
+        await supabase
+          .from("contacts")
+          .update({ email_invalid: true, email_invalid_reason: reason, email_invalid_at: now } as any)
+          .eq("id", cont.id);
+        const { data: enrollments } = await supabase
+          .from("sequence_enrollments")
+          .select("*, sequences!inner(*)")
+          .eq("contact_id", cont.id).eq("status", "active");
+        for (const e of enrollments ?? []) await stopEnrollment(supabase, e, "email_bounced", reason);
+      }
+      return { action: "bounce_handled", failed, recipient: recipientEmail };
+    }
+  }
+
+  // ── Match sender to candidate or contact ──────────────────────
+  const [{ data: cand }, { data: cont }] = await Promise.all([
+    supabase.from("people").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
+    supabase.from("contacts").select("id, full_name").eq("email", senderEmail).limit(1).maybeSingle(),
+  ]);
+  const match = cand
+    ? { entityId: cand.id, entityType: "candidate", entityColumn: "candidate_id" as const }
+    : cont
+      ? { entityId: cont.id, entityType: "contact", entityColumn: "contact_id" as const }
+      : null;
+  if (!match) {
+    logger.info("Unipile email: no entity match", { senderEmail });
+    return { action: "no_match", senderEmail };
+  }
+
+  // ── Insert message (dedup on external_message_id unique constraint) ──
+  const conversationId = data.conversation_id || data.thread_id || `unipile_email_${match.entityId}`;
+  const { error: insertErr } = await supabase.from("messages").insert({
+    conversation_id: conversationId,
+    [match.entityColumn]: match.entityId,
+    channel: "email",
+    direction: "inbound",
+    subject: subject || null,
+    body: bodyHtml || bodyText,
+    sender_address: senderEmail,
+    recipient_address: recipientEmail,
+    sent_at: sentAt,
+    provider: "unipile",
+    external_message_id: externalId,
+    is_read: data.is_read ?? false,
+  } as any);
+  // Unique-violation = duplicate of the Graph copy; fine, swallow.
+  if (insertErr && !/duplicate key|23505/.test(insertErr.message)) {
+    logger.warn("Unipile email insert failed", { error: insertErr.message });
+  }
+
+  // ── Update entity timestamps ──────────────────────────────────
+  const table = match.entityType === "candidate" ? "candidates" : "contacts";
+  await supabase
+    .from(table)
+    .update({ last_responded_at: receivedAt, last_comm_channel: "email" } as any)
+    .eq("id", match.entityId);
+
+  // ── Sentiment + universal stop rule ───────────────────────────
+  const intel = bodyForSearch.length > 10
+    ? await extractMessageIntel(bodyForSearch, subject)
+    : null;
+  if (intel) {
+    const { data: enrollment } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(match.entityColumn, match.entityId)
+      .eq("status", "active")
+      .order("enrolled_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    await applyExtractedIntel(
+      supabase, match.entityId, match.entityType as "candidate" | "contact",
+      intel, "email", enrollment?.id,
+    );
+
+    // Stop ALL active enrollments for this person on any reply.
+    const { data: actives } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(match.entityColumn, match.entityId)
+      .eq("status", "active");
+    for (const e of actives ?? []) {
+      await stopEnrollment(supabase, e, "reply_received", bodyForSearch.slice(0, 500));
+    }
+  }
+
+  // Refresh Joe Says
+  await generateJoeSays.trigger({
+    entityId: match.entityId,
+    entityType: match.entityType as "candidate" | "contact",
+  });
+
+  return { action: "email_logged", entityId: match.entityId, entityType: match.entityType };
+}
 
 async function processLinkedInMessage(supabase: any, event: any, receivedAt: string) {
   const messageData = event.data || event.message || event;

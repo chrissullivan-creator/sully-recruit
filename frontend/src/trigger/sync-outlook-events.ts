@@ -2,6 +2,10 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
 import { getMicrosoftAccessToken } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
+import {
+  fetchUnipileEventsForAccount,
+  shouldUseUnipileCalendar,
+} from "./lib/unipile-calendar";
 
 /**
  * Pull each configured mailbox's upcoming Outlook calendar events and
@@ -83,6 +87,67 @@ export const syncOutlookEvents = schedules.task({
           context: { mailbox: email },
           severity: "WARN",
         });
+      }
+    }
+
+    // Phase 4: Unipile calendar in PARALLEL. When the flag is on, we
+    // also pull events from Unipile for every mailbox that has a
+    // unipile_account_id wired in integration_accounts. Dedup on
+    // tasks.external_id (the Outlook event id is the same coming
+    // from either provider) keeps the table clean. Failure is
+    // non-fatal — it's a parallel safety net, not the primary path.
+    if (await shouldUseUnipileCalendar()) {
+      const { data: unipileAccts } = await supabase
+        .from("integration_accounts")
+        .select("email_address, owner_user_id, unipile_account_id, unipile_provider")
+        .eq("provider", "email")
+        .eq("is_active", true)
+        .not("unipile_account_id", "is", null);
+      const unipileSummary: Array<{ email: string; pulled: number; new: number }> = [];
+      const start = new Date().toISOString();
+      const end = new Date(Date.now() + 14 * 86_400_000).toISOString();
+
+      for (const acct of unipileAccts ?? []) {
+        const e = (acct.email_address || "").toLowerCase();
+        if (!graphEmails.has(e)) continue;
+        try {
+          const events = await fetchUnipileEventsForAccount(
+            supabase, acct.unipile_account_id!, start, end,
+          );
+          let inserted = 0;
+          for (const ev of events) {
+            const dateOnly = ev.start_dt.slice(0, 10);
+            // Dedup against what Graph already wrote.
+            const { data: existing } = await supabase
+              .from("tasks").select("id").eq("external_id", ev.id).limit(1);
+            if (existing?.length) continue;
+
+            const { error } = await supabase.from("tasks").insert({
+              title: ev.subject,
+              description: (ev.description || "").slice(0, 500) || "Outlook calendar event",
+              priority: "medium",
+              due_date: dateOnly,
+              start_time: ev.start_dt.endsWith("Z") ? ev.start_dt : ev.start_dt + "Z",
+              end_time: ev.end_dt
+                ? (ev.end_dt.endsWith("Z") ? ev.end_dt : ev.end_dt + "Z")
+                : null,
+              timezone: ev.timezone || "UTC",
+              task_type: "meeting",
+              location: ev.location || null,
+              meeting_url: ev.meetingUrl || null,
+              assigned_to: acct.owner_user_id ?? null,
+              created_by: acct.owner_user_id ?? null,
+              external_id: ev.id,
+            } as any);
+            if (!error) inserted++;
+          }
+          unipileSummary.push({ email: e, pulled: events.length, new: inserted });
+        } catch (err: any) {
+          logger.warn("Unipile calendar fetch error (non-fatal)", { email: e, error: err.message });
+        }
+      }
+      if (unipileSummary.length) {
+        logger.info("Unipile calendar parallel sweep", { unipileSummary });
       }
     }
 
