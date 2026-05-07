@@ -206,10 +206,13 @@ export function BulkAddCandidatesDialog({ open, onOpenChange, applicants, jobId,
           existing = data;
         }
         if (!existing && applicant.email) {
+          // Plain people.email retired — match across all three address columns.
+          const e = String(applicant.email).toLowerCase();
           const { data } = await supabase
             .from('people')
             .select('id')
-            .eq('email', applicant.email)
+            .or(`personal_email.ilike.${e},work_email.ilike.${e},primary_email.ilike.${e}`)
+            .limit(1)
             .maybeSingle();
           existing = data;
         }
