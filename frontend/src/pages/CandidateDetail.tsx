@@ -940,11 +940,17 @@ const CandidateDetail = () => {
 
         {/* Social / contact links */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {candidate.email && (
-            <a href={`mailto:${candidate.email}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={candidate.email}>
-              <Mail className="h-4 w-4" />
-            </a>
-          )}
+          {(() => {
+            // Prefer personal_email for candidate outreach (sequences send to
+            // personal_email; work_email is shown for context). Fall back to
+            // the legacy email column during the migration off it.
+            const mailto = (candidate as any).personal_email || (candidate as any).work_email || candidate.email;
+            return mailto ? (
+              <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
+                <Mail className="h-4 w-4" />
+              </a>
+            ) : null;
+          })()}
           {candidate.phone && (
             <a href={`tel:${candidate.phone}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={candidate.phone}>
               <Phone className="h-4 w-4" />
@@ -1064,7 +1070,6 @@ const CandidateDetail = () => {
               <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Email" value={candidate.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
               <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
@@ -1489,7 +1494,8 @@ const CandidateDetail = () => {
               <TabsContent value="communications" className="px-8 py-5 mt-0">
                 <div className="flex items-center gap-2 mb-5">
                   <Button variant="outline" size="sm" onClick={() => {
-                    if (candidate.email) { window.location.href = `mailto:${candidate.email}`; }
+                    const to = (candidate as any).personal_email || (candidate as any).work_email || candidate.email;
+                    if (to) { window.location.href = `mailto:${to}`; }
                     else { toast.error('No email address on file'); }
                   }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
                   <Button variant="outline" size="sm" onClick={() => {

@@ -517,11 +517,17 @@ const ContactDetail = () => {
 
         {/* Social / contact links */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {contact.email && (
-            <a href={`mailto:${contact.email}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={contact.email}>
-              <Mail className="h-4 w-4" />
-            </a>
-          )}
+          {(() => {
+            // Prefer work_email for client outreach (sequences send to
+            // work_email; personal_email is shown for context). Fall back to
+            // the legacy email column during the migration off it.
+            const mailto = (contact as any).work_email || (contact as any).personal_email || contact.email;
+            return mailto ? (
+              <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
+                <Mail className="h-4 w-4" />
+              </a>
+            ) : null;
+          })()}
           {contact.phone && (
             <a href={`tel:${contact.phone}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={contact.phone}>
               <Phone className="h-4 w-4" />
@@ -590,7 +596,6 @@ const ContactDetail = () => {
               <EditableField label="First Name" value={contact.first_name} onSave={v => updateField('first_name', v)} placeholder="First name" />
               <EditableField label="Last Name" value={contact.last_name} onSave={v => updateField('last_name', v)} placeholder="Last name" />
               <EditableField label="Title" value={contact.title} onSave={v => updateField('title', v)} placeholder="e.g. VP, Talent Acquisition" />
-              <EditableField label="Email" value={contact.email} onSave={v => updateField('email', v)} type="email" placeholder="email@domain.com" />
               <EditableField label="Phone" value={contact.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
               <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
