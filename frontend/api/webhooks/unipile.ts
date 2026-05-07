@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "node:crypto";
 
 /**
  * Vercel serverless function — Unipile webhook receiver.
@@ -10,11 +11,15 @@ import { createClient } from "@supabase/supabase-js";
  * event types) and fires the `process-unipile-event` Trigger.dev task
  * for processing.
  *
- * Auth: shared "secret signature" Unipile sends in the
- * `x-unipile-secret` (or `x-webhook-secret`) header. Resolved from
- * env (`UNIPILE_WEBHOOK_SECRET`) first, then `app_settings` row of
- * the same name. Mismatch = 401. When neither is configured the
- * receiver accepts everything (dev convenience).
+ * Auth: shared "secret signature" Unipile sends in a header. Across
+ * Unipile builds we've seen all of:
+ *   - X-Unipile-Secret / X-Webhook-Secret / X-Unipile-Signature: <secret verbatim>
+ *   - X-Unipile-Signature: hmac-sha256(body, secret) hex-encoded
+ *   - Authorization: Bearer <secret>
+ * The verifier accepts any of these. Resolved from env
+ * (`UNIPILE_WEBHOOK_SECRET`) first, then `app_settings` row of the
+ * same name. Mismatch = 401. When neither is configured the receiver
+ * accepts everything (dev convenience).
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -40,18 +45,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (expectedSecret) {
-    // Unipile sends the configured "Secret signature" verbatim in one
-    // of these headers. We accept both names so the receiver works
-    // even if their header naming flips between v1 and v2.
-    const incoming = String(
-      req.headers["x-unipile-secret"]
-        || req.headers["x-webhook-secret"]
-        || req.headers["x-unipile-signature"]
-        || "",
-    );
-    if (incoming !== expectedSecret) {
+    if (!verifyUnipileSecret(req, expectedSecret)) {
+      // Log header NAMES only (no values, no PII) so we can see which
+      // header Unipile is actually using on a fresh install.
       console.warn("Unipile webhook: secret mismatch", {
-        gotPrefix: incoming.slice(0, 8),
+        headerNames: Object.keys(req.headers).sort(),
       });
       return res.status(401).json({ error: "Invalid webhook secret" });
     }
@@ -68,5 +66,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Always 200 so Unipile doesn't retry-storm. The trigger task is
     // queued or the server is having a hiccup; either way, ack.
     return res.status(200).json({ received: true, error: "processing_queued" });
+  }
+}
+
+/**
+ * Accept the shared secret in any of the formats Unipile uses across
+ * versions. Returns true on the first match.
+ *   1. Raw secret in any "secret"/"signature"/"webhook" header
+ *   2. Raw secret in `Authorization: Bearer <secret>`
+ *   3. HMAC-SHA256(body, secret) hex in any signature header
+ */
+function verifyUnipileSecret(req: VercelRequest, secret: string): boolean {
+  const headers = req.headers;
+
+  // Path 1 + 2: raw secret check across likely headers.
+  const candidates = [
+    headers["x-unipile-secret"],
+    headers["x-webhook-secret"],
+    headers["x-unipile-signature"],
+    headers["x-webhook-signature"],
+    headers["x-signature"],
+    headers["unipile-signature"],
+    typeof headers.authorization === "string"
+      ? headers.authorization.replace(/^Bearer\s+/i, "")
+      : undefined,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c && timingSafeEqual(c, secret)) return true;
+  }
+
+  // Path 3: HMAC-SHA256 of the raw body using the secret as the key.
+  // Vercel parses JSON bodies into `req.body` by default, so we
+  // recompute the canonical JSON to hash. If the body is a string
+  // (raw mode) we hash it directly.
+  const sigHeader = String(
+    headers["x-unipile-signature"]
+      || headers["x-webhook-signature"]
+      || headers["x-signature"]
+      || "",
+  ).trim();
+  if (sigHeader) {
+    try {
+      const raw = typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body ?? {});
+      const hmac = crypto
+        .createHmac("sha256", secret)
+        .update(raw)
+        .digest("hex");
+      // Some senders prefix `sha256=` — strip it before comparing.
+      const cleaned = sigHeader.replace(/^sha256=/i, "");
+      if (timingSafeEqual(hmac, cleaned)) return true;
+    } catch { /* fall through to false */ }
+  }
+
+  return false;
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  } catch {
+    return false;
   }
 }
