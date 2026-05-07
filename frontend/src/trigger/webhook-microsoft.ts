@@ -228,44 +228,83 @@ async function processResumesInboxEmail(
 
   if (resumeAtts.length === 0) return { created: 0, skipped: 0 };
 
-  // Reuse an existing candidate if the sender already has one. Otherwise
-  // create a stub — name extracted from displayName or local-part of email,
-  // ingestion will overwrite once the resume parses cleanly.
+  // Resumes inbox: the sender is almost always one of our recruiters
+  // forwarding from Outlook — not the candidate. Two paths:
+  //
+  //   - Forward (sender is a profiles row): create a blank stub owned
+  //     by the forwarder. resume-ingestion will redirect or fill the
+  //     stub once parsed_json surfaces the candidate's real identity.
+  //
+  //   - Direct send (sender is NOT in profiles): the sender IS the
+  //     candidate. Match across all three email columns and reuse;
+  //     otherwise create a stub with their email routed to
+  //     personal/work via classifyEmail.
   const senderDisplay = (message.from?.emailAddress?.name as string) || "";
-  const [firstNameGuess, ...rest] = senderDisplay.trim().split(/\s+/);
-  const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
+  const lowerSender = senderEmail.toLowerCase();
+
+  const { data: forwarderProfile } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .ilike("email", lowerSender)
+    .maybeSingle();
+  const isForward = !!forwarderProfile?.id;
+  const forwarderUserId: string | null = forwarderProfile?.id ?? null;
 
   let candidateId: string;
-  // Match across all three email columns so a candidate stored under
-  // their work address still gets recognised when they reply from
-  // gmail (and vice versa).
-  const existingMatch = await matchPersonByEmail(supabase, senderEmail);
-  if (existingMatch?.entityId) {
-    candidateId = existingMatch.entityId;
-  } else {
+
+  if (isForward) {
     const { data: created, error: createErr } = await supabase
       .from("people")
       .insert({
         type: "candidate",
-        first_name: firstNameGuess || null,
-        last_name: lastNameGuess || null,
-        full_name: senderDisplay || senderEmail,
-        // Plain `email` retired — sender goes to personal/work via classifier.
-        ...classifyEmail(senderEmail),
+        full_name: "Pending résumé parse",
         status: "new",
         source: "resumes_inbox",
         source_detail: recipientEmail,
         is_stub: true,
+        owner_user_id: forwarderUserId,
+        created_by_user_id: forwarderUserId,
       } as any)
       .select("id")
       .single();
     if (createErr || !created?.id) {
-      logger.error("Resumes inbox: failed to create candidate stub", {
+      logger.error("Resumes inbox: failed to create forwarded stub", {
         senderEmail, error: createErr?.message,
       });
       return { created: 0, skipped: 0 };
     }
     candidateId = created.id;
+  } else {
+    const [firstNameGuess, ...rest] = senderDisplay.trim().split(/\s+/);
+    const lastNameGuess = rest.join(" ") || senderEmail.split("@")[0];
+
+    const existingMatch = await matchPersonByEmail(supabase, senderEmail);
+    if (existingMatch?.entityId) {
+      candidateId = existingMatch.entityId;
+    } else {
+      const { data: created, error: createErr } = await supabase
+        .from("people")
+        .insert({
+          type: "candidate",
+          first_name: firstNameGuess || null,
+          last_name: lastNameGuess || null,
+          full_name: senderDisplay || senderEmail,
+          ...classifyEmail(senderEmail),
+          status: "new",
+          source: "resumes_inbox",
+          source_detail: recipientEmail,
+          is_stub: true,
+        } as any)
+        .select("id")
+        .single();
+      if (createErr || !created?.id) {
+        logger.error("Resumes inbox: failed to create candidate stub", {
+          senderEmail, error: createErr?.message,
+        });
+        return { created: 0, skipped: 0 };
+      }
+      candidateId = created.id;
+    }
   }
 
   let created = 0;
