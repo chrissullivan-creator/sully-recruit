@@ -41,7 +41,10 @@ interface ReclassifyPayload {
 }
 
 const DEFAULT_LIMIT = 5_000;
-const PER_REQUEST_DELAY_MS = 333;
+// Concurrent chat fetches per pass. Each Unipile chat lookup is ~500ms,
+// so 4-way concurrency processes ~8 chats/sec — keeps us well under
+// Unipile rate-limits while clearing 1k convs in ~2min instead of 20.
+const CONCURRENCY = 4;
 
 async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   const supabase = getSupabaseAdmin();
@@ -82,9 +85,13 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   let errors = 0;
   let skipped = 0;
 
-  for (const conv of convs) {
+  // Process a single conversation row: fetch the Unipile chat, decide
+  // whether anything needs updating, and apply the writes. Returns the
+  // counter to bump.
+  type Outcome = "updated" | "skipped" | "errored";
+  const processOne = async (conv: typeof convs[number]): Promise<Outcome> => {
     const unipileAcctId = acctMap.get(conv.integration_account_id);
-    if (!unipileAcctId) { skipped++; continue; }
+    if (!unipileAcctId) return "skipped";
 
     try {
       const chat: any = await unipileFetch(
@@ -103,7 +110,6 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
 
       const needsChannelChange = newChannel !== conv.channel;
       const needsContentTypeStamp = (contentType ?? null) !== (conv.content_type ?? null);
-      if (!needsChannelChange && !needsContentTypeStamp) { skipped++; }
 
       if (needsContentTypeStamp || needsChannelChange) {
         await supabase
@@ -115,28 +121,33 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
           } as any)
           .eq("id", conv.id);
       }
-      // Keep messages in sync — searches/filters elsewhere read messages.channel.
       if (needsChannelChange) {
         await supabase
           .from("messages")
           .update({ channel: newChannel } as any)
           .eq("conversation_id", conv.id);
       }
-      if (needsChannelChange || needsContentTypeStamp) updated++;
+      if (needsChannelChange || needsContentTypeStamp) return "updated";
+      return "skipped";
     } catch (err: any) {
-      // 404 = chat deleted on Unipile's side; no update we can make.
-      // Anything else logged but non-fatal so the sweep keeps moving.
       const msg = err.message || String(err);
-      if (/\b404\b/.test(msg)) {
-        skipped++;
-      } else {
-        errors++;
-        logger.warn("Chat fetch failed", { convId: conv.id, error: msg });
-      }
+      if (/\b404\b/.test(msg)) return "skipped"; // chat deleted on Unipile side
+      logger.warn("Chat fetch failed", { convId: conv.id, error: msg });
+      return "errored";
     }
+  };
 
-    // Light per-request delay — Unipile is generous but not unlimited.
-    await new Promise((r) => setTimeout(r, PER_REQUEST_DELAY_MS));
+  // Walk the work-list with a fixed-size pool so we don't blow Unipile's
+  // rate-limit. Slicing into chunks keeps the implementation simple and
+  // avoids needing a 3rd-party concurrency library.
+  for (let i = 0; i < convs.length; i += CONCURRENCY) {
+    const batch = convs.slice(i, i + CONCURRENCY);
+    const outcomes = await Promise.all(batch.map(processOne));
+    for (const o of outcomes) {
+      if (o === "updated") updated++;
+      else if (o === "skipped") skipped++;
+      else errors++;
+    }
   }
 
   const summary = { scanned: convs.length, updated, errors, skipped, force };
