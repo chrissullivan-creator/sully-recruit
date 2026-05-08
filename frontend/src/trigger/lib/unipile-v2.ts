@@ -36,8 +36,12 @@ async function resolveConfig(supabase: any): Promise<ResolvedConfig> {
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
+  // Prefer the explicit v2 setting, then fall back to the public v2
+  // endpoint. We do NOT derive v2 from the v1 DSN — the dedicated DSN
+  // host (e.g. api19.unipile.com:14926) only serves v1; v2 lives at
+  // the public api.unipile.com/v2 endpoint.
   const base = (v2Row?.value || "").replace(/\/+$/, "")
-    || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+    || "https://api.unipile.com/v2";
   const apiKey = v2KeyRow?.value || v1KeyRow?.value;
   if (!base || !apiKey) throw new Error("Unipile v2 config missing");
   const value = { base, apiKey };

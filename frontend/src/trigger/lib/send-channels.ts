@@ -406,7 +406,7 @@ async function verifyUnipileAccountHealth(supabase: any, accountId: string): Pro
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
   const base = (v2Row?.value || "").replace(/\/+$/, "")
-    || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+    || "https://api.unipile.com/v2";
   const apiKey = v2KeyRow?.value || v1KeyRow?.value;
   if (!base || !apiKey) throw new Error("Unipile config missing");
   try {

@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
     ]);
     const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-      || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+      || "https://api.unipile.com/v2";
     const apiKey = v2KeyRow?.value || v1KeyRow?.value;
     if (!v2Base || !apiKey) {
       console.error("Unipile v2 config not found in app_settings");
