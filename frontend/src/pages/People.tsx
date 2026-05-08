@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { usePeople } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
@@ -138,6 +139,7 @@ const People = () => {
           'id, type, full_name, first_name, last_name, ' +
           'title, current_title, company_name, current_company, company_id, ' +
           'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
+          'email_invalid, email_invalid_reason, email_invalid_at, ' +
           'avatar_url, roles, status, ' +
           'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +
           'owner_user_id, created_at, updated_at',
@@ -490,6 +492,13 @@ const People = () => {
                               <Mail className="h-4 w-4" />
                             </a>
                           )}
+                          <EmailBounceBadge
+                            emailInvalid={(person as any).email_invalid}
+                            reason={(person as any).email_invalid_reason}
+                            invalidatedAt={(person as any).email_invalid_at}
+                            variant="icon"
+                            className="ml-0.5"
+                          />
                           {person.mobile_phone && (
                             <a href={`tel:${person.mobile_phone}`} title={person.mobile_phone}
                               className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
