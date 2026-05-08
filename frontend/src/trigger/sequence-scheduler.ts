@@ -252,7 +252,25 @@ export const sequenceActionExecute = task({
   run: async (payload: ActionExecutePayload) => {
     const supabase = getSupabaseAdmin();
 
-    // Re-validate enrollment is still active
+    // Idempotency: only proceed if the step_log is still claimed
+    // ('in_flight'). The sweep claims via UPDATE WHERE status='scheduled',
+    // so there's exactly one path that sets it to in_flight per row. If
+    // we see anything else here, another execution already finished this
+    // log and Trigger.dev re-invoked us on retry. Bailing protects
+    // against the post-send-throws-then-retry double-send.
+    const { data: stepLog } = await supabase
+      .from("sequence_step_logs")
+      .select("status")
+      .eq("id", payload.stepLogId)
+      .maybeSingle();
+
+    if (!stepLog || stepLog.status !== "in_flight") {
+      return { action: "skipped", reason: `step_log_status_${stepLog?.status || "missing"}` };
+    }
+
+    // Re-validate enrollment + parent sequence are both still active.
+    // Pausing a sequence (or stopping the enrollment) needs to halt
+    // sends on logs that were already claimed but not yet executed.
     const { data: enrollment } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -262,6 +280,11 @@ export const sequenceActionExecute = task({
     if (!enrollment || enrollment.status !== "active") {
       await markStepLog(supabase, payload.stepLogId, "cancelled");
       return { action: "cancelled", reason: "enrollment_not_active" };
+    }
+
+    if (enrollment.sequences?.status !== "active") {
+      await markStepLog(supabase, payload.stepLogId, "cancelled");
+      return { action: "cancelled", reason: `sequence_status_${enrollment.sequences?.status}` };
     }
 
     // Reply guard — any reply except connection acceptance stops everything
@@ -560,12 +583,13 @@ export const sequenceSweep = schedules.task({
         id, enrollment_id, action_id, node_id, channel,
         sequence_enrollments!inner(
           id, sequence_id, candidate_id, contact_id, status,
-          sequences!inner(id, created_by, sender_user_id)
+          sequences!inner(id, status, created_by, sender_user_id)
         )
       `)
       .eq("status", "scheduled")
       .lte("scheduled_at", now)
       .eq("sequence_enrollments.status", "active")
+      .eq("sequence_enrollments.sequences.status", "active")
       .limit(100);
 
     if (error) {
