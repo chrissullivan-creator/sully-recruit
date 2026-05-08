@@ -46,19 +46,38 @@ export const syncConversations = schedules.task({
         account.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
       );
       try {
-        // v2 path: GET /api/v2/chats?account_id=…&limit&sort
+        // Per Unipile v2 docs, chats live inside inboxes:
+        //   GET /v2/{account_id}/inboxes  →  list inboxes
+        //   GET /v2/{account_id}/inboxes/{inbox_id}/chats
+        // Iterate every inbox, concatenate the chats up to BATCH_SIZE.
         let data: any;
         try {
-          data = await unipileFetch(
+          const inboxesResp: any = await unipileFetch(
             supabase,
             account.unipile_account_id,
-            `chats`,
-            {
-              method: "GET",
-              topLevel: true,
-              query: { limit: BATCH_SIZE, sort: "latest" },
-            },
+            `inboxes`,
+            { method: "GET" },
           );
+          const inboxes: any[] = inboxesResp.items ?? inboxesResp.inboxes ?? inboxesResp.data ?? [];
+          const collected: any[] = [];
+          for (const ib of inboxes) {
+            if (collected.length >= BATCH_SIZE) break;
+            const inboxId = ib.id ?? ib.inbox_id ?? ib.name;
+            if (!inboxId) continue;
+            const remaining = BATCH_SIZE - collected.length;
+            const chatsResp: any = await unipileFetch(
+              supabase,
+              account.unipile_account_id,
+              `inboxes/${encodeURIComponent(inboxId)}/chats`,
+              { method: "GET", query: { limit: remaining, sort: "latest" } },
+            );
+            const items = chatsResp.items ?? chatsResp.chats ?? chatsResp.data ?? [];
+            for (const c of items) {
+              collected.push(c);
+              if (collected.length >= BATCH_SIZE) break;
+            }
+          }
+          data = { items: collected };
         } catch (err: any) {
           logger.warn("Failed to fetch chats", { accountId: account.id, error: err.message });
           continue;
@@ -129,7 +148,7 @@ export const syncConversations = schedules.task({
           }
 
           // Fetch latest messages for this conversation.
-          // v2 path: GET /api/v2/chats/{chat_id}/messages?account_id=…
+          // v2 path: GET /v2/{account_id}/chats/{chat_id}/messages
           let msgData: any = null;
           try {
             msgData = await unipileFetch(
@@ -138,7 +157,6 @@ export const syncConversations = schedules.task({
               `chats/${encodeURIComponent(convId)}/messages`,
               {
                 method: "GET",
-                topLevel: true,
                 query: { limit: 10 },
               },
             );

@@ -5,13 +5,19 @@
  *
  * Key v2 facts (from
  *   https://developer.unipile.com/v2.0/docs/migration-linkedin-api ):
- *   - account_id is now a path segment for most endpoints, but the
- *     /chats family stays top-level with account_id as a query param
- *     (Unipile returns 404 for /api/v2/{account_id}/chats…). Pass
- *     `topLevel: true` when calling unipileFetch for chats endpoints.
- *   - User & recruiter endpoints sit under the /linkedin/ prefix:
- *       /api/v2/{account_id}/linkedin/users/...
- *       /api/v2/{account_id}/linkedin/recruiter/...
+ *   - account_id is a path segment on every documented v2 endpoint.
+ *     Per Unipile v2 docs:
+ *       /v2/{account_id}/inboxes
+ *       /v2/{account_id}/inboxes/{inbox_id}/chats        (list chats)
+ *       /v2/{account_id}/chats/{chat_id}                 (single chat)
+ *       /v2/{account_id}/chats/{chat_id}/messages        (messages)
+ *       /v2/{account_id}/linkedin/users/...              (users + invite)
+ *       /v2/{account_id}/linkedin/recruiter/...          (recruiter ops)
+ *   - There is no top-level /v2/chats — to enumerate chats you list
+ *     inboxes first, then chats per inbox. See helpers below.
+ *   - The `topLevel` option on unipileFetch is reserved for a tiny
+ *     handful of true-top-level routes (currently none in regular
+ *     use); keep it for forward-compat.
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */

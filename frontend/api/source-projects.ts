@@ -94,8 +94,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // and the action "hiringProjectList" / "pipelineCandidates" /
     // "hiringProject" (createrecruiterhiringproject), so the canonical
     // path is /linkedin/recruiter/hiring-projects with pipeline-
-    // candidates under each project. We probe newest → oldest so we
-    // keep working through Unipile path rollouts.
+    // candidates under each project.
+    //
+    // URL shape: Unipile MCP `get_hiring_projects` doesn't take an
+    // account_id arg — strong hint that v2 hiring-projects is
+    // top-level (account_id as query param), matching the chats
+    // family. We try the top-level shape first, then path-segmented
+    // as a fallback in case some Unipile builds still nest under
+    // /{account_id}/.
     if (action === "list_projects") {
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
       const candidatePaths = [
@@ -104,16 +110,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `linkedin/recruiter/projects`,
       ];
       const tries: Array<{ url: string; status: number; ok: boolean; bodyPrefix?: string }> = [];
+      // Per Unipile v2 docs every endpoint puts account_id in the path;
+      // we keep a top-level fallback for builds that surface hiring
+      // projects under a different shape.
       for (const path of candidatePaths) {
-        const url = `${v2Base}/${acct}/${path}?limit=100&offset=${offset}`;
-        const resp = await fetch(url, { headers });
-        if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-        if (resp.ok) {
-          const data = await resp.json();
-          const items = data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
-          return res.status(200).json({ items, raw: data, used_path: path });
+        const variants = [
+          `${v2Base}/${acct}/${path}?limit=100&offset=${offset}`,
+          `${v2Base}/${path}?account_id=${acct}&limit=100&offset=${offset}`,
+        ];
+        for (const url of variants) {
+          const resp = await fetch(url, { headers });
+          if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+          if (resp.ok) {
+            const data = await resp.json();
+            const items = data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
+            return res.status(200).json({ items, raw: data, used_path: path, used_url: url });
+          }
+          tries.push({ url, status: resp.status, ok: false, bodyPrefix: (await resp.text()).slice(0, 200) });
         }
-        tries.push({ url, status: resp.status, ok: false, bodyPrefix: (await resp.text()).slice(0, 200) });
       }
       // None worked — return the LAST status so the UI surfaces a real error.
       const last = tries[tries.length - 1];
@@ -126,7 +140,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── list_applicants ──────────────────────────────────────────
     // 1. GET project for header info
     // 2. POST talent-pool/applicants (v2 expects POST + body, not GET)
-    // Path bases probed in order — same fallback logic as list_projects.
+    // Path bases probed in order, each tried both top-level and
+    // path-segmented (mirrors list_projects probe).
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
@@ -137,33 +152,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ];
       const tries: { url: string; method: string; status?: number; ok: boolean; count?: number; error?: string; keys?: string[] }[] = [];
 
+      // Helper: build both URL shapes for a project-scoped path
+      // (path-segmented first per Unipile v2 docs, top-level as fallback).
+      const buildVariants = (base: string, suffix: string) => {
+        const root = suffix ? `${base}/${projectId}/${suffix}` : `${base}/${projectId}`;
+        return [
+          `${v2Base}/${acct}/${root}`,
+          `${v2Base}/${root}${root.includes("?") ? "&" : "?"}account_id=${acct}`,
+        ];
+      };
+
       // 1) Project detail
       let projectData: any = null;
       let workingBase: string | null = null;
-      for (const base of projectBases) {
-        const projectUrl = `${v2Base}/${acct}/${base}/${projectId}`;
-        try {
-          const r = await fetch(projectUrl, { headers });
-          const t: any = { url: projectUrl, method: "GET", status: r.status, ok: r.ok };
-          if (r.ok) {
-            projectData = await r.json();
-            t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
-            workingBase = base;
+      let workingShape: "topLevel" | "pathSeg" | null = null;
+      outerProj: for (const base of projectBases) {
+        const urls = buildVariants(base, "");
+        for (let i = 0; i < urls.length; i++) {
+          const projectUrl = urls[i];
+          try {
+            const r = await fetch(projectUrl, { headers });
+            const t: any = { url: projectUrl, method: "GET", status: r.status, ok: r.ok };
+            if (r.ok) {
+              projectData = await r.json();
+              t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
+              workingBase = base;
+              workingShape = i === 0 ? "topLevel" : "pathSeg";
+              tries.push(t);
+              break outerProj;
+            } else {
+              t.error = (await r.text()).slice(0, 500);
+            }
             tries.push(t);
-            break;
-          } else {
-            t.error = (await r.text()).slice(0, 500);
+          } catch (err: any) {
+            tries.push({ url: projectUrl, method: "GET", ok: false, error: err.message });
           }
-          tries.push(t);
-        } catch (err: any) {
-          tries.push({ url: projectUrl, method: "GET", ok: false, error: err.message });
         }
       }
 
-      // 2) Candidates — try the new v2 GET pipeline-candidates path
-      //    first (matches the docs reference `getrecruiterpipelinecandidates`),
-      //    fall back to the legacy POST talent-pool/applicants for older
-      //    Unipile builds.
+      // 2) Candidates — try GET pipeline-candidates first, fall back to
+      //    POST talent-pool/applicants for older Unipile builds.
       const applicantBases = workingBase ? [workingBase] : projectBases;
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
       const variants: Array<{
@@ -181,29 +209,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let applicants: any[] = [];
       outer: for (const base of applicantBases) {
         for (const v of variants) {
-          const applicantsUrl = `${v2Base}/${acct}/${base}/${projectId}/${v.suffix}`;
-          try {
-            const r = await fetch(applicantsUrl, {
-              method: v.method,
-              headers: v.method === "POST"
-                ? { ...headers, "Content-Type": "application/json" }
-                : headers,
-              body: v.body,
-            });
-            const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
-            if (r.ok) {
-              const d = await r.json();
-              applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
-              t.count = applicants.length;
-              workingBase = base;
+          // If we already know the shape from step 1, only try that one.
+          const allUrls = buildVariants(base, v.suffix);
+          const urls = workingShape === "topLevel" ? [allUrls[0]]
+            : workingShape === "pathSeg" ? [allUrls[1]]
+            : allUrls;
+          for (const applicantsUrl of urls) {
+            try {
+              const r = await fetch(applicantsUrl, {
+                method: v.method,
+                headers: v.method === "POST"
+                  ? { ...headers, "Content-Type": "application/json" }
+                  : headers,
+                body: v.body,
+              });
+              const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
+              if (r.ok) {
+                const d = await r.json();
+                applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
+                t.count = applicants.length;
+                workingBase = base;
+                tries.push(t);
+                break outer;
+              } else {
+                t.error = (await r.text()).slice(0, 500);
+              }
               tries.push(t);
-              break outer;
-            } else {
-              t.error = (await r.text()).slice(0, 500);
+            } catch (err: any) {
+              tries.push({ url: applicantsUrl, method: v.method, ok: false, error: err.message });
             }
-            tries.push(t);
-          } catch (err: any) {
-            tries.push({ url: applicantsUrl, method: v.method, ok: false, error: err.message });
           }
         }
       }

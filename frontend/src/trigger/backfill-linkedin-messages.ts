@@ -141,14 +141,41 @@ export const backfillLinkedinMessages = schedules.task({
 
     const stats = { chats_scanned: 0, messages_scanned: 0, inserted: 0, skipped: 0, errors: 0 };
 
-    // v2 path: GET /api/v2/chats?account_id=…
-    // The chats family stays top-level in v2 (see lib/unipile-v2.ts).
-    const chatsData: any = await unipileFetch(
+    // Per Unipile v2 docs, chats live inside inboxes:
+    //   GET /v2/{account_id}/inboxes
+    //   GET /v2/{account_id}/inboxes/{inbox_id}/chats
+    // List the account's inboxes, then pull chats from each, capped at
+    // `maxChats` total to keep this scheduled run quick.
+    const inboxesData: any = await unipileFetch(
       supabase,
       account.unipile_account_id,
-      `chats`,
-      { method: "GET", topLevel: true, query: { limit: maxChats } },
+      `inboxes`,
+      { method: "GET" },
     );
+    const inboxes: any[] = inboxesData.items ?? inboxesData.inboxes ?? inboxesData.data ?? [];
+    const chats: any[] = [];
+    for (const ib of inboxes) {
+      if (chats.length >= maxChats) break;
+      const inboxId = ib.id ?? ib.inbox_id ?? ib.name;
+      if (!inboxId) continue;
+      try {
+        const remaining = maxChats - chats.length;
+        const data: any = await unipileFetch(
+          supabase,
+          account.unipile_account_id,
+          `inboxes/${encodeURIComponent(inboxId)}/chats`,
+          { method: "GET", query: { limit: remaining } },
+        );
+        const items = data.items ?? data.chats ?? data.data ?? [];
+        for (const c of items) {
+          chats.push(c);
+          if (chats.length >= maxChats) break;
+        }
+      } catch (err: any) {
+        logger.warn("inbox chats fetch failed", { inboxId, error: err.message });
+      }
+    }
+    const chatsData = { items: chats };
     const chats = chatsData.items ?? chatsData.chats ?? chatsData.data ?? [];
 
     logger.info(`Fetched ${chats.length} chats for ${accountEmail}`);
@@ -209,14 +236,14 @@ export const backfillLinkedinMessages = schedules.task({
         );
 
         // Fetch messages (only latest 20 since this runs every 5 min).
-        // v2 path: GET /api/v2/chats/{chat_id}/messages?account_id=…
+        // v2 path: GET /v2/{account_id}/chats/{chat_id}/messages
         let msgsData: any;
         try {
           msgsData = await unipileFetch(
             supabase,
             account.unipile_account_id,
             `chats/${encodeURIComponent(chatId)}/messages`,
-            { method: "GET", topLevel: true, query: { limit: 20 } },
+            { method: "GET", query: { limit: 20 } },
           );
         } catch {
           stats.errors++;
