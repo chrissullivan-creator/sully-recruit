@@ -28,6 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { cn } from '@/lib/utils';
@@ -732,6 +733,9 @@ const ContactDetail = () => {
                 <TabsTrigger value="notes" className="gap-1.5">
                   <FileText className="h-3.5 w-3.5" /> Notes
                 </TabsTrigger>
+                <TabsTrigger value="sizzles" className="gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" /> Sizzles
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -1172,6 +1176,16 @@ const ContactDetail = () => {
 
               <TabsContent value="notes" className="px-8 py-5 mt-0">
                 <EntityNotesTab entityType="contact" entityId={id!} placeholder="Add a note about this contact — call summary, hiring preferences, anything the team should see…" />
+              </TabsContent>
+
+              <TabsContent value="sizzles" className="px-8 py-5 mt-0">
+                {(c as any).company_id ? (
+                  <SizzlesPanel scope={{ companyId: (c as any).company_id }} />
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    Tag this contact's company to see sizzles for it.
+                  </p>
+                )}
               </TabsContent>
             </ScrollArea>
           </Tabs>
