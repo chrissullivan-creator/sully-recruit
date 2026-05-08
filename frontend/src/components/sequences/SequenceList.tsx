@@ -6,14 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, BarChart3, Calendar } from "lucide-react";
+import { Plus, BarChart3, Calendar, Pause, Play, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { authHeaders } from "@/lib/api-auth";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
 
 interface SequenceRow {
   id: string;
   name: string;
   audience_type: string;
+  status: string;
   created_at: string;
   job_id: string | null;
   jobs?: { title: string } | null;
@@ -25,6 +27,58 @@ export function SequenceList() {
   const [sequences, setSequences] = useState<SequenceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [drillSequence, setDrillSequence] = useState<SequenceRow | null>(null);
+  // Tracks per-row pause/resume mutation state so we can disable
+  // the buttons + show a spinner.
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function handlePause(seq: SequenceRow) {
+    setBusyId(seq.id);
+    try {
+      const { error } = await supabase
+        .from("sequences")
+        .update({ status: "paused", updated_at: new Date().toISOString() } as any)
+        .eq("id", seq.id);
+      if (error) throw error;
+      toast.success("Sequence paused — sends will halt within 3 minutes");
+      await loadSequences();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to pause");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleResume(seq: SequenceRow) {
+    setBusyId(seq.id);
+    try {
+      const { error } = await supabase
+        .from("sequences")
+        .update({ status: "active", updated_at: new Date().toISOString() } as any)
+        .eq("id", seq.id);
+      if (error) throw error;
+      // Re-pace active enrollments so unsent steps schedule from
+      // NOW (not the stale last_sent_at + delay, which would
+      // typically land in the past after a long pause).
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        const resp = await fetch("/api/replace-sequence-enrollments", {
+          method: "POST",
+          headers: await authHeaders(),
+          body: JSON.stringify({ sequence_id: seq.id, enrolled_by: user.id, force_imminent: true }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.error || `HTTP ${resp.status}`);
+        toast.success(`Resumed and re-paced ${result.repaced ?? 0} enrollment${result.repaced === 1 ? "" : "s"}`);
+      } else {
+        toast.success("Sequence resumed");
+      }
+      await loadSequences();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to resume");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   useEffect(() => {
     loadSequences();
@@ -34,7 +88,7 @@ export function SequenceList() {
     try {
       const { data, error } = await supabase
         .from("sequences")
-        .select("id, name, audience_type, created_at, job_id, jobs(title)")
+        .select("id, name, audience_type, status, created_at, job_id, jobs(title)")
         .order("created_at", { ascending: false }) as any;
 
       if (error) throw error;
@@ -92,6 +146,7 @@ export function SequenceList() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Audience</TableHead>
                 <TableHead>Job</TableHead>
                 <TableHead>Enrolled</TableHead>
@@ -106,6 +161,20 @@ export function SequenceList() {
                     <Link to={`/sequences/${seq.id}/edit`} className="hover:underline">
                       {seq.name}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        seq.status === "active"
+                          ? "default"
+                          : seq.status === "paused"
+                            ? "secondary"
+                            : "outline"
+                      }
+                      className="capitalize"
+                    >
+                      {seq.status}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="capitalize">{seq.audience_type}</Badge>
@@ -134,6 +203,28 @@ export function SequenceList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      {seq.status === "active" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handlePause(seq)}
+                          disabled={busyId === seq.id}
+                          title="Pause this sequence"
+                        >
+                          {busyId === seq.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+                        </Button>
+                      )}
+                      {seq.status === "paused" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleResume(seq)}
+                          disabled={busyId === seq.id}
+                          title="Resume + re-pace from now"
+                        >
+                          {busyId === seq.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        </Button>
+                      )}
                       <Link to={`/sequences/${seq.id}/schedule`}>
                         <Button variant="ghost" size="sm">
                           <Calendar className="h-4 w-4" />
