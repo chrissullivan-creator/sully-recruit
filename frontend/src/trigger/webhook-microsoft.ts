@@ -505,14 +505,9 @@ async function processEmailMessage(
             } as any)
             .eq("id", enrollment.id);
 
-          // Mark v1 executions as bounced
-          await supabase
-            .from("sequence_step_executions")
-            .update({ status: "bounced" } as any)
-            .eq("enrollment_id", enrollment.id)
-            .in("status", ["sent", "delivered", "scheduled"]);
-
-          // Mark v2 step logs as cancelled
+          // sequence_step_executions was the v1 table; dropped in v2
+          // schema. Only sequence_step_logs is live now — mark any
+          // pending sends as cancelled when we detect a bounce.
           await supabase
             .from("sequence_step_logs")
             .update({ status: "cancelled" } as any)
