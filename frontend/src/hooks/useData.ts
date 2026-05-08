@@ -285,8 +285,12 @@ export function useSequences() {
     queryKey: ['sequences'],
     queryFn: async () => {
       const { data, error } = await supabase
+        // sequence_steps was the v1 schema; it was dropped in the v2
+        // migration (replaced by sequence_nodes + sequence_actions).
+        // Selecting it threw a SelectQueryError that nuked the entire
+        // sequences fetch — Enroll dialogs went empty everywhere.
         .from('sequences')
-        .select('*, sequence_steps(*), sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
+        .select('*, sequence_nodes(id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)), sequence_enrollments(id), jobs(id, title, company_name)')
         .order('created_at', { ascending: false }) as any;
       if (error) throw error;
       return (data || []).map((sequence: any) => {
