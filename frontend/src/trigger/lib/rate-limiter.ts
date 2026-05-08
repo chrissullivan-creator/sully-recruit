@@ -76,45 +76,27 @@ export async function checkRateLimit(
   todayStart.setUTCHours(0, 0, 0, 0);
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-  // Fetch today's executions scoped to this user via enrollment join
-  const { data: todayExecs } = await supabase
-    .from("sequence_step_executions")
-    .select("id, sequence_step_id, executed_at, sequence_enrollments!inner(enrolled_by)")
+  // Fetch today's send-logs scoped to this user via the enrollment join.
+  // sequence_step_logs has `channel` denormalized so we don't need a
+  // second hop to sequence_actions to get the channel — that's the v2
+  // table-shape upgrade from sequence_steps + sequence_step_executions.
+  const { data: todayLogs } = await supabase
+    .from("sequence_step_logs")
+    .select("id, channel, sent_at, sequence_enrollments!inner(enrolled_by)")
     .eq("sequence_enrollments.enrolled_by", userId)
-    .gte("executed_at", todayStart.toISOString())
-    .in("status", ["sent"]);
+    .gte("sent_at", todayStart.toISOString())
+    .eq("status", "sent");
 
-  if (!todayExecs || todayExecs.length === 0) {
+  if (!todayLogs || todayLogs.length === 0) {
     return { allowed: true, dailyCount: 0, hourlyCount: 0 };
   }
 
-  // Get the step IDs to check their channels + enrolled_by user
-  const stepIds = [...new Set(todayExecs.map((e: any) => e.sequence_step_id))];
-  const { data: steps } = await supabase
-    .from("sequence_steps")
-    .select("id, channel, step_type")
-    .in("id", stepIds);
-
-  // Also filter by enrolled_by user via enrollments
-  const enrollmentIds = [...new Set(todayExecs.map((e: any) => e.enrollment_id))];
-
-  // Build set of step IDs that match our channel category
-  const matchingStepIds = new Set(
-    (steps ?? [])
-      .filter((s: any) => matchesCategory(s.channel || s.step_type || "", category))
-      .map((s: any) => s.id),
-  );
-
   let dailyCount = 0;
   let hourlyCount = 0;
-
-  for (const exec of todayExecs) {
-    if (matchingStepIds.has(exec.sequence_step_id)) {
-      dailyCount++;
-      if (new Date(exec.executed_at) >= oneHourAgo) {
-        hourlyCount++;
-      }
-    }
+  for (const row of todayLogs as any[]) {
+    if (!matchesCategory(row.channel || "", category)) continue;
+    dailyCount++;
+    if (row.sent_at && new Date(row.sent_at) >= oneHourAgo) hourlyCount++;
   }
 
   // Hourly cap → reschedule 30-60 min from now

@@ -108,15 +108,8 @@ export const cleanupStaleEnrollments = schedules.task({
 
     // 3. Cancel stale outbound LinkedIn connection requests (30+ days)
     // These clutter the LinkedIn account and waste connection slots.
-    // Check both v1 (sequence_step_executions) and v2 (sequence_step_logs) tables.
-    const { data: staleInvitesV1 } = await supabase
-      .from("sequence_step_executions")
-      .select("id")
-      .eq("channel", "linkedin_connection")
-      .eq("status", "sent")
-      .lt("executed_at", connectionCutoff)
-      .limit(50);
-
+    // sequence_step_executions was the v1 table — dropped in the v2
+    // schema migration; only sequence_step_logs is live now.
     const { data: staleInvitesV2 } = await supabase
       .from("sequence_step_logs")
       .select("id")
@@ -126,13 +119,6 @@ export const cleanupStaleEnrollments = schedules.task({
       .limit(50);
 
     let invitesWithdrawn = 0;
-    for (const invite of staleInvitesV1 || []) {
-      await supabase
-        .from("sequence_step_executions")
-        .update({ status: "expired" } as any)
-        .eq("id", invite.id);
-      invitesWithdrawn++;
-    }
     for (const invite of staleInvitesV2 || []) {
       await supabase
         .from("sequence_step_logs")

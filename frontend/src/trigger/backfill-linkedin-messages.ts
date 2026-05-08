@@ -290,6 +290,7 @@ export const backfillLinkedinMessages = schedules.task({
             channel,
             direction,
             body,
+            provider: "unipile",
             unipile_message_id: msgId,
             unipile_chat_id: chatId,
             sender_address: senderAddress,
