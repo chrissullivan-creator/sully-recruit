@@ -46,6 +46,7 @@ import {
   invalidateTaskScope,
 } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
+import { PersonRolesMenu } from '@/components/candidates/PersonRolesMenu';
 
 // Pipeline chip strip — derives from the canonical pipeline
 // (frontend/src/lib/pipeline.ts) so this UI never drifts from the
@@ -1036,6 +1037,13 @@ const CandidateDetail = () => {
           <Button variant="ghost" size="sm" onClick={() => setMergeOpen(true)} title="Merge with another candidate">
             <Merge className="h-3.5 w-3.5 mr-1" />Merge
           </Button>
+          {id && (
+            <PersonRolesMenu
+              personId={id}
+              roles={(candidate as any)?.roles}
+              currentType={(candidate as any)?.type}
+            />
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="sm" disabled={deleting} title="Delete candidate">
