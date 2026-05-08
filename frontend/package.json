@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "trigger:dev": "npx trigger.dev@latest dev",
-    "trigger:deploy": "npx trigger.dev@latest deploy"
+    "trigger:deploy": "npx trigger.dev@latest deploy",
+    "types:supabase": "npx supabase gen types typescript --project-id xlobevmhzimxjtpiontf > src/integrations/supabase/types.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
