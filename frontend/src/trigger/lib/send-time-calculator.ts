@@ -156,6 +156,7 @@ export async function checkDailyCap(
 
   if (!limit?.daily_max) return { allowed: true };
 
+  // Sent count for the day from the daily counter table.
   const { data: log } = await supabase
     .from("daily_send_log")
     .select("count")
@@ -163,8 +164,28 @@ export async function checkDailyCap(
     .eq("channel", channel)
     .eq("send_date", estDate)
     .maybeSingle();
+  const sentCount = log?.count || 0;
 
-  return { allowed: (log?.count || 0) < limit.daily_max };
+  // Already-scheduled step_logs for this account+channel on this EST
+  // date. Without this, init scheduling 300 step-1s would all see
+  // "sentCount = 0" and pile onto the same day, overcommitting and
+  // forcing rate-limit retries to push them days forward at execute
+  // time. Counting them here lets calculateSendTime roll to the next
+  // day at init time, before they're queued.
+  //
+  // Date boundaries computed in EST so the cap aligns with the
+  // user-visible day; this matches incrementDailySend's send_date.
+  const dayStart = new Date(`${estDate}T00:00:00-05:00`); // EST UTC-5
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const { count: scheduledCount } = await supabase
+    .from("sequence_step_logs")
+    .select("id", { count: "exact", head: true })
+    .eq("channel", channel)
+    .eq("status", "scheduled")
+    .gte("scheduled_at", dayStart.toISOString())
+    .lt("scheduled_at", dayEnd.toISOString());
+
+  return { allowed: (sentCount + (scheduledCount || 0)) < limit.daily_max };
 }
 
 export async function checkHourlyCap(
