@@ -843,7 +843,7 @@ async function matchByEmail(
 // anyway).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BOUNCE_SENDER_RE = /^(postmaster|mailer-daemon|mail.daemon)@/i;
+const BOUNCE_SENDER_RE = /^(postmaster|mailer-?daemon|mail\.?daemon)@/i;
 const BOUNCE_SUBJECT_RE = /undeliverable|delivery (status|has|failure)|delivery has failed|returned mail|mail delivery (subsystem|failed)/i;
 
 function extractFailedRecipient(body: string): string | null {
@@ -859,8 +859,36 @@ function extractFailedRecipient(body: string): string | null {
   if (reject?.[1]) return reject[1].toLowerCase();
   // 4. Last-resort: the only non-postmaster email in the body.
   const all = Array.from(body.matchAll(/([\w.+-]+@[\w.-]+)/g)).map((m) => m[1].toLowerCase());
-  const candidate = all.find((e) => !/^(postmaster|mailer-daemon|noreply|no-reply)@/i.test(e));
+  const candidate = all.find((e) => !/^(postmaster|mailer-?daemon|noreply|no-reply)@/i.test(e));
   return candidate ?? null;
+}
+
+/**
+ * Fallback when the body has been scrubbed (e.g. JPMorgan's NDRs
+ * replace the email address with "..." everywhere). The bounce
+ * subject is conventionally "Undeliverable: <original subject>" or
+ * "Returned mail: <original subject>" — strip the prefix and look
+ * up our most recent outbound message with that subject. The
+ * recipient_address on that row is the failed recipient.
+ */
+async function extractFailedRecipientFromOriginalSubject(
+  supabase: any,
+  bounceSubject: string,
+): Promise<string | null> {
+  const cleaned = bounceSubject
+    .replace(/^(undeliverable|undelivered|returned mail|mail delivery failure|delivery (status|has|failure)|delivery has failed)\s*[:\-]?\s*/i, "")
+    .trim();
+  if (!cleaned) return null;
+  const { data } = await supabase
+    .from("messages")
+    .select("recipient_address")
+    .eq("direction", "outbound")
+    .eq("subject", cleaned)
+    .not("recipient_address", "is", null)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as any)?.recipient_address?.toLowerCase() ?? null;
 }
 
 async function maybeHandleBounce(
@@ -877,7 +905,14 @@ async function maybeHandleBounce(
   // alone is enough; otherwise require subject match too.
   if (!senderMatches && !subjectMatches) return null;
 
-  const failedRecipient = extractFailedRecipient(body);
+  let failedRecipient = extractFailedRecipient(body);
+  if (!failedRecipient) {
+    // Some NDRs (e.g. JPMorgan) scrub the email out of the body —
+    // the failed address gets replaced with "..." everywhere. Fall
+    // back to looking up our most recent outbound message with the
+    // subject the bounce is wrapped around ("Undeliverable: <subj>").
+    failedRecipient = await extractFailedRecipientFromOriginalSubject(supabase, subject);
+  }
   if (!failedRecipient) {
     logger.warn("Bounce detected but couldn't extract recipient", { senderEmail, subject });
     return null;
