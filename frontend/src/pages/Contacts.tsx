@@ -473,8 +473,12 @@ const Contacts = () => {
                     <td className="px-4 py-3">
                       <span className={cn(
                         'stage-badge border',
-                        contact.status === 'active' 
-                          ? 'bg-success/10 text-success border-success/20' 
+                        contact.status === 'engaged' || contact.status === 'active'
+                          ? 'bg-success/10 text-success border-success/20'
+                          : contact.status === 'reached_out'
+                          ? 'bg-warning/15 text-warning border-warning/20'
+                          : contact.status === 'new'
+                          ? 'bg-blue-500/15 text-blue-400 border-blue-500/20'
                           : 'bg-muted text-muted-foreground border-border'
                       )}>
                         {contact.status}
