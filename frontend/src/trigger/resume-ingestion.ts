@@ -224,6 +224,15 @@ ${rawText.slice(0, 60000)}`;
       if (parsedJson.location) updates.location_text = parsedJson.location;
       if (parsedJson.linkedin_url) updates.linkedin_url = parsedJson.linkedin_url;
       if (parsedJson.skills?.length) updates.skills = parsedJson.skills;
+      // Mirror the canonical public URL onto people.resume_url so the
+      // candidate detail / list pages show the resume after ingestion.
+      // Without this, parsing succeeds but the UI says "no resume".
+      // The ResumeDropZone path also stamps this on insert; this
+      // covers email-attachment ingest + any other path that lands
+      // here without setting it.
+      if (filePath) {
+        updates.resume_url = `https://xlobevmhzimxjtpiontf.supabase.co/storage/v1/object/public/resumes/${filePath}`;
+      }
 
       const { error: peopleUpdateErr } = await supabase
         .from("people")

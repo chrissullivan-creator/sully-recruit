@@ -260,6 +260,16 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           parsing_status: 'pending',
         } as any).select('id').single();
         resume = inserted;
+
+        // Mirror the canonical public URL onto people.resume_url so
+        // detail pages + lists show the resume immediately. Without
+        // this, the resumes row exists but the UI's resume_url-keyed
+        // checks all read null. (586 rows had drifted before this fix.)
+        const publicUrl = `https://xlobevmhzimxjtpiontf.supabase.co/storage/v1/object/public/resumes/${filePath}`;
+        await supabase
+          .from('people')
+          .update({ resume_url: publicUrl, updated_at: new Date().toISOString() } as any)
+          .eq('id', candidateId);
       }
 
       const resumeId = resume?.id;
