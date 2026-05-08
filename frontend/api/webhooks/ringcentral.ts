@@ -15,13 +15,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Verify the request is from RingCentral using the verification token.
-  // Only enforce when BOTH the env var is set AND the request includes the header
-  // (old subscriptions created before this change won't send the header).
+  // Verify the request is from RingCentral. When the env var is set we
+  // REQUIRE the verification-token header to match — the previous "only
+  // check when both are present" gate let pre-rotation subscriptions
+  // bypass auth indefinitely. Set RINGCENTRAL_WEBHOOK_STRICT=false (env)
+  // during a subscription rotation if you need to temporarily fall
+  // through to log-and-accept.
   const expectedToken = process.env.RINGCENTRAL_WEBHOOK_TOKEN;
+  const strict = (process.env.RINGCENTRAL_WEBHOOK_STRICT ?? "true").toLowerCase() !== "false";
   const incomingToken = req.headers["verification-token"];
-  if (expectedToken && incomingToken && incomingToken !== expectedToken) {
-    return res.status(401).json({ error: "Invalid verification token" });
+  if (expectedToken) {
+    if (!incomingToken || incomingToken !== expectedToken) {
+      console.warn("RingCentral webhook: token mismatch", {
+        strict,
+        hasHeader: !!incomingToken,
+        expectedPrefix: expectedToken.slice(0, 6),
+      });
+      if (strict) {
+        return res.status(401).json({ error: "Invalid verification token" });
+      }
+    }
   }
 
   try {

@@ -170,7 +170,7 @@ async function syncMailbox(
   mailboxEmail: string,
   ownerUserId: string | undefined,
   accessToken: string,
-): Promise<{ synced: number; matched: number }> {
+): Promise<{ synced: number; matched: number; failed: number }> {
   const now = new Date().toISOString();
   const twoWeeksLater = new Date(Date.now() + 14 * 86_400_000).toISOString();
 
@@ -188,6 +188,7 @@ async function syncMailbox(
 
   let synced = 0;
   let matched = 0;
+  let failed = 0;
 
   for (const event of events) {
     const subject = event.subject || "";
@@ -243,6 +244,7 @@ async function syncMailbox(
 
     if (taskErr || !taskData) {
       logger.warn("Failed to insert task", { error: taskErr?.message, subject });
+      failed++;
       continue;
     }
     synced++;
@@ -258,7 +260,7 @@ async function syncMailbox(
     }
   }
 
-  return { synced, matched };
+  return { synced, matched, failed };
 }
 
 // Wraps the shared multi-column matcher (email / personal_email /
