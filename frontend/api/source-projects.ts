@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 
+// Bumped 2026-05-08 to force Vercel to rebuild this serverless function.
+// Production was returning 404 even though the file was on main; build
+// log didn't surface a per-function error. Touching the file to invalidate
+// any stale cache and confirm the deploy actually picks it up.
+
 /**
  * POST /api/source-projects
  *
