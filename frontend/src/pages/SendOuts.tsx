@@ -12,9 +12,10 @@ import {
 } from '@dnd-kit/core';
 import { useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
-import { useSendOuts, type SendOutRow } from '@/lib/queries/send-outs';
+import { useSendOuts, type SendOutRow, fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { CANONICAL_PIPELINE, stageToCanonical, nextStage, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
+import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { KpiTiles } from '@/components/send-outs/KpiTiles';
 import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBar';
 import { StageTable } from '@/components/send-outs/StageTable';
@@ -75,6 +76,13 @@ export default function SendOuts() {
   const [pendingWithdrawal, setPendingWithdrawal] = useState<{
     row: SendOutRow; source: string;
   } | null>(null);
+  // When set, a move into pitch / send out / submitted is pending the
+  // notes dialog. initialNote carries forward whatever the recruiter
+  // typed at the previous stage so they can edit instead of re-type.
+  const [pendingNotedMove, setPendingNotedMove] = useState<{
+    row: SendOutRow; target: CanonicalStage; source: string; initialNote: string | null;
+  } | null>(null);
+  const [savingNotedMove, setSavingNotedMove] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -161,10 +169,19 @@ export default function SendOuts() {
     await commitMove(row, nextK, 'advance');
   };
 
-  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string, withdrawnReason?: string) => {
+  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string, withdrawnReason?: string, note?: string) => {
     // Withdrawn requires a reason — defer the move until the dialog returns.
     if (target === 'withdrawn' && !withdrawnReason) {
       setPendingWithdrawal({ row, source });
+      return;
+    }
+    // Pitch / send out / submitted captures a stage-move note and
+    // pre-fills with the prior pitch note so it carries through. We
+    // only intercept on the FIRST call (note === undefined); the
+    // dialog confirm path passes `note` and skips this branch.
+    if (note === undefined && (target === 'pitched' || target === 'ready_to_send' || target === 'submitted')) {
+      const prior = target === 'pitched' ? null : await fetchLatestStageMoveNote(row.id);
+      setPendingNotedMove({ row, target, source, initialNote: prior });
       return;
     }
     // Optimistic patch — react-query cache update.
@@ -180,6 +197,7 @@ export default function SendOuts() {
       entityId: row.candidate?.id ?? null,
       entityType: 'send_out',
       withdrawnReason: withdrawnReason ?? null,
+      note: note ?? null,
     });
     if (!res.ok) {
       // Roll back.
@@ -367,6 +385,34 @@ export default function SendOuts() {
           const { row, source } = pendingWithdrawal;
           setPendingWithdrawal(null);
           await commitMove(row, 'withdrawn', source, reason);
+        }}
+      />
+
+      <SendOutNotesDialog
+        open={!!pendingNotedMove}
+        onOpenChange={(v) => { if (!v && !savingNotedMove) setPendingNotedMove(null); }}
+        candidateName={pendingNotedMove?.row.candidate?.full_name ?? null}
+        jobTitle={pendingNotedMove?.row.job?.title ?? null}
+        saving={savingNotedMove}
+        title={
+          pendingNotedMove?.target === 'submitted'
+            ? 'Send to Client'
+            : pendingNotedMove?.target === 'pitched'
+              ? 'Move to Pitch'
+              : 'Move to Send Out'
+        }
+        confirmLabel={pendingNotedMove?.target === 'submitted' ? 'Save & Send' : 'Save & Move'}
+        initialNote={pendingNotedMove?.initialNote}
+        onConfirm={async (note) => {
+          if (!pendingNotedMove) return;
+          const { row, target, source } = pendingNotedMove;
+          setSavingNotedMove(true);
+          try {
+            await commitMove(row, target, source, undefined, note);
+          } finally {
+            setSavingNotedMove(false);
+            setPendingNotedMove(null);
+          }
         }}
       />
 

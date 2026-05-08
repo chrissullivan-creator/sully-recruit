@@ -30,6 +30,10 @@ export function SendOutNotesDialog({
   title = 'Add notes for this Send Out',
   /** What action label to show on the primary button. */
   confirmLabel = 'Save & Move',
+  /** Pre-fill the textarea with prior notes (e.g. carry-through from
+   *  a pitch into the subsequent send out so the recruiter can edit
+   *  rather than re-type). */
+  initialNote,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -39,13 +43,16 @@ export function SendOutNotesDialog({
   saving?: boolean;
   title?: string;
   confirmLabel?: string;
+  initialNote?: string | null;
 }) {
   const [note, setNote] = useState('');
 
-  // Reset on open so a previous note doesn't bleed into the next move.
+  // Re-seed when the dialog opens. If we were handed prior notes
+  // (e.g. carry-through from pitch -> send out), pre-fill them so
+  // the recruiter edits rather than re-types.
   useEffect(() => {
-    if (open) setNote('');
-  }, [open]);
+    if (open) setNote(initialNote ?? '');
+  }, [open, initialNote]);
 
   const subject =
     candidateName && jobTitle

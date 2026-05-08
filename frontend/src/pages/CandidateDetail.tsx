@@ -31,6 +31,7 @@ import {
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
+import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -333,6 +334,12 @@ const CandidateDetail = () => {
   const [selectedJobForSendOut, setSelectedJobForSendOut] = useState<string>('');
   const [savingSendOut, setSavingSendOut] = useState(false);
   const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
+  // When set, the dialog is collecting a note for a stage move on
+  // an existing send_out. Distinct from the "add to job" flow which
+  // also uses sendOutNotesOpen but creates a fresh send_out.
+  const [pendingStageMove, setPendingStageMove] = useState<{
+    sendOutId: string; target: CanonicalStage; initialNote: string | null;
+  } | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
 
@@ -521,10 +528,7 @@ const CandidateDetail = () => {
     }
   };
 
-  const handleUpdateStage = async (sendOutId: string, newStage: string) => {
-    // Canonical pipeline keys: pitch | ready_to_send | submitted | interview |
-    // offer | placed | withdrawn. Map any legacy values that may still arrive.
-    const canonical = stageToCanonical(newStage) ?? (newStage as CanonicalStage);
+  const persistStageUpdate = async (sendOutId: string, canonical: CanonicalStage, note?: string) => {
     const updates: any = { stage: canonical, updated_at: new Date().toISOString() };
     if (canonical === 'submitted') updates.sent_to_client_at = new Date().toISOString();
     if (canonical === 'interview') updates.interview_at = new Date().toISOString();
@@ -538,6 +542,21 @@ const CandidateDetail = () => {
       .select('id, candidate_id, contact_id, job_id, recruiter_id, interview_at')
       .single();
     if (error) { toast.error('Failed to update stage'); return; }
+
+    // Persist the stage-move note (same shape as moveStage uses) so it
+    // shows up in the activity feed and is available as the pre-fill
+    // when the candidate moves to the next stage.
+    const trimmed = (note ?? '').trim();
+    if (trimmed) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('notes').insert({
+        entity_type: 'send_out',
+        entity_id: sendOutId,
+        note: trimmed,
+        created_by: user?.id ?? null,
+        note_source: 'stage_move',
+      } as any);
+    }
 
     if (canonical === 'interview' && updatedSendOut) {
       await ensureInterviewArtifacts({
@@ -555,6 +574,19 @@ const CandidateDetail = () => {
     queryClient.invalidateQueries({ queryKey: ['candidate', id] });
     queryClient.invalidateQueries({ queryKey: ['tasks'] });
     toast.success(`Stage updated to ${canonicalConfig(canonical).label}`);
+  };
+
+  const handleUpdateStage = async (sendOutId: string, newStage: string) => {
+    const canonical = stageToCanonical(newStage) ?? (newStage as CanonicalStage);
+    // Pitch / send out / submitted captures a stage-move note, with
+    // the prior pitch note pre-filled so it carries through.
+    if (canonical === 'pitched' || canonical === 'ready_to_send' || canonical === 'submitted') {
+      const prior = canonical === 'pitched' ? null : await fetchLatestStageMoveNote(sendOutId);
+      setPendingStageMove({ sendOutId, target: canonical, initialNote: prior });
+      setSendOutNotesOpen(true);
+      return;
+    }
+    await persistStageUpdate(sendOutId, canonical);
   };
 
   const handleReject = async (sendOutId: string) => {
@@ -2390,13 +2422,47 @@ const CandidateDetail = () => {
 
       <SendOutNotesDialog
         open={sendOutNotesOpen}
-        onOpenChange={(v) => { if (!savingSendOut) setSendOutNotesOpen(v); }}
-        onConfirm={(note) => performAddSendOut(note)}
+        onOpenChange={(v) => {
+          if (!savingSendOut) {
+            setSendOutNotesOpen(v);
+            if (!v) setPendingStageMove(null);
+          }
+        }}
+        onConfirm={async (note) => {
+          // Two paths share this dialog: a fresh "add to pipeline"
+          // (creates a new send_out) vs a stage move on an existing
+          // one. pendingStageMove distinguishes them.
+          if (pendingStageMove) {
+            const { sendOutId, target } = pendingStageMove;
+            setPendingStageMove(null);
+            setSendOutNotesOpen(false);
+            await persistStageUpdate(sendOutId, target, note);
+            return;
+          }
+          await performAddSendOut(note);
+        }}
         candidateName={fullName || null}
-        jobTitle={jobs.find((j: any) => j.id === selectedJobForSendOut)?.title ?? null}
+        jobTitle={
+          pendingStageMove
+            ? null
+            : (jobs.find((j: any) => j.id === selectedJobForSendOut)?.title ?? null)
+        }
         saving={savingSendOut}
-        title="Add to Send Out"
-        confirmLabel="Add to pipeline"
+        title={
+          pendingStageMove
+            ? (pendingStageMove.target === 'submitted'
+                ? 'Send to Client'
+                : pendingStageMove.target === 'pitched'
+                  ? 'Move to Pitch'
+                  : 'Move to Send Out')
+            : 'Add to Send Out'
+        }
+        confirmLabel={
+          pendingStageMove
+            ? (pendingStageMove.target === 'submitted' ? 'Save & Send' : 'Save & Move')
+            : 'Add to pipeline'
+        }
+        initialNote={pendingStageMove?.initialNote ?? null}
       />
 
       {candidate && (
