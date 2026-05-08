@@ -96,6 +96,7 @@
     "typescript": "^5.8.3",
     "vaul": "^0.9.9",
     "vite": "^5.4.19",
+    "word-extractor": "^1.0.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {

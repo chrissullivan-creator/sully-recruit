@@ -181,6 +181,20 @@ export async function extractResumeText(
     }
   }
 
+  if (lower.endsWith(".doc")) {
+    // Legacy binary Word format — mammoth doesn't read it; word-extractor
+    // parses the OLE compound binary (pure JS, no native deps).
+    try {
+      const mod: any = await import("word-extractor");
+      const Extractor = mod.default ?? mod;
+      const extractor = new Extractor();
+      const doc = await extractor.extract(buffer);
+      return (doc.getBody() || "").trim().slice(0, 16_000);
+    } catch {
+      return "";
+    }
+  }
+
   if (lower.endsWith(".pdf")) {
     try {
       const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
