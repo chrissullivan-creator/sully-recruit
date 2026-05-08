@@ -120,10 +120,16 @@ export const backfillLinkedinMessages = schedules.task({
 
     const supabase = getSupabaseAdmin();
 
+    // Filter by account_type — each recruiter has multiple rows
+    // (email / linkedin_recruiter / phone / sms) sharing the same
+    // email_address. Without this, .maybeSingle() returns null when
+    // it sees more than one row and the task bails with the
+    // misleading "no Unipile account" warning.
     const { data: account } = await supabase
       .from("integration_accounts")
       .select("id, email_address, unipile_account_id, owner_user_id, account_type")
       .eq("email_address", accountEmail)
+      .eq("account_type", "linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .maybeSingle();
