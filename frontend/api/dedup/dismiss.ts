@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../lib/auth";
 
 /**
  * POST /api/dedup/dismiss
@@ -13,26 +14,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const authHeader = req.headers.authorization;
+  if (!(await requireAuth(req, res))) return;
+
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-
   if (!serviceKey || !supabaseUrl) {
     return res.status(500).json({ error: "Server misconfigured" });
-  }
-
-  const token = authHeader?.replace("Bearer ", "");
-
-  if (token === serviceKey) {
-    // Service key auth — allowed
-  } else if (token) {
-    const supabase = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || serviceKey);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-  } else {
-    return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {

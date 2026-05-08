@@ -35,11 +35,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) return;
+        if (!supabaseUrl || !serviceKey) {
+          console.warn("track/open: Supabase credentials not configured — skipping count");
+          return;
+        }
         const supabase = createClient(supabaseUrl, serviceKey);
-        await supabase.rpc("increment_step_log_open", { p_id: id });
-      } catch {
-        // Swallow — the pixel response must never block on tracking.
+        const { error } = await supabase.rpc("increment_step_log_open", { p_id: id });
+        if (error) {
+          // Visibility — open counts can drop silently if this RPC keeps failing.
+          // Pixel response is already in flight so the user impact is zero.
+          console.error("track/open: increment_step_log_open RPC failed", {
+            id,
+            code: (error as any).code,
+            message: error.message,
+          });
+        }
+      } catch (err: any) {
+        console.error("track/open: unexpected error", { id, message: err?.message });
       }
     })();
   }
