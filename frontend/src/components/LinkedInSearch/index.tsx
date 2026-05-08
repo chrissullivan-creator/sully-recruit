@@ -327,8 +327,6 @@ export default function LinkedInSearch() {
         sequence_id: enrollSeqId,
         candidate_id: candidateId,
         status: 'active',
-        current_step_order: 0,
-        next_step_at: new Date().toISOString(),
         enrolled_by: userId,
       });
       if (enrollErr) throw enrollErr;

@@ -337,7 +337,7 @@ Sentiment: ${candidate.last_sequence_sentiment ?? "—"}`);
   // 9. Sequence enrollments
   const { data: enrollments } = await supabase
     .from("sequence_enrollments")
-    .select("status, enrolled_at, stopped_reason, sequences(name, channel)")
+    .select("status, enrolled_at, stop_reason, sequences(name, channel)")
     .eq("candidate_id", candidateId)
     .order("enrolled_at", { ascending: false })
     .limit(5);
@@ -345,7 +345,7 @@ Sentiment: ${candidate.last_sequence_sentiment ?? "—"}`);
   if (enrollments?.length) {
     const enrLines = enrollments.map(
       (e: any) =>
-        `- ${(e.sequences as any)?.name ?? "?"} (${(e.sequences as any)?.channel ?? "?"}) — ${e.status}${e.stopped_reason ? ` (${e.stopped_reason})` : ""} — Enrolled ${e.enrolled_at}`,
+        `- ${(e.sequences as any)?.name ?? "?"} (${(e.sequences as any)?.channel ?? "?"}) — ${e.status}${e.stop_reason ? ` (${e.stop_reason})` : ""} — Enrolled ${e.enrolled_at}`,
     );
     parts.push(`SEQUENCE HISTORY:\n${enrLines.join("\n")}`);
   }
