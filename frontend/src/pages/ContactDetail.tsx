@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { invalidatePersonScope, invalidateNoteScope, invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
+import { PersonRolesMenu } from '@/components/candidates/PersonRolesMenu';
 
 /* ------------------------------------------------------------------ */
 /*  Inline hooks                                                       */
@@ -563,6 +564,14 @@ const ContactDetail = () => {
           >
             <Play className="h-4 w-4" />
           </button>
+          {id && (
+            <PersonRolesMenu
+              personId={id}
+              roles={(contact as any)?.roles}
+              currentType="client"
+              variant="ghost"
+            />
+          )}
           <button
             onClick={() => setConfirmDelete(true)}
             className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
