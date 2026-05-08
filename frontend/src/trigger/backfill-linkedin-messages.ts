@@ -175,8 +175,6 @@ export const backfillLinkedinMessages = schedules.task({
         logger.warn("inbox chats fetch failed", { inboxId, error: err.message });
       }
     }
-    const chatsData = { items: chats };
-    const chats = chatsData.items ?? chatsData.chats ?? chatsData.data ?? [];
 
     logger.info(`Fetched ${chats.length} chats for ${accountEmail}`);
 
