@@ -197,6 +197,13 @@ export const sequenceEnrollmentInit = task({
           });
           pendingConnection++;
         } else {
+          // Floor the cursor at NOW so resumed sequences (or any
+          // re-pace where the last sent step was long ago) don't
+          // schedule overdue steps that would all fire at once on
+          // the next sweep tick. If prevSendTime is already in the
+          // future, this is a no-op.
+          if (prevSendTime.getTime() < Date.now()) prevSendTime = new Date();
+
           // Calculate send time using business-hours model, anchored to the
           // previous step's send time (cumulative).
           const scheduledAt = await calculateSendTime(supabase, {
