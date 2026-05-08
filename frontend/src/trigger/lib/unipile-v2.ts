@@ -6,9 +6,10 @@
  * Key v2 facts (from
  *   https://developer.unipile.com/v2.0/docs/migration-linkedin-api ):
  *   - account_id is now a path segment, not a query/body param.
- *   - Each LinkedIn product has its own prefix:
- *       Classic:        /api/v2/{account_id}/linkedin/...
- *       Recruiter:      /api/v2/{account_id}/linkedin/recruiter/...
+ *   - All LinkedIn endpoints (chats, users, recruiter ops) sit under
+ *     the /linkedin/ prefix. Top-level /chats was retired.
+ *       Classic chats:      /api/v2/{account_id}/linkedin/chats[/{id}[/messages]]
+ *       Recruiter-only ops: /api/v2/{account_id}/linkedin/recruiter/...
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */

@@ -9,8 +9,8 @@ import { createClient } from "@supabase/supabase-js";
  *
  *   v2 paths (account_id moves into the URL):
  *     GET /api/v2/{account_id}/linkedin/users/{slug-or-provider-id}
- *     GET /api/v2/{account_id}/chats/{chat_id}
- *     GET /api/v2/{account_id}/chats/{chat_id}/attendees
+ *     GET /api/v2/{account_id}/linkedin/chats/{chat_id}
+ *     GET /api/v2/{account_id}/linkedin/chats/{chat_id}/attendees
  *
  * Resolution order (first hit wins):
  *   1. unipile_id           — direct user fetch
@@ -110,11 +110,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Try resolving via chat attendees — used when the inbound message has no
     // LinkedIn URL (common: backfill-populated LinkedIn threads store only the
     // Unipile provider_id, not a URL).
-    //   v2: /chats/{id} and /chats/{id}/attendees (account_id in path)
+    //   v2: /linkedin/chats/{id} and /linkedin/chats/{id}/attendees (account_id in path)
     if (!profileData && chat_id) {
       let attendees: any[] = [];
       const chatResp = await fetch(
-        `${v2Base}/${acctSeg}/chats/${encodeURIComponent(chat_id)}`,
+        `${v2Base}/${acctSeg}/linkedin/chats/${encodeURIComponent(chat_id)}`,
         { headers: uniHeaders },
       );
       if (chatResp.ok) {
@@ -123,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (attendees.length === 0) {
         const attResp = await fetch(
-          `${v2Base}/${acctSeg}/chats/${encodeURIComponent(chat_id)}/attendees`,
+          `${v2Base}/${acctSeg}/linkedin/chats/${encodeURIComponent(chat_id)}/attendees`,
           { headers: uniHeaders },
         );
         if (attResp.ok) {

@@ -47,13 +47,13 @@ export const syncConversations = schedules.task({
       );
       try {
         // v2 paths:
-        //   GET /api/v2/{account_id}/chats?limit&sort
+        //   GET /api/v2/{account_id}/linkedin/chats?limit&sort
         let data: any;
         try {
           data = await unipileFetch(
             supabase,
             account.unipile_account_id,
-            `chats`,
+            `linkedin/chats`,
             {
               method: "GET",
               query: { limit: BATCH_SIZE, sort: "latest" },
@@ -129,13 +129,13 @@ export const syncConversations = schedules.task({
           }
 
           // Fetch latest messages for this conversation.
-          // v2 path: GET /api/v2/{account_id}/chats/{chat_id}/messages
+          // v2 path: GET /api/v2/{account_id}/linkedin/chats/{chat_id}/messages
           let msgData: any = null;
           try {
             msgData = await unipileFetch(
               supabase,
               account.unipile_account_id,
-              `chats/${encodeURIComponent(convId)}/messages`,
+              `linkedin/chats/${encodeURIComponent(convId)}/messages`,
               {
                 method: "GET",
                 query: { limit: 10 },

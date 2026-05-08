@@ -522,7 +522,7 @@ export async function sendLinkedIn(
   }
 
   // ── Regular message + InMail via v2 ─────────────────────────────
-  // v2 path: POST /api/v2/{account_id}/chats
+  // v2 path: POST /api/v2/{account_id}/linkedin/chats
   // Body: { attendees_ids: [providerId], text, message_type? }
   //   - Classic message:  no message_type
   //   - Recruiter InMail: message_type = "INMAIL"
@@ -581,7 +581,7 @@ export async function sendLinkedIn(
         const data: any = await unipileFetch(
           supabase,
           resolvedAccountId,
-          `chats`,
+          `linkedin/chats`,
           { method: "POST", body: fd as any },
         );
         if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
@@ -609,7 +609,7 @@ export async function sendLinkedIn(
     const data: any = await unipileFetch(
       supabase,
       resolvedAccountId,
-      `chats`,
+      `linkedin/chats`,
       {
         method: "POST",
         body: JSON.stringify(sendPayload),
