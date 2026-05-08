@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const matches: any[] = [];
 
-  const selectFields = "id, first_name, last_name, full_name, email, phone, linkedin_url";
+  const selectFields = "id, first_name, last_name, full_name, email, work_email, personal_email, secondary_emails, phone, linkedin_url";
   const candidateExtra = ", current_title, current_company";
   const contactExtra = ", title, company_name";
 
@@ -41,9 +41,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const searchTable = async (table: string, assignType: string) => {
     const sel = getSelect(table);
 
-    // Email match (strongest)
+    // Email match (strongest). Check every column we store addresses in:
+    // primary_email (alias `email`), work_email, personal_email, and the
+    // secondary_emails text[] array. Without this an existing person who
+    // only has the typed work/personal column populated would slip past
+    // dedup detection.
     if (email) {
-      const { data } = await supabase.from(table).select(sel).ilike("email", email).limit(5);
+      const lc = String(email).toLowerCase();
+      const { data } = await supabase
+        .from(table)
+        .select(sel)
+        .or(
+          `email.ilike.${lc},work_email.ilike.${lc},personal_email.ilike.${lc},secondary_emails.cs.{${lc}}`,
+        )
+        .limit(5);
       if (data) matches.push(...data.map((d: any) => ({ ...d, type: assignType })));
     }
 

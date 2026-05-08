@@ -161,7 +161,14 @@ const Candidates = () => {
 
   const filteredCandidates = useMemo(() => {
     let list = candidates.filter((c) => {
-      // Boolean search across key fields
+      // Boolean search across key fields. Email lookups need to cover
+      // every spot we store an address — primary_email (alias `email`),
+      // work_email, personal_email, and the secondary_emails array —
+      // otherwise an exact-email query misses rows that only have the
+      // typed work/personal column populated.
+      const secondary: string[] = Array.isArray((c as any).secondary_emails)
+        ? (c as any).secondary_emails
+        : [];
       const searchFields = [
         c.full_name ?? '',
         c.first_name ?? '',
@@ -169,6 +176,9 @@ const Candidates = () => {
         c.current_company ?? '',
         c.current_title ?? '',
         c.email ?? '',
+        (c as any).work_email ?? '',
+        (c as any).personal_email ?? '',
+        ...secondary,
         `${c.first_name ?? ''} ${c.last_name ?? ''}`,
       ];
       const matchesSearch = booleanMatch(searchQuery, searchFields);
