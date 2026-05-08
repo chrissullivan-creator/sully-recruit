@@ -94,14 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // and the action "hiringProjectList" / "pipelineCandidates" /
     // "hiringProject" (createrecruiterhiringproject), so the canonical
     // path is /linkedin/recruiter/hiring-projects with pipeline-
-    // candidates under each project.
-    //
-    // URL shape: Unipile MCP `get_hiring_projects` doesn't take an
-    // account_id arg — strong hint that v2 hiring-projects is
-    // top-level (account_id as query param), matching the chats
-    // family. We try the top-level shape first, then path-segmented
-    // as a fallback in case some Unipile builds still nest under
-    // /{account_id}/.
+    // candidates under each project. We probe a few candidate paths
+    // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
       const candidatePaths = [
@@ -110,9 +104,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `linkedin/recruiter/projects`,
       ];
       const tries: Array<{ url: string; status: number; ok: boolean; bodyPrefix?: string }> = [];
-      // Per Unipile v2 docs every endpoint puts account_id in the path;
-      // we keep a top-level fallback for builds that surface hiring
-      // projects under a different shape.
+      // Per Unipile v2 docs every endpoint puts account_id in the path.
+      // Top-level (?account_id=…) kept as a fallback for builds where
+      // hiring projects surface under a different shape.
       for (const path of candidatePaths) {
         const variants = [
           `${v2Base}/${acct}/${path}?limit=100&offset=${offset}`,
