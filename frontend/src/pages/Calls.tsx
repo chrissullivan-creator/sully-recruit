@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { invalidateNoteScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 import {
   Phone, PhoneIncoming, PhoneOutgoing, Search, Clock,
   FileText, Plus, UserCheck, User, Users, Loader2,
@@ -161,6 +162,20 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
             .update({ owner_user_id: user.id } as any)
             .eq('id', matchResult.entity_id);
           if (ownerErr) console.warn('Owner assign failed:', ownerErr.message);
+        }
+
+        // Fire-and-forget Joe intel extraction on manually-typed notes,
+        // same fields process-call-deepgram populates for transcribed
+        // calls. Only worth running when there's enough text to extract
+        // signal from (the task itself short-circuits below ~80 chars).
+        if (isCandidate && (callData as any)?.id && notes.trim().length >= 80) {
+          authHeaders().then((headers) =>
+            fetch('/api/trigger-extract-call-intel', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ call_log_id: (callData as any).id }),
+            }),
+          ).catch(() => {});
         }
       }
 
@@ -369,6 +384,17 @@ function LinkCallDialog({
           .update({ owner_user_id: (call as any).owner_id } as any)
           .eq('id', entityId);
         if (ownerErr) console.warn('Owner assign failed:', ownerErr.message);
+      }
+      // Same fire-and-forget intel extraction as the new-call path —
+      // a freshly-linked call gets the same Joe pass on its notes.
+      if (isCandidate && (call.notes ?? '').trim().length >= 80) {
+        authHeaders().then((headers) =>
+          fetch('/api/trigger-extract-call-intel', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ call_log_id: call.id }),
+          }),
+        ).catch(() => {});
       }
       queryClient.invalidateQueries({ queryKey: ['call_logs'] });
       invalidateNoteScope(queryClient);
