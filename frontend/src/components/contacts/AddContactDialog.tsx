@@ -37,6 +37,12 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const linkedinUrl = form.linkedin_url.trim() || null;
       const { data: inserted, error } = await supabase.from('people').insert({
+        // roles[] is the source of truth — the sync_people_type_with_roles
+        // trigger overrides `type` from roles[]. Without this explicit
+        // roles[], the column default `['candidate']` kicks in and the
+        // trigger flips type back to 'candidate', so the contact ends up
+        // mis-categorised in the candidates list.
+        roles: ['client'],
         type: 'client',
         first_name: form.first_name.trim() || null,
         last_name: form.last_name.trim() || null,

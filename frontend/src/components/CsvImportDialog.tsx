@@ -189,6 +189,11 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
             // Build payload: only include fields with actual values from CSV
             // so we don't stomp existing enriched data with empty strings
             const payload: Record<string, any> = {
+              // roles[] is the source of truth — sync_people_type_with_roles
+              // trigger derives `type` from it. Match on insert so the
+              // trigger doesn't flip us. (See AddContactDialog for the
+              // long version of the same comment.)
+              roles: ['candidate'],
               type: 'candidate',
               first_name: c.first_name || undefined,
               last_name: c.last_name || undefined,
@@ -258,6 +263,7 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         const buildRow = (r: ParsedResult) => {
           const c = r.mapped as any;
           const row: Record<string, any> = {
+            roles: ['client'],
             type: 'client',
             owner_user_id: user.id,
             first_name: c.first_name || null,
