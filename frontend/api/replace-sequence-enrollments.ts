@@ -66,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Cancel pending step_logs (scheduled + pending_connection) so the
     // next enrollment-init run starts from a clean slate. Keep history
-    // (sent / skipped / failed) intact.
+    // (sent / skipped / failed) intact — init will skip those actions.
     const { error: cancelErr } = await supabase
       .from("sequence_step_logs")
       .update({ status: "cancelled", skip_reason: "repaced", updated_at: new Date().toISOString() } as any)
@@ -75,14 +75,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (cancelErr) throw cancelErr;
 
-    // Reset enrolled_at to NOW so cumulative delays restart from this
-    // moment. Without this the engine would re-pace using the original
-    // enrolled_at and step 1 (delay 0) would fire immediately.
-    const nowIso = new Date().toISOString();
-    await supabase
-      .from("sequence_enrollments")
-      .update({ enrolled_at: nowIso } as any)
-      .in("id", enrollmentIds);
+    // Don't reset enrolled_at — init now anchors unsent steps to the
+    // last sent step's sent_at. Resetting would make step 1 fire again
+    // immediately for anyone whose original step 1 already shipped.
 
     // Hand each enrollment to sequence-enrollment-init.
     const handles: string[] = [];

@@ -86,6 +86,23 @@ export const sequenceEnrollmentInit = task({
     let pendingConnection = 0;
     let preSkipped = 0;
 
+    // Idempotency for re-pace: load every non-cancelled step_log this
+    // enrollment already has. Cancelled logs were cleared by the
+    // re-pace path and are eligible for re-scheduling. Anything else
+    // (sent / skipped / failed / pending_connection that's still live)
+    // is terminal — we must not insert a duplicate. Without this gate,
+    // re-pacing an enrollment that's already partway through fires
+    // step 1 again immediately, double-mailing the recipient.
+    const { data: existingLogs } = await supabase
+      .from("sequence_step_logs")
+      .select("action_id, status, sent_at, scheduled_at")
+      .eq("enrollment_id", payload.enrollmentId)
+      .not("status", "eq", "cancelled");
+    const existingByAction = new Map<string, { status: string; sent_at: string | null; scheduled_at: string | null }>();
+    for (const log of (existingLogs || []) as any[]) {
+      if (log.action_id) existingByAction.set(log.action_id, log);
+    }
+
     // Pre-fetch the recipient's contact fields once so we can pre-skip
     // steps the recipient can't receive (no email → skip email, no
     // linkedin_url → skip every linkedin_*) without round-tripping at
@@ -128,6 +145,22 @@ export const sequenceEnrollmentInit = task({
     for (const node of orderedNodes) {
       const actions = (node as any).sequence_actions || [];
       for (const action of actions) {
+        // Skip actions that already have a non-cancelled log. Advance
+        // the cursor to whichever timestamp anchors the next step:
+        // sent_at if we shipped it, scheduled_at if it's still queued
+        // (pending_connection waiting on the webhook).
+        const existing = existingByAction.get(action.id);
+        if (existing) {
+          if (existing.status === "sent" && existing.sent_at) {
+            prevSendTime = new Date(existing.sent_at);
+          } else if (existing.status === "scheduled" && existing.scheduled_at) {
+            prevSendTime = new Date(existing.scheduled_at);
+          }
+          // skipped / failed / pending_connection don't advance — same
+          // as the pre-skip semantics for the live insert path.
+          continue;
+        }
+
         // Pre-skip if the recipient lacks the required field for this
         // channel. Logged as 'skipped' with no scheduled_at so it shows
         // up in step history but never fires. Doesn't advance the
