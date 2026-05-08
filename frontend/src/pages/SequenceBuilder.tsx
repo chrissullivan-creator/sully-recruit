@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -22,6 +22,44 @@ function toTimeInput(value: unknown, fallback: string) {
   return fallback;
 }
 
+// Fingerprint of just the fields that affect *scheduling*. Message
+// text, subject lines, attachments, sender, name, jobs, etc. are
+// excluded — those apply at send time without needing to rebuild the
+// queued step logs. We use this to gate the re-pace prompt: if nothing
+// structural changed, skip asking the recruiter to re-pace.
+function structuralFingerprint(
+  setup: SequenceSetupData,
+  branches: SequenceBranch[],
+): string {
+  const window = [
+    setup.sendWindowStart,
+    setup.sendWindowEnd,
+    setup.timezone,
+    setup.weekdaysOnly ? "1" : "0",
+  ].join("|");
+  const flow = branches
+    .map((b) =>
+      `${b.id}:${b.steps
+        .map((s) =>
+          `${s.branchStepOrder}:${s.actions
+            .map((a) =>
+              [
+                a.channel,
+                a.baseDelayHours,
+                a.delayIntervalMinutes,
+                a.jiggleMinutes,
+                a.postConnectionHardcodedHours,
+                a.respectSendWindow ? "1" : "0",
+              ].join(","),
+            )
+            .join(";")}`,
+        )
+        .join("|")}`,
+    )
+    .join("/");
+  return `${window}::${flow}`;
+}
+
 export default function SequenceBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -43,6 +81,11 @@ export default function SequenceBuilder() {
 
   const [branches, setBranches] = useState<SequenceBranch[]>(createEmptyBranches());
   const [saving, setSaving] = useState(false);
+  // Snapshot of the structural fingerprint at last load/save. We
+  // compare against this before prompting to re-pace — text-only or
+  // metadata edits skip the prompt entirely since they don't need
+  // queued step logs to be rebuilt.
+  const lastStructuralRef = useRef<string | null>(null);
   const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
   // Live preview: merge-vars dict for whichever recipient the
   // recruiter picked from the "Preview as" selector. null = preview off.
@@ -101,7 +144,23 @@ export default function SequenceBuilder() {
         .eq("sequence_id", id);
 
       const nodeRows = ((nodes ?? []) as any[]).sort(compareSequenceNodes);
-      setBranches(hydrateBranchesFromNodes(nodeRows, []));
+      const loadedBranches = hydrateBranchesFromNodes(nodeRows, []);
+      setBranches(loadedBranches);
+      lastStructuralRef.current = structuralFingerprint(
+        {
+          name: seq.name || "",
+          jobId: seq.job_id || loadedJobIds[0] || null,
+          jobIds: loadedJobIds,
+          audienceType: seq.audience_type,
+          objective: seq.objective || "",
+          sendWindowStart: toTimeInput(seq.send_window_start, "09:00"),
+          sendWindowEnd: toTimeInput(seq.send_window_end, "18:00"),
+          timezone: seq.timezone || "America/New_York",
+          senderUserId: seq.sender_user_id || seq.created_by,
+          weekdaysOnly: seq.weekdays_only === true,
+        },
+        loadedBranches,
+      );
     })();
   }, [id]);
 
@@ -391,13 +450,23 @@ export default function SequenceBuilder() {
    */
   const repaceIfNeeded = useCallback(async (seqId: string) => {
     if (!user?.id) return;
+    // Skip if nothing about scheduling changed — message text,
+    // subject, attachments, sender, name, jobs etc. apply at send
+    // time and don't need queued step logs to be rebuilt.
+    const currentFp = structuralFingerprint(setup, branches);
+    if (lastStructuralRef.current !== null && currentFp === lastStructuralRef.current) {
+      return;
+    }
     const { count } = await supabase
       .from("sequence_enrollments")
       .select("id", { count: "exact", head: true })
       .eq("sequence_id", seqId)
       .eq("status", "active");
     const activeCount = count ?? 0;
-    if (activeCount === 0) return;
+    if (activeCount === 0) {
+      lastStructuralRef.current = currentFp;
+      return;
+    }
 
     const confirmed = window.confirm(
       `${activeCount} active enrollment${activeCount === 1 ? "" : "s"} on this sequence.\n\n` +
@@ -405,7 +474,12 @@ export default function SequenceBuilder() {
       `Pending sends will be cancelled and rebuilt from this moment forward. ` +
       `History (sent / skipped) is preserved.`,
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      // User declined — adopt the new fingerprint as baseline so we
+      // don't keep prompting on follow-up saves of the same diff.
+      lastStructuralRef.current = currentFp;
+      return;
+    }
 
     try {
       let resp = await fetch("/api/replace-sequence-enrollments", {
@@ -426,6 +500,7 @@ export default function SequenceBuilder() {
         );
         if (!force) {
           toast.message("Re-pace cancelled — imminent sends preserved");
+          lastStructuralRef.current = currentFp;
           return;
         }
         resp = await fetch("/api/replace-sequence-enrollments", {
@@ -438,10 +513,11 @@ export default function SequenceBuilder() {
 
       if (!resp.ok) throw new Error(result.error || `HTTP ${resp.status}`);
       toast.success(`Re-paced ${result.repaced} enrollment${result.repaced === 1 ? "" : "s"}`);
+      lastStructuralRef.current = currentFp;
     } catch (err: any) {
       toast.error(`Re-pace failed: ${err.message}`);
     }
-  }, [user]);
+  }, [user, setup, branches]);
 
   const handleSaveDraft = useCallback(async () => {
     const seqId = await saveSequence("draft");
