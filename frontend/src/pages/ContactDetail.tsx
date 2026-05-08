@@ -181,11 +181,17 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
 /*  Status helpers                                                     */
 /* ------------------------------------------------------------------ */
 
+// Aligned to the candidates_status_check constraint: new / reached_out / engaged.
+// Legacy values (active/inactive/client/lead) kept for backwards-compat with
+// rows written before the constraint tightened.
 const CONTACT_STATUSES: Record<string, { label: string; className: string }> = {
-  active:   { label: 'Active',   className: 'bg-success/10 text-success border-success/20' },
-  inactive: { label: 'Inactive', className: 'bg-muted text-muted-foreground border-border' },
-  client:   { label: 'Client',   className: 'bg-accent/15 text-accent border-accent/30' },
-  lead:     { label: 'Lead',     className: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+  new:         { label: 'New',         className: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+  reached_out: { label: 'Reached out', className: 'bg-warning/15 text-warning border-warning/20' },
+  engaged:     { label: 'Engaged',     className: 'bg-success/10 text-success border-success/20' },
+  active:      { label: 'Active',      className: 'bg-success/10 text-success border-success/20' },
+  inactive:    { label: 'Inactive',    className: 'bg-muted text-muted-foreground border-border' },
+  client:      { label: 'Client',      className: 'bg-accent/15 text-accent border-accent/30' },
+  lead:        { label: 'Lead',        className: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
 };
 
 const COMM_CHANNEL_LABELS: Record<string, string> = {
@@ -465,7 +471,7 @@ const ContactDetail = () => {
   const initials = `${contact.first_name?.[0] ?? ''}${contact.last_name?.[0] ?? ''}`;
   const fullName = contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim();
   const companyName = c.company_name || c.companies?.name || '';
-  const statusCfg = CONTACT_STATUSES[contact.status ?? ''] ?? CONTACT_STATUSES.active;
+  const statusCfg = CONTACT_STATUSES[contact.status ?? ''] ?? CONTACT_STATUSES.new;
 
   /* ---- sidebar filtering ---- */
 

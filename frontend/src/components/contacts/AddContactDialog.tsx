@@ -25,7 +25,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '',
     linkedin_url: '', title: '', department: '',
-    company_id: '', status: 'active',
+    company_id: '', status: 'new',
   });
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
@@ -71,7 +71,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         }).catch(() => {});
       }
 
-      setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'active' });
+      setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'new' });
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create contact');
@@ -129,8 +129,9 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
               <Select value={form.status} onValueChange={(v) => update('status', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="reached_out">Reached out</SelectItem>
+                  <SelectItem value="engaged">Engaged</SelectItem>
                 </SelectContent>
               </Select>
             </div>

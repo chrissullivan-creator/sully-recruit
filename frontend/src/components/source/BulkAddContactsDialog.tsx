@@ -189,7 +189,7 @@ export function BulkAddContactsDialog({ open, onOpenChange, applicants, project 
           company_name: companyName,
           linkedin_url: applicant.linkedin_url || null,
           avatar_url: applicant.profile_picture_url || null,
-          status: 'active',
+          status: 'new',
           roles: ['client'],                    // LinkedIn hiring project imports = clients/contacts
           is_stub: false,
           owner_user_id: userId,                // FIX: was owner_id
