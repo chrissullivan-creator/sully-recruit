@@ -220,7 +220,7 @@ export const processCallDeepgram = task({
           systemPrompt: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
 
 Return ONLY valid JSON in this exact shape:
-{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"work_authorization":null,"relocation_preference":null,"target_locations":null,"target_roles":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
 
 Field rules:
 - summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a transcript dump.
@@ -230,13 +230,17 @@ Field rules:
 - current_title / current_company: short strings, null if not stated.
 - current_base, current_bonus, target_base, target_bonus: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given (e.g. "160-170k"), return the midpoint as an integer (165000). If only a vague signal (e.g. "comfortable in the 200s"), return your best single-integer estimate. Null if not discussed at all.
 - fun_facts: hobbies, interests, personal details, family, connection points — anything to build rapport later. Null if nothing personal came up.
-- visa_status: e.g. "US Citizen", "H-1B", "Green Card", "F-1/OPT". Null if not discussed.
+- visa_status: long-form sponsorship signal. "US Citizen", "Green Card", "H-1B (sponsorship needed)", "F-1/OPT (transfer required)", etc. Null if not discussed.
+- work_authorization: short status string for the candidate's right to work — e.g. "Citizen", "GC", "H-1B", "F-1/OPT", "TN". Distinct from visa_status; this is the form-field summary, not the conversational detail. Null if not discussed.
+- relocation_preference: short string — "Open", "No", "NYC only", "Open to East Coast", "Open with relo package". Distilled from the conversation; the conversational details go in relo_details. Null if not discussed.
+- target_locations: short comma-separated list of cities or regions the candidate is targeting — "NYC, Chicago", "London", "Remote". Null if not discussed.
+- target_roles: short comma-separated list of role types they're targeting — "PM, Quant", "VP credit trading", "Recruiter Director". Null if not discussed.
 - where_interviewed: firms/companies they mentioned currently interviewing at (comma-separated or short prose). Null if not discussed.
 - where_submitted: firms/companies they mentioned being submitted to by other recruiters. Null if not discussed.
 - notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.
 - looking_to_do_next: what kind of role / function / firm-type they actually want next — concrete signal of direction, not a wishlist. 1–2 sentences. Null if not discussed.
 - dislikes_current_role: specific complaints about the current seat (manager, comp, scope, hours, products, culture, growth path). Verbatim or close to it where useful. Null if not discussed.
-- relo_details: more than just yes/no — willingness, family situation, blocked cities, preferred geos, timing. Null if not discussed.
+- relo_details: more than just yes/no — willingness, family situation, blocked cities, preferred geos, timing — the conversational detail behind relocation_preference. Null if not discussed.
 - job_move_explanations: short prose explaining why they made each prior job change (especially short stints / gaps / lateral moves). Helps clients pre-empt questions. Null if not discussed.`,
           userContent: `Transcript:\n${transcript.slice(0, 30000)}`,
           model: "claude-sonnet-4-20250514",
@@ -330,6 +334,10 @@ Field rules:
         if (intel.notes) updates.back_of_resume_notes = intel.notes;
         if (intel.fun_facts) updates.fun_facts = intel.fun_facts;
         if (intel.visa_status) updates.visa_status = intel.visa_status;
+        if (intel.work_authorization) updates.work_authorization = intel.work_authorization;
+        if (intel.relocation_preference) updates.relocation_preference = intel.relocation_preference;
+        if (intel.target_locations) updates.target_locations = intel.target_locations;
+        if (intel.target_roles) updates.target_roles = intel.target_roles;
         if (intel.where_interviewed) updates.where_interviewed = intel.where_interviewed;
         if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
         if (intel.notice_period) updates.notice_period = intel.notice_period;

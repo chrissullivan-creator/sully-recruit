@@ -23,7 +23,7 @@ interface Payload {
 const SYSTEM_PROMPT = `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from these notes a recruiter typed after a call. Finance-aware, no fluff, but be thorough enough to be useful.
 
 Return ONLY valid JSON in this exact shape:
-{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"work_authorization":null,"relocation_preference":null,"target_locations":null,"target_roles":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
 
 Field rules:
 - summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a notes dump.
@@ -33,12 +33,16 @@ Field rules:
 - current_title / current_company: short strings. Null if not stated.
 - current_base, current_bonus, target_base, target_bonus: single integer (annual USD, no commas, no symbol, no strings). Range → midpoint. Vague signal ("comfortable in the 200s") → best estimate. Null if not discussed at all.
 - fun_facts: hobbies, interests, family, connection points. Null if nothing personal came up.
-- visa_status: "US Citizen", "H-1B", "Green Card", "F-1/OPT", etc. Null if not discussed.
+- visa_status: long-form sponsorship signal. "US Citizen", "Green Card", "H-1B (sponsorship needed)", "F-1/OPT (transfer required)", etc. Null if not discussed.
+- work_authorization: short status string for the candidate's right to work — e.g. "Citizen", "GC", "H-1B", "F-1/OPT", "TN". Distinct from visa_status; this is the form-field summary, not the conversational detail. Null if not discussed.
+- relocation_preference: short string — "Open", "No", "NYC only", "Open to East Coast", "Open with relo package". Distilled from the conversation; the conversational details go in relo_details. Null if not discussed.
+- target_locations: short comma-separated list of cities or regions the candidate is targeting — "NYC, Chicago", "London", "Remote". Null if not discussed.
+- target_roles: short comma-separated list of role types they're targeting — "PM, Quant", "VP credit trading", "Recruiter Director". Null if not discussed.
 - where_interviewed / where_submitted: firms they're in process at / have been submitted to. Null if not discussed.
 - notice_period: "2 weeks", "30 days", "immediately". Null if not discussed.
 - looking_to_do_next: concrete career direction (function / firm-type / level). 1–2 sentences. Null if not discussed.
 - dislikes_current_role: specific complaints (manager, comp, scope, hours, growth). Verbatim where useful. Null if not discussed.
-- relo_details: willingness, family situation, blocked cities, timing. Null if not discussed.
+- relo_details: willingness, family situation, blocked cities, timing — the conversational detail behind relocation_preference. Null if not discussed.
 - job_move_explanations: why they made each prior job change (especially short stints / gaps / lateral moves). Null if not discussed.
 
 Recruiter notes are a higher signal-to-noise input than a raw transcript — when the recruiter wrote it, treat it as fact, not a thing to second-guess.`;
@@ -140,6 +144,10 @@ export const extractManualCallIntel = task({
     if (intel.notes) updates.back_of_resume_notes = intel.notes;
     if (intel.fun_facts) updates.fun_facts = intel.fun_facts;
     if (intel.visa_status) updates.visa_status = intel.visa_status;
+    if (intel.work_authorization) updates.work_authorization = intel.work_authorization;
+    if (intel.relocation_preference) updates.relocation_preference = intel.relocation_preference;
+    if (intel.target_locations) updates.target_locations = intel.target_locations;
+    if (intel.target_roles) updates.target_roles = intel.target_roles;
     if (intel.where_interviewed) updates.where_interviewed = intel.where_interviewed;
     if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
     if (intel.notice_period) updates.notice_period = intel.notice_period;
