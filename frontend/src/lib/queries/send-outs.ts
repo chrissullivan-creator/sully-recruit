@@ -77,3 +77,22 @@ export function lastTouchAt(row: SendOutRow): string | null {
   if (candidates.length === 0) return null;
   return candidates.sort().reverse()[0];
 }
+
+/**
+ * Most recent stage-move note for a send_out, used to pre-fill the
+ * notes dialog when the candidate is moved to a subsequent stage
+ * (e.g. pitch → send out). Returns null when nothing's been written.
+ */
+export async function fetchLatestStageMoveNote(sendOutId: string | null | undefined): Promise<string | null> {
+  if (!sendOutId) return null;
+  const { data } = await supabase
+    .from('notes')
+    .select('note')
+    .eq('entity_type', 'send_out')
+    .eq('entity_id', sendOutId)
+    .eq('note_source', 'stage_move')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as any)?.note ?? null;
+}

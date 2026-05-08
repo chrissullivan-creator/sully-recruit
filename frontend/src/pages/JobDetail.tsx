@@ -47,6 +47,7 @@ import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPELINE } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
+import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -385,7 +386,7 @@ const JobDetail = () => {
   };
   const [activeDrag, setActiveDrag] = useState<KanbanRow | null>(null);
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
-  const [pendingMove, setPendingMove] = useState<{ row: KanbanRow; target: CanonicalStage } | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ row: KanbanRow; target: CanonicalStage; initialNote?: string | null } | null>(null);
   const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
   const [savingMove, setSavingMove] = useState(false);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -492,12 +493,17 @@ const JobDetail = () => {
     const row = kanbanRows.find((r) => r.id === e.active.id);
     if (!row || stageToCanonical(row.pipeline_stage) === target) return;
 
-    // Moves into Send Out / Submitted pop the notes dialog so the
-    // recruiter can capture context (pitch angle, comp, why this fit)
-    // that follows the candidate into the activity feed. Other stages
-    // commit immediately.
-    if (target === 'ready_to_send' || target === 'submitted') {
-      setPendingMove({ row, target });
+    // Moves into Pitch / Send Out / Submitted pop the notes dialog so
+    // the recruiter can capture context (pitch angle, comp, why this
+    // fit) that follows the candidate into the activity feed. The pitch
+    // note is then carried forward into the Send Out dialog as the
+    // initial value, so the recruiter edits rather than re-types. Other
+    // stages commit immediately.
+    if (target === 'pitched' || target === 'ready_to_send' || target === 'submitted') {
+      const prior = target === 'pitched'
+        ? null
+        : await fetchLatestStageMoveNote(row.send_out_id);
+      setPendingMove({ row, target, initialNote: prior });
       setSendOutNotesOpen(true);
       return;
     }
@@ -1822,8 +1828,15 @@ const JobDetail = () => {
         candidateName={pendingMove?.row.candidate?.full_name ?? null}
         jobTitle={job?.title ?? null}
         saving={savingMove}
-        title={pendingMove?.target === 'submitted' ? 'Send to Client' : 'Move to Send Out'}
+        title={
+          pendingMove?.target === 'submitted'
+            ? 'Send to Client'
+            : pendingMove?.target === 'pitched'
+              ? 'Move to Pitch'
+              : 'Move to Send Out'
+        }
         confirmLabel={pendingMove?.target === 'submitted' ? 'Save & Send' : 'Save & Move'}
+        initialNote={pendingMove?.initialNote}
       />
     </MainLayout>
   );
