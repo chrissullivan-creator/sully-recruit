@@ -60,10 +60,16 @@ async function resolveBaseAndKey(supabase: any) {
 }
 
 async function resolveUnipileAccountId(supabase: any, fromEmail: string): Promise<string | null> {
+  // Each recruiter has multiple integration_accounts rows sharing the
+  // same email_address (email / linkedin_recruiter / phone / sms).
+  // Pin account_type='email' since this helper is the email-send path
+  // — without it we sometimes get back a linkedin_recruiter account_id
+  // and Unipile rejects the send.
   const { data } = await supabase
     .from("integration_accounts")
     .select("unipile_account_id, unipile_provider")
     .eq("email_address", fromEmail.toLowerCase())
+    .eq("account_type", "email")
     .not("unipile_account_id", "is", null)
     .limit(1)
     .maybeSingle();
