@@ -98,7 +98,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     // Prefer the v2 settings, fall back to v1 settings (rewriting suffix).
     check("Unipile", async () => {
       const v2Base = (cfg.get("UNIPILE_BASE_V2_URL") || "").replace(/\/+$/, "")
-        || (cfg.get("UNIPILE_BASE_URL") || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+        || "https://api.unipile.com/v2";
       const apiKey = cfg.get("UNIPILE_API_KEY_V2") || cfg.get("UNIPILE_API_KEY");
       if (!v2Base || !apiKey) return { ok: false, detail: "credentials missing" };
       const r = await fetch(`${v2Base}/accounts?limit=1`, {

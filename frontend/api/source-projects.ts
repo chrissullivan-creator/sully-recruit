@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
 
     const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-      || (v1Row?.value || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "/api/v2");
+      || "https://api.unipile.com/v2";
     const v1Base = (v1Row?.value || "").replace(/\/+$/, "");
     const apiKey = v2KeyRow?.value || v1KeyRow?.value;
 
@@ -79,7 +79,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── list_accounts ─────────────────────────────────────────────
     // Diagnostic. Still on v1 — Unipile's account routes haven't moved.
     if (action === "list_accounts") {
-      const resp = await fetch(`${v1Base || v2Base.replace("/api/v2", "/api/v1")}/accounts`, { headers });
+      // v1 still serves the diagnostic /accounts route; fall back to the
+      // dedicated DSN if the v1 setting was unset.
+      const v1FromDsn = "https://api19.unipile.com:14926/api/v1";
+      const resp = await fetch(`${v1Base || v1FromDsn}/accounts`, { headers });
       if (!resp.ok) {
         return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: (await resp.text()).slice(0, 500) });
       }
