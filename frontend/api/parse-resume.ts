@@ -1,17 +1,19 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { extractResumeText } from "../src/lib/resume-parser";
-import { callAIWithFallback } from "../src/lib/ai-fallback";
 
 /**
  * POST /api/parse-resume
  *
- * Downloads a résumé from Supabase Storage, extracts raw text, and
- * runs Gemini → OpenAI fallback to produce structured JSON. No DB
- * writes — the calling dialog persists candidate fields itself.
+ * Self-contained on purpose: no relative imports from src/lib. The
+ * shared callAIWithFallback / extractResumeText helpers caused
+ * ERR_MODULE_NOT_FOUND under Vercel's serverless ESM bundler when
+ * crossed in a transitive chain (api → lib → lib). Inlining here
+ * cuts the bundle's module graph to only node_modules + this file,
+ * which is the configuration we know loads cleanly.
  *
- * Eden AI / Affinda was retired. Gemini is the primary parser;
- * OpenAI is the fallback when Gemini hits quota or auth errors.
+ * Strategy: extract raw text via pdf-parse / mammoth / TextDecoder
+ * (dynamic imports — failures fall through to "" and the AI gets a
+ * useful error), then run Gemini → OpenAI for structured JSON.
  *
  * Body: { filePath: string, fileName: string }
  * Auth: Supabase JWT (from logged-in user)
@@ -27,10 +29,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Server misconfigured: missing Supabase credentials" });
   }
 
-  // Auth: validate Supabase JWT
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ error: "Unauthorized" });
-  const supabase = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || serviceKey);
+
+  const verifierKey =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    serviceKey;
+  const supabase = createClient(supabaseUrl, verifierKey);
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
@@ -69,9 +75,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const fileBytes = new Uint8Array(await downloadData.arrayBuffer());
-    const rawText = await extractResumeText(fileBytes, fileName, {
-      log: { warn: (m, meta) => console.warn(m, meta) },
-    });
+    const rawText = await extractResumeText(fileBytes, fileName);
+    if (!rawText || rawText.trim().length < 30) {
+      return res.status(422).json({
+        error: "Could not read text from this file. If it's a scanned/image-only PDF, please upload a text-based version.",
+      });
+    }
 
     const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
 
@@ -89,15 +98,15 @@ Extract:
 }
 
 Resume text:
-${rawText.slice(0, 60000)}`;
+${rawText.slice(0, 60_000)}`;
 
-    const { text, via } = await callAIWithFallback({
-      geminiKey: geminiKey || undefined,
-      openaiKey: openaiKey || undefined,
-      systemPrompt: "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
-      userContent: userPrompt,
+    const systemPrompt =
+      "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.";
+
+    const { text, via } = await callGeminiThenOpenAI({
+      geminiKey, openaiKey,
+      systemPrompt, userContent: userPrompt,
       maxTokens: 2048,
-      jsonOutput: true,
     });
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -107,7 +116,134 @@ ${rawText.slice(0, 60000)}`;
     const parsed = JSON.parse(jsonMatch[0]);
     return res.status(200).json({ parsed, via });
   } catch (err: any) {
-    console.error("Parse resume error:", err.message);
-    return res.status(500).json({ error: err.message });
+    console.error("Parse resume error:", err?.stack || err?.message || err);
+    return res.status(500).json({
+      error: err?.message || "parse-resume crashed",
+      code: err?.code,
+    });
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Inline helpers — kept here on purpose so this function has zero
+// relative imports. Don't extract these without verifying the deploy
+// still picks them up; transitive src/lib imports failed before
+// (see file header).
+// ──────────────────────────────────────────────────────────────────────
+
+async function extractResumeText(
+  fileBytes: ArrayBuffer | Uint8Array,
+  fileName: string,
+): Promise<string> {
+  const lower = (fileName || "").toLowerCase();
+  const buffer = Buffer.from(fileBytes as any);
+
+  if (lower.endsWith(".txt")) {
+    return new TextDecoder().decode(buffer).slice(0, 16_000);
+  }
+
+  if (lower.endsWith(".docx")) {
+    try {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.default.extractRawText({ buffer });
+      return (result.value || "").trim().slice(0, 16_000);
+    } catch (err: any) {
+      console.warn("mammoth load/parse failed:", err?.message);
+      return "";
+    }
+  }
+
+  if (lower.endsWith(".pdf")) {
+    try {
+      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
+      const result = await Promise.race([
+        pdfParse(buffer),
+        new Promise<{ text: string }>((_, rej) =>
+          setTimeout(() => rej(new Error("pdf-parse timeout 20s")), 20_000),
+        ),
+      ]);
+      return (result.text || "").trim().slice(0, 16_000);
+    } catch (err: any) {
+      console.warn("pdf-parse load/parse failed:", err?.message);
+      return "";
+    }
+  }
+
+  return new TextDecoder().decode(buffer).slice(0, 16_000);
+}
+
+interface CallOpts {
+  geminiKey: string;
+  openaiKey: string;
+  systemPrompt: string;
+  userContent: string;
+  maxTokens: number;
+}
+
+const FALLBACK_REGEX =
+  /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
+
+async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via: "gemini" | "openai" }> {
+  // Gemini first. JSON-mode + low temperature for structured output.
+  if (opts.geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: opts.userContent }] }],
+          generationConfig: {
+            maxOutputTokens: opts.maxTokens,
+            temperature: 0,
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+      if (!resp.ok) {
+        const body = (await resp.text()).slice(0, 400);
+        throw new Error(`Gemini ${resp.status}: ${body}`);
+      }
+      const data = await resp.json();
+      const text =
+        (data.candidates?.[0]?.content?.parts || [])
+          .map((p: any) => p.text || "")
+          .join("") || "";
+      if (!text) throw new Error("Gemini returned no text content");
+      return { text, via: "gemini" };
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      if (!FALLBACK_REGEX.test(msg) || !opts.openaiKey) throw err;
+      console.warn("Gemini failed, falling back to OpenAI:", msg);
+    }
+  }
+
+  // OpenAI fallback.
+  if (opts.openaiKey) {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts.openaiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: opts.maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: opts.systemPrompt },
+          { role: "user", content: opts.userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+    const text = data.choices?.[0]?.message?.content || "";
+    if (!text) throw new Error("OpenAI returned no text content");
+    return { text, via: "openai" };
+  }
+
+  throw new Error("callGeminiThenOpenAI: no provider keys supplied");
 }
