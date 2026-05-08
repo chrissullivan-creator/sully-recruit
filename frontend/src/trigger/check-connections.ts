@@ -1,9 +1,65 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 import { unipileFetch } from "./lib/unipile-v2";
+import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;
+
+/**
+ * When a connection is detected as accepted (either via webhook or this
+ * scheduled fallback), we need to do TWO things to advance the
+ * enrollment:
+ *   1. Flip the gate flag on sequence_enrollments
+ *   2. Promote any pending_connection step_logs to scheduled
+ *
+ * The Unipile webhook handler (advanceOnConnectionAccepted in
+ * webhook-unipile.ts) already handles both. This helper is the
+ * mirror image for the polling fallback — without it, missed webhooks
+ * leave step_logs parked at pending_connection forever and the
+ * follow-up message never fires.
+ */
+async function schedulePendingConnectionLogs(
+  supabase: any,
+  enrollmentId: string,
+  acceptedAt: Date,
+): Promise<number> {
+  const { data: enrollment } = await supabase
+    .from("sequence_enrollments")
+    .select("*, sequences!inner(*)")
+    .eq("id", enrollmentId)
+    .maybeSingle();
+  if (!enrollment) return 0;
+
+  const sequence = enrollment.sequences;
+  const senderUserId = sequence.sender_user_id || sequence.created_by;
+
+  const { data: pendingLogs } = await supabase
+    .from("sequence_step_logs")
+    .select("id, sequence_actions!inner(base_delay_hours, delay_interval_minutes, jiggle_minutes)")
+    .eq("enrollment_id", enrollmentId)
+    .eq("status", "pending_connection");
+  if (!pendingLogs?.length) return 0;
+
+  for (const log of pendingLogs as any[]) {
+    const action = log.sequence_actions;
+    const scheduledAt = await calculatePostConnectionSendTime(
+      supabase,
+      acceptedAt,
+      Number(action.base_delay_hours) || 0,
+      action.delay_interval_minutes || 0,
+      action.jiggle_minutes || 0,
+      sequence.send_window_start || "09:00",
+      sequence.send_window_end || "18:00",
+      senderUserId,
+    );
+    await supabase
+      .from("sequence_step_logs")
+      .update({ scheduled_at: scheduledAt.toISOString(), status: "scheduled" } as any)
+      .eq("id", log.id);
+  }
+  return pendingLogs.length;
+}
 
 /**
  * Scheduled task: check pending LinkedIn connection requests.
@@ -123,10 +179,17 @@ export const checkConnections = schedules.task({
             .eq("candidate_id", enrollment.candidate_id)
             .eq("channel", "linkedin");
 
+          // Promote any pending_connection step_logs to scheduled.
+          // Without this, missed webhooks leave the follow-up step
+          // parked forever — the webhook handler does this, but if it
+          // never fired we'd never reach it.
+          const promoted = await schedulePendingConnectionLogs(supabase, enrollment.id, now);
+
           accepted++;
           logger.info("Connection accepted (caught by check)", {
             enrollmentId: enrollment.id,
             candidateId: enrollment.candidate_id,
+            promotedLogs: promoted,
           });
         }
 
