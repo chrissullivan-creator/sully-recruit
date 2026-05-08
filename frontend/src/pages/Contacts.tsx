@@ -92,12 +92,18 @@ const Contacts = () => {
   const { data: jobs = [] } = useJobs();
 
   const filteredContacts = useMemo(() => {
+    const q = searchQuery.toLowerCase();
     let list = contacts.filter((contact) => {
       const companyDisplay = ((contact as any).company_name || (contact.companies as any)?.name || '');
-      const matchesSearch =
-        (contact.full_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        companyDisplay.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (contact.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
+      const secondary: string[] = Array.isArray((contact as any).secondary_emails) ? (contact as any).secondary_emails : [];
+      const matchesSearch = !q ||
+        (contact.full_name ?? '').toLowerCase().includes(q) ||
+        companyDisplay.toLowerCase().includes(q) ||
+        (contact.title ?? '').toLowerCase().includes(q) ||
+        ((contact as any).email ?? '').toLowerCase().includes(q) ||
+        ((contact as any).work_email ?? '').toLowerCase().includes(q) ||
+        ((contact as any).personal_email ?? '').toLowerCase().includes(q) ||
+        secondary.some((e) => (e ?? '').toLowerCase().includes(q));
       const matchesFilter = filter === 'all' || contact.status === filter;
       const roles: string[] = (contact as any).roles ?? ['client'];
       const matchesRole =

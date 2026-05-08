@@ -21,7 +21,7 @@ import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -117,15 +117,67 @@ const People = () => {
     return true;
   };
 
+  // Full-email queries get a server-side bypass. The client cache pages
+  // through people in chunks of 1000; on a 13K-row tenant the user can
+  // search for an email that hasn't loaded yet and see "no results"
+  // even though the row exists. When the input parses as a complete
+  // email, we hit the people table directly and merge the rows in.
+  const trimmedQuery = searchQuery.trim();
+  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedQuery);
+  const { data: emailHits = [] } = useQuery({
+    queryKey: ['people_email_lookup', trimmedQuery.toLowerCase()],
+    enabled: looksLikeEmail,
+    queryFn: async () => {
+      const lc = trimmedQuery.toLowerCase();
+      // Three columns + a contains() for the secondary_emails text[] —
+      // primary_email is generated, but we still match on it so legacy
+      // rows that only have the COALESCE'd value still surface.
+      const { data } = await supabase
+        .from('people')
+        .select(
+          'id, type, full_name, first_name, last_name, ' +
+          'title, current_title, company_name, current_company, company_id, ' +
+          'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
+          'avatar_url, roles, status, ' +
+          'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +
+          'owner_user_id, created_at, updated_at',
+        )
+        .or(
+          `primary_email.ilike.${lc},work_email.ilike.${lc},personal_email.ilike.${lc},secondary_emails.cs.{${lc}}`,
+        )
+        .limit(50);
+      return (data ?? []).map((p: any) => ({
+        ...p,
+        source_table: p.type === 'client' ? 'contact' : 'candidate',
+        title: p.title ?? p.current_title ?? null,
+        company_name: p.company_name ?? p.current_company ?? null,
+      }));
+    },
+    staleTime: 30_000,
+  });
+
   const filtered = useMemo(() => {
-    let list = people.filter((p: any) => {
-      const q = searchQuery.toLowerCase();
+    const q = trimmedQuery.toLowerCase();
+
+    // Merge the email-bypass hits into the working list when applicable.
+    // De-dupe by id so a row that's already loaded doesn't appear twice.
+    let source = people;
+    if (looksLikeEmail && emailHits.length > 0) {
+      const known = new Set(people.map((p: any) => p.id));
+      const extras = (emailHits as any[]).filter((p) => !known.has(p.id));
+      if (extras.length > 0) source = [...people, ...extras];
+    }
+
+    let list = source.filter((p: any) => {
       const matchesSearch = !q ||
         (p.full_name ?? '').toLowerCase().includes(q) ||
         (p.company_name ?? '').toLowerCase().includes(q) ||
         (p.title ?? '').toLowerCase().includes(q) ||
+        (p.email ?? '').toLowerCase().includes(q) ||
         (p.work_email ?? '').toLowerCase().includes(q) ||
-        (p.personal_email ?? '').toLowerCase().includes(q);
+        (p.personal_email ?? '').toLowerCase().includes(q) ||
+        (Array.isArray(p.secondary_emails) &&
+          p.secondary_emails.some((e: string) => (e ?? '').toLowerCase().includes(q)));
       return matchesSearch && matchesTab(p);
     });
 
@@ -142,7 +194,7 @@ const People = () => {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [people, searchQuery, tab, sortField, sortDir]);
+  }, [people, emailHits, looksLikeEmail, trimmedQuery, tab, sortField, sortDir]);
 
   const tabCounts = useMemo(() => ({
     all:        people.length,
