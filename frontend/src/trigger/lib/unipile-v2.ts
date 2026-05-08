@@ -5,11 +5,13 @@
  *
  * Key v2 facts (from
  *   https://developer.unipile.com/v2.0/docs/migration-linkedin-api ):
- *   - account_id is now a path segment, not a query/body param.
- *   - All LinkedIn endpoints (chats, users, recruiter ops) sit under
- *     the /linkedin/ prefix. Top-level /chats was retired.
- *       Classic chats:      /api/v2/{account_id}/linkedin/chats[/{id}[/messages]]
- *       Recruiter-only ops: /api/v2/{account_id}/linkedin/recruiter/...
+ *   - account_id is now a path segment for most endpoints, but the
+ *     /chats family stays top-level with account_id as a query param
+ *     (Unipile returns 404 for /api/v2/{account_id}/chats…). Pass
+ *     `topLevel: true` when calling unipileFetch for chats endpoints.
+ *   - User & recruiter endpoints sit under the /linkedin/ prefix:
+ *       /api/v2/{account_id}/linkedin/users/...
+ *       /api/v2/{account_id}/linkedin/recruiter/...
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */
@@ -54,15 +56,26 @@ export interface UnipileFetchInit extends Omit<RequestInit, "headers"> {
   query?: Record<string, string | number | undefined>;
   /** Extra headers merged on top of auth/Accept defaults. */
   headers?: Record<string, string>;
+  /**
+   * When true, build the URL as `${base}/${path}?account_id=…` instead
+   * of `${base}/${account_id}/${path}`. Use for endpoints that Unipile
+   * v2 keeps top-level (notably /chats and its children — the API
+   * returns 404 when account_id is in the path for these).
+   */
+  topLevel?: boolean;
 }
 
 /**
  * Fetch any Unipile v2 endpoint scoped to a single account_id.
  * Throws on non-2xx with the response body in the message.
  *
- * Example:
+ * Example (account_id in path — default):
  *   await unipileFetch(supabase, accountId, "linkedin/users/jane-doe", { method: "GET" })
  *   →  GET /api/v2/{account_id}/linkedin/users/jane-doe
+ *
+ * Example (top-level — chats family):
+ *   await unipileFetch(supabase, accountId, "chats", { method: "GET", topLevel: true })
+ *   →  GET /api/v2/chats?account_id={account_id}
  */
 export async function unipileFetch<T = any>(
   supabase: any,
@@ -72,7 +85,13 @@ export async function unipileFetch<T = any>(
 ): Promise<T> {
   if (!accountId) throw new Error("unipileFetch: accountId required");
   const { base, apiKey } = await resolveConfig(supabase);
-  const url = new URL(unipileV2Path(base, accountId, path));
+  const cleanPath = path.replace(/^\/+/, "");
+  const url = init.topLevel
+    ? new URL(`${base}/${cleanPath}`)
+    : new URL(unipileV2Path(base, accountId, path));
+  if (init.topLevel) {
+    url.searchParams.set("account_id", accountId);
+  }
   if (init.query) {
     for (const [k, v] of Object.entries(init.query)) {
       if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
