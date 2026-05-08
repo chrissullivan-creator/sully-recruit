@@ -19,7 +19,7 @@ import {
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
   Sparkles, RefreshCw, Martini, Send as SendIcon,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play,
 } from 'lucide-react';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -28,6 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { invalidatePersonScope, invalidateNoteScope, invalidateJobScope } from '@/lib/invalidate';
@@ -255,6 +256,7 @@ const ContactDetail = () => {
   const [removingJobId, setRemovingJobId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [deletingContact, setDeletingContact] = useState(false);
 
   const handleDeleteContact = async () => {
@@ -555,6 +557,13 @@ const ContactDetail = () => {
             <CalendarPlus className="h-4 w-4" />
           </button>
           <button
+            onClick={() => setEnrollOpen(true)}
+            className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title="Enroll in sequence"
+          >
+            <Play className="h-4 w-4" />
+          </button>
+          <button
             onClick={() => setConfirmDelete(true)}
             className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
             title="Delete contact"
@@ -574,6 +583,13 @@ const ContactDetail = () => {
           email: (contact as any).work_email ?? (contact as any).personal_email ?? (contact as any).email ?? null,
         }}
         defaultSubject={`Meeting w/ ${contact.full_name || contact.first_name || 'contact'}`}
+      />
+
+      <EnrollInSequenceDialog
+        open={enrollOpen}
+        onOpenChange={setEnrollOpen}
+        candidateIds={contact.id ? [contact.id] : []}
+        candidateNames={[contact.full_name || `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim() || 'Contact']}
       />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
