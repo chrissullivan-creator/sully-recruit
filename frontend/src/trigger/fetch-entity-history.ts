@@ -118,7 +118,7 @@ export const fetchEntityHistory = task({
     }
 
     // 3. Search LinkedIn history via Unipile v2
-    //    GET /api/v2/{account_id}/chats/{chat_id}/messages
+    //    GET /api/v2/{account_id}/linkedin/chats/{chat_id}/messages
     if (contact.linkedin_url) {
       try {
         const { data: liAccounts } = await supabase
@@ -149,7 +149,7 @@ export const fetchEntityHistory = task({
               const data: any = await unipileFetch(
                 supabase,
                 liAcct.unipile_account_id,
-                `chats/${encodeURIComponent(channel.external_conversation_id)}/messages`,
+                `linkedin/chats/${encodeURIComponent(channel.external_conversation_id)}/messages`,
                 { method: "GET", query: { limit: 50 } },
               );
               const messages = data.items || data || [];

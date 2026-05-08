@@ -141,11 +141,13 @@ export const backfillLinkedinMessages = schedules.task({
 
     const stats = { chats_scanned: 0, messages_scanned: 0, inserted: 0, skipped: 0, errors: 0 };
 
-    // v2 path: GET /api/v2/{account_id}/chats
+    // v2 path: GET /api/v2/{account_id}/linkedin/chats
+    // (top-level /chats was retired — Unipile v2 nests chats under
+    // the product prefix, see lib/unipile-v2.ts header.)
     const chatsData: any = await unipileFetch(
       supabase,
       account.unipile_account_id,
-      `chats`,
+      `linkedin/chats`,
       { method: "GET", query: { limit: maxChats } },
     );
     const chats = chatsData.items ?? chatsData.chats ?? chatsData.data ?? [];
@@ -208,13 +210,13 @@ export const backfillLinkedinMessages = schedules.task({
         );
 
         // Fetch messages (only latest 20 since this runs every 5 min).
-        // v2 path: GET /api/v2/{account_id}/chats/{chat_id}/messages
+        // v2 path: GET /api/v2/{account_id}/linkedin/chats/{chat_id}/messages
         let msgsData: any;
         try {
           msgsData = await unipileFetch(
             supabase,
             account.unipile_account_id,
-            `chats/${encodeURIComponent(chatId)}/messages`,
+            `linkedin/chats/${encodeURIComponent(chatId)}/messages`,
             { method: "GET", query: { limit: 20 } },
           );
         } catch {

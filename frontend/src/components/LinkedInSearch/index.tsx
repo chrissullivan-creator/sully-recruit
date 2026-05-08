@@ -265,7 +265,7 @@ export default function LinkedInSearch() {
         title: r.current_title || null,
         linkedin_url: r.linkedin_url || null,
         avatar_url: r.profile_picture_url || null,
-        status: 'active',
+        status: 'new',
         owner_id: userId,
       } as any);
       if (error) throw error;
