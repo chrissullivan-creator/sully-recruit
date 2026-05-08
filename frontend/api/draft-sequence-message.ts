@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { callAIWithFallback } from "../src/lib/ai-fallback";
+import { callAIWithFallback } from "./lib/ai-fallback";
 import { requireAuth } from "./lib/auth";
 
 /**
