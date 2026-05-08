@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting, getGeminiKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getAppSetting, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
 import { sendInternalEmail } from "./lib/microsoft-graph";
 import { notifyError } from "./lib/alerting";
 import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
@@ -217,16 +217,19 @@ export const reconcileOrphanedResumes = schedules.task({
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
-    // Resolve AI keys once per sweep — Gemini → OpenAI cascade for parsing.
-    const [geminiKey, openaiKey] = await Promise.all([
+    // Resolve AI keys once per sweep — Mistral OCR for text extraction,
+    // Gemini → OpenAI cascade for structured parsing.
+    const [geminiKey, openaiKey, mistralKey] = await Promise.all([
       getGeminiKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getMistralKey().catch(() => ""),
     ]);
     if (!geminiKey && !openaiKey) {
       logger.warn("Reconcile: neither GEMINI_API_KEY nor OPENAI_API_KEY set — cannot parse");
       return { skipped: true, reason: "no_ai_keys" };
     }
     const parseOpts = {
+      mistralKey: mistralKey || undefined,
       callAI: (req: any) =>
         callAIWithFallback({
           ...req,

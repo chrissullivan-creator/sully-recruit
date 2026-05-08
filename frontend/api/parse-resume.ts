@@ -48,15 +48,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // Resolve provider keys: env first, then app_settings.
+    // Resolve provider keys: env first, then app_settings. Mistral runs
+    // OCR FIRST (handles scanned/image-only PDFs); Gemini/OpenAI parse
+    // the resulting text into structured JSON.
+    let mistralKey = process.env.MISTRAL_API_KEY || "";
     let geminiKey = process.env.GEMINI_API_KEY || "";
     let openaiKey = process.env.OPENAI_API_KEY || "";
-    if (!geminiKey || !openaiKey) {
+    if (!mistralKey || !geminiKey || !openaiKey) {
       const { data } = await admin
         .from("app_settings")
         .select("key, value")
-        .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY"]);
+        .in("key", ["MISTRAL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]);
       for (const row of data ?? []) {
+        if (row.key === "MISTRAL_API_KEY" && !mistralKey) mistralKey = row.value;
         if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
         if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
       }
@@ -75,12 +79,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const fileBytes = new Uint8Array(await downloadData.arrayBuffer());
-    const rawText = await extractResumeText(fileBytes, fileName);
+
+    // 1. Mistral OCR is the primary path — handles scanned PDFs,
+    //    image-only PDFs, mixed-content PDFs that pdf-parse chokes on,
+    //    and (with image_url) raw images. Returns markdown.
+    // 2. Fallback: pdf-parse / mammoth / TextDecoder (extractResumeText).
+    let rawText = mistralKey ? await mistralOCR(fileBytes, fileName, mistralKey) : "";
+    let extractor: "mistral" | "fallback" = "mistral";
+    if (!rawText || rawText.trim().length < 30) {
+      extractor = "fallback";
+      rawText = await extractResumeText(fileBytes, fileName);
+    }
     if (!rawText || rawText.trim().length < 30) {
       return res.status(422).json({
         error: "Could not read text from this file. If it's a scanned/image-only PDF, please upload a text-based version.",
       });
     }
+    console.log("parse-resume extractor:", extractor, "len:", rawText.length);
 
     const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
 
@@ -130,6 +145,63 @@ ${rawText.slice(0, 60_000)}`;
 // still picks them up; transitive src/lib imports failed before
 // (see file header).
 // ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Mistral OCR — primary text-extraction path. Handles scanned PDFs,
+ * image-only PDFs, mixed-content PDFs, and raw images. Returns null
+ * (not throws) on any failure so the caller can fall through to
+ * pdf-parse / mammoth.
+ *
+ * Endpoint: POST https://api.mistral.ai/v1/ocr
+ * Docs: https://docs.mistral.ai/studio-api/document-processing/basic_ocr
+ */
+async function mistralOCR(
+  fileBytes: ArrayBuffer | Uint8Array,
+  fileName: string,
+  apiKey: string,
+): Promise<string> {
+  const lower = (fileName || "").toLowerCase();
+  const isPdf = lower.endsWith(".pdf");
+  const isImage = /\.(png|jpe?g|tiff?|webp|gif|bmp)$/i.test(lower);
+  // DOCX/TXT skip OCR — mammoth + TextDecoder are faster + cheaper.
+  if (!isPdf && !isImage) return "";
+
+  const buffer = Buffer.from(fileBytes as any);
+  const base64 = buffer.toString("base64");
+  const mime = isPdf ? "application/pdf" : (lower.endsWith(".png") ? "image/png" : "image/jpeg");
+  const dataUri = `data:${mime};base64,${base64}`;
+
+  try {
+    const resp = await fetch("https://api.mistral.ai/v1/ocr", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "mistral-ocr-latest",
+        document: isPdf
+          ? { type: "document_url", document_url: dataUri }
+          : { type: "image_url", image_url: dataUri },
+      }),
+    });
+    if (!resp.ok) {
+      console.warn("Mistral OCR non-2xx:", resp.status, (await resp.text()).slice(0, 300));
+      return "";
+    }
+    const data = await resp.json();
+    const pages = Array.isArray(data?.pages) ? data.pages : [];
+    const text = pages
+      .map((p: any) => (typeof p?.markdown === "string" ? p.markdown : ""))
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+    return text.slice(0, 60_000);
+  } catch (err: any) {
+    console.warn("Mistral OCR error:", err?.message);
+    return "";
+  }
+}
 
 async function extractResumeText(
   fileBytes: ArrayBuffer | Uint8Array,

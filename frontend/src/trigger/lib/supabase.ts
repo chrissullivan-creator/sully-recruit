@@ -141,6 +141,20 @@ export async function getGeminiKey(): Promise<string> {
 }
 
 /**
+ * Get Mistral API key from app_settings. Mistral OCR is the primary
+ * text-extraction path for resume PDFs (handles scanned/image-only
+ * PDFs that pdf-parse cannot decode). Returns empty string when
+ * missing so callers can fall back to pdf-parse / mammoth.
+ */
+export async function getMistralKey(): Promise<string> {
+  try {
+    return await getAppSetting("MISTRAL_API_KEY");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Get OpenAI API key from app_settings. Used as a fallback parser when
  * Anthropic is over quota / rate-limited / down. Returns empty string
  * (not an error) so callers can detect "fallback unavailable" without
