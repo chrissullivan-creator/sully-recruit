@@ -1,5 +1,5 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getGeminiKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -70,9 +70,10 @@ export const reparseResumes = schedules.task({
     let parsedCount = 0, embeddedCount = 0, failedCount = 0;
     const errors: string[] = [];
 
-    const [geminiKey, openaiKey] = await Promise.all([
+    const [geminiKey, openaiKey, mistralKey] = await Promise.all([
       getGeminiKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getMistralKey().catch(() => ""),
     ]);
     if (!geminiKey && !openaiKey) {
       logger.warn("Reparse: neither GEMINI_API_KEY nor OPENAI_API_KEY set — cannot run");
@@ -88,6 +89,7 @@ export const reparseResumes = schedules.task({
 
         const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
         const { parsed, rawText } = await parseResume(buf, resume.fileName, {
+          mistralKey: mistralKey || undefined,
           callAI: (req) =>
             callAIWithFallback({
               ...req,

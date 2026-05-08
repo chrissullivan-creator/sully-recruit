@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getGeminiKey, getOpenAIKey } from "./lib/supabase";
+import { getSupabaseAdmin, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
@@ -59,7 +59,10 @@ export const resumeIngestion = task({
     // resume. shared extractor handles PDF/DOCX/DOC/TXT; the parser will
     // re-extract internally too — that's fine, it's a tiny cost vs. the
     // value of skipping junk.
-    const sniffText = await extractResumeText(fileBytes, fileName);
+    // Resolve the Mistral key once up-front so extractResumeText can
+    // do OCR before falling back to pdf-parse for image-only PDFs.
+    const mistralKey = await getMistralKey().catch(() => "");
+    const sniffText = await extractResumeText(fileBytes, fileName, { mistralKey });
     if (!looksLikeResume(sniffText)) {
       logger.warn("File does not look like a resume; skipping AI parse", {
         fileName, textLength: sniffText.length,
