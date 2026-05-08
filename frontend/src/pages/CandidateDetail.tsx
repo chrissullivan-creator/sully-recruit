@@ -35,6 +35,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
+import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { cn } from '@/lib/utils';
 import { CANONICAL_PIPELINE, canonicalConfig, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
@@ -101,7 +102,7 @@ const ChannelIcon = ({ channel }: { channel?: string | null }) => {
 };
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder, disabled = false, highlight = false }: {
-  label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
+  label: React.ReactNode; value: string | null | undefined; onSave: (v: string) => Promise<void>;
   type?: string; placeholder?: string; disabled?: boolean; highlight?: boolean;
 }) => {
   const [editing, setEditing] = useState(false);
@@ -1134,7 +1135,16 @@ const CandidateDetail = () => {
               <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
               <EditableField
-                label="Work Email"
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Work Email
+                    <EmailBounceBadge
+                      emailInvalid={(candidate as any).email_invalid}
+                      reason={(candidate as any).email_invalid_reason}
+                      invalidatedAt={(candidate as any).email_invalid_at}
+                    />
+                  </span>
+                }
                 value={c.work_email}
                 onSave={v => updateField('work_email', v)}
                 type="email"
@@ -1142,7 +1152,24 @@ const CandidateDetail = () => {
                 disabled={!canEdit}
                 highlight={editingInfo}
               />
-              <EditableField label="Personal Email" value={c.personal_email} onSave={v => updateField('personal_email', v)} type="email" placeholder="personal@gmail.com" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Personal Email
+                    <EmailBounceBadge
+                      emailInvalid={(candidate as any).email_invalid}
+                      reason={(candidate as any).email_invalid_reason}
+                      invalidatedAt={(candidate as any).email_invalid_at}
+                    />
+                  </span>
+                }
+                value={c.personal_email}
+                onSave={v => updateField('personal_email', v)}
+                type="email"
+                placeholder="personal@gmail.com"
+                disabled={!canEdit}
+                highlight={editingInfo}
+              />
               <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
                 await updateField('mobile_phone', v);
                 // Keep legacy phone in sync

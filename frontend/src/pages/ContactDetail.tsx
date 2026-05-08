@@ -28,6 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -141,7 +142,7 @@ function useContactJobs(contactId: string | undefined) {
 /* ------------------------------------------------------------------ */
 
 const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
-  label: string; value: string | null | undefined; onSave: (v: string) => Promise<void>;
+  label: React.ReactNode; value: string | null | undefined; onSave: (v: string) => Promise<void>;
   type?: string; placeholder?: string;
 }) => {
   const [editing, setEditing] = useState(false);
@@ -652,14 +653,32 @@ const ContactDetail = () => {
               <EditableField label="Country" value={c.country} onSave={v => updateField('country', v)} placeholder="Country" />
               <EditableField label="Postal Code" value={c.postal_code} onSave={v => updateField('postal_code', v)} placeholder="Zip / Postal code" />
               <EditableField
-                label="Work Email"
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Work Email
+                    <EmailBounceBadge
+                      emailInvalid={(contact as any).email_invalid}
+                      reason={(contact as any).email_invalid_reason}
+                      invalidatedAt={(contact as any).email_invalid_at}
+                    />
+                  </span>
+                }
                 value={c.work_email}
                 onSave={v => updateField('work_email', v)}
                 type="email"
                 placeholder="work@firm.com"
               />
               <EditableField
-                label="Personal Email"
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Personal Email
+                    <EmailBounceBadge
+                      emailInvalid={(contact as any).email_invalid}
+                      reason={(contact as any).email_invalid_reason}
+                      invalidatedAt={(contact as any).email_invalid_at}
+                    />
+                  </span>
+                }
                 value={c.personal_email}
                 onSave={v => updateField('personal_email', v)}
                 type="email"
