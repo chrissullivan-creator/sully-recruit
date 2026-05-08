@@ -3,8 +3,8 @@ import {
   createSupabaseAdmin,
   enrichMatches,
   searchResumeEmbeddings,
-} from "./lib/voyage";
-import { requireAuth } from "./lib/auth";
+} from "./lib/voyage.js";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * POST /api/match-candidates-to-job

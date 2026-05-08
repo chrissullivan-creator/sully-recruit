@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { callAIWithFallback } from "./lib/ai-fallback";
-import { requireAuth } from "./lib/auth";
+import { callAIWithFallback } from "./lib/ai-fallback.js";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * POST /api/parse-resume-ai

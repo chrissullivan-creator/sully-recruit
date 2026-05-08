@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { callAIWithFallback } from "./lib/ai-fallback";
-import { requireAuth } from "./lib/auth";
+import { callAIWithFallback } from "./lib/ai-fallback.js";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * POST /api/draft-sequence-message

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
-import { requireAuth } from "./lib/auth";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * Re-pace every active enrollment of a sequence so step reorders, delay

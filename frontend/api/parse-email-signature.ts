@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { callAIWithFallback } from "./lib/ai-fallback";
+import { callAIWithFallback } from "./lib/ai-fallback.js";
 
 /**
  * POST /api/parse-email-signature
