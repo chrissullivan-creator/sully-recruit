@@ -111,6 +111,12 @@ export const sequenceEnrollmentInit = task({
     let recipientEmail: string | null = null;
     let recipientLinkedin: string | null = null;
     let recipientPhone: string | null = null;
+    // Already-connected on LinkedIn? If so we don't send a connection
+    // request (Unipile would 422 it as "already connected", which the
+    // execute path can't classify as rate-limit and marks failed). We
+    // also schedule any linkedin_message steps directly instead of
+    // parking them as pending_connection.
+    let recipientLinkedinConnected = false;
     if (recipientId) {
       const { data: person } = await supabase
         .from("people")
@@ -125,6 +131,20 @@ export const sequenceEnrollmentInit = task({
         recipientLinkedin = person.linkedin_url || null;
         recipientPhone = person.phone || null;
       }
+
+      // candidate_channels.is_connected gets stamped by either the
+      // Unipile webhook (advanceOnConnectionAccepted) or the
+      // check-connections polling fallback. Either way, when we see
+      // is_connected=true we skip the linkedin_connection step
+      // entirely and land linkedin_message logs as 'scheduled'
+      // directly rather than parking them as pending_connection.
+      const { data: ch } = await supabase
+        .from("candidate_channels")
+        .select("is_connected")
+        .eq("candidate_id", recipientId)
+        .eq("channel", "linkedin")
+        .maybeSingle();
+      recipientLinkedinConnected = (ch as any)?.is_connected === true;
     }
 
     function recipientHasRequired(channel: string): boolean {
@@ -183,10 +203,32 @@ export const sequenceEnrollmentInit = task({
           continue;
         }
 
-        if (action.channel === "linkedin_message") {
-          // Park as pending_connection — will be scheduled when connection is accepted.
-          // Don't advance prevSendTime; the webhook handler will use 4h post-accept
-          // and downstream steps stay anchored to the last scheduled action.
+        // Already connected on LinkedIn → skip the connection request
+        // and let downstream linkedin_message steps schedule directly
+        // (they fall through to the normal scheduled path below
+        // because the linkedin_message branch checks for connection
+        // state too). Doesn't advance the cursor — same semantics as
+        // a missing-channel pre-skip.
+        if (action.channel === "linkedin_connection" && recipientLinkedinConnected) {
+          await supabase.from("sequence_step_logs").insert({
+            enrollment_id: payload.enrollmentId,
+            action_id: action.id,
+            node_id: node.id,
+            channel: action.channel,
+            scheduled_at: null,
+            status: "skipped",
+            skip_reason: "already_connected",
+          });
+          preSkipped++;
+          continue;
+        }
+
+        if (action.channel === "linkedin_message" && !recipientLinkedinConnected) {
+          // Not connected yet — park as pending_connection. Webhook
+          // handler will schedule it once the invite is accepted.
+          // Don't advance prevSendTime; the webhook handler will use
+          // 4h post-accept and downstream steps stay anchored to the
+          // last scheduled action.
           await supabase.from("sequence_step_logs").insert({
             enrollment_id: payload.enrollmentId,
             action_id: action.id,
@@ -500,14 +542,31 @@ export const sequenceActionExecute = task({
       }
     } catch (err: any) {
       const errMsg = err.message || "";
+      const errLower = errMsg.toLowerCase();
 
-      // LinkedIn circuit breaker: if Unipile returns limit_exceeded or 429,
-      // reschedule the step instead of marking it as permanently failed.
+      // Provider-side rate limit signal — reschedule +2h.
       const isRateLimit =
-        errMsg.includes("limit_exceeded") ||
-        errMsg.includes("rate limit") ||
-        errMsg.includes("429") ||
-        errMsg.includes("too many requests");
+        errLower.includes("limit_exceeded") ||
+        errLower.includes("rate limit") ||
+        errLower.includes("429") ||
+        errLower.includes("too many requests");
+
+      // Transient infra failure — Supabase pause, DB connection blip,
+      // Unipile API timeout, missing app_settings on a stale fetch.
+      // Today's outage caused 1,337 LinkedIn step_logs to fail when
+      // verifyUnipileAccountHealth's app_settings query returned 540
+      // during the Supabase pause; the error didn't match the
+      // rate-limit regex and the chain dead-ended. Treating these as
+      // transient and rescheduling +30 min so the next sweep retries.
+      const isTransient =
+        errLower.includes("fetch failed") ||
+        errLower.includes("network") ||
+        errLower.includes("econnreset") ||
+        errLower.includes("timed out") ||
+        errLower.includes("timeout") ||
+        errLower.includes("unipile config missing") ||
+        errLower.includes("unipile api unreachable") ||
+        errLower.includes("could not resolve linkedin profile") && errLower.includes("timeout");
 
       if (isRateLimit && action.channel.startsWith("linkedin")) {
         // Push the step back by 2 hours instead of failing it
@@ -522,6 +581,21 @@ export const sequenceActionExecute = task({
           retryAt,
         });
         return { action: "rate_limited", reason: errMsg, retryAt };
+      }
+
+      if (isTransient) {
+        const retryAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        await supabase
+          .from("sequence_step_logs")
+          .update({ scheduled_at: retryAt, status: "scheduled" } as any)
+          .eq("id", payload.stepLogId);
+        logger.warn("Transient send error — rescheduling step in 30 min", {
+          channel: action.channel,
+          enrollmentId: payload.enrollmentId,
+          err: errMsg,
+          retryAt,
+        });
+        return { action: "transient_retry", reason: errMsg, retryAt };
       }
 
       logger.error("Send failed", { channel: action.channel, error: errMsg });
