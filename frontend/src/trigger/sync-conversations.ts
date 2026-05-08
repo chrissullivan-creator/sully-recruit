@@ -46,16 +46,16 @@ export const syncConversations = schedules.task({
         account.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
       );
       try {
-        // v2 paths:
-        //   GET /api/v2/{account_id}/linkedin/chats?limit&sort
+        // v2 path: GET /api/v2/chats?account_id=…&limit&sort
         let data: any;
         try {
           data = await unipileFetch(
             supabase,
             account.unipile_account_id,
-            `linkedin/chats`,
+            `chats`,
             {
               method: "GET",
+              topLevel: true,
               query: { limit: BATCH_SIZE, sort: "latest" },
             },
           );
@@ -129,15 +129,16 @@ export const syncConversations = schedules.task({
           }
 
           // Fetch latest messages for this conversation.
-          // v2 path: GET /api/v2/{account_id}/linkedin/chats/{chat_id}/messages
+          // v2 path: GET /api/v2/chats/{chat_id}/messages?account_id=…
           let msgData: any = null;
           try {
             msgData = await unipileFetch(
               supabase,
               account.unipile_account_id,
-              `linkedin/chats/${encodeURIComponent(convId)}/messages`,
+              `chats/${encodeURIComponent(convId)}/messages`,
               {
                 method: "GET",
+                topLevel: true,
                 query: { limit: 10 },
               },
             );

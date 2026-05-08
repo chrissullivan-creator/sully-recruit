@@ -26,7 +26,7 @@ import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
  *      yet (one-off mode) or all of them (force=true payload).
  *   2. Group by integration_account so we hit Unipile with the right
  *      auth/account_id.
- *   3. For each, GET /api/v2/{account_id}/linkedin/chats/{external_conversation_id}
+ *   3. For each, GET /api/v2/chats/{external_conversation_id}?account_id=…
  *   4. Read content_type and folder; classify via canonicalChannel.
  *   5. UPDATE the conversation + every message row inside it.
  *
@@ -90,8 +90,8 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
       const chat: any = await unipileFetch(
         supabase,
         unipileAcctId,
-        `linkedin/chats/${encodeURIComponent(conv.external_conversation_id!)}`,
-        { method: "GET" },
+        `chats/${encodeURIComponent(conv.external_conversation_id!)}`,
+        { method: "GET", topLevel: true },
       );
 
       const contentType = String(chat.content_type ?? "").toLowerCase() || null;
