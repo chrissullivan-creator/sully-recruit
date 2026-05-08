@@ -49,22 +49,22 @@ export const syncLinkedinInvitations = schedules.task({
 
     for (const acct of accounts) {
       try {
-        // Try the canonical path first; some Unipile builds put the
-        // endpoint under /linkedin/. Either response shape is fine
-        // because `unipileFetch` throws on non-2xx and we catch.
+        // Per Unipile v2 docs, LinkedIn-specific endpoints sit under
+        // /linkedin/. Try that path first; older builds may still
+        // expose the legacy unprefixed shape, hence the fallback.
         let data: any;
         try {
           data = await unipileFetch(
             supabase,
             acct.unipile_account_id!,
-            `users/invitations/received`,
+            `linkedin/users/invitations/received`,
             { method: "GET", query: { limit: 50 } },
           );
         } catch {
           data = await unipileFetch(
             supabase,
             acct.unipile_account_id!,
-            `linkedin/users/invitations/received`,
+            `users/invitations/received`,
             { method: "GET", query: { limit: 50 } },
           );
         }
