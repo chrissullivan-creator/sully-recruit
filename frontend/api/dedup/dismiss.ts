@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { requireAuth } from "../lib/auth";
+import { requireAuth } from "../lib/auth.js";
 
 /**
  * POST /api/dedup/dismiss

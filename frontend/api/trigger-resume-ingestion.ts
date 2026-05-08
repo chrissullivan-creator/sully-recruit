@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
-import { requireAuth } from "./lib/auth";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * Vercel serverless function to trigger the resume-ingestion Trigger.dev task.
