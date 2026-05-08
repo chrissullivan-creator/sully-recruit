@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1176,6 +1177,7 @@ const JobDetail = () => {
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><FileTextIcon className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+                <TabsTrigger value="sizzles" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
               </TabsList>
             </div>
 
@@ -1600,6 +1602,11 @@ const JobDetail = () => {
               {/* ── Notes Tab ─────────────────────────────── */}
               <TabsContent value="notes" className="px-6 lg:px-8 py-5 mt-0">
                 <JobNotesTab jobId={job.id} />
+              </TabsContent>
+
+              {/* ── Sizzles Tab ───────────────────────────── */}
+              <TabsContent value="sizzles" className="px-6 lg:px-8 py-5 mt-0">
+                <SizzlesPanel scope={{ jobId: job.id }} />
               </TabsContent>
 
             </ScrollArea>
