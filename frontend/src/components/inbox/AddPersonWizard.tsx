@@ -24,12 +24,12 @@ import { invalidatePersonScope, invalidateCommsScope } from '@/lib/invalidate';
 import {
   Loader2, UserCheck, Users, UserPlus, Check, Building,
   ChevronsUpDown, Link as LinkIcon, ArrowLeft, Plus,
-  Mail, Linkedin, MessageSquare,
+  Mail, Linkedin, MessageSquare, Phone, MapPin, AlertCircle, Pencil,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = 'pick_type' | 'searching' | 'matches' | 'enriching' | 'form';
+type Step = 'pick_type' | 'searching' | 'matches' | 'enriching' | 'preview' | 'form';
 type PersonType = 'candidate' | 'contact';
 
 interface PersonMatch {
@@ -250,7 +250,20 @@ export function AddPersonWizard({
       console.error('Enrichment failed:', err);
     }
 
-    setStep('form');
+    // Decide: preview card (when enrichment landed something useful)
+    // or fall straight into the editable form (when it didn't).
+    // Read the latest form via the functional setter to dodge the
+    // async setState that the merges above used.
+    setForm(latest => {
+      const goodName =
+        (latest.first_name?.trim().length ?? 0) > 1 &&
+        (latest.last_name?.trim().length ?? 0) > 1;
+      const hasIdentitySignal =
+        !!latest.email || !!latest.title || !!latest.company ||
+        /linkedin\.com\/(?:in|pub)\//i.test(latest.linkedin_url ?? '');
+      setStep(goodName && hasIdentitySignal ? 'preview' : 'form');
+      return latest;
+    });
   }, [channel, rawBody, prefill]);
 
   // LinkedIn resolution — delegates to /api/lookup-linkedin, which reads the
@@ -348,7 +361,19 @@ export function AddPersonWizard({
   // ── Save new person ────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!personType || !form.first_name.trim() || !form.last_name.trim()) return;
+    if (!personType) return;
+    const errors = validateFormForSave(form, personType);
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      // If we were on the preview card, drop the user back to the form
+      // so they can see + correct the inline errors. From the form view
+      // the errors render in place.
+      if (step === 'preview') setStep('form');
+      const first = Object.values(errors)[0];
+      if (first) toast.error(first);
+      return;
+    }
+    setValidationErrors({});
     setSaving(true);
 
     try {
@@ -432,6 +457,42 @@ export function AddPersonWizard({
 
   const update = (field: keyof FormData, value: string) =>
     setForm(prev => ({ ...prev, [field]: value }));
+
+  /**
+   * Pre-save validation. Errors map onto field labels so they can render
+   * inline in the form OR as a banner above the preview card. Returns
+   * an empty object when valid.
+   *
+   * Rules (per product direction):
+   *   - first_name length > 1 char
+   *   - last_name  length > 1 char
+   *   - linkedin_url, when filled, must be a real linkedin.com/in/ URL
+   *     (NOT just a Unipile URN/provider_id like ACoAAA…). Required for
+   *     candidates because we use it for matching + Unipile resolution;
+   *     optional for clients (sometimes only an email is known).
+   */
+  const validateFormForSave = (
+    f: FormData,
+    type: PersonType | null,
+  ): Partial<Record<keyof FormData, string>> => {
+    const errors: Partial<Record<keyof FormData, string>> = {};
+    const first = (f.first_name ?? '').trim();
+    const last = (f.last_name ?? '').trim();
+    const li = (f.linkedin_url ?? '').trim();
+    if (first.length <= 1) errors.first_name = 'First name must be more than 1 letter';
+    if (last.length <= 1) errors.last_name = 'Last name must be more than 1 letter';
+    if (type === 'candidate') {
+      if (!li) errors.linkedin_url = 'LinkedIn URL is required for candidates';
+      else if (!/^https?:\/\/(?:[\w.-]+\.)?linkedin\.com\/(?:in|pub)\//i.test(li)) {
+        errors.linkedin_url = 'Must be a linkedin.com/in/ URL';
+      }
+    } else if (li && !/^https?:\/\/(?:[\w.-]+\.)?linkedin\.com\/(?:in|pub)\//i.test(li)) {
+      errors.linkedin_url = 'Must be a linkedin.com/in/ URL';
+    }
+    return errors;
+  };
+
+  const [validationErrors, setValidationErrors] = useState<Partial<Record<keyof FormData, string>>>({});
 
   const getMatchDisplay = (m: PersonMatch) => ({
     name: m.full_name || `${m.first_name || ''} ${m.last_name || ''}`.trim(),
@@ -591,6 +652,81 @@ export function AddPersonWizard({
           )}
 
           {/* ── STEP: Form ───────────────────────────────────────────── */}
+          {/* ── STEP: Preview (post-enrichment confirmation card) ───── */}
+          {step === 'preview' && (
+            <div className="py-4 space-y-3">
+              <p className="text-xs text-muted-foreground text-center">
+                {channel === 'email'
+                  ? 'Pulled this from the email signature.'
+                  : channel?.startsWith('linkedin')
+                    ? 'Pulled this from LinkedIn (via Unipile).'
+                    : 'Pulled this from the thread.'}{' '}
+                Confirm to add as a {personType === 'candidate' ? 'candidate' : 'client'}.
+              </p>
+
+              {/* Card mirrors the look of the matches list so confirming
+                  feels visually consistent with "linking to existing". */}
+              <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                {personType === 'candidate'
+                  ? <UserCheck className="h-4 w-4 text-success shrink-0 mt-0.5" />
+                  : <Users className="h-4 w-4 text-info shrink-0 mt-0.5" />}
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-foreground truncate">
+                      {form.first_name} {form.last_name}
+                    </span>
+                    <Badge variant="outline" className="text-[9px] uppercase shrink-0 capitalize">
+                      {personType}
+                    </Badge>
+                  </div>
+                  {(form.title || form.company) && (
+                    <p className="text-xs text-muted-foreground truncate">
+                      {[form.title, form.company].filter(Boolean).join(' @ ')}
+                    </p>
+                  )}
+                  <div className="flex flex-col gap-0.5 mt-1.5">
+                    {form.email && (
+                      <p className="text-[11px] text-foreground/80 flex items-center gap-1.5 truncate">
+                        <Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        {form.email}
+                      </p>
+                    )}
+                    {form.phone && (
+                      <p className="text-[11px] text-foreground/80 flex items-center gap-1.5 truncate">
+                        <Phone className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        {form.phone}
+                      </p>
+                    )}
+                    {form.location && (
+                      <p className="text-[11px] text-foreground/80 flex items-center gap-1.5 truncate">
+                        <MapPin className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        {form.location}
+                      </p>
+                    )}
+                    {form.linkedin_url && (
+                      <p className="text-[11px] text-foreground/80 flex items-center gap-1.5 truncate">
+                        <Linkedin className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        {form.linkedin_url}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Validation banner — drives the user back to Edit when
+                  required fields don't pass on save. */}
+              {Object.keys(validationErrors).length > 0 && (
+                <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning space-y-0.5">
+                  {Object.values(validationErrors).map((msg, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <AlertCircle className="h-3 w-3 shrink-0" /> {msg}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {step === 'form' && (
             <div className="py-2 space-y-4">
               {/* Type toggle */}
@@ -625,11 +761,29 @@ export function AddPersonWizard({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">First Name <span className="text-[#D4AF37]">*</span></Label>
-                  <Input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} className="h-9" />
+                  <Input
+                    value={form.first_name}
+                    onChange={(e) => update('first_name', e.target.value)}
+                    className={cn('h-9', validationErrors.first_name && 'border-warning')}
+                  />
+                  {validationErrors.first_name && (
+                    <p className="text-[10px] text-warning flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {validationErrors.first_name}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Last Name <span className="text-[#D4AF37]">*</span></Label>
-                  <Input value={form.last_name} onChange={(e) => update('last_name', e.target.value)} className="h-9" />
+                  <Input
+                    value={form.last_name}
+                    onChange={(e) => update('last_name', e.target.value)}
+                    className={cn('h-9', validationErrors.last_name && 'border-warning')}
+                  />
+                  {validationErrors.last_name && (
+                    <p className="text-[10px] text-warning flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {validationErrors.last_name}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -724,8 +878,20 @@ export function AddPersonWizard({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">LinkedIn URL</Label>
-                <Input value={form.linkedin_url} onChange={(e) => update('linkedin_url', e.target.value)} placeholder="https://linkedin.com/in/..." className="h-9" />
+                <Label className="text-xs">
+                  LinkedIn URL{personType === 'candidate' && <span className="text-[#D4AF37]"> *</span>}
+                </Label>
+                <Input
+                  value={form.linkedin_url}
+                  onChange={(e) => update('linkedin_url', e.target.value)}
+                  placeholder="https://linkedin.com/in/..."
+                  className={cn('h-9', validationErrors.linkedin_url && 'border-warning')}
+                />
+                {validationErrors.linkedin_url && (
+                  <p className="text-[10px] text-warning flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" /> {validationErrors.linkedin_url}
+                  </p>
+                )}
               </div>
 
               {/* Candidate-specific fields */}
@@ -757,6 +923,27 @@ export function AddPersonWizard({
         </ScrollArea>
 
         {/* Footer */}
+        {step === 'preview' && (
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setStep('form')}
+              className="gap-1"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </Button>
+            <Button
+              variant="gold"
+              onClick={handleSave}
+              disabled={saving}
+              className="gap-1.5"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Confirm & Add
+            </Button>
+          </DialogFooter>
+        )}
+
         {step === 'form' && (
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
@@ -764,6 +951,7 @@ export function AddPersonWizard({
               onClick={() => {
                 setStep('pick_type');
                 setMatches([]);
+                setValidationErrors({});
                 enrichedRef.current = false;
               }}
               className="gap-1"
@@ -773,7 +961,7 @@ export function AddPersonWizard({
             <Button
               variant="gold"
               onClick={handleSave}
-              disabled={saving || !form.first_name.trim() || !form.last_name.trim()}
+              disabled={saving}
               className="gap-1.5"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
