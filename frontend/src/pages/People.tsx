@@ -227,7 +227,13 @@ const People = () => {
     return sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
   };
 
-  const selectedCandidateIds = selectedKeys
+  // Pass every selection (candidate + contact rows) to enroll/bulk
+  // dialogs. The dialog itself determines candidate-vs-contact routing
+  // by looking each id up in the candidates list.
+  const selectedCandidateIds = selectedKeys.map(k => k.split(':')[1]);
+  // Send-out actions still gate on type=candidate (you can't send out
+  // a client). Keep that subset separate.
+  const selectedCandidateOnlyIds = selectedKeys
     .filter(k => k.startsWith('candidate:'))
     .map(k => k.split(':')[1]);
 
@@ -270,15 +276,15 @@ const People = () => {
             </Button>
             {selectedKeys.length > 0 && (
               <>
+                {selectedCandidateOnlyIds.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={() => setBulkSendOutOpen(true)}>
+                    <Briefcase className="h-3.5 w-3.5 mr-1" /> Add to Job ({selectedCandidateOnlyIds.length})
+                  </Button>
+                )}
                 {selectedCandidateIds.length > 0 && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => setBulkSendOutOpen(true)}>
-                      <Briefcase className="h-3.5 w-3.5 mr-1" /> Add to Job ({selectedCandidateIds.length})
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-                      <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
-                    </Button>
-                  </>
+                  <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+                    <Play className="h-3.5 w-3.5 mr-1" /> Enroll ({selectedCandidateIds.length})
+                  </Button>
                 )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -593,8 +599,8 @@ const People = () => {
       <BulkCandidateActionsDialog
         open={bulkSendOutOpen}
         onOpenChange={setBulkSendOutOpen}
-        candidateIds={selectedCandidateIds}
-        candidateNames={selectedCandidateIds.map(id => {
+        candidateIds={selectedCandidateOnlyIds}
+        candidateNames={selectedCandidateOnlyIds.map(id => {
           const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
           return p?.full_name ?? id;
         })}

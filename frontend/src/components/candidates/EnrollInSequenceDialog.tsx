@@ -21,10 +21,11 @@ interface EnrollInSequenceDialogProps {
   preselectedSequenceId?: string;
 }
 
-const isSequenceSelectable = (sequence: any) => {
-  const status = String(sequence?.status || '').toLowerCase();
-  return status === 'active' || status === 'draft';
-};
+// Show every sequence in the picker. Filtering by status='active' or
+// 'draft' was hiding sequences that lived in legacy/null states (and
+// the user's own working sequences sometimes sit in 'draft' until
+// they're ready). Easier to expose them all and let the user choose.
+const isSequenceSelectable = (_sequence: any) => true;
 
 export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candidateNames = [], preselectedSequenceId }: EnrollInSequenceDialogProps) => {
   const [selectedSequenceId, setSelectedSequenceId] = useState<string>('');
@@ -101,8 +102,11 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     setSelectedPeople(prev => prev.includes(personId) ? prev.filter(p => p !== personId) : [...prev, personId]);
   };
 
-  const channelIcon = (channel: string) => {
-    if (channel === 'linkedin') return <Linkedin className="h-3.5 w-3.5" />;
+  const channelIcon = (channel: string | null | undefined) => {
+    const c = String(channel || '').toLowerCase();
+    if (c.includes('linkedin') || c.includes('recruiter')) return <Linkedin className="h-3.5 w-3.5" />;
+    if (c === 'sms') return <MessageSquare className="h-3.5 w-3.5" />;
+    if (c === 'phone') return <Phone className="h-3.5 w-3.5" />;
     return <Mail className="h-3.5 w-3.5" />;
   };
 
@@ -126,6 +130,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const candidateIdSet = new Set(candidates.map(c => c.id));
+      const contactIdSet = new Set(contacts.map((c: any) => c.id));
 
       // Check for existing enrollments to prevent duplicates
       const { data: existingEnrollments } = await supabase
@@ -137,11 +142,16 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       const existingContIds = new Set((existingEnrollments ?? []).filter(e => e.contact_id).map(e => e.contact_id));
 
       let skipped = 0;
+      let unresolved = 0;
       const enrollments: any[] = [];
       for (const personId of idsToEnroll) {
         const isCand = candidateIdSet.has(personId);
+        const isCont = contactIdSet.has(personId);
+        // If we can't resolve the id to either pool, skip rather than
+        // shoving it into contact_id (which would FK-violate).
+        if (!isCand && !isCont) { unresolved++; continue; }
         if (isCand && existingCandIds.has(personId)) { skipped++; continue; }
-        if (!isCand && existingContIds.has(personId)) { skipped++; continue; }
+        if (isCont && existingContIds.has(personId)) { skipped++; continue; }
         enrollments.push({
           sequence_id: selectedSequenceId,
           ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
@@ -197,6 +207,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       const parts: string[] = [];
       if (enrollments.length > 0) parts.push(`${enrollments.length} enrolled`);
       if (skipped > 0) parts.push(`${skipped} already in sequence, skipped`);
+      if (unresolved > 0) parts.push(`${unresolved} could not be resolved`);
       toast.success(parts.join(' · ') || 'No changes');
       queryClient.invalidateQueries({ queryKey: ['sequences'] });
       queryClient.invalidateQueries({ queryKey: ['sequence_enrollments'] });
@@ -239,19 +250,33 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
               {isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading sequences...</p>
               ) : activeSequences.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No sequences available.</p>
+                <p className="text-sm text-muted-foreground">
+                  No sequences exist yet. Create one in Sequences first.
+                </p>
               ) : (
                 <Select value={selectedSequenceId} onValueChange={setSelectedSequenceId}>
                   <SelectTrigger><SelectValue placeholder="Choose a sequence..." /></SelectTrigger>
                   <SelectContent>
-                    {activeSequences.map((seq) => (
-                      <SelectItem key={seq.id} value={seq.id}>
-                        <span className="flex items-center gap-2">
-                          {channelIcon(seq.channel)}
-                          {seq.name}
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {activeSequences.map((seq) => {
+                      // Guard against any sequence row missing an id —
+                      // Radix Select crashes on empty-string values.
+                      if (!seq?.id) return null;
+                      const status = String(seq?.status || '').toLowerCase();
+                      const showStatus = status && status !== 'active';
+                      return (
+                        <SelectItem key={seq.id} value={seq.id}>
+                          <span className="flex items-center gap-2">
+                            {channelIcon(seq.channel)}
+                            <span>{seq.name || 'Untitled sequence'}</span>
+                            {showStatus && (
+                              <Badge variant="secondary" className="text-[10px] capitalize ml-1">
+                                {status}
+                              </Badge>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               )}
@@ -259,18 +284,23 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
           )}
 
           {/* Sender account picker — required */}
-          {allAccounts.length > 0 && (
-            <div className="space-y-2">
-              <Label>Send From <span className="text-destructive">*</span></Label>
+          <div className="space-y-2">
+            <Label>Send From <span className="text-destructive">*</span></Label>
+            {allAccounts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No sender accounts wired. Connect an integration in Settings first.
+              </p>
+            ) : (
               <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
                 <SelectTrigger className={!selectedAccountId ? 'border-destructive/50' : ''}>
                   <SelectValue placeholder="Choose sender account..." />
                 </SelectTrigger>
                 <SelectContent>
                   {allAccounts.map((acct: any) => {
+                    if (!acct?.id) return null;
                     const label = (acct.account_label || acct.account_type || '')
                       .replace(/\s*(Email|LinkedIn|SMS|Phone|SMTP|Gmail|Outlook)\s*$/i, '').trim()
-                      || acct.account_label || acct.account_type;
+                      || acct.account_label || acct.account_type || 'Unnamed account';
                     return (
                       <SelectItem key={acct.id} value={acct.id}>
                         <span className="flex items-center gap-2">
@@ -282,8 +312,8 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                   })}
                 </SelectContent>
               </Select>
-            </div>
-          )}
+            )}
+          </div>
 
           {isPeoplePicker && (
             <div className="space-y-2">
@@ -357,8 +387,9 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
               recruiter_inmail: { start: 10, end: 27 },
             };
 
-            const snapToWindow = (date: Date, channel: string): Date => {
-              const w = SEND_WINDOWS[channel] ?? { start: 10, end: 22 };
+            const snapToWindow = (date: Date, channel: string | null | undefined): Date => {
+              const c = String(channel || '').toLowerCase();
+              const w = SEND_WINDOWS[c] ?? { start: 10, end: 22 };
               const h = date.getUTCHours() + date.getUTCMinutes() / 60;
               const outside = w.end > 24
                 ? (h >= (w.end - 24) && h < w.start)
@@ -387,20 +418,22 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
             const fmtDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
             const fmtTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
 
-            const stepIcon = (ch: string) => {
-              if (ch === 'email') return <Mail className="h-3 w-3" />;
-              if (ch.includes('linkedin') || ch.includes('recruiter')) return <Linkedin className="h-3 w-3" />;
-              if (ch === 'sms') return <MessageSquare className="h-3 w-3" />;
-              if (ch === 'phone') return <Phone className="h-3 w-3" />;
+            const stepIcon = (ch: string | null | undefined) => {
+              const c = String(ch || '').toLowerCase();
+              if (c === 'email') return <Mail className="h-3 w-3" />;
+              if (c.includes('linkedin') || c.includes('recruiter')) return <Linkedin className="h-3 w-3" />;
+              if (c === 'sms') return <MessageSquare className="h-3 w-3" />;
+              if (c === 'phone') return <Phone className="h-3 w-3" />;
               return <Mail className="h-3 w-3" />;
             };
 
-            const channelLabel = (ch: string) => {
-              if (ch === 'linkedin_connection') return 'Connection Request';
-              if (ch === 'linkedin_message') return 'LinkedIn Message';
-              if (ch === 'linkedin_recruiter' || ch === 'recruiter_inmail') return 'Recruiter InMail';
-              if (ch === 'sms') return 'SMS';
-              if (ch === 'phone') return 'Phone';
+            const channelLabel = (ch: string | null | undefined) => {
+              const c = String(ch || '').toLowerCase();
+              if (c === 'linkedin_connection') return 'Connection Request';
+              if (c === 'linkedin_message') return 'LinkedIn Message';
+              if (c === 'linkedin_recruiter' || c === 'recruiter_inmail') return 'Recruiter InMail';
+              if (c === 'sms') return 'SMS';
+              if (c === 'phone') return 'Phone';
               return 'Email';
             };
 
