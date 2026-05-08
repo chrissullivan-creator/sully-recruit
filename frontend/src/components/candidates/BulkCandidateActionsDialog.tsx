@@ -160,8 +160,6 @@ export const BulkCandidateActionsDialog = ({
           sequence_id: selectedSequenceId,
           candidate_id: candidateId,
           status: 'active',
-          current_step_order: 0,
-          next_step_at: new Date().toISOString(),
           enrolled_by: userId,
         }));
 

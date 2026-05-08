@@ -45,7 +45,6 @@ export const cleanupStaleEnrollments = schedules.task({
           linkedin_connection_status: "expired",
           stop_trigger: "connection_expired",
           stop_reason: "connection_request_expired_30d",
-          stopped_reason: "connection_request_expired_30d",
           stopped_at: new Date().toISOString(),
         } as any)
         .in("id", ids);
@@ -72,8 +71,7 @@ export const cleanupStaleEnrollments = schedules.task({
       .from("sequence_enrollments")
       .select("id")
       .eq("status", "active")
-      .lt("updated_at", inactiveCutoff)
-      .is("next_step_at", null);
+      .lt("updated_at", inactiveCutoff);
 
     if (inactiveErr) {
       logger.error("Failed to query inactive enrollments", { error: inactiveErr.message });
@@ -86,7 +84,6 @@ export const cleanupStaleEnrollments = schedules.task({
           status: "stopped",
           stop_trigger: "inactive_expired",
           stop_reason: "inactive_60d",
-          stopped_reason: "inactive_60d",
           stopped_at: new Date().toISOString(),
         } as any)
         .in("id", ids);

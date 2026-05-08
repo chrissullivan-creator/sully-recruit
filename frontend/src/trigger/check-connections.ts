@@ -98,9 +98,11 @@ export const checkConnections = schedules.task({
           profile.distance === 1;
 
         if (isConnected) {
-          // Connection accepted! Advance the enrollment
+          // Connection accepted — flip the gate so the sequence
+          // scheduler picks the enrollment up on its next pass. The
+          // scheduler reads sequence_step_logs to compute the next
+          // send time; no need to stamp next_step_at here.
           const now = new Date();
-          const nextStepAt = new Date(now.getTime() + 4 * 60 * 60 * 1000); // +4 hours
 
           await supabase
             .from("sequence_enrollments")
@@ -108,7 +110,6 @@ export const checkConnections = schedules.task({
               waiting_for_connection_acceptance: false,
               linkedin_connection_status: "accepted",
               linkedin_connection_accepted_at: now.toISOString(),
-              next_step_at: nextStepAt.toISOString(),
             } as any)
             .eq("id", enrollment.id);
 

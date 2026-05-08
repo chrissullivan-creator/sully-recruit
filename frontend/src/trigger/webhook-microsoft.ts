@@ -500,7 +500,6 @@ async function processEmailMessage(
               status: "stopped",
               stop_trigger: "email_bounced",
               stop_reason: "email_bounced",
-              stopped_reason: "email_bounced",
               stopped_at: receivedAt,
             } as any)
             .eq("id", enrollment.id);

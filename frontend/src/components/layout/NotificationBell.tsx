@@ -5,20 +5,32 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 export function NotificationBell() {
   const { data: notifications = [] } = useNotifications();
+  const queryClient = useQueryClient();
   const unread = notifications.filter((n) => !n.is_read);
 
   const markRead = async (id: string) => {
-    await supabase.from('notifications').update({ is_read: true } as any).eq('id', id);
+    const { error } = await supabase.from('notifications').update({ is_read: true } as any).eq('id', id);
+    if (error) {
+      toast.error('Could not mark notification as read');
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
   };
 
   const markAllRead = async () => {
     const ids = unread.map((n) => n.id);
-    if (ids.length) {
-      await supabase.from('notifications').update({ is_read: true } as any).in('id', ids);
+    if (!ids.length) return;
+    const { error } = await supabase.from('notifications').update({ is_read: true } as any).in('id', ids);
+    if (error) {
+      toast.error('Could not mark notifications as read');
+      return;
     }
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
   };
 
   return (
