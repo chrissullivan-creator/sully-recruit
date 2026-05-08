@@ -534,6 +534,15 @@ export const sequenceActionExecute = task({
         .eq("id", payload.stepLogId);
     }
 
+    // Re-anchor the next pending step to actual sent_at + delay.
+    // At init time we computed cumulative scheduled_at off the prior
+    // step's *scheduled* time. If anything pushed this step's actual
+    // sent — daily cap roll, rate-limit retry, paused sequence — that
+    // delta needs to propagate or the next step fires too early
+    // (sometimes <24h after this one). Cascading happens naturally:
+    // the next step's execute will re-anchor the step after, etc.
+    await reanchorNextStep(supabase, payload.enrollmentId, payload.stepLogId, sentAt, sequence);
+
     // Increment daily send counter
     const est = sentAt.toLocaleString("en-US", { timeZone: "America/New_York" });
     const estDate = new Date(est);
@@ -850,6 +859,74 @@ async function getSenderName(supabase: any, userId: string): Promise<string> {
     .eq("id", userId)
     .maybeSingle();
   return profile?.full_name || `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || "";
+}
+
+/**
+ * After a step actually sends, push the next pending step's
+ * scheduled_at to actualSentAt + that step's delay (respecting send
+ * window + caps via calculateSendTime). Without this, a step that
+ * was delayed by daily cap or rate-limit retry leaks an unintended
+ * shorter gap to the next step.
+ *
+ * Only touches the immediate next step — when *that* step executes,
+ * it re-anchors its own next step the same way. Cascading is
+ * automatic and incremental.
+ *
+ * pending_connection logs are skipped; they get scheduled by the
+ * webhook / fallback when the connection is accepted.
+ */
+async function reanchorNextStep(
+  supabase: any,
+  enrollmentId: string,
+  currentStepLogId: string,
+  actualSentAt: Date,
+  sequence: any,
+): Promise<void> {
+  const { data: nextLog } = await supabase
+    .from("sequence_step_logs")
+    .select("id, scheduled_at, sequence_actions!inner(*)")
+    .eq("enrollment_id", enrollmentId)
+    .eq("status", "scheduled")
+    .neq("id", currentStepLogId)
+    .order("scheduled_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!nextLog) return;
+
+  const action = (nextLog as any).sequence_actions;
+  if (!action) return;
+
+  const senderUserId = sequence.sender_user_id || sequence.created_by;
+  const newScheduledAt = await calculateSendTime(supabase, {
+    startTime: actualSentAt,
+    delayHours: Number(action.base_delay_hours) || 0,
+    delayMinutes: action.delay_interval_minutes || 0,
+    jiggleMinutes: action.jiggle_minutes || 0,
+    channel: action.channel,
+    sendWindowStart: sequence.send_window_start || "09:00",
+    sendWindowEnd: sequence.send_window_end || "18:00",
+    accountId: senderUserId,
+    weekdaysOnly: sequence.weekdays_only === true,
+  });
+
+  // Only update if the new time is later than what we already have.
+  // We never want to *pull forward* a step — bringing it earlier
+  // could violate the cumulative-delay contract and surprise the
+  // recipient. Push-back only.
+  const existing = new Date(nextLog.scheduled_at);
+  if (newScheduledAt.getTime() <= existing.getTime()) return;
+
+  await supabase
+    .from("sequence_step_logs")
+    .update({ scheduled_at: newScheduledAt.toISOString(), updated_at: new Date().toISOString() } as any)
+    .eq("id", nextLog.id);
+
+  logger.info("Re-anchored next step to actual send time", {
+    enrollmentId,
+    nextStepLogId: nextLog.id,
+    delta_minutes: Math.round((newScheduledAt.getTime() - existing.getTime()) / 60000),
+  });
 }
 
 async function markStepLog(supabase: any, stepLogId: string, status: string, sentAt?: Date): Promise<void> {
