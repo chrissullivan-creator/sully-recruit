@@ -13,6 +13,8 @@ import { fetchEntityHistory } from "./fetch-entity-history";
 import { checkConnections } from "./check-connections";
 import { syncLinkedinInvitations } from "./sync-linkedin-invitations";
 import { pendingConnectionTimeout } from "./pending-connection-timeout";
+import { resumeIngestion } from "./resume-ingestion";
+import { syncOutlookEvents } from "./sync-outlook-events";
 
 export const functions = [
   syncInmailCredits,
@@ -25,4 +27,6 @@ export const functions = [
   checkConnections,
   syncLinkedinInvitations,
   pendingConnectionTimeout,
+  resumeIngestion,
+  syncOutlookEvents,
 ];

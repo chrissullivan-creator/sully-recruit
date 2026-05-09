@@ -14,14 +14,15 @@ interface ResumeIngestionPayload {
   fileName: string;
 }
 
-export const resumeIngestion = task({
-  id: "resume-ingestion",
-  retry: { maxAttempts: 3 },
-  run: async (payload: ResumeIngestionPayload) => {
-    const { resumeId, candidateId, filePath, fileName } = payload;
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so the Inngest port and Trigger.dev task
+ * share one source of truth. Phase 5b deletes the wrapper.
+ */
+export async function runResumeIngestion(payload: ResumeIngestionPayload) {
+  const { resumeId, candidateId, filePath, fileName } = payload;
+  const supabase = getSupabaseAdmin();
 
-    logger.info("Starting resume ingestion", { resumeId, candidateId, fileName });
+  logger.info("Starting resume ingestion", { resumeId, candidateId, fileName });
 
     await supabase
       .from("resumes")
@@ -291,7 +292,14 @@ ${rawText.slice(0, 60000)}`;
 
     return { success: true, resumeId, candidateId: workingCandidateId };
     }
-  },
+}
+
+// Trigger.dev wrapper — kept while other Trigger.dev tasks chain into
+// resumeIngestion.trigger(). Phase 5b deletes it.
+export const resumeIngestion = task({
+  id: "resume-ingestion",
+  retry: { maxAttempts: 3 },
+  run: (payload: ResumeIngestionPayload) => runResumeIngestion(payload),
 });
 
 /**

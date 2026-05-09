@@ -31,14 +31,14 @@ import { matchPersonByEmail as matchPersonByEmailHelper } from "./lib/match-pers
  * land before they're missed, light enough that we're not hammering
  * Graph for 14d of forward-looking events.
  */
-export const syncOutlookEvents = schedules.task({
-  id: "sync-outlook-events",
-  cron: "*/30 * * * *",
-  maxDuration: 300,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so the Inngest port and Trigger.dev task
+ * share one source of truth. Phase 5b deletes the wrapper.
+ */
+export async function runSyncOutlookEvents() {
+  const supabase = getSupabaseAdmin();
 
-    let graphEmailsRaw = "";
+  let graphEmailsRaw = "";
     try { graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || ""; } catch {}
     const graphEmails = new Set(
       graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
@@ -160,8 +160,11 @@ export const syncOutlookEvents = schedules.task({
     };
     logger.info("Outlook calendar sync complete", summary);
     return summary;
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/sync-outlook-events.ts.
+// Stub disables the Trigger.dev cron so we don't double-sync calendars.
+export const syncOutlookEvents = null;
 
 // ─── per-mailbox sync ──────────────────────────────────────────────────────
 
