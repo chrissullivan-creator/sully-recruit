@@ -17,20 +17,25 @@ const RC_SERVER = "https://platform.ringcentral.com";
  * Also used as the go-forward processor: poll-rc-calls or the webhook can
  * .trigger() this task after inserting a new call_log row.
  */
-export const processCallDeepgram = task({
-  id: "process-call-deepgram",
-  maxDuration: 1800, // 30 minutes — handles even 2-hour recordings
-  retry: { maxAttempts: 2 },
-  run: async (payload: {
-    call_log_id?: string;
-    batch?: boolean;
-    limit?: number;
-    dry_run?: boolean;
-  }) => {
-    const supabase = getSupabaseAdmin();
-    const anthropicKey = await getAnthropicKey();
-    const deepgramKey = await getAppSetting("DEEPGRAM_API_KEY");
-    if (!deepgramKey) throw new Error("DEEPGRAM_API_KEY not found in app_settings");
+export type ProcessCallDeepgramPayload = {
+  call_log_id?: string;
+  batch?: boolean;
+  limit?: number;
+  dry_run?: boolean;
+};
+
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ *
+ * Long-running: up to 30 min for 2-hour recordings (Deepgram + Claude
+ * extraction + back-of-resume notes).
+ */
+export async function runProcessCallDeepgram(payload: ProcessCallDeepgramPayload) {
+  const supabase = getSupabaseAdmin();
+  const anthropicKey = await getAnthropicKey();
+  const deepgramKey = await getAppSetting("DEEPGRAM_API_KEY");
+  if (!deepgramKey) throw new Error("DEEPGRAM_API_KEY not found in app_settings");
 
     // ── Find calls to process ───────────────────────────────────────
     let toProcess: any[] = [];
@@ -378,7 +383,16 @@ Field rules:
 
     logger.info("Batch complete", stats);
     return stats;
-  },
+}
+
+// Trigger.dev wrapper — kept while other Trigger.dev tasks chain into
+// processCallDeepgram.trigger() (e.g. retry-stuck-call-transcripts,
+// drain-call-queue, webhook-ringcentral). Phase 5b deletes it.
+export const processCallDeepgram = task({
+  id: "process-call-deepgram",
+  maxDuration: 1800, // 30 min for 2-hour recordings
+  retry: { maxAttempts: 2 },
+  run: (payload: ProcessCallDeepgramPayload) => runProcessCallDeepgram(payload),
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────

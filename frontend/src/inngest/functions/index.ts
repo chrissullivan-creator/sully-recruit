@@ -31,6 +31,9 @@ import { backfillResumeEmbeddings } from "./backfill-resume-embeddings";
 import { syncConversations } from "./sync-conversations";
 import { pollRcCalls } from "./poll-rc-calls";
 import { renewWebhookSubscriptions } from "./webhook-subscription-renewal";
+import { backfillCalendarEvents } from "./backfill-calendar-events";
+import { processCallDeepgram } from "./process-call-deepgram";
+import { recoverOrphanResumes } from "./recover-orphan-resumes";
 
 export const functions = [
   syncInmailCredits,
@@ -61,4 +64,7 @@ export const functions = [
   syncConversations,
   pollRcCalls,
   renewWebhookSubscriptions,
+  backfillCalendarEvents,
+  processCallDeepgram,
+  recoverOrphanResumes,
 ];

@@ -46,13 +46,13 @@ interface RecoverPayload {
   since?: string;
 }
 
-export const recoverOrphanResumes = task({
-  id: "recover-orphan-resumes",
-  maxDuration: 540,
-  retry: { maxAttempts: 1 },
-  run: async (payload: RecoverPayload) => {
-    const supabase = getSupabaseAdmin();
-    const limit = payload.limit ?? 200;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runRecoverOrphanResumes(payload: RecoverPayload) {
+  const supabase = getSupabaseAdmin();
+  const limit = payload.limit ?? 200;
     const since = payload.since ?? "2026-04-15";
 
     // Find orphans — storage objects in `resumes` bucket whose path
@@ -67,8 +67,10 @@ export const recoverOrphanResumes = task({
 
     logger.info("Orphan recovery starting", { count: orphans.length, since, limit });
     return await processOrphans(supabase, orphans);
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/recover-orphan-resumes.ts.
+export const recoverOrphanResumes = null;
 
 async function processOrphans(
   supabase: any,

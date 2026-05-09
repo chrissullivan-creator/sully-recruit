@@ -19,12 +19,13 @@ import { matchPersonByEmail as matchPersonByEmailHelper } from "./lib/match-pers
  *   1. Pull historical events from Graph API → create meeting tasks + tag people
  *   2. Re-link any existing calendar tasks that are missing meeting_attendees
  */
-export const backfillCalendarEvents = task({
-  id: "backfill-calendar-events",
-  retry: { maxAttempts: 1 },
-  run: async (payload: { monthsBack?: number } = {}) => {
-    const supabase = getSupabaseAdmin();
-    const monthsBack = payload.monthsBack ?? 6;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runBackfillCalendarEvents(payload: { monthsBack?: number } = {}) {
+  const supabase = getSupabaseAdmin();
+  const monthsBack = payload.monthsBack ?? 6;
 
     let eventsSynced = 0;
     let eventsMatched = 0;
@@ -219,8 +220,10 @@ export const backfillCalendarEvents = task({
 
     logger.info("Calendar backfill complete", summary);
     return summary;
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/backfill-calendar-events.ts.
+export const backfillCalendarEvents = null;
 
 // ── Process a batch of Graph calendar events ──────────────────────────────
 
