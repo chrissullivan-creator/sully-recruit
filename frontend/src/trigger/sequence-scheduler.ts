@@ -69,6 +69,14 @@ export const sequenceEnrollmentInit = task({
       return { action: "error", reason: "sequence_not_found" };
     }
 
+    // Inngest cutover guard: once a sequence has been flipped to engine='inngest',
+    // its enrollments are owned by the Inngest sequence-run function — Trigger.dev
+    // must not pre-schedule step_logs for it (the sweep filters them out anyway,
+    // so the rows would just sit forever).
+    if ((sequence as any).engine === "inngest") {
+      return { action: "skipped", reason: "engine_inngest" };
+    }
+
     // Get ALL nodes with their actions
     const { data: nodes } = await supabase
       .from("sequence_nodes")
@@ -667,19 +675,24 @@ export const sequenceSweep = schedules.task({
     const supabase = getSupabaseAdmin();
     const now = new Date().toISOString();
 
+    // engine='trigger' filter: the Inngest cutover (see migration
+    // 20260509000000_add_sequences_engine_column.sql) flips per-sequence to
+    // 'inngest' as it migrates them. This sweep MUST skip those rows so the
+    // two engines can never both fire the same step_log.
     const { data: dueLogs, error } = await supabase
       .from("sequence_step_logs")
       .select(`
         id, enrollment_id, action_id, node_id, channel,
         sequence_enrollments!inner(
           id, sequence_id, candidate_id, contact_id, status,
-          sequences!inner(id, status, created_by, sender_user_id)
+          sequences!inner(id, status, engine, created_by, sender_user_id)
         )
       `)
       .eq("status", "scheduled")
       .lte("scheduled_at", now)
       .eq("sequence_enrollments.status", "active")
       .eq("sequence_enrollments.sequences.status", "active")
+      .eq("sequence_enrollments.sequences.engine", "trigger")
       .limit(100);
 
     if (error) {
