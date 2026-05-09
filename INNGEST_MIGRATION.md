@@ -43,6 +43,8 @@ to Vercel cron, and keeps webhook ack endpoints on Vercel functions
 | `webhook-unipile` (deferred work) | Same shape, multiple channels |
 | `webhook-ringcentral` (deferred work) | SMS parse + intel |
 | `webhook-subscription-renewal` | Microsoft Graph subscription rotation |
+| `sync-outlook-events` (30m) | Fans out across Graph + Unipile accounts |
+| `poll-rc-calls` | Fans out across RingCentral accounts |
 
 ### → Vercel Cron (simple, idempotent, short)
 
@@ -50,12 +52,10 @@ to Vercel cron, and keeps webhook ack endpoints on Vercel functions
 |---|---|
 | `cleanup-stale-enrollments` (daily) | Single DELETE, no fan-out |
 | `sync-inmail-credits` (hourly) | Two API calls, idempotent stamp |
-| `sync-outlook-events` (15m) | If short — re-evaluate, may need Inngest |
 | `pipeline-health-digest` | Weekly digest send |
 | `purge-marketing-emails` (daily) | Bulk Outlook folder cleanup |
 | `sync-proxy-config` | Config refresh |
 | `retry-stuck-call-transcripts` | Simple poll |
-| `poll-rc-calls` | If simple — re-evaluate |
 
 ### → Vercel Functions (HTTP entrypoints; may be Edge)
 
