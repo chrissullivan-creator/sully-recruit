@@ -37,6 +37,7 @@ import { recoverOrphanResumes } from "./recover-orphan-resumes";
 import { processClayEnrichment } from "./process-clay-enrichment";
 import { migrateSequenceToInngest } from "./migrate-sequence-to-inngest";
 import { bulkMigrateSequences } from "./bulk-migrate-sequences";
+import { rescueOrphanEnrollments } from "./rescue-orphan-enrollments";
 
 export const functions = [
   syncInmailCredits,
@@ -73,4 +74,5 @@ export const functions = [
   processClayEnrichment,
   migrateSequenceToInngest,
   bulkMigrateSequences,
+  rescueOrphanEnrollments,
 ];
