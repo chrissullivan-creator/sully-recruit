@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../../src/inngest/client";
 import { simpleParser } from "mailparser";
 
 /**
@@ -279,11 +279,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    await tasks.trigger("resume-ingestion", {
-      resumeId: resumeRow.id,
-      candidateId,
-      filePath: storagePath,
-      fileName,
+    await inngest.send({
+      // resumeId is unique per upload — bare event id dedupes against
+      // the DB webhook + frontend route firing on the same insert.
+      id: `resume-ingest-${resumeRow.id}`,
+      name: "resume/ingest-requested",
+      data: {
+        resumeId: resumeRow.id,
+        candidateId,
+        filePath: storagePath,
+        fileName,
+      },
     });
     created++;
   }
