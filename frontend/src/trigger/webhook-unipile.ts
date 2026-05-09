@@ -174,8 +174,48 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     return { action: "no_match", senderEmail };
   }
 
+  // ── Determine conversation. Match into the outbound sequence
+  // conversation when the inbound has an In-Reply-To / References
+  // header pointing at one of our sent sequence emails. Without this,
+  // a reply to a sequence email lands in unipile_email_{entityId} while
+  // the original outbound sits in seq_{enrollmentId}, splitting the
+  // visible thread. ────────────────────────────────────────────────
+  const headersRaw = (data.headers || data.internet_message_headers || {}) as Record<string, any>;
+  const headerValue = (name: string): string => {
+    for (const [k, v] of Object.entries(headersRaw || {})) {
+      if (k.toLowerCase() === name.toLowerCase()) return String(v ?? "");
+    }
+    return "";
+  };
+  const inReplyToRaw = [headerValue("In-Reply-To"), headerValue("References")]
+    .flatMap((s) => s.match(/<[^>]+>/g) || []);
+  // Match both bracketed and bare forms — outbound stores whatever the
+  // provider returned, which differs across Graph vs Unipile vs Gmail.
+  const inReplyToIds = Array.from(new Set([
+    ...inReplyToRaw,
+    ...inReplyToRaw.map((s: string) => s.replace(/^<|>$/g, "")),
+  ]));
+
+  let conversationId = data.conversation_id || data.thread_id || `unipile_email_${match.entityId}`;
+  if (inReplyToIds.length > 0) {
+    const { data: parent } = await supabase
+      .from("messages")
+      .select("conversation_id")
+      .in("external_message_id", inReplyToIds)
+      .eq("direction", "outbound")
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (parent?.conversation_id) {
+      conversationId = parent.conversation_id;
+      logger.info("Unipile inbound email threaded into outbound conversation", {
+        conversationId,
+        entityId: match.entityId,
+      });
+    }
+  }
+
   // ── Insert message (dedup on external_message_id unique constraint) ──
-  const conversationId = data.conversation_id || data.thread_id || `unipile_email_${match.entityId}`;
   const { error: insertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [match.entityColumn]: match.entityId,

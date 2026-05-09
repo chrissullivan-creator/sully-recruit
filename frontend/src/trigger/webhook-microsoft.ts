@@ -548,8 +548,43 @@ async function processEmailMessage(
     }
   }
 
-  // Determine or create conversation
-  const conversationId = `graph_${match.entityId}`;
+  // Determine conversation. When this email is a reply to one of our
+  // outbound sequence emails, we want it to land in the same
+  // conversation as the original send (seq_{enrollmentId}) rather than
+  // splitting it into the per-entity bucket. Outbound sequence emails
+  // already capture their internet_message_id on both messages and
+  // sequence_step_logs, so we look up the parent by external_message_id
+  // matching the In-Reply-To / References header on the inbound.
+  const inReplyToRaw = ((message.internetMessageHeaders || []) as any[])
+    .filter((h: any) => typeof h?.name === "string" && /^(in-reply-to|references)$/i.test(h.name))
+    .flatMap((h: any) => String(h.value || "").match(/<[^>]+>/g) || []);
+  // Graph stores internetMessageId with <...> brackets, but other
+  // clients sometimes strip them. Match against both forms so we don't
+  // miss a thread because of cosmetic differences.
+  const inReplyTo = Array.from(new Set([
+    ...inReplyToRaw,
+    ...inReplyToRaw.map((s: string) => s.replace(/^<|>$/g, "")),
+  ]));
+
+  let conversationId = `graph_${match.entityId}`;
+  if (inReplyTo.length > 0) {
+    const { data: parent } = await supabase
+      .from("messages")
+      .select("conversation_id")
+      .in("external_message_id", inReplyTo)
+      .eq("direction", "outbound")
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (parent?.conversation_id) {
+      conversationId = parent.conversation_id;
+      logger.info("Inbound email threaded into outbound conversation", {
+        conversationId,
+        entityId: match.entityId,
+      });
+    }
+  }
+
   const { data: existingConv } = await supabase
     .from("conversations")
     .select("id")

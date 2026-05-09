@@ -40,6 +40,77 @@ interface ActionExecutePayload {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LinkedIn per-account circuit breaker
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// integration_accounts already has linkedin_next_available_send_at and
+// linkedin_next_available_connection_at columns; they were never wired up.
+// When one step on an account hits limit_exceeded, we'd otherwise watch
+// the next 5+ scheduled steps on the same account fire over the next
+// few minutes and each individually get +2h rescheduled (and waste a
+// Unipile API call each time). Stamping a tripwire on the account lets
+// the next sweep tick skip-reschedule those steps without calling out
+// to Unipile.
+
+const LINKEDIN_RATE_LIMIT_COOLDOWN_HOURS = 2;
+
+function linkedinChannelToCol(channel: string): "linkedin_next_available_send_at" | "linkedin_next_available_connection_at" {
+  return channel === "linkedin_connection"
+    ? "linkedin_next_available_connection_at"
+    : "linkedin_next_available_send_at";
+}
+
+/**
+ * Looks up the LinkedIn integration_accounts row owned by senderUserId
+ * and returns its tripwire timestamp for the given channel. Null when
+ * no account row exists or the column is unset.
+ */
+async function getLinkedinCooldownUntil(
+  supabase: any,
+  senderUserId: string,
+  channel: string,
+): Promise<{ accountId: string | null; until: Date | null }> {
+  const col = linkedinChannelToCol(channel);
+  const { data: acct } = await supabase
+    .from("integration_accounts")
+    .select(`id, ${col}`)
+    .eq("owner_user_id", senderUserId)
+    .or("provider.eq.linkedin,account_type.eq.linkedin")
+    .eq("is_active", true)
+    .maybeSingle();
+  const raw = acct?.[col];
+  return {
+    accountId: acct?.id ?? null,
+    until: raw ? new Date(raw) : null,
+  };
+}
+
+/**
+ * Stamps the cooldown column to NOW + LINKEDIN_RATE_LIMIT_COOLDOWN_HOURS
+ * on the LinkedIn account owned by senderUserId. Best-effort — failure
+ * just means the next step on this account also gets a wasted retry,
+ * which is the pre-existing behavior.
+ */
+async function tripLinkedinCooldown(
+  supabase: any,
+  senderUserId: string,
+  channel: string,
+): Promise<Date | null> {
+  const col = linkedinChannelToCol(channel);
+  const until = new Date(Date.now() + LINKEDIN_RATE_LIMIT_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const { error } = await supabase
+    .from("integration_accounts")
+    .update({ [col]: until.toISOString(), updated_at: new Date().toISOString() } as any)
+    .eq("owner_user_id", senderUserId)
+    .or("provider.eq.linkedin,account_type.eq.linkedin");
+  if (error) {
+    logger.warn("Failed to stamp LinkedIn cooldown tripwire (non-fatal)", { error: error.message });
+    return null;
+  }
+  return until;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Task 1: Initialize enrollment — pre-schedule ALL actions upfront
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -445,6 +516,30 @@ export const sequenceActionExecute = task({
       return { action: "skipped", reason: err.message };
     }
 
+    // Per-account LinkedIn circuit breaker — pre-flight check. If a
+    // recent rate-limit hit on this account stamped a cooldown into
+    // integration_accounts, skip-reschedule this step to that timestamp
+    // instead of burning a Unipile call we already know will fail.
+    if (action.channel.startsWith("linkedin")) {
+      const { until } = await getLinkedinCooldownUntil(supabase, senderUserId, action.channel);
+      if (until && until.getTime() > Date.now()) {
+        await supabase
+          .from("sequence_step_logs")
+          .update({
+            scheduled_at: until.toISOString(),
+            status: "scheduled",
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq("id", payload.stepLogId);
+        logger.warn("LinkedIn account in cooldown — rescheduling step", {
+          channel: action.channel,
+          enrollmentId: payload.enrollmentId,
+          retryAt: until.toISOString(),
+        });
+        return { action: "rate_limited", reason: "circuit_breaker_open", retryAt: until.toISOString() };
+      }
+    }
+
     // Send
     let sendResult: any;
     try {
@@ -575,7 +670,10 @@ export const sequenceActionExecute = task({
           .from("sequence_step_logs")
           .update({ scheduled_at: retryAt, status: "scheduled" } as any)
           .eq("id", payload.stepLogId);
-        logger.warn("LinkedIn rate limit hit — rescheduling step in 2h", {
+        // Also trip the per-account circuit breaker so the next sweep
+        // doesn't burn another Unipile call on a sibling step.
+        await tripLinkedinCooldown(supabase, senderUserId, action.channel);
+        logger.warn("LinkedIn rate limit hit — rescheduling step + tripping account cooldown", {
           channel: action.channel,
           enrollmentId: payload.enrollmentId,
           retryAt,
