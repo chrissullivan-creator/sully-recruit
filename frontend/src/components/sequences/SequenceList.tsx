@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, BarChart3, Calendar, Pause, Play, Loader2, OctagonX } from "lucide-react";
+import { Plus, BarChart3, Calendar, Pause, Play, Loader2, OctagonX, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api-auth";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
@@ -42,6 +42,11 @@ export function SequenceList() {
   // Tracks per-row pause/resume mutation state so we can disable
   // the buttons + show a spinner.
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Tenant-wide anomaly counts the engine should rarely produce. When
+  // they appear, the recruiter wants to see them on the list rather
+  // than discover them buried in a per-sequence schedule view.
+  const [stuckInFlight, setStuckInFlight] = useState<number>(0);
+  const [staleConnections, setStaleConnections] = useState<number>(0);
 
   async function handlePause(seq: SequenceRow) {
     setBusyId(seq.id);
@@ -130,7 +135,48 @@ export function SequenceList() {
 
   useEffect(() => {
     loadSequences();
+    loadAnomalies();
   }, []);
+
+  // Counts step_logs that look like the engine got stuck:
+  //   - in_flight > 10 minutes (sweep auto-resets these but if the
+  //     sweep itself is broken they pile up)
+  //   - pending_connection > 14 days (LinkedIn invite never accepted)
+  // Both are tenant-wide; SequenceList sits on top of every sequence
+  // so it's the right surface to flag them.
+  async function loadAnomalies() {
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const [{ count: stuck }, { count: stale }] = await Promise.all([
+      supabase
+        .from("sequence_step_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "in_flight")
+        .lt("updated_at", tenMinAgo),
+      supabase
+        .from("sequence_step_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending_connection")
+        .lt("scheduled_at", fourteenDaysAgo),
+    ]);
+    setStuckInFlight(stuck || 0);
+    setStaleConnections(stale || 0);
+  }
+
+  async function handleResetStuckInFlight() {
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { error } = await supabase
+      .from("sequence_step_logs")
+      .update({ status: "scheduled", updated_at: new Date().toISOString() } as any)
+      .eq("status", "in_flight")
+      .lt("updated_at", tenMinAgo);
+    if (error) {
+      toast.error(error.message || "Couldn't reset stuck rows");
+      return;
+    }
+    toast.success("Stuck in-flight rows reset to scheduled");
+    setStuckInFlight(0);
+  }
 
   async function loadSequences() {
     try {
@@ -184,6 +230,32 @@ export function SequenceList() {
           </p>
           <DailyUtilization />
         </div>
+        {(stuckInFlight > 0 || staleConnections > 0) && (
+          <div className="mb-4 space-y-1.5">
+            {stuckInFlight > 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+                <span className="inline-flex items-center gap-2 text-amber-900">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {stuckInFlight} step log{stuckInFlight === 1 ? "" : "s"} stuck in <code className="font-mono">in_flight</code> &gt; 10 min
+                </span>
+                <Button variant="outline" size="sm" onClick={handleResetStuckInFlight} className="h-7 text-xs">
+                  Reset
+                </Button>
+              </div>
+            )}
+            {staleConnections > 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+                <span className="inline-flex items-center gap-2 text-amber-900">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {staleConnections} LinkedIn invite{staleConnections === 1 ? "" : "s"} pending acceptance &gt; 14 days
+                </span>
+                <span className="text-[10px] text-amber-900/70 italic">
+                  cleaned by sequence-pending-connection-timeout daily
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         {loading ? (
           <p className="text-muted-foreground text-sm">Loading...</p>
         ) : sequences.length === 0 ? (

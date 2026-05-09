@@ -10,10 +10,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/shared/RichTextEditor";
 import { toast } from "sonner";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X } from "lucide-react";
+import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X, Send } from "lucide-react";
 import type { ActionData } from "./ActionNode";
 import { supabase } from "@/integrations/supabase/client";
 import { applyMergeTags } from "@/lib/merge-tags";
+import { authHeaders } from "@/lib/api-auth";
 
 const CHANNELS = [
   { value: "linkedin_connection", label: "LinkedIn Connection", icon: Linkedin, color: "bg-blue-100 text-blue-800" },
@@ -55,6 +56,7 @@ export function SequenceStepCard({
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editorDraft, setEditorDraft] = useState("");
+  const [testingIndex, setTestingIndex] = useState<number | null>(null);
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: ActionData[keyof ActionData]) => {
@@ -149,6 +151,77 @@ export function SequenceStepCard({
     }
   }, [actions, editingIndex, label, onAskJoe, stepNumber]);
 
+  // Send a single test message to the operator's own email so they can
+  // eyeball formatting + merge-tag substitution without enrolling
+  // themselves into the sequence (today's only validation path). Email
+  // only for v1 — sending LinkedIn / SMS to oneself is awkward
+  // (LinkedIn doesn't accept self-DMs; SMS to operator's own number
+  // requires their RingCentral identity, which not every user has). The
+  // backend route is the existing /api/trigger-send-message — it
+  // accepts an arbitrary `to` and we set it to the recruiter's auth
+  // email.
+  const sendTestEmail = useCallback(
+    async (index: number) => {
+      const action = actions[index];
+      if (!action) return;
+      if (action.channel !== "email") {
+        toast.error("Send Test is only available on email steps for now");
+        return;
+      }
+      if (!action.messageBody?.trim()) {
+        toast.error("Add a message body before sending a test");
+        return;
+      }
+      setTestingIndex(index);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const toAddress = user?.email;
+        const userId = user?.id;
+        if (!toAddress || !userId) {
+          toast.error("Couldn't resolve your email — try signing out and back in");
+          return;
+        }
+        // Resolve merge tags using whatever the parent has selected for
+        // preview, falling back to a labeled placeholder so empty tags
+        // are obvious in the test email instead of looking like
+        // production output.
+        const fallbackVars: Record<string, string> = {
+          first_name: "Test",
+          last_name: "Recipient",
+          company: "Acme Inc",
+          title: "Sample Title",
+          job_name: "Sample Job",
+          sender_name: user?.user_metadata?.full_name || "Sender",
+        };
+        const vars = previewMergeVars ?? fallbackVars;
+        const renderedBody = applyMergeTags(action.messageBody, vars);
+        const renderedSubject = applyMergeTags(action.subjectLine || "[Sequence test]", vars);
+
+        const resp = await fetch("/api/trigger-send-message", {
+          method: "POST",
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            channel: "email",
+            to: toAddress,
+            subject: `[TEST] ${renderedSubject}`,
+            body: renderedBody,
+            user_id: userId,
+          }),
+        });
+        if (!resp.ok) {
+          const detail = await resp.text().catch(() => "");
+          throw new Error(`HTTP ${resp.status}: ${detail.slice(0, 160)}`);
+        }
+        toast.success(`Test sent to ${toAddress}`);
+      } catch (err: any) {
+        toast.error(`Send Test failed: ${err?.message || "unknown error"}`);
+      } finally {
+        setTestingIndex(null);
+      }
+    },
+    [actions, previewMergeVars],
+  );
+
   const copyMergeTag = useCallback(async (tag: string) => {
     try {
       await navigator.clipboard.writeText(tag);
@@ -195,6 +268,22 @@ export function SequenceStepCard({
                   </Select>
                 </div>
                 <div className="flex gap-1">
+                  {action.channel === "email" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => sendTestEmail(i)}
+                      className="h-7 px-2"
+                      disabled={testingIndex === i || !action.messageBody?.trim()}
+                      title="Send a one-off test email to your own address"
+                    >
+                      {testingIndex === i ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Send className="h-3 w-3" />
+                      )}
+                    </Button>
+                  )}
                   {onAskJoe && (
                     <Button
                       variant="ghost"

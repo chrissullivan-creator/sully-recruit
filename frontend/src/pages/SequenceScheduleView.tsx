@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, Pause, SkipForward, Calendar } from "lucide-react";
+import { ArrowLeft, SkipForward, Calendar, AlertTriangle, RotateCcw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const CHANNEL_COLORS: Record<string, string> = {
@@ -37,13 +37,19 @@ interface ScheduledSend {
   entityType: string;
 }
 
+interface FailedSend extends ScheduledSend {
+  skip_reason?: string | null;
+}
+
 export default function SequenceScheduleView() {
   const { id } = useParams();
   const [sequence, setSequence] = useState<any>(null);
   const [sends, setSends] = useState<ScheduledSend[]>([]);
+  const [failed, setFailed] = useState<FailedSend[]>([]);
   const [dailyCounts, setDailyCounts] = useState<Record<string, number>>({});
   const [view, setView] = useState<"day" | "week">("week");
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) loadData();
@@ -60,11 +66,13 @@ export default function SequenceScheduleView() {
       if (seqError) throw seqError;
       setSequence(seq);
 
-      // Load scheduled step logs with enrollment details
+      // Load scheduled + sent + failed step logs with enrollment
+      // details. Failed rows feed the dedicated "Failed (N)" section so
+      // the recruiter can retry them without dropping into the DB.
       const { data: logs, error: logsError } = await supabase
         .from("sequence_step_logs")
         .select(`
-          id, enrollment_id, channel, scheduled_at, status,
+          id, enrollment_id, channel, scheduled_at, status, skip_reason,
           sequence_enrollments!inner(
             candidate_id, contact_id,
             candidate:people!candidate_id(first_name, last_name),
@@ -72,11 +80,11 @@ export default function SequenceScheduleView() {
           )
         `)
         .eq("sequence_enrollments.sequence_id", id)
-        .in("status", ["scheduled", "sent"])
+        .in("status", ["scheduled", "sent", "failed"])
         .order("scheduled_at", { ascending: true }) as any;
       if (logsError) throw logsError;
 
-      const mapped: ScheduledSend[] = (logs || []).map((log: any) => {
+      const mapped: FailedSend[] = (logs || []).map((log: any) => {
         const enrollment = log.sequence_enrollments;
         const candidate = enrollment?.candidate ?? enrollment?.candidates;
         const contact = enrollment?.contact ?? enrollment?.contacts;
@@ -92,12 +100,14 @@ export default function SequenceScheduleView() {
           channel: log.channel,
           scheduled_at: log.scheduled_at,
           status: log.status,
+          skip_reason: log.skip_reason,
           entityName: name,
           entityId: enrollment?.candidate_id || enrollment?.contact_id,
           entityType: enrollment?.candidate_id ? "candidate" : "contact",
         };
       });
-      setSends(mapped);
+      setSends(mapped.filter((s) => s.status !== "failed"));
+      setFailed(mapped.filter((s) => s.status === "failed"));
 
       // Load daily send counts
       const { data: dailyLogs, error: dailyError } = await supabase
@@ -146,6 +156,53 @@ export default function SequenceScheduleView() {
       minute: "2-digit",
       hour12: true,
     });
+  };
+
+  // Retry a single failed step_log by flipping it back to 'scheduled'
+  // with scheduled_at = now. Sweep picks it up on the next 3-min tick.
+  // We don't pre-flight-check the recipient or send window — the
+  // sweep + executor revalidate everything (recipient, account health,
+  // send window, daily cap) before firing.
+  const handleRetryOne = async (logId: string, atMs: number = Date.now()) => {
+    setRetrying(logId);
+    try {
+      const { error } = await supabase
+        .from("sequence_step_logs")
+        .update({
+          status: "scheduled",
+          scheduled_at: new Date(atMs).toISOString(),
+          skip_reason: null,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", logId);
+      if (error) throw error;
+      const moved = failed.find((s) => s.id === logId);
+      setFailed((prev) => prev.filter((s) => s.id !== logId));
+      if (moved) setSends((prev) => [...prev, { ...moved, status: "scheduled" }]);
+      toast.success("Retry queued");
+    } catch (err: any) {
+      toast.error(err?.message || "Retry failed");
+    } finally {
+      setRetrying(null);
+    }
+  };
+
+  const handleRetryAll = async () => {
+    if (failed.length === 0) return;
+    if (!window.confirm(`Retry all ${failed.length} failed send${failed.length === 1 ? "" : "s"}? They'll fire on the next sweep tick.`)) return;
+    const nowIso = new Date().toISOString();
+    const ids = failed.map((s) => s.id);
+    const { error } = await supabase
+      .from("sequence_step_logs")
+      .update({ status: "scheduled", scheduled_at: nowIso, skip_reason: null, updated_at: nowIso } as any)
+      .in("id", ids);
+    if (error) {
+      toast.error(error.message || "Retry failed");
+      return;
+    }
+    setSends((prev) => [...prev, ...failed.map((s) => ({ ...s, status: "scheduled" }))]);
+    setFailed([]);
+    toast.success(`${ids.length} retr${ids.length === 1 ? "y" : "ies"} queued`);
   };
 
   const handleSkipSend = async (logId: string) => {
@@ -218,6 +275,66 @@ export default function SequenceScheduleView() {
           );
         })}
       </div>
+
+      {failed.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50/40">
+          <CardHeader className="py-3 flex flex-row items-center justify-between gap-4">
+            <CardTitle className="text-sm flex items-center gap-2 text-amber-900">
+              <AlertTriangle className="h-4 w-4" />
+              Failed ({failed.length})
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={handleRetryAll} className="h-7 text-xs">
+              <RotateCcw className="h-3 w-3 mr-1" /> Retry all
+            </Button>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Person</TableHead>
+                  <TableHead>Channel</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {failed.map((send) => (
+                  <TableRow key={send.id}>
+                    <TableCell>
+                      <Link
+                        to={`/${send.entityType === "candidate" ? "candidates" : "contacts"}/${send.entityId}`}
+                        className="hover:underline text-sm"
+                      >
+                        {send.entityName}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={CHANNEL_COLORS[send.channel] || "bg-gray-100"}>
+                        {send.channel.replace(/_/g, " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-md truncate" title={send.skip_reason || ""}>
+                      {send.skip_reason || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRetryOne(send.id)}
+                        disabled={retrying === send.id}
+                        title="Retry this send now"
+                        className="h-7 text-xs"
+                      >
+                        {retrying === send.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <><RotateCcw className="h-3 w-3 mr-1" /> Retry</>}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* View toggle */}
       <Tabs value={view} onValueChange={(v) => setView(v as "day" | "week")}>
