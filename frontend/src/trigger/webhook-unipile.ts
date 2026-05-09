@@ -262,9 +262,12 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   }
 
   // Refresh Joe Says
-  await generateJoeSays.trigger({
-    entityId: match.entityId,
-    entityType: match.entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "joe/says-requested",
+    data: {
+      entityId: match.entityId,
+      entityType: match.entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "email_logged", entityId: match.entityId, entityType: match.entityType };
@@ -513,9 +516,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   logger.info("LinkedIn message logged", { entityId, entityType });
 
   // Chain-trigger Joe Says refresh
-  await generateJoeSays.trigger({
-    entityId,
-    entityType: entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "joe/says-requested",
+    data: {
+      entityId,
+      entityType: entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "logged", entityId, entityType, type: "linkedin_message" };

@@ -86,10 +86,14 @@ export async function runProcessRingcentralEvent(payload: RingCentralWebhookPayl
         (eventBody.duration && eventBody.duration > 30);
 
       if (isCompletedCall && callLog?.id) {
-        await processCallDeepgram.trigger(
-          { call_log_id: callLog.id },
-          { delay: "90s" },
-        );
+        // 90s delay so RingCentral has time to finalize the recording
+        // server-side. Inngest's `ts` schedules the event for future
+        // delivery (same semantics as Trigger.dev's { delay }).
+        await inngest.send({
+          name: "call/deepgram-process.requested",
+          data: { call_log_id: callLog.id },
+          ts: Date.now() + 90_000,
+        });
       }
 
       return { action: "logged_unknown", phone: otherPhone, callLogId: callLog?.id };
@@ -215,10 +219,11 @@ export async function runProcessRingcentralEvent(payload: RingCentralWebhookPayl
         // Delay 90s — RC recordings often need 1-2 min before they're
         // exposed in the call-log API. The retry-stuck-call-transcripts
         // sweep handles cases where even that isn't enough.
-        await processCallDeepgram.trigger(
-          { call_log_id: callLog.id },
-          { delay: "90s" },
-        );
+        await inngest.send({
+          name: "call/deepgram-process.requested",
+          data: { call_log_id: callLog.id },
+          ts: Date.now() + 90_000,
+        });
         logger.info("Triggered Deepgram transcription", { callLogId: callLog.id });
       }
     }
@@ -248,9 +253,12 @@ export async function runProcessRingcentralEvent(payload: RingCentralWebhookPayl
     }
 
     // Chain-trigger Joe Says refresh after processing communication
-    await generateJoeSays.trigger({
-      entityId: match.entityId,
-      entityType: match.entityType as "candidate" | "contact",
+    await inngest.send({
+      name: "joe/says-requested",
+      data: {
+        entityId: match.entityId,
+        entityType: match.entityType as "candidate" | "contact",
+      },
     });
 
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };

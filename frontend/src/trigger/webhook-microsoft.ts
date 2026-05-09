@@ -388,11 +388,15 @@ async function processResumesInboxEmail(
       continue;
     }
 
-    await resumeIngestion.trigger({
-      resumeId: resumeRow.id,
-      candidateId,
-      filePath: storagePath,
-      fileName,
+    await inngest.send({
+      id: `resume-ingest-${resumeRow.id}`,
+      name: "resume/ingest-requested",
+      data: {
+        resumeId: resumeRow.id,
+        candidateId,
+        filePath: storagePath,
+        fileName,
+      },
     });
     created++;
   }
@@ -683,9 +687,12 @@ async function processEmailMessage(
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
 
   // Chain-trigger Joe Says refresh
-  await generateJoeSays.trigger({
-    entityId: match.entityId,
-    entityType: match.entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "joe/says-requested",
+    data: {
+      entityId: match.entityId,
+      entityType: match.entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "logged", entityId: match.entityId, type: "email" };

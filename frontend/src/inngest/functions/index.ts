@@ -34,6 +34,7 @@ import { renewWebhookSubscriptions } from "./webhook-subscription-renewal";
 import { backfillCalendarEvents } from "./backfill-calendar-events";
 import { processCallDeepgram } from "./process-call-deepgram";
 import { recoverOrphanResumes } from "./recover-orphan-resumes";
+import { processClayEnrichment } from "./process-clay-enrichment";
 
 export const functions = [
   syncInmailCredits,
@@ -67,4 +68,5 @@ export const functions = [
   backfillCalendarEvents,
   processCallDeepgram,
   recoverOrphanResumes,
+  processClayEnrichment,
 ];

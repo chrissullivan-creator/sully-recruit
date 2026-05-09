@@ -1,6 +1,8 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
-import { processCallDeepgram } from "./process-call-deepgram";
+import { processCallDeepgram } from "./process-call-deepgram"; // legacy reference — chained calls migrated to inngest below
+import { inngest } from "../inngest/client";
+void processCallDeepgram;
 import { notifyError } from "./lib/alerting";
 
 /**
@@ -62,7 +64,10 @@ export async function runRetryStuckCallTranscripts() {
     let triggered = 0;
     for (const cl of toRetry) {
       try {
-        await processCallDeepgram.trigger({ call_log_id: cl.id });
+        await inngest.send({
+          name: "call/deepgram-process.requested",
+          data: { call_log_id: cl.id },
+        });
         triggered++;
       } catch (err: any) {
         await notifyError({

@@ -1,6 +1,8 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
-import { resumeIngestion } from "./resume-ingestion";
+import { resumeIngestion } from "./resume-ingestion"; // legacy chain target — kept for the wrapper export
+import { inngest } from "../inngest/client";
+void resumeIngestion;
 
 /**
  * One-shot recovery for résumé files that landed in storage but
@@ -146,11 +148,15 @@ async function processOrphans(
       }
 
       // 3. Dispatch ingestion — Gemini parse → smart-redirect → fill.
-      await resumeIngestion.trigger({
-        resumeId: resume.id,
-        candidateId: stub.id,
-        filePath,
-        fileName,
+      await inngest.send({
+        id: `resume-ingest-${resume.id}`,
+        name: "resume/ingest-requested",
+        data: {
+          resumeId: resume.id,
+          candidateId: stub.id,
+          filePath,
+          fileName,
+        },
       });
 
       processed++;

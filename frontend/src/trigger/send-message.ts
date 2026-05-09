@@ -1,7 +1,9 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
 import { sendEmail, sendSms, sendLinkedIn } from "./lib/send-channels";
-import { generateJoeSays } from "./generate-joe-says";
+import { generateJoeSays } from "./generate-joe-says"; // legacy chain target — kept until Phase 5b
+import { inngest } from "../inngest/client";
+void generateJoeSays;
 
 interface SendMessagePayload {
   channel: "email" | "sms" | "linkedin";
@@ -137,9 +139,9 @@ export async function runSendMessage(
     // Best-effort — the message was already delivered above, so a Joe Says
     // failure must not fail this run (otherwise retries would re-send).
     try {
-      await generateJoeSays.trigger({
-        entityId,
-        entityType,
+      await inngest.send({
+        name: "joe/says-requested",
+        data: { entityId, entityType },
       });
     } catch (err: any) {
       log.warn("generateJoeSays.trigger failed after send-message", {

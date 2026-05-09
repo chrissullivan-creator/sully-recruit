@@ -1,10 +1,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../../src/inngest/client";
 
 /**
  * Vercel serverless function — Clay webhook receiver.
- * Receives enriched contact/candidate data from Clay tables,
- * fires Trigger.dev task for processing.
+ * Receives enriched contact/candidate data from Clay tables, sends an
+ * Inngest event for processing.
+ *
+ * Migrated from Trigger.dev (which fired a `process-clay-enrichment`
+ * task that wasn't actually defined in this codebase) to Inngest.
+ * The receiving Inngest function is in
+ * frontend/src/inngest/functions/process-clay-enrichment.ts.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -21,9 +26,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await tasks.trigger("process-clay-enrichment", {
-      body: req.body,
-      receivedAt: new Date().toISOString(),
+    await inngest.send({
+      name: "clay/enrichment-received",
+      data: {
+        body: req.body,
+        receivedAt: new Date().toISOString(),
+      },
     });
 
     return res.status(200).json({ received: true });

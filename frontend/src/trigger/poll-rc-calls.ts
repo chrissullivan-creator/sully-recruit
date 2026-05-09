@@ -1,6 +1,8 @@
 import { schedules, task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
-import { processCallDeepgram } from "./process-call-deepgram";
+import { processCallDeepgram } from "./process-call-deepgram"; // legacy reference — chained calls migrated to inngest below
+import { inngest } from "../inngest/client";
+void processCallDeepgram;
 
 // Poll RingCentral call log as a safety net for missed webhooks.
 // Default lookback is 10 minutes; the manual backfill task accepts a
@@ -184,10 +186,11 @@ export async function runPoll(lookbackMinutes: number) {
               // call-log API for 1-2 min after the call ends. The
               // retry-stuck-call-transcripts sweep is the safety net
               // if even 90s isn't enough.
-              await processCallDeepgram.trigger(
-                { call_log_id: inserted.id },
-                { delay: "90s" },
-              );
+              await inngest.send({
+                name: "call/deepgram-process.requested",
+                data: { call_log_id: inserted.id },
+                ts: Date.now() + 90_000, // 90s delay for RC recording finalisation
+              });
               logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
             }
           }

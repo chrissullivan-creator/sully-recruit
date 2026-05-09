@@ -1,6 +1,7 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
 import { buildProfileText, getVoyageEmbedding } from "./lib/resume-parsing";
+import { inngest } from "../inngest/client";
 import { generateJoeSays } from "./generate-joe-says";
 import { classifyEmail, normalizeEmail } from "../lib/email-classifier";
 import { matchPersonByEmail } from "./lib/match-person-by-email";
@@ -280,12 +281,12 @@ ${rawText.slice(0, 60000)}`;
     // Best-effort — ingestion has already committed the parsed data,
     // so a Joe Says failure shouldn't fail the run or burn retries.
     try {
-      await generateJoeSays.trigger({
-        entityId: workingCandidateId,
-        entityType: "candidate",
+      await inngest.send({
+        name: "joe/says-requested",
+        data: { entityId: workingCandidateId, entityType: "candidate" },
       });
     } catch (err: any) {
-      logger.warn("generateJoeSays.trigger failed after resume ingestion", {
+      logger.warn("inngest.send(joe/says-requested) failed after resume ingestion", {
         candidateId: workingCandidateId, error: err?.message,
       });
     }

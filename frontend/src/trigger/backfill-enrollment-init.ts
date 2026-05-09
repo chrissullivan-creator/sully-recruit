@@ -1,6 +1,8 @@
 import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { getSupabaseAdmin } from "./lib/supabase";
-import { sequenceEnrollmentInit } from "./sequence-scheduler";
+import { sequenceEnrollmentInit } from "./sequence-scheduler"; // legacy reference — chained calls migrated to inngest below
+import { inngest } from "../inngest/client";
+void sequenceEnrollmentInit;
 import { notifyError } from "./lib/alerting";
 
 /**
@@ -78,12 +80,16 @@ export async function runBackfillEnrollmentInit() {
     let triggered = 0;
     for (const e of stuck) {
       try {
-        await sequenceEnrollmentInit.trigger({
-          enrollmentId: e.id,
-          sequenceId: e.sequence_id,
-          candidateId: e.candidate_id || undefined,
-          contactId: e.contact_id || undefined,
-          enrolledBy: e.enrolled_by,
+        await inngest.send({
+          id: `seq-enrolled-${e.id}-backfill`,
+          name: "sequence/enrolled",
+          data: {
+            enrollmentId: e.id,
+            sequenceId: e.sequence_id,
+            candidateId: e.candidate_id || undefined,
+            contactId: e.contact_id || undefined,
+            enrolledBy: e.enrolled_by,
+          },
         });
         triggered++;
       } catch (err: any) {
