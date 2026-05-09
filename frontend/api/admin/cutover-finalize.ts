@@ -1,11 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { inngest } from "../lib/inngest/client.js";
+import { tasks } from "@trigger.dev/sdk/v3";
 
 /**
  * One-shot admin endpoint to finish the Trigger.dev → Inngest sequence
- * cutover from a single curl. Server-side use of `inngest.send` so we
- * don't depend on the operator having INNGEST_EVENT_KEY locally.
+ * cutover from a single curl.
  *
  *   curl -X POST https://<vercel-app>/api/admin/cutover-finalize \
  *     -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
@@ -14,22 +13,25 @@ import { inngest } from "../lib/inngest/client.js";
  *   1. UPDATE sequences SET engine='inngest' WHERE engine='trigger'
  *   2. Find every active enrollment with no open step_logs
  *      (no scheduled / pending_connection / in_flight)
- *   3. inngest.send('sequence/run.requested', …) per orphan, chunked
- *      at 500/call (Inngest send cap is 5000/req — 500 keeps the
- *      payload comfortably under the network buffer).
+ *   3. For each orphan: tasks.trigger("sequence-enrollment-init", …)
+ *      so its sequence_actions get pre-materialised into fresh
+ *      scheduled step_logs. The Inngest sweep (post-#198) then picks
+ *      them up on the next 3-min tick since the sequence is on
+ *      engine='inngest'.
  *
- * Auth: Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>. We reuse the
- * service-role key as the admin token because (a) it's already in
- * Vercel env, (b) anyone who already has it has full DB access — no
- * security regression vs adding a new ADMIN_TOKEN env var.
+ * Why tasks.trigger and not inngest.send: PR #198 keeps
+ * sequenceEnrollmentInit on Trigger.dev (it pre-materialises step_logs
+ * for both engines). Inngest only owns the sweep + per-action
+ * execution post-cutover. Firing a `sequence/...` Inngest event for
+ * orphans wouldn't reach a handler — there's no per-enrollment
+ * Inngest function in the new architecture.
  *
- * Idempotent: re-runs no-op once everything's flipped + dispatched.
+ * Auth: Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>. Reuses an
+ * existing Vercel env var — no new ADMIN_TOKEN setup. Anyone who
+ * already has this key already has full DB access — no security
+ * regression vs adding a new env var.
  *
- * IMPORTANT: This endpoint dispatches `sequence/run.requested` events.
- * Production's sequence-run function is a Phase 1 no-op until PR #198
- * (real Inngest sequence engine) merges. Until then, this endpoint
- * fires events that get acknowledged + logged but produce no sends.
- * Once #198 is in, the same dispatch wakes the engine.
+ * Idempotent — re-runs no-op once everything's flipped + re-initialised.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -65,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: enrollmentRows } = await (supabase as any)
       .from("sequence_enrollments")
       .select(`
-        id, sequence_id, enrolled_by,
+        id, sequence_id, candidate_id, contact_id, enrolled_by,
         sequences!inner(id, sender_user_id, created_by)
       `)
       .eq("status", "active")
@@ -84,29 +86,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       orphans = allActive.filter((e) => !withOpen.has(e.id));
     }
 
-    // ── Step 3: dispatch sequence/run.requested per orphan ──────────
+    // ── Step 3: re-init each orphan via Trigger.dev ─────────────────
+    // Trigger.dev's SDK is still in package.json (PR #198 didn't drop
+    // it). sequenceEnrollmentInit pre-materialises sequence_step_logs
+    // for the enrollment regardless of engine, after which the Inngest
+    // sweep claims them on the next tick.
     let dispatched = 0;
-    if (orphans.length > 0) {
-      const events = orphans.map((e) => ({
-        // Distinct dedup key per cutover run so this rescue doesn't
-        // suppress any earlier `seq-{enrollmentId}` events in Inngest's
-        // log.
-        id: `seq-run-${e.id}-cutover-${Math.floor(Date.now() / 1000)}`,
-        name: "sequence/run.requested" as const,
-        data: {
+    const dispatchErrors: Array<{ enrollmentId: string; error: string }> = [];
+    for (const e of orphans) {
+      try {
+        await tasks.trigger("sequence-enrollment-init", {
           enrollmentId: e.id as string,
           sequenceId: e.sequence_id as string,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
           enrolledBy:
             (e.sequences?.sender_user_id as string | undefined)
             ?? (e.sequences?.created_by as string | undefined)
             ?? (e.enrolled_by as string),
-        },
-      }));
-      const chunkSize = 500;
-      for (let i = 0; i < events.length; i += chunkSize) {
-        const chunk = events.slice(i, i + chunkSize);
-        await inngest.send(chunk);
-        dispatched += chunk.length;
+        });
+        dispatched++;
+      } catch (err: any) {
+        dispatchErrors.push({
+          enrollmentId: e.id as string,
+          error: err?.message || "unknown",
+        });
       }
     }
 
@@ -117,10 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       active_enrollments_total: allActive.length,
       orphan_enrollments_dispatched: dispatched,
       orphan_enrollment_ids_sample: orphans.slice(0, 10).map((e) => e.id as string),
-      note:
-        "If sequence-run is still Phase 1 no-op (PR #198 not merged), "
-        + "the dispatched events get acknowledged but produce no sends. "
-        + "Re-run this endpoint after #198 merges to wake them up.",
+      dispatch_errors_count: dispatchErrors.length,
+      dispatch_errors_sample: dispatchErrors.slice(0, 5),
     });
   } catch (err: any) {
     console.error("cutover-finalize error", err?.message);
