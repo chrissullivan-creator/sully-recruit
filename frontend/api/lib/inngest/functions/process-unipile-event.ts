@@ -1,12 +1,28 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAnthropicKey } from "./lib/supabase";
-import { generateJoeSays } from "./generate-joe-says";
-import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
-import { stopEnrollment } from "./sequence-scheduler";
-import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
-import { canonicalChannel } from "./lib/unipile-v2";
-import { matchPersonByEmail } from "./lib/match-person-by-email";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
+import {
+  extractMessageIntel,
+  applyExtractedIntel,
+} from "../../../../src/trigger/lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
+import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
+import { canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
+import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-email.js";
 
+/**
+ * Process Unipile webhook events (LinkedIn messages, connection updates,
+ * Outlook email via the Phase-3 parallel feed). Matches by provider_id /
+ * email, logs to messages + conversations, runs Joe sentiment-and-intel
+ * extraction on inbound, and stops active enrollments on any reply.
+ *
+ * Ported from `src/trigger/webhook-unipile.ts` — the API route at
+ * `api/webhooks/unipile.ts` now sends `webhooks/unipile.received` and
+ * Inngest drives the work. `generateJoeSays.trigger(...)` still routes
+ * via Trigger.dev (will switch when generate-joe-says is ported).
+ *
+ * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ */
 interface UnipileWebhookPayload {
   body: {
     event?: string;
@@ -17,20 +33,21 @@ interface UnipileWebhookPayload {
     connection?: any;
   };
   receivedAt: string;
+  verified?: boolean;
 }
 
-/**
- * Process Unipile webhook events (LinkedIn messages, connection updates).
- * Matches by provider_id in candidate_channels, logs activity,
- * runs sentiment analysis on replies via Claude Haiku.
- */
-export const processUnipileEvent = task({
-  id: "process-unipile-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: UnipileWebhookPayload) => {
+export const processUnipileEvent = inngest.createFunction(
+  {
+    id: "process-unipile-event",
+    name: "Process inbound Unipile webhook (Inngest)",
+    retries: 3,
+  },
+  { event: "webhooks/unipile.received" },
+  async ({ event, logger }) => {
+    const payload = event.data as UnipileWebhookPayload;
     const supabase = getSupabaseAdmin();
-    const event = payload.body;
-    const eventType = event.event || event.type || "";
+    const body = payload.body;
+    const eventType = body.event || body.type || "";
 
     logger.info("Processing Unipile event", { eventType });
 
@@ -40,40 +57,25 @@ export const processUnipileEvent = task({
     // constraint, so the second arrival is a no-op.
     const isEmailEvent =
       /^mail\.|^email\.|^message\.received|outlook|gmail/i.test(eventType)
-      || event.data?.account_type === "OUTLOOK"
-      || event.data?.account_type === "GMAIL"
-      || event.data?.attachments !== undefined && event.data?.subject !== undefined;
+      || body.data?.account_type === "OUTLOOK"
+      || body.data?.account_type === "GMAIL"
+      || (body.data?.attachments !== undefined && body.data?.subject !== undefined);
     if (isEmailEvent) {
-      return await processUnipileEmailEvent(supabase, event, payload.receivedAt);
+      return await processUnipileEmailEvent(supabase, body, payload.receivedAt, logger);
     }
 
-    if (eventType.includes("message") || event.message) {
-      return await processLinkedInMessage(supabase, event, payload.receivedAt);
+    if (eventType.includes("message") || body.message) {
+      return await processLinkedInMessage(supabase, body, payload.receivedAt, logger);
     }
 
-    if (eventType.includes("connection") || event.connection) {
-      return await processConnectionUpdate(supabase, event, payload.receivedAt);
+    if (eventType.includes("connection") || body.connection) {
+      return await processConnectionUpdate(supabase, body, payload.receivedAt, logger);
     }
 
     logger.info("Unhandled Unipile event type", { eventType });
     return { action: "skipped", reason: "unhandled_event_type" };
   },
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EMAIL EVENT — Unipile Outlook
-//
-// Mirrors webhook-microsoft.ts:processEmailMessage but reads the Unipile
-// event shape instead of the Graph subscription notification. Runs in
-// parallel with Graph until Phase 3 cutover; messages.external_message_id
-// has a unique constraint so the second-arriving copy of the same email
-// is a silent no-op.
-//
-// Email-bounce / NDR detection: re-uses the same heuristics as
-// webhook-microsoft (postmaster sender or "undeliverable" subject) and
-// sets people.email_invalid + stops active enrollments. Sentiment
-// extraction runs on every inbound for the universal-stop rule.
-// ─────────────────────────────────────────────────────────────────────────────
+);
 
 const EMAIL_BOUNCE_SENDER_RE = /^(postmaster|mailer-daemon|mail.daemon)@/i;
 const EMAIL_BOUNCE_SUBJECT_RE = /undeliverable|delivery (status|has|failure)|delivery has failed|returned mail|mail delivery (subsystem|failed)/i;
@@ -88,11 +90,9 @@ function extractFailedRecipient(body: string): string | null {
   return candidate ?? null;
 }
 
-async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: string) {
+async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: string, logger: any) {
   const data = event.data || event.email || event;
 
-  // Defensive field reads — Unipile has shifted shapes between
-  // accounts and even between event types within v2.
   const fromField = data.from || data.sender || {};
   const senderEmail = String(
     fromField.identifier || fromField.email || fromField.address || "",
@@ -115,15 +115,11 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   );
   const sentAt = data.received_at || data.date || data.timestamp || receivedAt;
 
-  // ── Hard-bounce / NDR ──────────────────────────────────────────
   const isBounce =
     EMAIL_BOUNCE_SENDER_RE.test(senderEmail) || EMAIL_BOUNCE_SUBJECT_RE.test(subject);
   if (isBounce) {
     const failed = extractFailedRecipient(bodyForSearch);
     if (failed) {
-      // Multi-email match — bounce on a work address still flags the
-      // person even if their primary on file is personal. The plain
-      // people.email column was retired; use the helper.
       const bouncedMatch = await matchPersonByEmail(supabase, failed);
       const cand = bouncedMatch && bouncedMatch.entityType !== "contact"
         ? { id: bouncedMatch.entityId }
@@ -159,8 +155,6 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     }
   }
 
-  // ── Match sender to candidate or contact (multi-email, all 3 columns) ─
-  // The plain people.email column was retired; use the shared helper.
   const senderMatch = await matchPersonByEmail(supabase, senderEmail);
   const match = senderMatch
     ? {
@@ -174,7 +168,6 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     return { action: "no_match", senderEmail };
   }
 
-  // ── Insert message (dedup on external_message_id unique constraint) ──
   const conversationId = data.conversation_id || data.thread_id || `unipile_email_${match.entityId}`;
   const { error: insertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
@@ -190,19 +183,16 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     external_message_id: externalId,
     is_read: data.is_read ?? false,
   } as any);
-  // Unique-violation = duplicate of the Graph copy; fine, swallow.
   if (insertErr && !/duplicate key|23505/.test(insertErr.message)) {
     logger.warn("Unipile email insert failed", { error: insertErr.message });
   }
 
-  // ── Update entity timestamps ──────────────────────────────────
   const table = match.entityType === "candidate" ? "candidates" : "contacts";
   await supabase
     .from(table)
     .update({ last_responded_at: receivedAt, last_comm_channel: "email" } as any)
     .eq("id", match.entityId);
 
-  // ── Sentiment + universal stop rule ───────────────────────────
   const intel = bodyForSearch.length > 10
     ? await extractMessageIntel(bodyForSearch, subject)
     : null;
@@ -216,11 +206,14 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
       .limit(1)
       .maybeSingle();
     await applyExtractedIntel(
-      supabase, match.entityId, match.entityType as "candidate" | "contact",
-      intel, "email", enrollment?.id,
+      supabase,
+      match.entityId,
+      match.entityType as "candidate" | "contact",
+      intel,
+      "email",
+      enrollment?.id,
     );
 
-    // Stop ALL active enrollments for this person on any reply.
     const { data: actives } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -231,7 +224,6 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     }
   }
 
-  // Refresh Joe Says
   await generateJoeSays.trigger({
     entityId: match.entityId,
     entityType: match.entityType as "candidate" | "contact",
@@ -240,24 +232,21 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   return { action: "email_logged", entityId: match.entityId, entityType: match.entityType };
 }
 
-async function processLinkedInMessage(supabase: any, event: any, receivedAt: string) {
+async function processLinkedInMessage(supabase: any, event: any, receivedAt: string, logger: any) {
   const messageData = event.data || event.message || event;
   const senderId = messageData.sender_id || messageData.provider_id || messageData.from?.provider_id;
   const messageBody = messageData.text || messageData.body || "";
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
-  // Detect Recruiter InMail vs Classic DM using the canonical Unipile
-  // v2 signals from the chat object (per the unipile-node-sdk types):
-  //   chat.content_type === 'inmail'                         → InMail
-  //   chat.folder includes 'INBOX_LINKEDIN_RECRUITER'        → InMail
-  //
-  // We don't fall back to subject — Classic DMs CAN carry a subject
-  // (group chats etc.) and InMails sometimes don't surface one in the
-  // webhook payload. We don't fall back to integration_account.account_type
-  // either: a Recruiter seat handles BOTH InMails AND Classic DMs, so
-  // tagging every Chris message based on his account type would (and did)
-  // dump every Classic chat into the Recruiter tab.
+  // Detect Recruiter InMail vs Classic DM via the canonical Unipile v2
+  // signals on the chat object (per unipile-node-sdk types):
+  //   chat.content_type === 'inmail'                  → InMail
+  //   chat.folder includes 'INBOX_LINKEDIN_RECRUITER' → InMail
+  // Don't fall back to subject (Classic DMs can have subjects, InMails
+  // sometimes don't surface one in the webhook). Don't fall back to
+  // integration_account.account_type either: a Recruiter seat handles
+  // BOTH InMails AND Classic DMs.
   const chat = messageData.chat ?? {};
   const contentType = String(
     messageData.content_type ?? chat.content_type ?? "",
@@ -279,7 +268,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "skipped", reason: "no_sender_id" };
   }
 
-  // Check for duplicate
   if (externalMessageId) {
     const { data: existing } = await supabase
       .from("messages")
@@ -291,8 +279,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
-  // Match sender directly via candidates.unipile_id / contacts.unipile_id.
-  // Primary lookup — candidate_channels is used as fallback in connection handler.
   let entityId: string | null = null;
   let entityType: "candidate" | "contact" = "candidate";
   let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
@@ -319,7 +305,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
-  // Handle unknown sender — create unlinked conversation and message
   if (!entityId) {
     logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
 
@@ -373,7 +358,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "logged_unlinked", senderId, senderName, type: "linkedin_message" };
   }
 
-  // Determine or create conversation
   const conversationId = externalConversationId || `li_${entityId}`;
   const { data: existingConv } = await supabase
     .from("conversations")
@@ -386,16 +370,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       id: conversationId,
       [entityColumn]: entityId,
       channel,
-      // Stamp content_type so the reclassify task can skip this row
-      // on the next pass. NULL for Classic DMs (Unipile omits the
-      // field there); 'inmail' for Recruiter InMails.
       content_type: contentType || null,
       external_conversation_id: externalConversationId,
       last_message_at: receivedAt,
     } as any);
   }
 
-  // Insert inbound message
   await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
@@ -409,7 +389,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     is_read: false,
   } as any);
 
-  // Update conversation
   await supabase
     .from("conversations")
     .update({
@@ -419,7 +398,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     })
     .eq("id", conversationId);
 
-  // Update entity timestamps
   const table = entityType === "candidate" ? "candidates" : "contacts";
   await supabase
     .from(table)
@@ -429,7 +407,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     } as any)
     .eq("id", entityId);
 
-  // Extract intelligence from inbound LinkedIn message
   if (messageBody.length > 10) {
     const intel = await extractMessageIntel(messageBody);
     if (intel) {
@@ -443,13 +420,16 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         .maybeSingle();
 
       await applyExtractedIntel(
-        supabase, entityId, entityType as "candidate" | "contact",
-        intel, "linkedin", enrollment?.id,
+        supabase,
+        entityId,
+        entityType as "candidate" | "contact",
+        intel,
+        "linkedin",
+        enrollment?.id,
       );
     }
   }
 
-  // Universal stop rule: any LinkedIn message reply stops active enrollments
   const { data: activeEnrollments } = await supabase
     .from("sequence_enrollments")
     .select("*, sequences!inner(*)")
@@ -465,7 +445,6 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
 
   logger.info("LinkedIn message logged", { entityId, entityType });
 
-  // Chain-trigger Joe Says refresh
   await generateJoeSays.trigger({
     entityId,
     entityType: entityType as "candidate" | "contact",
@@ -474,7 +453,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   return { action: "logged", entityId, entityType, type: "linkedin_message" };
 }
 
-async function processConnectionUpdate(supabase: any, event: any, receivedAt: string) {
+async function processConnectionUpdate(supabase: any, event: any, receivedAt: string, logger: any) {
   const connectionData = event.data || event.connection || event;
   const providerId = connectionData.provider_id || connectionData.attendee_provider_id;
   const status = connectionData.status || connectionData.state || "";
@@ -483,10 +462,6 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
     return { action: "skipped", reason: "no_provider_id" };
   }
 
-  // Match entity using same approach as processLinkedInMessage:
-  // 1. Check candidates.unipile_id (primary match)
-  // 2. Check contacts.unipile_id
-  // 3. Fall back to candidate_channels/contact_channels (legacy)
   let entityId: string | null = null;
   let entityType: "candidate" | "contact" = "candidate";
   let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
@@ -513,7 +488,6 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
     }
   }
 
-  // Fallback: check candidate_channels / contact_channels (legacy lookup)
   if (!entityId) {
     const { data: channelMatch } = await supabase
       .from("candidate_channels")
@@ -546,7 +520,6 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
   }
 
   if (status === "ACCEPTED" || status === "accepted" || status === "connected") {
-    // Update candidate_channels if this is a candidate
     if (entityType === "candidate") {
       await supabase
         .from("candidate_channels")
@@ -565,10 +538,8 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
         .eq("channel", "linkedin");
     }
 
-    // V2: Advance any enrollments waiting for connection acceptance
-    await advanceOnConnectionAccepted(supabase, entityColumn, entityId, receivedAt);
+    await advanceOnConnectionAccepted(supabase, entityColumn, entityId, receivedAt, logger);
 
-    // Log connection_accepted as a special message type
     await supabase.from("messages").insert({
       conversation_id: `li_${entityId}`,
       [entityColumn]: entityId,
@@ -587,17 +558,13 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
   return { action: "connection_update", status, entityId, entityType };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// V2 Sequence: Schedule pending_connection actions on connection accepted
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function advanceOnConnectionAccepted(
   supabase: any,
   entityColumn: string,
   entityId: string,
   receivedAt: string,
+  logger: any,
 ): Promise<void> {
-  // Find active enrollments for this entity
   const { data: enrollments } = await supabase
     .from("sequence_enrollments")
     .select("*, sequences!inner(*)")
@@ -610,7 +577,6 @@ async function advanceOnConnectionAccepted(
     const sequence = enrollment.sequences;
     const senderUserId = sequence.sender_user_id || sequence.created_by;
 
-    // Find all pending_connection step logs for this enrollment
     const { data: pendingLogs } = await supabase
       .from("sequence_step_logs")
       .select("*, sequence_actions!inner(*)")
@@ -622,7 +588,6 @@ async function advanceOnConnectionAccepted(
     for (const log of pendingLogs) {
       const action = (log as any).sequence_actions;
 
-      // Calculate: 4h minimum + additional delay, using business-hours model
       const scheduledAt = await calculatePostConnectionSendTime(
         supabase,
         new Date(receivedAt),
@@ -634,7 +599,6 @@ async function advanceOnConnectionAccepted(
         senderUserId,
       );
 
-      // Activate the step log
       await supabase
         .from("sequence_step_logs")
         .update({ scheduled_at: scheduledAt.toISOString(), status: "scheduled" })
@@ -647,3 +611,4 @@ async function advanceOnConnectionAccepted(
     });
   }
 }
+

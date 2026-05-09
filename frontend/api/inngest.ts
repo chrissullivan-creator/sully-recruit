@@ -34,6 +34,9 @@ import {
 import { processCallDeepgram } from "./lib/inngest/functions/process-call-deepgram.js";
 import { pollRcCalls, backfillRcCalls } from "./lib/inngest/functions/poll-rc-calls.js";
 import { retryStuckCallTranscripts } from "./lib/inngest/functions/retry-stuck-call-transcripts.js";
+import { processRingcentralEvent } from "./lib/inngest/functions/process-ringcentral-event.js";
+import { processUnipileEvent } from "./lib/inngest/functions/process-unipile-event.js";
+import { processMicrosoftEvent } from "./lib/inngest/functions/process-microsoft-event.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -80,5 +83,8 @@ export default serve({
     pollRcCalls,
     backfillRcCalls,
     retryStuckCallTranscripts,
+    processRingcentralEvent,
+    processUnipileEvent,
+    processMicrosoftEvent,
   ],
 });

@@ -1,32 +1,52 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { generateJoeSays } from "./generate-joe-says";
-import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
-import { stopEnrollment } from "./sequence-scheduler";
-import { processCallDeepgram } from "./process-call-deepgram";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
+import {
+  extractMessageIntel,
+  applyExtractedIntel,
+} from "../../../../src/trigger/lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
 
+/**
+ * Process inbound RingCentral events (calls, SMS, voicemail). Matches
+ * the caller phone to a candidate or contact, logs to call_logs /
+ * messages, fires a delayed `call/transcribe.requested` event for
+ * completed calls ≥30s, and chain-triggers Joe Says.
+ *
+ * Ported from `src/trigger/webhook-ringcentral.ts` — the API route at
+ * `api/webhooks/ringcentral.ts` now sends `webhooks/ringcentral.received`
+ * and Inngest drives the work. The Trigger.dev `processCallDeepgram`
+ * wrapper is gone; this file's `inngest.send("call/transcribe.requested")`
+ * with `ts: now+90_000` reproduces the old `delay: "90s"` semantics
+ * (RC recordings usually need 1–2 min before they're exposed in the
+ * call-log API).
+ *
+ * `generateJoeSays.trigger(...)` still routes through Trigger.dev for
+ * now; it'll switch to Inngest when generate-joe-says is ported.
+ *
+ * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ */
 interface RingCentralWebhookPayload {
   body: any;
   headers: Record<string, string | undefined>;
   receivedAt: string;
 }
 
-/**
- * Process inbound RingCentral events (calls, SMS, voicemail).
- * Matches caller phone to candidates/contacts and logs activity.
- * For completed calls: fetches recording, transcribes with Claude,
- * extracts candidate fields, generates summary, stores in notes + back_of_resume_notes.
- */
-export const processRingcentralEvent = task({
-  id: "process-ringcentral-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: RingCentralWebhookPayload) => {
+export const processRingcentralEvent = inngest.createFunction(
+  {
+    id: "process-ringcentral-event",
+    name: "Process inbound RingCentral webhook (Inngest)",
+    retries: 3,
+  },
+  { event: "webhooks/ringcentral.received" },
+  async ({ event, logger }) => {
+    const payload = event.data as RingCentralWebhookPayload;
     const supabase = getSupabaseAdmin();
-    const event = payload.body;
+    const body = payload.body;
 
-    logger.info("Processing RingCentral event", { event });
+    logger.info("Processing RingCentral event", { event: body });
 
-    const eventBody = event.body || event;
+    const eventBody = body.body || body;
     const eventType = eventBody.type || eventBody.event || "";
 
     const fromPhone = eventBody.from?.phoneNumber || eventBody.from?.extensionNumber || "";
@@ -35,14 +55,12 @@ export const processRingcentralEvent = task({
     const toExtension = eventBody.to?.[0]?.extensionNumber || eventBody.to?.extensionNumber || "";
     const direction = eventBody.direction === "Inbound" ? "inbound" : "outbound";
     const otherPhone = direction === "inbound" ? fromPhone : toPhone;
-    // User-side identity (which Sully user this event belongs to)
     const userPhone = direction === "inbound" ? toPhone : fromPhone;
     const userExtension = direction === "inbound" ? toExtension : fromExtension;
 
     const isSmsEvent = eventType.includes("SMS") || eventBody.messageType === "SMS";
 
-    // Resolve owner_id from integration_accounts (provider='sms', match extension or phone).
-    const ownerId = await lookupOwnerId(supabase, userExtension, userPhone);
+    const ownerId = await lookupOwnerId(supabase, userExtension, userPhone, logger);
 
     if (!otherPhone) {
       logger.info("No phone number in event — skipping");
@@ -52,7 +70,7 @@ export const processRingcentralEvent = task({
     const normalizedPhone = otherPhone.replace(/[^0-9+]/g, "");
     const match = await matchByPhone(supabase, normalizedPhone);
 
-    // ── CALL event with no match: still log as Unknown (never drop) ────
+    // CALL event with no match: still log as Unknown (never drop)
     if (!match && !isSmsEvent) {
       const { data: callLog, error: callLogError } = await supabase
         .from("call_logs")
@@ -84,23 +102,22 @@ export const processRingcentralEvent = task({
         (eventBody.duration && eventBody.duration > 30);
 
       if (isCompletedCall && callLog?.id) {
-        await processCallDeepgram.trigger(
-          { call_log_id: callLog.id },
-          { delay: "90s" },
-        );
+        await inngest.send({
+          name: "call/transcribe.requested",
+          data: { call_log_id: callLog.id },
+          ts: Date.now() + 90_000,
+        });
       }
 
       return { action: "logged_unknown", phone: otherPhone, callLogId: callLog?.id };
     }
 
     if (!match) {
-      // SMS with no match — can't attach to conversation; skip.
       logger.info("No matching entity for SMS", { phone: normalizedPhone });
       return { action: "no_match", phone: normalizedPhone };
     }
 
     if (isSmsEvent) {
-      // ── SMS event ─────────────────────────────────────────────────
       await supabase.from("messages").insert({
         conversation_id: `rc_sms_${match.entityId}`,
         [match.entityColumn]: match.entityId,
@@ -116,7 +133,6 @@ export const processRingcentralEvent = task({
 
       const smsBody = eventBody.subject || eventBody.text || "";
 
-      // Extract intelligence from inbound SMS
       if (direction === "inbound") {
         if (smsBody.length > 10) {
           const intel = await extractMessageIntel(smsBody);
@@ -131,14 +147,18 @@ export const processRingcentralEvent = task({
               .maybeSingle();
 
             await applyExtractedIntel(
-              supabase, match.entityId, match.entityType as "candidate" | "contact",
-              intel, "sms", enrollment?.id,
+              supabase,
+              match.entityId,
+              match.entityType as "candidate" | "contact",
+              intel,
+              "sms",
+              enrollment?.id,
             );
           }
         }
       }
 
-      // V2: Universal stop rule — inbound SMS stops active enrollments
+      // Universal stop rule — inbound SMS stops active enrollments
       if (direction === "inbound" && smsBody) {
         const { data: activeEnrollments } = await supabase
           .from("sequence_enrollments")
@@ -159,7 +179,7 @@ export const processRingcentralEvent = task({
 
       logger.info("SMS logged", { entityId: match.entityId, direction });
     } else {
-      // ── Call event ────────────────────────────────────────────────
+      // Call event
       const { data: callLog, error: callLogError } = await supabase
         .from("call_logs")
         .insert({
@@ -184,25 +204,21 @@ export const processRingcentralEvent = task({
 
       logger.info("Call logged", { entityId: match.entityId, callLogId: callLog?.id, ownerId });
 
-      // ── Trigger Deepgram transcription for completed calls ≥ 30s ──
       const isCompletedCall =
         eventBody.result === "Completed" ||
         eventBody.result === "Call connected" ||
         (eventBody.duration && eventBody.duration > 30);
 
       if (isCompletedCall && callLog?.id) {
-        // Delay 90s — RC recordings often need 1-2 min before they're
-        // exposed in the call-log API. The retry-stuck-call-transcripts
-        // sweep handles cases where even that isn't enough.
-        await processCallDeepgram.trigger(
-          { call_log_id: callLog.id },
-          { delay: "90s" },
-        );
-        logger.info("Triggered Deepgram transcription", { callLogId: callLog.id });
+        await inngest.send({
+          name: "call/transcribe.requested",
+          data: { call_log_id: callLog.id },
+          ts: Date.now() + 90_000,
+        });
+        logger.info("Triggered Deepgram transcription (delayed 90s)", { callLogId: callLog.id });
       }
     }
 
-    // Update last activity timestamps
     if (direction === "inbound") {
       const table = match.entityType === "candidate" ? "candidates" : "contacts";
       await supabase
@@ -214,7 +230,6 @@ export const processRingcentralEvent = task({
         } as any)
         .eq("id", match.entityId);
     } else {
-      // Outbound calls still update last_spoken_at
       const table = match.entityType === "candidate" ? "candidates" : "contacts";
       await supabase
         .from(table)
@@ -226,7 +241,8 @@ export const processRingcentralEvent = task({
         .eq("id", match.entityId);
     }
 
-    // Chain-trigger Joe Says refresh after processing communication
+    // Chain-trigger Joe Says refresh after processing communication.
+    // Still routes through Trigger.dev until generate-joe-says is ported.
     await generateJoeSays.trigger({
       entityId: match.entityId,
       entityType: match.entityType as "candidate" | "contact",
@@ -234,15 +250,13 @@ export const processRingcentralEvent = task({
 
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };
   },
-});
+);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OWNER LOOKUP — map RC extension or phone to Sully user_id
-// ─────────────────────────────────────────────────────────────────────────────
 async function lookupOwnerId(
   supabase: any,
   extension: string,
   phone: string,
+  logger: any,
 ): Promise<string | null> {
   if (!extension && !phone) return null;
 
@@ -266,18 +280,13 @@ async function lookupOwnerId(
   return data?.owner_user_id ?? null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PHONE MATCHING — uses SQL queries instead of fetching all records
-// ─────────────────────────────────────────────────────────────────────────────
 async function matchByPhone(
   supabase: any,
   normalizedPhone: string,
 ): Promise<{ entityId: string; entityType: string; entityColumn: string } | null> {
-  // Strip to digits only for matching
   const digitsOnly = normalizedPhone.replace(/[^0-9]/g, "");
   const last10 = digitsOnly.slice(-10);
 
-  // Try exact match on candidates first (E.164 format)
   const { data: candidateExact } = await supabase
     .from("people")
     .select("id")
@@ -289,7 +298,6 @@ async function matchByPhone(
     return { entityId: candidateExact.id, entityType: "candidate", entityColumn: "candidate_id" };
   }
 
-  // Try last-10-digit fuzzy match on candidates (handles format variations)
   if (last10.length === 10) {
     const { data: candidateFuzzy } = await supabase
       .from("people")
@@ -303,7 +311,6 @@ async function matchByPhone(
     }
   }
 
-  // Try exact match on contacts
   const { data: contactExact } = await supabase
     .from("contacts")
     .select("id")
@@ -315,7 +322,6 @@ async function matchByPhone(
     return { entityId: contactExact.id, entityType: "contact", entityColumn: "contact_id" };
   }
 
-  // Try last-10-digit fuzzy match on contacts
   if (last10.length === 10) {
     const { data: contactFuzzy } = await supabase
       .from("contacts")
