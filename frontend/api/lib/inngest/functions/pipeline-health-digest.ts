@@ -1,22 +1,23 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
-import { sendInternalEmail } from "./lib/microsoft-graph";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
+import { sendInternalEmail } from "../../../../src/trigger/lib/microsoft-graph.js";
 
 /**
- * Daily pipeline-health digest. Counts what's stuck across resume parsing,
- * call transcripts, and sentiment so we don't go five weeks without
- * realising sentiment quietly stopped working again.
+ * Daily pipeline-health digest. Counts what's stuck across resume
+ * parsing, call transcripts, and sentiment so we don't go five weeks
+ * without realising sentiment quietly stopped working again.
  *
- * Recipients/sender share the same app_settings as the alerting helper:
- *   ALERT_SENDER, ALERT_RECIPIENTS
+ * Recipients/sender share the same `app_settings` keys as the
+ * alerting helper: `ALERT_SENDER`, `ALERT_RECIPIENTS` (comma-separated).
  *
- * Runs once a day at 13:00 UTC (~9am ET).
+ * Daily at 13:00 UTC (~9am ET). Ported from
+ * `src/trigger/pipeline-health-digest.ts` — Inngest is the only
+ * scheduler now.
  */
-export const pipelineHealthDigest = schedules.task({
-  id: "pipeline-health-digest",
-  cron: "0 13 * * *",
-  maxDuration: 120,
-  run: async () => {
+export const pipelineHealthDigest = inngest.createFunction(
+  { id: "pipeline-health-digest", name: "Daily pipeline health digest (Inngest)" },
+  { cron: "0 13 * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
     let sender = "";
@@ -31,7 +32,6 @@ export const pipelineHealthDigest = schedules.task({
       return { skipped: true };
     }
 
-    // ── RESUMES ─────────────────────────────────────────────────────
     const { data: resumeStats } = await supabase
       .from("resumes")
       .select("parsing_status")
@@ -45,7 +45,6 @@ export const pipelineHealthDigest = schedules.task({
       .not("parsing_status", "in", '("failed","skipped","completed")')
       .lt("created_at", new Date(Date.now() - 6 * 3600_000).toISOString());
 
-    // ── CALL TRANSCRIPTS ────────────────────────────────────────────
     const { count: callsEligible } = await supabase
       .from("call_logs")
       .select("id", { count: "exact", head: true })
@@ -60,7 +59,6 @@ export const pipelineHealthDigest = schedules.task({
     const notedCount = (notedIds ?? []).length;
     const callsMissingNote = Math.max(0, (callsEligible ?? 0) - notedCount);
 
-    // ── SENTIMENT ──────────────────────────────────────────────────
     const { count: inbound24h } = await supabase
       .from("messages")
       .select("id", { count: "exact", head: true })
@@ -72,7 +70,6 @@ export const pipelineHealthDigest = schedules.task({
       .select("id", { count: "exact", head: true })
       .gt("created_at", new Date(Date.now() - 86_400_000).toISOString());
 
-    // ── BUILD EMAIL ─────────────────────────────────────────────────
     const sentimentRate =
       inbound24h && inbound24h > 0
         ? Math.round(((sentiments24h ?? 0) / inbound24h) * 100)
@@ -130,7 +127,7 @@ export const pipelineHealthDigest = schedules.task({
 
     return { flags, resumeStuck, callsMissingNote, inbound24h, sentiments24h };
   },
-});
+);
 
 function bucket(values: string[]): Record<string, number> {
   const m: Record<string, number> = {};

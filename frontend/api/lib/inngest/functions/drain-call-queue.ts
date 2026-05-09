@@ -1,19 +1,24 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 
-// Drain the call processing queue — picks up pending calls and sends them
-// to the process-call-recording edge function for transcription + analysis.
-//
-// Schedule: every 3 minutes
-
-export const drainCallQueue = schedules.task({
-  id: "drain-call-queue",
-  maxDuration: 180,
-  run: async () => {
+/**
+ * Drain the `call_processing_queue` — picks up `pending` calls and POSTs
+ * them to the `process-call-recording` Supabase edge function for
+ * Deepgram transcription + AI analysis.
+ *
+ * 5/run, attempts capped at 3, marks `failed` on the third miss so a
+ * single broken recording can't block the queue.
+ *
+ * Every 3 minutes. Ported from `src/trigger/drain-call-queue.ts` —
+ * Inngest is the only scheduler now.
+ */
+export const drainCallQueue = inngest.createFunction(
+  { id: "drain-call-queue", name: "Drain call processing queue (Inngest)" },
+  { cron: "*/3 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const batchSize = 5;
 
-    // Grab next batch of pending calls
     const { data: batch, error } = await supabase
       .from("call_processing_queue")
       .select("*")
@@ -31,18 +36,17 @@ export const drainCallQueue = schedules.task({
       return { processed: 0, failed: 0, remaining: 0 };
     }
 
-    // Mark as processing
     const ids = batch.map((r: any) => r.id);
     await supabase
       .from("call_processing_queue")
       .update({ status: "processing", updated_at: new Date().toISOString() })
       .in("id", ids);
 
-    let processed = 0, failed = 0;
+    let processed = 0,
+      failed = 0;
     const supabaseUrl = process.env.SUPABASE_URL!;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    // Process each call via the edge function
     const promises = batch.map(async (item: any) => {
       try {
         const res = await fetch(`${supabaseUrl}/functions/v1/process-call-recording`, {
@@ -94,7 +98,6 @@ export const drainCallQueue = schedules.task({
 
     await Promise.all(promises);
 
-    // Report queue depth
     const { count: remaining } = await supabase
       .from("call_processing_queue")
       .select("id", { count: "exact", head: true })
@@ -103,4 +106,4 @@ export const drainCallQueue = schedules.task({
     logger.info("Queue drain complete", { processed, failed, remaining: remaining ?? 0 });
     return { processed, failed, remaining: remaining ?? 0 };
   },
-});
+);
