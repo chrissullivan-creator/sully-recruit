@@ -1,8 +1,8 @@
 import { serve } from "inngest/express";
-import { inngest } from "../src/inngest/client.js";
-import { bulkMigrateSequences } from "../src/inngest/functions/bulk-migrate-sequences.js";
-import { migrateSequenceToInngest } from "../src/inngest/functions/migrate-sequence-to-inngest.js";
-import { sequenceRun } from "../src/inngest/functions/sequence-run.js";
+import { inngest } from "./lib/inngest/client.js";
+import { bulkMigrateSequences } from "./lib/inngest/functions/bulk-migrate-sequences.js";
+import { migrateSequenceToInngest } from "./lib/inngest/functions/migrate-sequence-to-inngest.js";
+import { sequenceRun } from "./lib/inngest/functions/sequence-run.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
