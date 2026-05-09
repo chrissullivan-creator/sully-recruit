@@ -1,35 +1,38 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { unipileFetch } from "./lib/unipile-v2";
+import { createClient } from "@supabase/supabase-js";
+import { inngest } from "../client.js";
+import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
 
 /**
  * Pull inbound LinkedIn connection requests per active LinkedIn account
- * and persist them to `linkedin_invitations`. Try to match each
- * inviter to an existing person by provider_id / linkedin URL; create
- * a new candidate when no match is found so the recruiter sees a warm
- * lead in the inbox without manual entry.
+ * and persist them to `linkedin_invitations`. Try to match each inviter
+ * to an existing person by provider_id / linkedin URL; create a new
+ * candidate when no match is found so the recruiter sees a warm lead in
+ * the inbox without manual entry.
  *
- * v2 path:
- *   GET /api/v2/{account_id}/users/invitations/received
+ * v2 path: GET /api/v2/{account_id}/users/invitations/received
+ *   (Some Unipile builds expose this as
+ *    /api/v2/{account_id}/linkedin/users/invitations/received — the
+ *    function tries both.)
  *
- * (Some Unipile builds expose this as
- *  /api/v2/{account_id}/linkedin/users/invitations/received — the
- *  task tries both.)
+ * 30-minute cadence — recruiters check inbound throughout the day;
+ * faster than that risks Unipile rate limits.
  *
- * Schedule: every 30 minutes. Recruiters check inbound throughout
- * the day; faster than that risks Unipile rate limits.
- *
- * Why this lives outside the existing webhook handler: webhooks fire
- * on new invites only after the account has been live; the periodic
- * pull catches anything missed during downtime AND keeps the
+ * Why this lives outside the existing webhook handler: webhooks fire on
+ * new invites only after the account has been live; the periodic pull
+ * catches anything missed during downtime AND keeps the
  * `linkedin_invitations` table authoritative.
+ *
+ * Ported from `src/trigger/sync-linkedin-invitations.ts` — Inngest is
+ * the only scheduler now.
  */
-export const syncLinkedinInvitations = schedules.task({
-  id: "sync-linkedin-invitations",
-  cron: "*/30 * * * *",
-  maxDuration: 240,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+export const syncLinkedinInvitations = inngest.createFunction(
+  { id: "sync-linkedin-invitations", name: "Sync inbound LinkedIn invitations (Inngest)" },
+  { cron: "*/30 * * * *" },
+  async ({ logger }) => {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
@@ -50,8 +53,8 @@ export const syncLinkedinInvitations = schedules.task({
     for (const acct of accounts) {
       try {
         // Per Unipile v2 docs, LinkedIn-specific endpoints sit under
-        // /linkedin/. Try that path first; older builds may still
-        // expose the legacy unprefixed shape, hence the fallback.
+        // /linkedin/. Try that path first; older builds may still expose
+        // the legacy unprefixed shape, hence the fallback.
         let data: any;
         try {
           data = await unipileFetch(
@@ -70,7 +73,7 @@ export const syncLinkedinInvitations = schedules.task({
         }
 
         const invites = data.items ?? data.invitations ?? data ?? [];
-        let pulled = invites.length;
+        const pulled = invites.length;
         let newOnAccount = 0;
 
         for (const inv of invites) {
@@ -192,4 +195,4 @@ export const syncLinkedinInvitations = schedules.task({
       per_account: perAccount,
     };
   },
-});
+);

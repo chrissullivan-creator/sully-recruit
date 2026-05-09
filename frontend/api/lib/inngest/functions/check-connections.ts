@@ -1,23 +1,25 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { unipileFetch } from "./lib/unipile-v2";
-import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
+import { createClient } from "@supabase/supabase-js";
+import { inngest } from "../client.js";
+import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;
 
 /**
- * When a connection is detected as accepted (either via webhook or this
- * scheduled fallback), we need to do TWO things to advance the
- * enrollment:
- *   1. Flip the gate flag on sequence_enrollments
- *   2. Promote any pending_connection step_logs to scheduled
+ * Polling fallback for the Unipile connection-accepted webhook. Without
+ * this, missed webhooks leave LinkedIn-connection step_logs parked at
+ * `pending_connection` forever and the follow-up message never fires.
  *
- * The Unipile webhook handler (advanceOnConnectionAccepted in
- * webhook-unipile.ts) already handles both. This helper is the
- * mirror image for the polling fallback — without it, missed webhooks
- * leave step_logs parked at pending_connection forever and the
- * follow-up message never fires.
+ * Mirrors what `advanceOnConnectionAccepted` does in
+ * `src/trigger/webhook-unipile.ts`:
+ *   1. Flip `waiting_for_connection_acceptance=false` on the enrollment
+ *   2. Promote any `pending_connection` step_logs to `scheduled` with a
+ *      window-aware send time anchored on the acceptance timestamp
+ *
+ * Ported from `src/trigger/check-connections.ts`. Inngest is the only
+ * scheduler now — Trigger.dev's copy is removed so they don't both
+ * thrash Unipile.
  */
 async function schedulePendingConnectionLogs(
   supabase: any,
@@ -61,24 +63,19 @@ async function schedulePendingConnectionLogs(
   return pendingLogs.length;
 }
 
-/**
- * Scheduled task: check pending LinkedIn connection requests.
- *
- * Finds enrollments waiting for connection acceptance and verifies
- * their status via Unipile — catches acceptances that webhooks may
- * have missed and advances the enrollment.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: check-connections
- *   Cron: 0 0/4 * * * (every 4 hours)
- */
-export const checkConnections = schedules.task({
-  id: "check-connections",
-  maxDuration: 180,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-    // Find enrollments stuck waiting for connection acceptance
+export const checkConnections = inngest.createFunction(
+  { id: "check-connections", name: "Check pending LinkedIn connections (Inngest)" },
+  { cron: "0 0/4 * * *" },
+  async ({ logger }) => {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+
     const { data: enrollments, error } = await supabase
       .from("sequence_enrollments")
       .select("id, candidate_id, enrolled_by")
@@ -104,7 +101,6 @@ export const checkConnections = schedules.task({
 
     for (const enrollment of enrollments) {
       try {
-        // Get candidate's LinkedIn info
         const { data: channel } = await supabase
           .from("candidate_channels")
           .select("provider_id, unipile_id, account_id")
@@ -117,7 +113,6 @@ export const checkConnections = schedules.task({
           continue;
         }
 
-        // Get the unipile_account_id for the account that sent the request
         const { data: account } = await supabase
           .from("integration_accounts")
           .select("unipile_account_id")
@@ -130,9 +125,7 @@ export const checkConnections = schedules.task({
           continue;
         }
 
-        // Check the user's profile — if we can see their full profile,
-        // the connection was likely accepted.
-        // v2 path: GET /api/v2/{account_id}/linkedin/users/{provider_id}
+        // v2: GET /api/v2/{account_id}/linkedin/users/{provider_id}
         let profile: any;
         try {
           profile = await unipileFetch(
@@ -154,10 +147,6 @@ export const checkConnections = schedules.task({
           profile.distance === 1;
 
         if (isConnected) {
-          // Connection accepted — flip the gate so the sequence
-          // scheduler picks the enrollment up on its next pass. The
-          // scheduler reads sequence_step_logs to compute the next
-          // send time; no need to stamp next_step_at here.
           const now = new Date();
 
           await supabase
@@ -169,7 +158,6 @@ export const checkConnections = schedules.task({
             } as any)
             .eq("id", enrollment.id);
 
-          // Update candidate channel
           await supabase
             .from("candidate_channels")
             .update({
@@ -179,10 +167,6 @@ export const checkConnections = schedules.task({
             .eq("candidate_id", enrollment.candidate_id)
             .eq("channel", "linkedin");
 
-          // Promote any pending_connection step_logs to scheduled.
-          // Without this, missed webhooks leave the follow-up step
-          // parked forever — the webhook handler does this, but if it
-          // never fired we'd never reach it.
           const promoted = await schedulePendingConnectionLogs(supabase, enrollment.id, now);
 
           accepted++;
@@ -207,8 +191,4 @@ export const checkConnections = schedules.task({
     logger.info("Connection check complete", { checked, accepted, failed });
     return { checked, accepted, failed };
   },
-});
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+);
