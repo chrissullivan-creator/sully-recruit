@@ -4,6 +4,7 @@ import { generateJoeSays } from "./generate-joe-says";
 import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
 import { stopEnrollment } from "./sequence-scheduler";
 import { processCallDeepgram } from "./process-call-deepgram";
+import { inngest } from "../inngest/client";
 
 interface RingCentralWebhookPayload {
   body: any;
@@ -115,6 +116,25 @@ export const processRingcentralEvent = task({
       } as any);
 
       const smsBody = eventBody.subject || eventBody.text || "";
+
+      // Phase 2c of the Inngest migration: emit message/inbound-reply
+      // for the cancel-on-reply Inngest function. Outbound sends from
+      // the recruiter aren't a stop signal, so guard on direction.
+      if (direction === "inbound") {
+        try {
+          await inngest.send({
+            name: "message/inbound-reply",
+            data: {
+              candidateId: match.entityType === "candidate" ? match.entityId : undefined,
+              contactId: match.entityType === "contact" ? match.entityId : undefined,
+              channel: "sms",
+              replyText: smsBody.slice(0, 500),
+            },
+          });
+        } catch (err: any) {
+          logger.warn("inngest.send(message/inbound-reply) failed (non-fatal)", { error: err?.message });
+        }
+      }
 
       // Extract intelligence from inbound SMS
       if (direction === "inbound") {

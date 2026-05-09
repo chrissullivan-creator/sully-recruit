@@ -6,6 +6,7 @@ import { stopEnrollment } from "./sequence-scheduler";
 import { calculatePostConnectionSendTime } from "./lib/send-time-calculator";
 import { canonicalChannel } from "./lib/unipile-v2";
 import { matchPersonByEmail } from "./lib/match-person-by-email";
+import { inngest } from "../inngest/client";
 
 interface UnipileWebhookPayload {
   body: {
@@ -193,6 +194,26 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   // Unique-violation = duplicate of the Graph copy; fine, swallow.
   if (insertErr && !/duplicate key|23505/.test(insertErr.message)) {
     logger.warn("Unipile email insert failed", { error: insertErr.message });
+  }
+
+  // Phase 2c of the Inngest migration: same hand-off as the Graph
+  // webhook. Skipped if the message was a duplicate of the Graph copy
+  // (insertErr matched the unique-violation regex above), since the
+  // Graph branch already emitted for it.
+  if (!insertErr) {
+    try {
+      await inngest.send({
+        name: "message/inbound-reply",
+        data: {
+          candidateId: match.entityType === "candidate" ? match.entityId : undefined,
+          contactId: match.entityType === "contact" ? match.entityId : undefined,
+          channel: "email",
+          replyText: (bodyText || bodyHtml || "").slice(0, 500),
+        },
+      });
+    } catch (err: any) {
+      logger.warn("inngest.send(message/inbound-reply) failed (non-fatal)", { error: err?.message });
+    }
   }
 
   // ── Update entity timestamps ──────────────────────────────────
@@ -409,6 +430,23 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     is_read: false,
   } as any);
 
+  // Phase 2c of the Inngest migration: emit message/inbound-reply for
+  // the cancel-on-reply Inngest function. The legacy DB trigger keeps
+  // stopping Trigger.dev enrollments in parallel.
+  try {
+    await inngest.send({
+      name: "message/inbound-reply",
+      data: {
+        candidateId: entityType === "candidate" ? entityId : undefined,
+        contactId: entityType === "contact" ? entityId : undefined,
+        channel,
+        replyText: (messageBody || "").slice(0, 500),
+      },
+    });
+  } catch (err: any) {
+    logger.warn("inngest.send(message/inbound-reply) failed (non-fatal)", { error: err?.message });
+  }
+
   // Update conversation
   await supabase
     .from("conversations")
@@ -579,6 +617,22 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
       sent_at: receivedAt,
       provider: "unipile",
     } as any);
+
+    // Phase 2c of the Inngest migration: emit linkedin/connection-accepted
+    // so any sequence-run blocked on step.waitForEvent can resume past
+    // the connection gate. Different event from message/inbound-reply
+    // — connection acceptance is NOT a stop signal.
+    try {
+      await inngest.send({
+        name: "linkedin/connection-accepted",
+        data: {
+          candidateId: entityType === "candidate" ? entityId : undefined,
+          contactId: entityType === "contact" ? entityId : undefined,
+        },
+      });
+    } catch (err: any) {
+      logger.warn("inngest.send(linkedin/connection-accepted) failed (non-fatal)", { error: err?.message });
+    }
 
     logger.info("Connection accepted", { entityId, entityType });
     return { action: "connection_accepted", entityId, entityType };

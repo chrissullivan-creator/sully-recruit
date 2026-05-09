@@ -5,6 +5,7 @@ import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction
 import { stopEnrollment } from "./sequence-scheduler";
 import { resumeIngestion } from "./resume-ingestion";
 import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
+import { inngest } from "../inngest/client";
 
 interface MicrosoftWebhookPayload {
   notification: {
@@ -596,6 +597,28 @@ async function processEmailMessage(
       is_read: false,
     })
     .eq("id", conversationId);
+
+  // Phase 2c of the Inngest migration: emit an event so the
+  // cancel-on-reply Inngest function can stop any sequence-run that's
+  // mid-flight on this person. The legacy Trigger.dev path
+  // (stop_enrollments_on_reply DB trigger + universal-stop block
+  // below) keeps running for legacy enrollments — the events are
+  // additive, not a replacement.
+  try {
+    await inngest.send({
+      name: "message/inbound-reply",
+      data: {
+        candidateId: match.entityType === "candidate" ? match.entityId : undefined,
+        contactId: match.entityType === "contact" ? match.entityId : undefined,
+        channel: "email",
+        replyText: (message.bodyPreview || "").slice(0, 500),
+      },
+    });
+  } catch (err: any) {
+    // Don't let an Inngest send failure break the webhook flow —
+    // the legacy DB trigger still stops Trigger.dev enrollments.
+    logger.warn("inngest.send(message/inbound-reply) failed (non-fatal)", { error: err?.message });
+  }
 
   // Update entity timestamps
   const table = match.entityType === "candidate" ? "candidates" : "contacts";
