@@ -16,6 +16,9 @@ import {
 } from "./lib/inngest/functions/reclassify-linkedin-chats.js";
 import { resolveUnipileIds } from "./lib/inngest/functions/resolve-unipile-ids.js";
 import { renewWebhookSubscriptions } from "./lib/inngest/functions/renew-webhook-subscriptions.js";
+import { backfillResumeEmbeddings } from "./lib/inngest/functions/backfill-resume-embeddings.js";
+import { reparseResumes } from "./lib/inngest/functions/reparse-resumes.js";
+import { reconcileOrphanedResumes } from "./lib/inngest/functions/reconcile-orphaned-resumes.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -45,5 +48,8 @@ export default serve({
     reclassifyLinkedinChatsOnce,
     resolveUnipileIds,
     renewWebhookSubscriptions,
+    backfillResumeEmbeddings,
+    reparseResumes,
+    reconcileOrphanedResumes,
   ],
 });

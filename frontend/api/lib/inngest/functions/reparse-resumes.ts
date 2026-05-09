@@ -1,28 +1,32 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
+import { inngest } from "../client.js";
+import {
+  getSupabaseAdmin,
+  getGeminiKey,
+  getOpenAIKey,
+  getMistralKey,
+} from "../../../../src/trigger/lib/supabase.js";
 import {
   looksLikeResume,
   getVoyageEmbedding,
   buildProfileText,
   delay,
-} from "./lib/resume-parsing";
-import { parseResume } from "../lib/resume-parser";
-import { callAIWithFallback } from "../lib/ai-fallback";
+} from "../../../../src/trigger/lib/resume-parsing.js";
+import { parseResume } from "../../../../src/lib/resume-parser.js";
+import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
 /**
- * Re-parse resumes that have a candidate_id but no raw_text.
- * Downloads from Supabase storage, parses with Claude, backfills
- * candidate fields, and embeds with Voyage AI.
+ * Re-parse resumes that have a candidate_id but no raw_text. Downloads
+ * from Supabase storage, parses via the Mistral OCR + Gemini→OpenAI
+ * cascade, backfills missing candidate fields, and embeds the result
+ * with Voyage.
  *
- * Schedule in Trigger.dev Dashboard:
- *   Task: reparse-resumes
- *   Cron: * * * * * (every minute)
+ * Every minute. Ported from `src/trigger/reparse-resumes.ts` —
+ * Inngest is the only scheduler now.
  */
-
-export const reparseResumes = schedules.task({
-  id: "reparse-resumes",
-  maxDuration: 300,
-  run: async () => {
+export const reparseResumes = inngest.createFunction(
+  { id: "reparse-resumes", name: "Reparse resumes missing raw_text (Inngest)" },
+  { cron: "* * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const limit = 10;
 
@@ -63,11 +67,16 @@ export const reparseResumes = schedules.task({
       .not("parsing_status", "in", '("failed","skipped","completed","parsed")');
 
     if (filtered.length === 0) {
-      logger.info("No parseable resumes found", { remaining: remaining ?? 0, junkSkipped: junkIds.length });
+      logger.info("No parseable resumes found", {
+        remaining: remaining ?? 0,
+        junkSkipped: junkIds.length,
+      });
       return { parsed: 0, remaining: remaining ?? 0, skippedJunk: junkIds.length };
     }
 
-    let parsedCount = 0, embeddedCount = 0, failedCount = 0;
+    let parsedCount = 0,
+      embeddedCount = 0,
+      failedCount = 0;
     const errors: string[] = [];
 
     const [geminiKey, openaiKey, mistralKey] = await Promise.all([
@@ -87,7 +96,9 @@ export const reparseResumes = schedules.task({
         const publicUrl = urlData?.publicUrl;
         if (!publicUrl) throw new Error("No public URL");
 
-        const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
+        const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
+          r.arrayBuffer(),
+        );
         const { parsed, rawText } = await parseResume(buf, resume.fileName, {
           mistralKey: mistralKey || undefined,
           callAI: (req) =>
@@ -114,7 +125,6 @@ export const reparseResumes = schedules.task({
           .eq("id", resume.id);
         parsedCount++;
 
-        // Update candidate with missing fields
         const { data: candidate } = await supabase
           .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
@@ -123,10 +133,14 @@ export const reparseResumes = schedules.task({
 
         if (candidate) {
           const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-          if (!candidate.current_title && parsed.current_title) updates.current_title = parsed.current_title;
-          if (!candidate.current_company && parsed.current_company) updates.current_company = parsed.current_company;
-          if (!candidate.location_text && parsed.location) updates.location_text = parsed.location;
-          if ((!candidate.skills || !candidate.skills.length) && skills.length) updates.skills = skills;
+          if (!candidate.current_title && parsed.current_title)
+            updates.current_title = parsed.current_title;
+          if (!candidate.current_company && parsed.current_company)
+            updates.current_company = parsed.current_company;
+          if (!candidate.location_text && parsed.location)
+            updates.location_text = parsed.location;
+          if ((!candidate.skills || !candidate.skills.length) && skills.length)
+            updates.skills = skills;
           if (!candidate.full_name && parsed.first_name) {
             updates.first_name = parsed.first_name;
             updates.last_name = parsed.last_name || "";
@@ -136,7 +150,6 @@ export const reparseResumes = schedules.task({
             await supabase.from("people").update(updates).eq("id", resume.candidate_id);
           }
 
-          // Embed
           try {
             const profileText = buildProfileText(candidate, normalizedRawText, parsed);
             if (profileText.trim().length >= 50) {
@@ -168,11 +181,14 @@ export const reparseResumes = schedules.task({
         await supabase.from("resumes").update({ parsing_status: "failed" }).eq("id", resume.id);
       }
 
-      // 1.5s between calls — ~40 RPM, safe on paid tier
       if (i < filtered.length - 1) await delay(1500);
     }
 
-    logger.info("Reparse complete", { parsed: parsedCount, embedded: embeddedCount, failed: failedCount });
+    logger.info("Reparse complete", {
+      parsed: parsedCount,
+      embedded: embeddedCount,
+      failed: failedCount,
+    });
     return {
       total: filtered.length,
       parsed: parsedCount,
@@ -182,4 +198,4 @@ export const reparseResumes = schedules.task({
       remaining: Math.max(0, (remaining ?? 0) - parsedCount),
     };
   },
-});
+);

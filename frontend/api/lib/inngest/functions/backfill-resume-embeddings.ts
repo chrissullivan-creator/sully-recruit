@@ -1,28 +1,31 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 import {
   buildProfileText,
   getVoyageEmbedding,
   delay,
-} from "./lib/resume-parsing";
+} from "../../../../src/trigger/lib/resume-parsing.js";
 
 /**
- * Backfill resume embeddings for candidates who have parsed resumes
- * but no full_profile embedding yet.
+ * Backfill `full_profile` Voyage embeddings for candidates whose resumes
+ * are parsed (`parsing_status='completed'`, raw_text present) but who
+ * don't yet have a `resume_embeddings` row. Embeddings power the AI
+ * matching surface — without them, candidates don't show up in semantic
+ * search.
  *
- * Schedule in Trigger.dev Dashboard:
- *   Task: backfill-resume-embeddings
- *   Cron: as needed (one-shot or scheduled)
+ * Hourly. Skips no-op runs cheaply (filters out already-embedded
+ * candidates before processing).
+ *
+ * Ported from `src/trigger/backfill-resume-embeddings.ts` — Inngest is
+ * the only scheduler now.
  */
-
-export const backfillResumeEmbeddings = schedules.task({
-  id: "backfill-resume-embeddings",
-  maxDuration: 300,
-  run: async () => {
+export const backfillResumeEmbeddings = inngest.createFunction(
+  { id: "backfill-resume-embeddings", name: "Backfill resume embeddings (Inngest)" },
+  { cron: "0 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const BATCH_SIZE = 25;
 
-    // Find resumes that are parsed but have no full_profile embedding
     const { data: resumes, error } = await supabase
       .from("resumes")
       .select("id, candidate_id, raw_text")
@@ -36,7 +39,6 @@ export const backfillResumeEmbeddings = schedules.task({
 
     if (error) throw new Error(`Query error: ${error.message}`);
 
-    // Filter out candidates that already have a full_profile embedding
     const candidateIds = [...new Set((resumes ?? []).map((r) => r.candidate_id!))];
     let existingEmbeddedIds = new Set<string>();
 
@@ -51,7 +53,7 @@ export const backfillResumeEmbeddings = schedules.task({
     }
 
     const toProcess = (resumes ?? []).filter(
-      (r) => !existingEmbeddedIds.has(r.candidate_id!)
+      (r) => !existingEmbeddedIds.has(r.candidate_id!),
     );
 
     if (toProcess.length === 0) {
@@ -68,7 +70,6 @@ export const backfillResumeEmbeddings = schedules.task({
       processed++;
 
       try {
-        // Fetch candidate data
         const { data: candidate } = await supabase
           .from("people")
           .select("id, full_name, current_title, current_company, location_text, skills")
@@ -94,7 +95,6 @@ export const backfillResumeEmbeddings = schedules.task({
 
         const embedding = await getVoyageEmbedding(profileText);
 
-        // Upsert: delete existing then insert
         await supabase
           .from("resume_embeddings")
           .delete()
@@ -125,11 +125,9 @@ export const backfillResumeEmbeddings = schedules.task({
         skipped++;
       }
 
-      // 500ms delay between candidates
       if (i < toProcess.length - 1) await delay(500);
     }
 
-    // Query remaining count of candidates still missing embeddings
     const { count: remainingCount } = await supabase
       .from("resumes")
       .select("id, candidate_id", { count: "exact", head: true })
@@ -139,7 +137,6 @@ export const backfillResumeEmbeddings = schedules.task({
       .neq("raw_text", "[PDF - parsed via Claude document API]")
       .not("candidate_id", "is", null);
 
-    // Subtract the ones we know have embeddings now
     const { count: embeddedTotal } = await supabase
       .from("resume_embeddings")
       .select("candidate_id", { count: "exact", head: true })
@@ -150,4 +147,4 @@ export const backfillResumeEmbeddings = schedules.task({
     logger.info("Backfill complete", { processed, embedded, skipped, remaining });
     return { processed, embedded, skipped, remaining };
   },
-});
+);
