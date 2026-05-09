@@ -72,11 +72,13 @@ async function schedulePendingConnectionLogs(
  *   Task: check-connections
  *   Cron: 0 0/4 * * * (every 4 hours)
  */
-export const checkConnections = schedules.task({
-  id: "check-connections",
-  maxDuration: 180,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so the Inngest port and the Trigger.dev
+ * scheduled task share one source of truth. Phase 5b deletes the
+ * Trigger.dev wrapper.
+ */
+export async function runCheckConnections() {
+  const supabase = getSupabaseAdmin();
 
     // Find enrollments stuck waiting for connection acceptance
     const { data: enrollments, error } = await supabase
@@ -206,8 +208,18 @@ export const checkConnections = schedules.task({
 
     logger.info("Connection check complete", { checked, accepted, failed });
     return { checked, accepted, failed };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/check-connections.ts.
+// The cron schedule (every 4h) is owned by the Inngest function now.
+// Running both simultaneously would double the Unipile API calls
+// against the same accounts; gutting this wrapper to a no-op stops the
+// Trigger.dev scheduler from firing.
+//
+// Other Trigger.dev tasks calling `checkConnections.trigger(...)`
+// directly (none currently) would silently no-op, which is fine
+// — they should send `linkedin/check-connections.requested` instead.
+export const checkConnections = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

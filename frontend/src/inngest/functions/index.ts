@@ -10,6 +10,9 @@ import { generateJoeSays } from "./generate-joe-says";
 import { sendMessage } from "./send-message";
 import { extractCallIntel } from "./extract-call-intel";
 import { fetchEntityHistory } from "./fetch-entity-history";
+import { checkConnections } from "./check-connections";
+import { syncLinkedinInvitations } from "./sync-linkedin-invitations";
+import { pendingConnectionTimeout } from "./pending-connection-timeout";
 
 export const functions = [
   syncInmailCredits,
@@ -19,4 +22,7 @@ export const functions = [
   sendMessage,
   extractCallIntel,
   fetchEntityHistory,
+  checkConnections,
+  syncLinkedinInvitations,
+  pendingConnectionTimeout,
 ];

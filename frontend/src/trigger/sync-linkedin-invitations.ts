@@ -24,12 +24,13 @@ import { unipileFetch } from "./lib/unipile-v2";
  * pull catches anything missed during downtime AND keeps the
  * `linkedin_invitations` table authoritative.
  */
-export const syncLinkedinInvitations = schedules.task({
-  id: "sync-linkedin-invitations",
-  cron: "*/30 * * * *",
-  maxDuration: 240,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so the Inngest port and the Trigger.dev
+ * scheduled task share one source of truth. Phase 5b deletes the
+ * Trigger.dev wrapper.
+ */
+export async function runSyncLinkedinInvitations() {
+  const supabase = getSupabaseAdmin();
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
@@ -191,5 +192,10 @@ export const syncLinkedinInvitations = schedules.task({
       candidates_created: candidatesCreated,
       per_account: perAccount,
     };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/sync-linkedin-invitations.ts.
+// Stub keeps the Trigger.dev task registry from complaining; Inngest
+// owns the cron now (running both would double-create candidates from
+// the same invitation).
+export const syncLinkedinInvitations = null;
