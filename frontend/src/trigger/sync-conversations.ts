@@ -15,11 +15,12 @@ const DELAY_MS = 400;
  *   Task: sync-conversations
  *   Cron: 0 0/2 * * * (every 2 hours)
  */
-export const syncConversations = schedules.task({
-  id: "sync-conversations",
-  maxDuration: 240,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runSyncConversations() {
+  const supabase = getSupabaseAdmin();
 
     // Get active LinkedIn accounts. Each row gets its own v2 sweep —
     // account_id moves into the URL path in v2 (no more query param).
@@ -207,8 +208,10 @@ export const syncConversations = schedules.task({
 
     logger.info("Conversation sync complete", { synced: totalSynced, messages: totalMessages });
     return { synced: totalSynced, messages: totalMessages };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/sync-conversations.ts.
+export const syncConversations = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

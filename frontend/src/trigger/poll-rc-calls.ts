@@ -59,7 +59,7 @@ async function findEntityByPhone(
   return null;
 }
 
-async function runPoll(lookbackMinutes: number) {
+export async function runPoll(lookbackMinutes: number) {
   const supabase = getSupabaseAdmin();
 
   const { data: accounts } = await supabase
@@ -209,22 +209,10 @@ async function runPoll(lookbackMinutes: number) {
   };
 }
 
-export const pollRcCalls = schedules.task({
-  id: "poll-rc-calls",
-  maxDuration: 120,
-  run: async () => runPoll(10),
-});
-
-/**
- * One-shot backfill task. Trigger from the dashboard with:
- *   { "lookback_minutes": 1440 }   // last 24h
- * Defaults to 60 minutes if no payload provided.
- */
-export const backfillRcCalls = task({
-  id: "backfill-rc-calls",
-  maxDuration: 600,
-  run: async (payload: { lookback_minutes?: number }) => {
-    const minutes = payload?.lookback_minutes ?? 60;
-    return runPoll(minutes);
-  },
-});
+// Helper `runPoll(minutes)` is exported above and used by the Inngest
+// function in frontend/src/inngest/functions/poll-rc-calls.ts. Both
+// the every-5-min cron and the one-shot backfill route through Inngest.
+//
+// MIGRATED to Inngest — Trigger.dev wrappers gutted.
+export const pollRcCalls = null;
+export const backfillRcCalls = null;

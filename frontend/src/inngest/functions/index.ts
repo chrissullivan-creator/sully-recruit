@@ -27,6 +27,10 @@ import { retryStuckCallTranscripts } from "./retry-stuck-call-transcripts";
 import { syncPeopleToOutlook } from "./sync-people-to-outlook";
 import { drainCallQueue } from "./drain-call-queue";
 import { reclassifyLinkedinChatsDaily } from "./reclassify-linkedin-chats";
+import { backfillResumeEmbeddings } from "./backfill-resume-embeddings";
+import { syncConversations } from "./sync-conversations";
+import { pollRcCalls } from "./poll-rc-calls";
+import { renewWebhookSubscriptions } from "./webhook-subscription-renewal";
 
 export const functions = [
   syncInmailCredits,
@@ -53,4 +57,8 @@ export const functions = [
   syncPeopleToOutlook,
   drainCallQueue,
   reclassifyLinkedinChatsDaily,
+  backfillResumeEmbeddings,
+  syncConversations,
+  pollRcCalls,
+  renewWebhookSubscriptions,
 ];

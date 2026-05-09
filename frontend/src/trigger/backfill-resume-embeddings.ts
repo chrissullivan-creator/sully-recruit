@@ -15,12 +15,13 @@ import {
  *   Cron: as needed (one-shot or scheduled)
  */
 
-export const backfillResumeEmbeddings = schedules.task({
-  id: "backfill-resume-embeddings",
-  maxDuration: 300,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
-    const BATCH_SIZE = 25;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runBackfillResumeEmbeddings() {
+  const supabase = getSupabaseAdmin();
+  const BATCH_SIZE = 25;
 
     // Find resumes that are parsed but have no full_profile embedding
     const { data: resumes, error } = await supabase
@@ -149,5 +150,7 @@ export const backfillResumeEmbeddings = schedules.task({
 
     logger.info("Backfill complete", { processed, embedded, skipped, remaining });
     return { processed, embedded, skipped, remaining };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/backfill-resume-embeddings.ts.
+export const backfillResumeEmbeddings = null;

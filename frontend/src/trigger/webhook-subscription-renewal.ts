@@ -13,11 +13,13 @@ const WEBHOOK_BASE_URL = "https://www.sullyrecruit.app";
  *   Task: renew-webhook-subscriptions
  *   Cron: 0 6 * * * (daily at 6 AM UTC)
  */
-export const renewWebhookSubscriptions = schedules.task({
-  id: "renew-webhook-subscriptions",
-  run: async () => {
-    const supabase = getSupabaseAdmin();
-    const results: { service: string; user: string; status: string; error?: string }[] = [];
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runRenewWebhookSubscriptions() {
+  const supabase = getSupabaseAdmin();
+  const results: { service: string; user: string; status: string; error?: string }[] = [];
 
     // ── Microsoft Graph ──────────────────────────────────────────────────
     try {
@@ -210,5 +212,7 @@ export const renewWebhookSubscriptions = schedules.task({
 
     logger.info("Webhook subscription renewal complete", { results });
     return { results };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/webhook-subscription-renewal.ts.
+export const renewWebhookSubscriptions = null;
