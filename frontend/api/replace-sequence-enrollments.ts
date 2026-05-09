@@ -1,16 +1,21 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
+import { inngest } from "./lib/inngest/client.js";
 import { requireAuth } from "./lib/auth.js";
 
 /**
  * Re-pace every active enrollment of a sequence so step reorders, delay
  * changes, and weekdays-only flips propagate to people who are already
  * mid-flight. Cancels any pending step_logs (scheduled / pending_connection)
- * and re-runs `sequence-enrollment-init` against the current sequence
+ * and re-runs the engine's init handler against the current sequence
  * config — same path a fresh enrollment takes.
  *
  * `sent` / `skipped` / `failed` rows are left alone so history sticks.
+ *
+ * Routes to whichever engine owns the sequence (sequences.engine):
+ *   - 'inngest' → inngest.send("sequence/enrollment-init.requested") per row
+ *   - 'trigger' → tasks.trigger("sequence-enrollment-init") per row
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -79,21 +84,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // last sent step's sent_at. Resetting would make step 1 fire again
     // immediately for anyone whose original step 1 already shipped.
 
-    // Hand each enrollment to sequence-enrollment-init.
+    // Look up the engine once; all enrollments on a sequence share it.
+    const { data: seq } = await (supabase as any)
+      .from("sequences")
+      .select("engine")
+      .eq("id", sequence_id)
+      .maybeSingle();
+    const engine = ((seq as any)?.engine || "trigger") as "trigger" | "inngest";
+
     const handles: string[] = [];
-    for (const e of enrollments) {
-      const handle = await tasks.trigger("sequence-enrollment-init", {
-        enrollmentId: e.id,
-        sequenceId: sequence_id,
-        candidateId: e.candidate_id || undefined,
-        contactId: e.contact_id || undefined,
-        enrolledBy: enrolled_by,
-      });
-      handles.push(handle.id);
+    if (engine === "inngest") {
+      const tsSec = Math.floor(Date.now() / 1000);
+      const events = enrollments.map((e) => ({
+        // Distinct id per repace so the original `enrollment-init-{id}`
+        // dedupe key in the Inngest log doesn't suppress this.
+        id: `enrollment-init-${e.id}-repace-${tsSec}`,
+        name: "sequence/enrollment-init.requested" as const,
+        data: {
+          enrollmentId: e.id,
+          sequenceId: sequence_id,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
+          enrolledBy: enrolled_by,
+        },
+      }));
+      const sent = await inngest.send(events);
+      handles.push(...sent.ids);
+    } else {
+      for (const e of enrollments) {
+        const handle = await tasks.trigger("sequence-enrollment-init", {
+          enrollmentId: e.id,
+          sequenceId: sequence_id,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
+          enrolledBy: enrolled_by,
+        });
+        handles.push(handle.id);
+      }
     }
 
     return res.status(200).json({
       repaced: enrollments.length,
+      engine,
       task_run_ids: handles,
     });
   } catch (err: any) {

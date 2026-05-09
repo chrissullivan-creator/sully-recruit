@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../lib/inngest/client.js";
 
 /**
  * One-shot admin endpoint to finish the Trigger.dev → Inngest sequence
@@ -86,16 +86,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       orphans = allActive.filter((e) => !withOpen.has(e.id));
     }
 
-    // ── Step 3: re-init each orphan via Trigger.dev ─────────────────
-    // Trigger.dev's SDK is still in package.json (PR #198 didn't drop
-    // it). sequenceEnrollmentInit pre-materialises sequence_step_logs
-    // for the enrollment regardless of engine, after which the Inngest
-    // sweep claims them on the next tick.
+    // ── Step 3: re-init each orphan via Inngest ─────────────────────
+    // The Inngest function `sequence-enrollment-init` calls into the
+    // shared `runSequenceEnrollmentInit` body and pre-materialises
+    // sequence_step_logs for the enrollment. The Inngest sweep then
+    // claims the new scheduled rows on the next 3-min tick.
     let dispatched = 0;
     const dispatchErrors: Array<{ enrollmentId: string; error: string }> = [];
-    for (const e of orphans) {
-      try {
-        await tasks.trigger("sequence-enrollment-init", {
+    if (orphans.length > 0) {
+      const tsSec = Math.floor(Date.now() / 1000);
+      const events = orphans.map((e) => ({
+        // Distinct dedup key per cutover so this doesn't suppress an
+        // earlier `enrollment-init-{id}` event in the Inngest log.
+        id: `enrollment-init-${e.id}-cutover-${tsSec}`,
+        name: "sequence/enrollment-init.requested" as const,
+        data: {
           enrollmentId: e.id as string,
           sequenceId: e.sequence_id as string,
           candidateId: e.candidate_id || undefined,
@@ -104,13 +109,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (e.sequences?.sender_user_id as string | undefined)
             ?? (e.sequences?.created_by as string | undefined)
             ?? (e.enrolled_by as string),
-        });
-        dispatched++;
-      } catch (err: any) {
-        dispatchErrors.push({
-          enrollmentId: e.id as string,
-          error: err?.message || "unknown",
-        });
+        },
+      }));
+      // inngest.send caps at 5000 events/call; chunk at 500 to stay
+      // comfortably under the network-buffer limit.
+      const chunkSize = 500;
+      for (let i = 0; i < events.length; i += chunkSize) {
+        const chunk = events.slice(i, i + chunkSize);
+        try {
+          await inngest.send(chunk);
+          dispatched += chunk.length;
+        } catch (err: any) {
+          for (const ev of chunk) {
+            dispatchErrors.push({
+              enrollmentId: ev.data.enrollmentId,
+              error: err?.message || "unknown",
+            });
+          }
+        }
       }
     }
 
