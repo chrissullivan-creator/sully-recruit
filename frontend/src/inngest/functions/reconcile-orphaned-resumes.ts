@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runReconcileOrphanedResumes } from "../../trigger/reconcile-orphaned-resumes";
+import { runReconcileOrphanedResumes } from "../../server/reconcile-orphaned-resumes";
 
 /**
  * Every minute: find resumes parsed but not yet linked to a

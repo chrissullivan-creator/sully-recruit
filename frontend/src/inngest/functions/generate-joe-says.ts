@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runGenerateJoeSays } from "../../trigger/generate-joe-says";
+import { runGenerateJoeSays } from "../../server/generate-joe-says";
 
 /**
  * Inngest port of the Joe Says brief generator.

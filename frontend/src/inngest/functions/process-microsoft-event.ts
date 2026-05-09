@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runProcessMicrosoftEvent } from "../../trigger/webhook-microsoft";
+import { runProcessMicrosoftEvent } from "../../server/webhook-microsoft";
 
 /**
  * Heavy work for inbound Microsoft Graph notifications. The Vercel

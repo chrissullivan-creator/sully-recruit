@@ -3,8 +3,8 @@ import { inngest } from "../client";
 // for Vercel, and Vercel's serverless bundler doesn't apply the
 // tsconfig `@/*` path alias the same way Vite does for src/. Keeping
 // these relative avoids ERR_MODULE_NOT_FOUND at deploy time.
-import { getSupabaseAdmin } from "../../trigger/lib/supabase";
-import { unipileFetch } from "../../trigger/lib/unipile-v2";
+import { getSupabaseAdmin } from "../../server/lib/supabase";
+import { unipileFetch } from "../../server/lib/unipile-v2";
 
 /**
  * Hourly LinkedIn Recruiter InMail credit sync.

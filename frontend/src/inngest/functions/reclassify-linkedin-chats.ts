@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { reclassifyOnce } from "../../trigger/reclassify-linkedin-chats";
+import { reclassifyOnce } from "../../server/reclassify-linkedin-chats";
 
 /**
  * Daily 06:00 UTC: re-classify recently-arrived LinkedIn chats whose

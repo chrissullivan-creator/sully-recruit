@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runCleanupStaleEnrollments } from "../../trigger/cleanup-stale-enrollments";
+import { runCleanupStaleEnrollments } from "../../server/cleanup-stale-enrollments";
 
 /**
  * Daily 05:00 UTC: cancel pending step_logs whose connection request

@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runRenewWebhookSubscriptions } from "../../trigger/webhook-subscription-renewal";
+import { runRenewWebhookSubscriptions } from "../../server/webhook-subscription-renewal";
 
 /**
  * Daily 06:00 UTC: rotate Microsoft Graph + RingCentral webhook

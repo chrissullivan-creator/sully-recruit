@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runDrainCallQueue } from "../../trigger/drain-call-queue";
+import { runDrainCallQueue } from "../../server/drain-call-queue";
 
 /**
  * Every 3 min: drain the call processing queue — pick up pending

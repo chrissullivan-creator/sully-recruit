@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runPoll } from "../../trigger/poll-rc-calls";
+import { runPoll } from "../../server/poll-rc-calls";
 
 /**
  * Every 5 min: poll RingCentral call logs across every wired account,

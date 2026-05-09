@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runCheckConnections } from "../../trigger/check-connections";
+import { runCheckConnections } from "../../server/check-connections";
 
 /**
  * 4-hourly polling fallback for missed `connection_accepted` Unipile

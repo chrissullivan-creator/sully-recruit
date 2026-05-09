@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runBackfillCalendarEvents } from "../../trigger/backfill-calendar-events";
+import { runBackfillCalendarEvents } from "../../server/backfill-calendar-events";
 
 /**
  * On-demand backfill of historical Microsoft Graph calendar events.

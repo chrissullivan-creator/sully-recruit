@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runExtractManualCallIntel } from "../../trigger/extract-manual-call-intel";
+import { runExtractManualCallIntel } from "../../server/extract-manual-call-intel";
 
 /**
  * Inngest port of extract-manual-call-intel.

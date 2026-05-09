@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runProcessUnipileEvent } from "../../trigger/webhook-unipile";
+import { runProcessUnipileEvent } from "../../server/webhook-unipile";
 
 /**
  * Heavy work for inbound Unipile webhooks (LinkedIn DMs, InMail,

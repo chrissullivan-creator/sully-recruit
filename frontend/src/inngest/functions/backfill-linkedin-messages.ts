@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import {
   runBackfillLinkedinMessages,
   LINKEDIN_BACKFILL_ACCOUNT_IDS,
-} from "../../trigger/backfill-linkedin-messages";
+} from "../../server/backfill-linkedin-messages";
 
 /**
  * Every 5 min: pull recent LinkedIn chats for every recruiter account,
@@ -24,7 +24,7 @@ export const backfillLinkedinMessages = inngest.createFunction(
     ],
   },
   async ({ step, logger }) => {
-    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    const results: Array<{ id: string; ok: boolean; error?: string | undefined }> = [];
     for (const externalId of LINKEDIN_BACKFILL_ACCOUNT_IDS) {
       const result = await step.run(`account-${externalId}`, async () => {
         try {
@@ -37,7 +37,10 @@ export const backfillLinkedinMessages = inngest.createFunction(
           return { ok: false as const, error: err?.message };
         }
       });
-      results.push({ id: externalId, ...result });
+      // step.run jsonifies the discriminated union; spread + cast so
+      // the array element type stays uniform.
+      const r = result as { ok: boolean; error?: string | undefined };
+      results.push({ id: externalId, ok: r.ok, error: r.error });
     }
     return { accounts: results };
   },

@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runRecoverOrphanResumes } from "../../trigger/recover-orphan-resumes";
+import { runRecoverOrphanResumes } from "../../server/recover-orphan-resumes";
 
 /**
  * On-demand recovery of resumes that exist in the storage bucket but

@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runResumeIngestion } from "../../trigger/resume-ingestion";
+import { runResumeIngestion } from "../../server/resume-ingestion";
 
 /**
  * Inngest port of resume-ingestion. Single source of truth lives in

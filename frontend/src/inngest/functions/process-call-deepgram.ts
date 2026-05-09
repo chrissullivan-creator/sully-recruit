@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runProcessCallDeepgram, type ProcessCallDeepgramPayload } from "../../trigger/process-call-deepgram";
+import { runProcessCallDeepgram, type ProcessCallDeepgramPayload } from "../../server/process-call-deepgram";
 
 /**
  * Long-running call transcription pipeline: Deepgram transcription +

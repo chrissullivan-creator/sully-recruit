@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runFetchEntityHistory } from "../../trigger/fetch-entity-history";
+import { runFetchEntityHistory } from "../../server/fetch-entity-history";
 
 /**
  * Inngest port of fetch-entity-history (the Contacts page "Fetch

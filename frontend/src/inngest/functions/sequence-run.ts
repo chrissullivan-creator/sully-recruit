@@ -1,8 +1,8 @@
 import { inngest } from "../client";
-import { getSupabaseAdmin } from "../../trigger/lib/supabase";
-import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "../../trigger/lib/send-channels";
-import { resolveMergeTags, applyMergeTags, validateEmail } from "../../trigger/lib/merge-tags";
-import { canonicalChannel } from "../../trigger/lib/unipile-v2";
+import { getSupabaseAdmin } from "../../server/lib/supabase";
+import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "../../server/lib/send-channels";
+import { resolveMergeTags, applyMergeTags, validateEmail } from "../../server/lib/merge-tags";
+import { canonicalChannel } from "../../server/lib/unipile-v2";
 
 /**
  * Phase 2 of the Inngest migration: the sequence engine itself.

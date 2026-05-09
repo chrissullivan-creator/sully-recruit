@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { getSupabaseAdmin } from "../../trigger/lib/supabase";
+import { getSupabaseAdmin } from "../../server/lib/supabase";
 
 /**
  * Operator-triggered migration: flip a single sequence from
@@ -82,7 +82,9 @@ export const migrateSequenceToInngest = inngest.createFunction(
 
     const cancelled = await step.run("cancel-pending-step-logs", async () => {
       if (enrollments.length === 0) return 0;
-      const { count } = await supabase
+      // .update().select() returns the affected rows; count via .length.
+      // Doing the count after the update keeps it in one round-trip.
+      const { data, error } = await supabase
         .from("sequence_step_logs")
         .update({
           status: "cancelled",
@@ -91,8 +93,9 @@ export const migrateSequenceToInngest = inngest.createFunction(
         } as any)
         .in("enrollment_id", enrollments.map((e: any) => e.id))
         .in("status", ["scheduled", "pending_connection"])
-        .select("id", { count: "exact", head: true });
-      return count ?? 0;
+        .select("id");
+      if (error) throw error;
+      return (data ?? []).length;
     });
 
     await step.run("flip-engine", async () => {

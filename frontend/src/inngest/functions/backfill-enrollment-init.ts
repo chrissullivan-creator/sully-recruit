@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runBackfillEnrollmentInit } from "../../trigger/backfill-enrollment-init";
+import { runBackfillEnrollmentInit } from "../../server/backfill-enrollment-init";
 
 /**
  * Every 10 min: find sequence_enrollments that were inserted but

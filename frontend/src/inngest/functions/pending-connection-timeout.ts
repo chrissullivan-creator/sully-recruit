@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runPendingConnectionTimeout } from "../../trigger/sequence-scheduler";
+import { runPendingConnectionTimeout } from "../../server/sequence-scheduler";
 
 /**
  * Daily 02:00 UTC: cancel any pending_connection step_log older than

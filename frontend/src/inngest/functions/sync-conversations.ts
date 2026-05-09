@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runSyncConversations } from "../../trigger/sync-conversations";
+import { runSyncConversations } from "../../server/sync-conversations";
 
 /**
  * Every 2 hours: pull conversation lists for every active LinkedIn

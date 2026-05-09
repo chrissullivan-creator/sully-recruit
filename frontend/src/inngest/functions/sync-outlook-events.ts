@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runSyncOutlookEvents } from "../../trigger/sync-outlook-events";
+import { runSyncOutlookEvents } from "../../server/sync-outlook-events";
 
 /**
  * Every 30 min: pull 14d of forward calendar events from Microsoft

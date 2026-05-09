@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../src/inngest/client";
 import { requireAuth } from "./lib/auth.js";
@@ -90,41 +89,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     const engine = ((seqRow as any)?.engine || "trigger") as "trigger" | "inngest";
 
-    const handles: string[] = [];
-    if (engine === "inngest") {
-      const events = enrollments.map((e) => ({
-        // Repace = brand-new run for the enrollment; include 'repace' +
-        // a timestamp in the id so it's distinct from the original
-        // seq-enrolled-{enrollmentId} dedup key.
-        id: `seq-enrolled-${e.id}-repace-${Math.floor(Date.now() / 1000)}`,
-        name: "sequence/enrolled" as const,
-        data: {
-          enrollmentId: e.id,
-          sequenceId: sequence_id,
-          candidateId: e.candidate_id || undefined,
-          contactId: e.contact_id || undefined,
-          enrolledBy: enrolled_by,
-        },
-      }));
-      const sent = await inngest.send(events);
-      handles.push(...sent.ids);
-    } else {
-      for (const e of enrollments) {
-        const handle = await tasks.trigger("sequence-enrollment-init", {
-          enrollmentId: e.id,
-          sequenceId: sequence_id,
-          candidateId: e.candidate_id || undefined,
-          contactId: e.contact_id || undefined,
-          enrolledBy: enrolled_by,
-        });
-        handles.push(handle.id);
-      }
+    if (engine !== "inngest") {
+      return res.status(409).json({
+        error: `sequence ${sequence_id} is on engine='${engine}'. Run inngest.send({ name: "sequence/migrate-to-inngest.requested", data: { sequenceId } }) first.`,
+      });
     }
+
+    const events = enrollments.map((e) => ({
+      // Repace = brand-new run for the enrollment; include 'repace' +
+      // a timestamp in the id so it's distinct from the original
+      // seq-enrolled-{enrollmentId} dedup key.
+      id: `seq-enrolled-${e.id}-repace-${Math.floor(Date.now() / 1000)}`,
+      name: "sequence/enrolled" as const,
+      data: {
+        enrollmentId: e.id,
+        sequenceId: sequence_id,
+        candidateId: e.candidate_id || undefined,
+        contactId: e.contact_id || undefined,
+        enrolledBy: enrolled_by,
+      },
+    }));
+    const sent = await inngest.send(events);
 
     return res.status(200).json({
       repaced: enrollments.length,
-      engine,
-      task_run_ids: handles,
+      task_run_ids: sent.ids,
     });
   } catch (err: any) {
     console.error("replace-sequence-enrollments error:", err.message);

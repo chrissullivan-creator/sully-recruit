@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runSyncPeopleToOutlook } from "../../trigger/sync-people-to-outlook";
+import { runSyncPeopleToOutlook } from "../../server/sync-people-to-outlook";
 
 /**
  * Every 30 min: push newly added / recently updated people to Outlook

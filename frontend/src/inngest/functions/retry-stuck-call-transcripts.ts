@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runRetryStuckCallTranscripts } from "../../trigger/retry-stuck-call-transcripts";
+import { runRetryStuckCallTranscripts } from "../../server/retry-stuck-call-transcripts";
 
 /**
  * Every 15 min: find call_logs whose Deepgram transcription got stuck

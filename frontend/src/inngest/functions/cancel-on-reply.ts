@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { getSupabaseAdmin } from "../../trigger/lib/supabase";
+import { getSupabaseAdmin } from "../../server/lib/supabase";
 
 /**
  * Reply → cancel relay.

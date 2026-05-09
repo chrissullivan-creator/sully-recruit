@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runSendMessage } from "../../trigger/send-message";
+import { runSendMessage } from "../../server/send-message";
 
 /**
  * Inngest port of the manual ad-hoc send-message task.

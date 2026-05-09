@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runBackfillEmails } from "../../trigger/backfill-emails";
+import { runBackfillEmails } from "../../server/backfill-emails";
 
 /**
  * Every 5 min: pull last 3 days of email from each wired Microsoft

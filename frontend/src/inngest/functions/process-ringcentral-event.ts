@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runProcessRingcentralEvent } from "../../trigger/webhook-ringcentral";
+import { runProcessRingcentralEvent } from "../../server/webhook-ringcentral";
 
 /**
  * Heavy work for RingCentral webhooks (calls + SMS). The Vercel

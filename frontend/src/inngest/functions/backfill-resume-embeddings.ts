@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runBackfillResumeEmbeddings } from "../../trigger/backfill-resume-embeddings";
+import { runBackfillResumeEmbeddings } from "../../server/backfill-resume-embeddings";
 
 /**
  * Every 6 hours: build full_profile embeddings for parsed resumes

@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { runSyncLinkedinInvitations } from "../../trigger/sync-linkedin-invitations";
+import { runSyncLinkedinInvitations } from "../../server/sync-linkedin-invitations";
 
 /**
  * Every 30 min: poll Unipile for inbound LinkedIn invitations across
