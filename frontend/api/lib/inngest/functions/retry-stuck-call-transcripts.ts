@@ -1,33 +1,30 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { processCallDeepgram } from "./process-call-deepgram";
-import { notifyError } from "./lib/alerting";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { notifyError } from "../../../../src/trigger/lib/alerting.js";
 
 /**
  * Safety net for calls whose transcripts never made it to ai_call_notes.
  *
  * Why this exists: RingCentral recordings aren't always ready when
- * poll-rc-calls or the RC webhook fires processCallDeepgram on a fresh
- * call_log. When the recording is missing, processCallDeepgram silently
+ * poll-rc-calls or the RC webhook fires the deepgram pipeline on a fresh
+ * call_log. When the recording is missing, runProcessCallDeepgram silently
  * increments `stats.no_recording++` and returns without writing a row —
- * so the call sits forever unless somebody runs the batch from the
- * Trigger.dev dashboard.
+ * so the call sits forever unless somebody reruns it.
  *
- * This sweep re-fires processCallDeepgram for any eligible call_log
- * that's still missing an ai_call_notes row, after a short grace
- * period (recording usually appears within a few minutes) and within a
- * cap (give up after 7 days).
+ * This sweep re-fires the Inngest `call/transcribe.requested` event for
+ * any eligible call_log still missing an ai_call_notes row, after a
+ * 5-min grace period and within a 7-day cap.
  *
- * Schedule: every 15 minutes.
+ * Every 15 minutes. Ported from
+ * `src/trigger/retry-stuck-call-transcripts.ts` — Inngest is the only
+ * scheduler now.
  */
-export const retryStuckCallTranscripts = schedules.task({
-  id: "retry-stuck-call-transcripts",
-  cron: "*/15 * * * *",
-  maxDuration: 600,
-  run: async () => {
+export const retryStuckCallTranscripts = inngest.createFunction(
+  { id: "retry-stuck-call-transcripts", name: "Retry stuck call transcripts (Inngest)" },
+  { cron: "*/15 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
-    // Pull eligible call_logs in the retry window (5 min .. 7 days old).
     const { data: eligible } = await supabase
       .from("call_logs")
       .select("id, started_at, duration_seconds, linked_entity_name, external_call_id")
@@ -43,7 +40,6 @@ export const retryStuckCallTranscripts = schedules.task({
       return { triggered: 0, scanned: 0 };
     }
 
-    // Filter out ones that already have notes.
     const ids = eligible.map((c: any) => c.id);
     const { data: existing } = await supabase
       .from("ai_call_notes")
@@ -57,20 +53,22 @@ export const retryStuckCallTranscripts = schedules.task({
       return { triggered: 0, scanned: eligible.length };
     }
 
-    // Cap fan-out per run so we don't blast the queue.
     const toRetry = stuck.slice(0, 25);
     let triggered = 0;
-    for (const cl of toRetry) {
-      try {
-        await processCallDeepgram.trigger({ call_log_id: cl.id });
-        triggered++;
-      } catch (err: any) {
-        await notifyError({
-          taskId: "retry-stuck-call-transcripts",
-          error: err,
-          context: { callLogId: cl.id, name: cl.linked_entity_name },
-        });
-      }
+    try {
+      await inngest.send(
+        toRetry.map((cl: any) => ({
+          name: "call/transcribe.requested" as const,
+          data: { call_log_id: cl.id },
+        })),
+      );
+      triggered = toRetry.length;
+    } catch (err: any) {
+      await notifyError({
+        taskId: "retry-stuck-call-transcripts",
+        error: err,
+        context: { count: toRetry.length },
+      });
     }
 
     logger.info("Stuck-call retry sweep done", {
@@ -87,4 +85,4 @@ export const retryStuckCallTranscripts = schedules.task({
 
     return { triggered, scanned: eligible.length, stuck: stuck.length };
   },
-});
+);

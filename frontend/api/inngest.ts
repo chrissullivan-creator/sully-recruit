@@ -31,6 +31,9 @@ import {
   syncProxyConfigDaily,
   syncProxyConfigOnce,
 } from "./lib/inngest/functions/sync-proxy-config.js";
+import { processCallDeepgram } from "./lib/inngest/functions/process-call-deepgram.js";
+import { pollRcCalls, backfillRcCalls } from "./lib/inngest/functions/poll-rc-calls.js";
+import { retryStuckCallTranscripts } from "./lib/inngest/functions/retry-stuck-call-transcripts.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -73,5 +76,9 @@ export default serve({
     pipelineHealthDigest,
     syncProxyConfigDaily,
     syncProxyConfigOnce,
+    processCallDeepgram,
+    pollRcCalls,
+    backfillRcCalls,
+    retryStuckCallTranscripts,
   ],
 });

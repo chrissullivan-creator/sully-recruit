@@ -1,14 +1,47 @@
-import { schedules, task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { processCallDeepgram } from "./process-call-deepgram";
-
-// Poll RingCentral call log as a safety net for missed webhooks.
-// Default lookback is 10 minutes; the manual backfill task accepts a
-// `lookback_minutes` payload (e.g. 1440 for the last 24h).
-//
-// Schedule: every 5 minutes
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
+
+/**
+ * Poll RingCentral call log as a safety net for missed webhooks. Default
+ * lookback is 10 minutes (every-5-minute cadence with overlap). The
+ * event-triggered backfill variant accepts `lookback_minutes` (e.g.
+ * 1440 for the last 24h) to catch up after an outage.
+ *
+ * For new completed calls (≥30s), inserts a `call_logs` row + fires
+ * `call/transcribe.requested` so the Deepgram pipeline picks it up.
+ *
+ * Ported from `src/trigger/poll-rc-calls.ts` — Inngest is the only
+ * scheduler now. The transcription dispatch was previously a
+ * Trigger.dev `processCallDeepgram.trigger(...)` call; it now sends
+ * the canonical Inngest event so we don't need both engines to be
+ * registered.
+ */
+
+async function findEntityByPhone(
+  supabase: any,
+  phone: string,
+): Promise<{ id: string; name: string; type: string } | null> {
+  const digits = phone.replace(/\D/g, "");
+  const variants = [
+    phone,
+    `+${digits}`,
+    digits,
+    digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : null,
+    digits.length === 10 ? `+1${digits}` : null,
+  ].filter(Boolean) as string[];
+
+  for (const v of variants) {
+    const { data: c } = await supabase.from("people").select("id, full_name").eq("phone", v).maybeSingle();
+    if (c) return { id: c.id, name: c.full_name, type: "candidate" };
+  }
+  for (const v of variants) {
+    const { data: c } = await supabase.from("contacts").select("id, full_name").eq("phone", v).maybeSingle();
+    if (c) return { id: c.id, name: c.full_name, type: "contact" };
+  }
+  return null;
+}
 
 async function getToken(acct: any): Promise<string | null> {
   if (acct.access_token && acct.token_expires_at) {
@@ -35,31 +68,7 @@ async function getToken(acct: any): Promise<string | null> {
   return (await res.json()).access_token;
 }
 
-async function findEntityByPhone(
-  supabase: any,
-  phone: string,
-): Promise<{ id: string; name: string; type: string } | null> {
-  const digits = phone.replace(/\D/g, "");
-  const variants = [
-    phone,
-    `+${digits}`,
-    digits,
-    digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : null,
-    digits.length === 10 ? `+1${digits}` : null,
-  ].filter(Boolean) as string[];
-
-  for (const v of variants) {
-    const { data: c } = await supabase.from("people").select("id, full_name").eq("phone", v).maybeSingle();
-    if (c) return { id: c.id, name: c.full_name, type: "candidate" };
-  }
-  for (const v of variants) {
-    const { data: c } = await supabase.from("contacts").select("id, full_name").eq("phone", v).maybeSingle();
-    if (c) return { id: c.id, name: c.full_name, type: "contact" };
-  }
-  return null;
-}
-
-async function runPoll(lookbackMinutes: number) {
+async function runPoll(lookbackMinutes: number, logger: any) {
   const supabase = getSupabaseAdmin();
 
   const { data: accounts } = await supabase
@@ -76,8 +85,11 @@ async function runPoll(lookbackMinutes: number) {
 
   const since = new Date(Date.now() - lookbackMinutes * 60 * 1000)
     .toISOString().replace(/\.\d{3}Z$/, "Z");
-  let totalProcessed = 0, totalInserted = 0, totalSkipped = 0;
+  let totalProcessed = 0,
+    totalInserted = 0,
+    totalSkipped = 0;
   const results: any[] = [];
+  const transcribeEvents: Array<{ name: "call/transcribe.requested"; data: { call_log_id: string } }> = [];
 
   for (const acct of accounts) {
     const token = await getToken(acct);
@@ -86,8 +98,6 @@ async function runPoll(lookbackMinutes: number) {
       continue;
     }
 
-    // RC paginates at 100/page. Walk pages until we exhaust the window
-    // (matters for large lookbacks like the 24h backfill).
     let page = 1;
     while (page <= 30) {
       const params = new URLSearchParams({
@@ -115,14 +125,20 @@ async function runPoll(lookbackMinutes: number) {
       for (const call of records) {
         totalProcessed++;
         const callId = call.id ?? call.sessionId;
-        if (!callId) { totalSkipped++; continue; }
+        if (!callId) {
+          totalSkipped++;
+          continue;
+        }
 
         const { data: existing } = await supabase
           .from("call_logs")
           .select("id")
           .eq("external_call_id", callId)
           .maybeSingle();
-        if (existing) { totalSkipped++; continue; }
+        if (existing) {
+          totalSkipped++;
+          continue;
+        }
 
         const duration = call.duration ?? 0;
         const direction = (call.direction ?? "Outbound").toLowerCase();
@@ -180,15 +196,10 @@ async function runPoll(lookbackMinutes: number) {
               .eq("external_call_id", callId)
               .maybeSingle();
             if (inserted?.id) {
-              // Delay 90s — RC recordings often aren't exposed in the
-              // call-log API for 1-2 min after the call ends. The
-              // retry-stuck-call-transcripts sweep is the safety net
-              // if even 90s isn't enough.
-              await processCallDeepgram.trigger(
-                { call_log_id: inserted.id },
-                { delay: "90s" },
-              );
-              logger.info("Triggered Deepgram transcription", { callId, callLogId: inserted.id });
+              transcribeEvents.push({
+                name: "call/transcribe.requested",
+                data: { call_log_id: inserted.id },
+              });
             }
           }
         }
@@ -199,32 +210,44 @@ async function runPoll(lookbackMinutes: number) {
     }
   }
 
+  // Inngest's send accepts up to 5000 events per call. Chunk just to be safe.
+  if (transcribeEvents.length > 0) {
+    const chunkSize = 500;
+    for (let i = 0; i < transcribeEvents.length; i += chunkSize) {
+      await inngest.send(transcribeEvents.slice(i, i + chunkSize));
+    }
+    logger.info("Dispatched transcription events", { count: transcribeEvents.length });
+  }
+
   logger.info("Poll RC calls complete", { totalProcessed, totalInserted, totalSkipped, lookbackMinutes });
   return {
     calls_scanned: totalProcessed,
     calls_inserted: totalInserted,
     calls_skipped: totalSkipped,
+    transcribe_dispatched: transcribeEvents.length,
     lookback_minutes: lookbackMinutes,
     results,
   };
 }
 
-export const pollRcCalls = schedules.task({
-  id: "poll-rc-calls",
-  maxDuration: 120,
-  run: async () => runPoll(10),
-});
+export const pollRcCalls = inngest.createFunction(
+  { id: "poll-rc-calls", name: "Poll RingCentral call log (Inngest)" },
+  { cron: "*/5 * * * *" },
+  async ({ logger }) => runPoll(10, logger),
+);
 
 /**
- * One-shot backfill task. Trigger from the dashboard with:
- *   { "lookback_minutes": 1440 }   // last 24h
- * Defaults to 60 minutes if no payload provided.
+ * Event-triggered backfill version. Send via:
+ *   await inngest.send({
+ *     name: "ops/backfill-rc-calls.requested",
+ *     data: { lookback_minutes: 1440 },
+ *   });
  */
-export const backfillRcCalls = task({
-  id: "backfill-rc-calls",
-  maxDuration: 600,
-  run: async (payload: { lookback_minutes?: number }) => {
-    const minutes = payload?.lookback_minutes ?? 60;
-    return runPoll(minutes);
+export const backfillRcCalls = inngest.createFunction(
+  { id: "backfill-rc-calls", name: "Backfill RingCentral call log (Inngest)" },
+  { event: "ops/backfill-rc-calls.requested" },
+  async ({ event, logger }) => {
+    const minutes = (event.data as any)?.lookback_minutes ?? 60;
+    return runPoll(minutes, logger);
   },
-});
+);

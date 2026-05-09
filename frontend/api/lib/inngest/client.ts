@@ -75,8 +75,36 @@ export type SequenceEnrollmentInitRequested = {
   };
 };
 
+/**
+ * Fires the engine-neutral RC call-deepgram pipeline (transcribe via
+ * Deepgram → extract intel with Joe → write ai_call_notes). Sources:
+ *   - poll-rc-calls (Inngest cron) — for newly polled completed calls
+ *   - retry-stuck-call-transcripts (Inngest cron) — for missed-recording sweeps
+ *   - webhook-ringcentral (Trigger.dev for now) — via the thin
+ *     `processCallDeepgram` task that delegates to the same runner
+ */
+export type CallTranscribeRequested = {
+  name: "call/transcribe.requested";
+  data: {
+    call_log_id?: string;
+    batch?: boolean;
+    limit?: number;
+    dry_run?: boolean;
+  };
+};
+
+/** One-off RC call-log backfill (e.g. last 24h). */
+export type BackfillRcCallsRequested = {
+  name: "ops/backfill-rc-calls.requested";
+  data: {
+    lookback_minutes?: number;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
   | SequenceActionExecuteRequested
-  | SequenceEnrollmentInitRequested;
+  | SequenceEnrollmentInitRequested
+  | CallTranscribeRequested
+  | BackfillRcCallsRequested;
