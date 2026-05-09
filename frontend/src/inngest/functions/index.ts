@@ -6,9 +6,17 @@
 import { syncInmailCredits } from "./sync-inmail-credits";
 import { sequenceRun } from "./sequence-run";
 import { cancelOnReply } from "./cancel-on-reply";
+import { generateJoeSays } from "./generate-joe-says";
+import { sendMessage } from "./send-message";
+import { extractCallIntel } from "./extract-call-intel";
+import { fetchEntityHistory } from "./fetch-entity-history";
 
 export const functions = [
   syncInmailCredits,
   sequenceRun,
   cancelOnReply,
+  generateJoeSays,
+  sendMessage,
+  extractCallIntel,
+  fetchEntityHistory,
 ];

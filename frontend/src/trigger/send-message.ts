@@ -22,25 +22,37 @@ interface SendMessagePayload {
  * - Chain-triggering Joe Says after new outbound communication
  * - Centralized monitoring via Trigger.dev dashboard
  */
-export const sendMessage = task({
-  id: "send-message",
-  retry: { maxAttempts: 3 },
-  run: async (payload: SendMessagePayload) => {
-    const {
-      channel,
-      conversationId,
-      candidateId,
-      contactId,
-      to,
-      subject,
-      body,
-      accountId,
-      userId,
-    } = payload;
+type Log = {
+  info: (msg: string, data?: any) => void;
+  warn: (msg: string, data?: any) => void;
+  error: (msg: string, data?: any) => void;
+};
 
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so the Inngest port
+ * (frontend/src/inngest/functions/send-message.ts) and the Trigger.dev
+ * task below share one source of truth. Phase 5b deletes the
+ * Trigger.dev wrapper.
+ */
+export async function runSendMessage(
+  payload: SendMessagePayload,
+  log: Log = console as any,
+) {
+  const {
+    channel,
+    conversationId,
+    candidateId,
+    contactId,
+    to,
+    subject,
+    body,
+    accountId,
+    userId,
+  } = payload;
 
-    logger.info("Sending message", { channel, to, userId });
+  const supabase = getSupabaseAdmin();
+
+  log.info("Sending message", { channel, to, userId });
 
     let externalMessageId: string | null = null;
     let senderAddress: string | null = null;
@@ -91,62 +103,69 @@ export const sendMessage = task({
       owner_id: userId,
     } as any);
 
-    if (msgError) {
-      logger.error("Failed to log message", { error: msgError.message });
-      // Message was sent but logging failed — don't throw (message already delivered)
+  if (msgError) {
+    log.error("Failed to log message", { error: msgError.message });
+    // Message was sent but logging failed — don't throw (message already delivered)
+  }
+
+  // Update conversation's last_message_at
+  if (conversationId) {
+    await supabase
+      .from("conversations")
+      .update({
+        last_message_at: new Date().toISOString(),
+        last_message_preview: body.substring(0, 100),
+        is_read: true,
+      } as any)
+      .eq("id", conversationId);
+  }
+
+  // Update entity's last_contacted_at
+  const entityId = candidateId || contactId;
+  const entityType = candidateId ? "candidate" : "contact";
+  if (entityId) {
+    const table = entityType === "candidate" ? "candidates" : "contacts";
+    await supabase
+      .from(table)
+      .update({
+        last_contacted_at: new Date().toISOString(),
+        last_comm_channel: channel,
+      } as any)
+      .eq("id", entityId);
+
+    // Chain-trigger Joe Says refresh (new outbound = update summary).
+    // Best-effort — the message was already delivered above, so a Joe Says
+    // failure must not fail this run (otherwise retries would re-send).
+    try {
+      await generateJoeSays.trigger({
+        entityId,
+        entityType,
+      });
+    } catch (err: any) {
+      log.warn("generateJoeSays.trigger failed after send-message", {
+        entityId, entityType, error: err?.message,
+      });
     }
+  }
 
-    // Update conversation's last_message_at
-    if (conversationId) {
-      await supabase
-        .from("conversations")
-        .update({
-          last_message_at: new Date().toISOString(),
-          last_message_preview: body.substring(0, 100),
-          is_read: true,
-        } as any)
-        .eq("id", conversationId);
-    }
+  log.info("Message sent and logged", {
+    channel,
+    to,
+    externalMessageId,
+  });
 
-    // Update entity's last_contacted_at
-    const entityId = candidateId || contactId;
-    const entityType = candidateId ? "candidate" : "contact";
-    if (entityId) {
-      const table = entityType === "candidate" ? "candidates" : "contacts";
-      await supabase
-        .from(table)
-        .update({
-          last_contacted_at: new Date().toISOString(),
-          last_comm_channel: channel,
-        } as any)
-        .eq("id", entityId);
+  return {
+    success: true,
+    channel,
+    externalMessageId,
+    sender: senderAddress,
+  };
+}
 
-      // Chain-trigger Joe Says refresh (new outbound = update summary).
-      // Best-effort — the message was already delivered above, so a Joe Says
-      // failure must not fail this run (otherwise retries would re-send).
-      try {
-        await generateJoeSays.trigger({
-          entityId,
-          entityType,
-        });
-      } catch (err: any) {
-        logger.warn("generateJoeSays.trigger failed after send-message", {
-          entityId, entityType, error: err?.message,
-        });
-      }
-    }
-
-    logger.info("Message sent and logged", {
-      channel,
-      to,
-      externalMessageId,
-    });
-
-    return {
-      success: true,
-      channel,
-      externalMessageId,
-      sender: senderAddress,
-    };
-  },
+// Trigger.dev wrapper — kept for legacy chained .trigger() calls in
+// other Trigger.dev tasks during the migration. Phase 5b deletes it.
+export const sendMessage = task({
+  id: "send-message",
+  retry: { maxAttempts: 3 },
+  run: (payload: SendMessagePayload) => runSendMessage(payload, logger),
 });

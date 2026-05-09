@@ -47,10 +47,11 @@ Field rules:
 
 Recruiter notes are a higher signal-to-noise input than a raw transcript — when the recruiter wrote it, treat it as fact, not a thing to second-guess.`;
 
-export const extractManualCallIntel = task({
-  id: "extract-manual-call-intel",
-  retry: { maxAttempts: 2 },
-  run: async ({ callLogId }: Payload) => {
+/**
+ * Pure run body — extracted so the Inngest port and Trigger.dev task
+ * share one source of truth. Phase 5b deletes the wrapper.
+ */
+export async function runExtractManualCallIntel({ callLogId }: Payload) {
     const supabase = getSupabaseAdmin();
 
     // Supabase's generated types treat call_logs polymorphically and
@@ -207,5 +208,11 @@ export const extractManualCallIntel = task({
       candidateId,
       fieldsUpdated: Object.keys(updates).filter((k) => k !== "updated_at"),
     };
-  },
+}
+
+// Trigger.dev wrapper — kept for legacy callers during the migration.
+export const extractManualCallIntel = task({
+  id: "extract-manual-call-intel",
+  retry: { maxAttempts: 2 },
+  run: (payload: Payload) => runExtractManualCallIntel(payload),
 });

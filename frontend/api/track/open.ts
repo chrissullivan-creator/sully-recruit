@@ -1,60 +1,90 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createClient } from "@supabase/supabase-js";
-
 /**
  * GET /api/track/open?id=<stepLogId>
  *
- * Returns a 1×1 transparent GIF and (best-effort) updates the matching
- * sequence_step_logs row: stamps opened_at on first hit, increments
- * open_count on every hit. Public — auth via the unguessable step log
- * UUID. Tracking failures must never block the pixel response.
+ * Returns a 1×1 transparent GIF and (best-effort) increments the
+ * matching sequence_step_logs row's opened_at + open_count via the
+ * `increment_step_log_open` RPC.
+ *
+ * Migrated to **Vercel Edge runtime** as part of the Inngest migration.
+ * The rationale: this endpoint gets hit thousands of times a day from
+ * many geographic regions whenever recipients open a tracked email.
+ * Edge runs on Cloudflare's global network, drops ~150ms of latency
+ * per hit, has no cold start, and is dirt cheap at scale.
+ *
+ * Edge-runtime caveats:
+ * - Native Web APIs only (Request/Response, fetch, Uint8Array). No
+ *   Buffer, no Node fs, no @supabase/supabase-js (it works on Edge but
+ *   bundles ~150kB; we just call the REST endpoint directly with fetch).
+ * - No process.env in some Edge configs — Vercel Edge does support it
+ *   for the env vars defined in the project, which we use here.
+ *
+ * Public — auth via the unguessable step_log UUID. Tracking failures
+ * must never block the pixel response (caller is a mail client; we're
+ * already past the threshold of "user has seen the email").
  */
+export const config = { runtime: "edge" };
 
-const TRANSPARENT_GIF = Buffer.from(
-  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
-  "base64",
-);
+// 1×1 transparent GIF (decoded once at module load; the binary is tiny).
+const TRANSPARENT_GIF_B64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+const TRANSPARENT_GIF = b64ToBytes(TRANSPARENT_GIF_B64);
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Always send the pixel — caching headers prevent an open-event from being
-  // counted multiple times by the same client repaint.
-  res.setHeader("Content-Type", "image/gif");
-  res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+export default async function handler(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const id = (url.searchParams.get("id") || "").trim();
 
-  const id = String(req.query.id || "").trim();
-
+  // Fire-and-forget: never await; the pixel must respond fast.
+  // Edge runtime supports `waitUntil` via the Cloudflare/Vercel context
+  // but using `Promise.resolve().then(...)` is fine for a low-stakes
+  // best-effort write.
   if (id) {
-    // Fire-and-forget: don't await, don't fail the response.
-    // Atomic increment via RPC — real mail clients fire the pixel many
-    // times concurrently (preview, full view, image proxy), and a
-    // read-modify-write here would drop opens.
-    (async () => {
+    Promise.resolve().then(async () => {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) {
-          console.warn("track/open: Supabase credentials not configured — skipping count");
-          return;
-        }
-        const supabase = createClient(supabaseUrl, serviceKey);
-        const { error } = await supabase.rpc("increment_step_log_open", { p_id: id });
-        if (error) {
-          // Visibility — open counts can drop silently if this RPC keeps failing.
-          // Pixel response is already in flight so the user impact is zero.
+        if (!supabaseUrl || !serviceKey) return;
+        // Atomic increment via Postgres RPC — mail clients fire the
+        // pixel many times concurrently (preview, full view, image
+        // proxy), and a read-modify-write here would drop opens.
+        const resp = await fetch(`${supabaseUrl}/rest/v1/rpc/increment_step_log_open`, {
+          method: "POST",
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ p_id: id }),
+        });
+        if (!resp.ok) {
+          // Visibility — keep parity with the Node version's logging.
+          // Pixel response is already in flight so user impact is zero.
+          // eslint-disable-next-line no-console
           console.error("track/open: increment_step_log_open RPC failed", {
-            id,
-            code: (error as any).code,
-            message: error.message,
+            id, status: resp.status, body: (await resp.text()).slice(0, 200),
           });
         }
       } catch (err: any) {
+        // eslint-disable-next-line no-console
         console.error("track/open: unexpected error", { id, message: err?.message });
       }
-    })();
+    });
   }
 
-  res.status(200).send(TRANSPARENT_GIF);
+  // BodyInit accepts ArrayBuffer; the underlying Uint8Array buffer is
+  // an ArrayBuffer so this is just a type narrowing for older lib defs.
+  return new Response(TRANSPARENT_GIF.buffer as ArrayBuffer, {
+    status: 200,
+    headers: {
+      "Content-Type": "image/gif",
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 }

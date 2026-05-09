@@ -9,12 +9,13 @@ import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
  *
  * Triggered on-demand from the Contacts page "Fetch History" button.
  */
-export const fetchEntityHistory = task({
-  id: "fetch-entity-history",
-  retry: { maxAttempts: 2 },
-  run: async (payload: { contact_id: string }) => {
-    const supabase = getSupabaseAdmin();
-    const { contact_id } = payload;
+/**
+ * Pure run body — extracted so the Inngest port and Trigger.dev task
+ * share one source of truth. Phase 5b deletes the wrapper.
+ */
+export async function runFetchEntityHistory(payload: { contact_id: string }) {
+  const supabase = getSupabaseAdmin();
+  const { contact_id } = payload;
 
     // 1. Get the contact
     const { data: contact, error: contactErr } = await supabase
@@ -192,5 +193,11 @@ export const fetchEntityHistory = task({
 
     logger.info("Entity history fetched", results);
     return results;
-  },
+}
+
+// Trigger.dev wrapper — kept for legacy callers during the migration.
+export const fetchEntityHistory = task({
+  id: "fetch-entity-history",
+  retry: { maxAttempts: 2 },
+  run: (payload: { contact_id: string }) => runFetchEntityHistory(payload),
 });

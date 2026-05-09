@@ -96,71 +96,87 @@ Rules:
 - If data is missing for a section, say "No data available" rather than making things up.
 - Keep the tone sharp and professional.`;
 
+/**
+ * Pure run body — extracted so the Inngest migration
+ * (frontend/src/inngest/functions/generate-joe-says.ts) and the
+ * Trigger.dev task below can share a single source of truth. Phase 5b
+ * deletes the Trigger.dev wrapper; this function survives.
+ */
+export async function runGenerateJoeSays(
+  payload: GenerateJoeSaysPayload,
+  log: { info: (msg: string, data?: any) => void; error: (msg: string, data?: any) => void } = console as any,
+) {
+  const { entityId, entityType } = payload;
+  const supabase = getSupabaseAdmin();
+  const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+
+  log.info("Generating Joe Says", { entityId, entityType });
+
+  let contextParts: string[] = [];
+  let systemPrompt: string;
+
+  if (entityType === "candidate") {
+    systemPrompt = CANDIDATE_PROMPT;
+    contextParts = await gatherCandidateContext(supabase, entityId);
+  } else {
+    systemPrompt = CONTACT_PROMPT;
+    contextParts = await gatherContactContext(supabase, entityId);
+  }
+
+  const contextText = contextParts.join("\n\n---\n\n");
+
+  if (contextText.length < 50) {
+    log.info("Not enough data to generate summary", { entityId });
+    return { skipped: true, reason: "insufficient_data" };
+  }
+
+  // Claude with OpenAI fallback on rate-limit / credit / auth errors
+  const { text: summary } = await callAIWithFallback({
+    anthropicKey,
+    openaiKey: openaiKey || undefined,
+    systemPrompt,
+    userContent: `Generate a comprehensive brief for this ${entityType} based on all available data:\n\n${contextText.slice(0, 30000)}`,
+    model: "claude-sonnet-4-20250514",
+    maxTokens: 3000,
+  });
+
+  if (!summary) {
+    throw new Error("Empty response from AI provider");
+  }
+
+  // Save to database
+  const table = entityType === "candidate" ? "candidates" : "contacts";
+  const { error: updateError } = await supabase
+    .from(table)
+    .update({
+      joe_says: summary,
+      joe_says_updated_at: new Date().toISOString(),
+    } as any)
+    .eq("id", entityId);
+
+  if (updateError) {
+    log.error("Failed to save Joe Says", { error: updateError.message });
+    throw new Error(`DB update failed: ${updateError.message}`);
+  }
+
+  log.info("Joe Says generated successfully", {
+    entityId,
+    entityType,
+    summaryLength: summary.length,
+  });
+
+  return { success: true, entityId, entityType, summaryLength: summary.length };
+}
+
+// Trigger.dev wrapper — kept for legacy callers during the migration.
+// The /api/trigger-generate-joe-says route is being migrated to send
+// Inngest events instead; once that lands, the only remaining caller
+// is the chained .trigger() inside other Trigger.dev tasks (which
+// stay until Phase 5b).
 export const generateJoeSays = task({
   id: "generate-joe-says",
   retry: { maxAttempts: 2 },
-  run: async (payload: GenerateJoeSaysPayload) => {
-    const { entityId, entityType } = payload;
-    const supabase = getSupabaseAdmin();
-    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
-
-    logger.info("Generating Joe Says", { entityId, entityType });
-
-    let contextParts: string[] = [];
-    let systemPrompt: string;
-
-    if (entityType === "candidate") {
-      systemPrompt = CANDIDATE_PROMPT;
-      contextParts = await gatherCandidateContext(supabase, entityId);
-    } else {
-      systemPrompt = CONTACT_PROMPT;
-      contextParts = await gatherContactContext(supabase, entityId);
-    }
-
-    const contextText = contextParts.join("\n\n---\n\n");
-
-    if (contextText.length < 50) {
-      logger.info("Not enough data to generate summary", { entityId });
-      return { skipped: true, reason: "insufficient_data" };
-    }
-
-    // Claude with OpenAI fallback on rate-limit / credit / auth errors
-    const { text: summary } = await callAIWithFallback({
-      anthropicKey,
-      openaiKey: openaiKey || undefined,
-      systemPrompt,
-      userContent: `Generate a comprehensive brief for this ${entityType} based on all available data:\n\n${contextText.slice(0, 30000)}`,
-      model: "claude-sonnet-4-20250514",
-      maxTokens: 3000,
-    });
-
-    if (!summary) {
-      throw new Error("Empty response from AI provider");
-    }
-
-    // Save to database
-    const table = entityType === "candidate" ? "candidates" : "contacts";
-    const { error: updateError } = await supabase
-      .from(table)
-      .update({
-        joe_says: summary,
-        joe_says_updated_at: new Date().toISOString(),
-      } as any)
-      .eq("id", entityId);
-
-    if (updateError) {
-      logger.error("Failed to save Joe Says", { error: updateError.message });
-      throw new Error(`DB update failed: ${updateError.message}`);
-    }
-
-    logger.info("Joe Says generated successfully", {
-      entityId,
-      entityType,
-      summaryLength: summary.length,
-    });
-
-    return { success: true, entityId, entityType, summaryLength: summary.length };
-  },
+  run: (payload: GenerateJoeSaysPayload) => runGenerateJoeSays(payload, logger),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

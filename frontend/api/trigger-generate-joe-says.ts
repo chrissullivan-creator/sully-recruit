@@ -1,11 +1,16 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../src/inngest/client";
 import { requireAuth } from "./lib/auth.js";
 
 /**
- * Vercel serverless function to trigger the generate-joe-says Trigger.dev task.
- * Called from CandidateDetail / ContactDetail "Generate Joe Says" button,
- * and also from Supabase database triggers when notes are inserted.
+ * Vercel serverless function to fire `joe/says-requested` into Inngest.
+ *
+ * Called from CandidateDetail / ContactDetail "Generate Joe Says"
+ * button, plus Supabase DB triggers on notes inserts. Migrated to
+ * Inngest as part of Phase 4 — the Inngest function (in
+ * frontend/src/inngest/functions/generate-joe-says.ts) is a thin
+ * wrapper around `runGenerateJoeSays`, the same helper the Trigger.dev
+ * task wraps. One source of truth for the logic.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -25,14 +30,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "entityType must be 'candidate' or 'contact'" });
     }
 
-    const handle = await tasks.trigger("generate-joe-says", {
-      entityId,
-      entityType,
+    const { ids } = await inngest.send({
+      // Idempotency: a flurry of clicks on "Generate Joe Says" within
+      // a few seconds dedupes to one run per entity per second.
+      id: `joe-says-${entityId}-${Math.floor(Date.now() / 1000)}`,
+      name: "joe/says-requested",
+      data: { entityId, entityType },
     });
 
-    return res.status(200).json({ triggered: true, id: handle.id });
+    return res.status(200).json({ triggered: true, id: ids[0] });
   } catch (err: any) {
-    console.error("Trigger generate-joe-says error:", err.message);
+    console.error("Trigger joe/says-requested error:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }
