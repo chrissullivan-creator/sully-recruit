@@ -4,6 +4,7 @@ import { bulkMigrateSequences } from "./lib/inngest/functions/bulk-migrate-seque
 import { migrateSequenceToInngest } from "./lib/inngest/functions/migrate-sequence-to-inngest.js";
 import { sequenceSweep } from "./lib/inngest/functions/sequence-sweep.js";
 import { sequenceActionExecute } from "./lib/inngest/functions/sequence-action-execute.js";
+import { sequenceEnrollmentInit } from "./lib/inngest/functions/sequence-enrollment-init.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -23,5 +24,6 @@ export default serve({
     migrateSequenceToInngest,
     sequenceSweep,
     sequenceActionExecute,
+    sequenceEnrollmentInit,
   ],
 });

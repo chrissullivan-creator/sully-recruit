@@ -56,7 +56,27 @@ export type SequenceActionExecuteRequested = {
   };
 };
 
+/**
+ * Pre-schedules every step_log this enrollment will need. Replaces the
+ * `tasks.trigger("sequence-enrollment-init", …)` call to Trigger.dev
+ * for sequences on the Inngest engine. Trigger.dev's
+ * `sequenceEnrollmentInit` task still exists and delegates to the same
+ * `runSequenceEnrollmentInit` helper, so legacy callers stay valid.
+ */
+export type SequenceEnrollmentInitRequested = {
+  name: "sequence/enrollment-init.requested";
+  data: {
+    enrollmentId: string;
+    sequenceId: string;
+    candidateId?: string;
+    contactId?: string;
+    enrolledBy: string;
+    accountId?: string;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
-  | SequenceActionExecuteRequested;
+  | SequenceActionExecuteRequested
+  | SequenceEnrollmentInitRequested;

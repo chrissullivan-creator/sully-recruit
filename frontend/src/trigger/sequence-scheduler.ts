@@ -30,7 +30,7 @@ export const stopEnrollment = runnerStopEnrollment;
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface EnrollmentInitPayload {
+export interface EnrollmentInitPayload {
   enrollmentId: string;
   sequenceId: string;
   candidateId?: string;
@@ -43,11 +43,18 @@ interface EnrollmentInitPayload {
 // Task 1: Initialize enrollment — pre-schedule ALL actions upfront
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const sequenceEnrollmentInit = task({
-  id: "sequence-enrollment-init",
-  retry: { maxAttempts: 3 },
-  run: async (payload: EnrollmentInitPayload) => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Engine-neutral run body — extracted so the Inngest port at
+ * api/lib/inngest/functions/sequence-enrollment-init.ts and the
+ * Trigger.dev wrapper below share a single source of truth.
+ *
+ * Pre-schedules every sequence_step_log row this enrollment will need,
+ * regardless of `sequences.engine`. The right sweep claims them later
+ * — Trigger.dev's sweep filters engine='trigger', Inngest's filters
+ * engine='inngest', so a single row only fires once.
+ */
+export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) {
+  const supabase = getSupabaseAdmin();
 
     const { data: enrollment } = await supabase
       .from("sequence_enrollments")
@@ -293,7 +300,21 @@ export const sequenceEnrollmentInit = task({
     });
 
     return { action: "initialized", scheduled, pendingConnection, preSkipped };
-  },
+}
+
+/**
+ * Trigger.dev wrapper — kept while live `tasks.trigger("sequence-enrollment-init", …)`
+ * call sites still exist (the new Inngest path is the primary route).
+ * Both engines call into the same `runSequenceEnrollmentInit` helper.
+ *
+ * Once the Inngest event-driven path is verified for ~24h, this
+ * wrapper can be retired in a follow-up PR alongside any remaining
+ * `tasks.trigger("sequence-enrollment-init")` call sites.
+ */
+export const sequenceEnrollmentInit = task({
+  id: "sequence-enrollment-init",
+  retry: { maxAttempts: 3 },
+  run: (payload: EnrollmentInitPayload) => runSequenceEnrollmentInit(payload),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
