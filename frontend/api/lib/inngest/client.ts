@@ -158,6 +158,32 @@ export type WebhookMicrosoftReceived = {
   };
 };
 
+/**
+ * Triggers the Joe Says brief regeneration for a candidate or contact.
+ * Sent after any inbound communication or resume ingestion completes
+ * so the recruiter-facing summary stays fresh.
+ */
+export type JoeSaysRequested = {
+  name: "ai/joe-says.requested";
+  data: {
+    entityId: string;
+    entityType: "candidate" | "contact";
+  };
+};
+
+/**
+ * Triggers parsing + embedding for a freshly uploaded resume.
+ */
+export type ResumeIngestionRequested = {
+  name: "ai/resume-ingestion.requested";
+  data: {
+    resumeId: string;
+    candidateId: string;
+    filePath: string;
+    fileName: string;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -167,4 +193,6 @@ export type AllInngestEvents =
   | BackfillRcCallsRequested
   | WebhookRingcentralReceived
   | WebhookUnipileReceived
-  | WebhookMicrosoftReceived;
+  | WebhookMicrosoftReceived
+  | JoeSaysRequested
+  | ResumeIngestionRequested;

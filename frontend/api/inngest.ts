@@ -37,6 +37,8 @@ import { retryStuckCallTranscripts } from "./lib/inngest/functions/retry-stuck-c
 import { processRingcentralEvent } from "./lib/inngest/functions/process-ringcentral-event.js";
 import { processUnipileEvent } from "./lib/inngest/functions/process-unipile-event.js";
 import { processMicrosoftEvent } from "./lib/inngest/functions/process-microsoft-event.js";
+import { generateJoeSays } from "./lib/inngest/functions/generate-joe-says.js";
+import { resumeIngestion } from "./lib/inngest/functions/resume-ingestion.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -86,5 +88,7 @@ export default serve({
     processRingcentralEvent,
     processUnipileEvent,
     processMicrosoftEvent,
+    generateJoeSays,
+    resumeIngestion,
   ],
 });
