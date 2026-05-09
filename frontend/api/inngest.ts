@@ -8,6 +8,14 @@ import { sequenceEnrollmentInit } from "./lib/inngest/functions/sequence-enrollm
 import { checkConnections } from "./lib/inngest/functions/check-connections.js";
 import { syncInmailCredits } from "./lib/inngest/functions/sync-inmail-credits.js";
 import { syncLinkedinInvitations } from "./lib/inngest/functions/sync-linkedin-invitations.js";
+import { cleanupStaleEnrollments } from "./lib/inngest/functions/cleanup-stale-enrollments.js";
+import { pendingConnectionTimeout } from "./lib/inngest/functions/pending-connection-timeout.js";
+import {
+  reclassifyLinkedinChatsDaily,
+  reclassifyLinkedinChatsOnce,
+} from "./lib/inngest/functions/reclassify-linkedin-chats.js";
+import { resolveUnipileIds } from "./lib/inngest/functions/resolve-unipile-ids.js";
+import { renewWebhookSubscriptions } from "./lib/inngest/functions/renew-webhook-subscriptions.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -31,5 +39,11 @@ export default serve({
     checkConnections,
     syncInmailCredits,
     syncLinkedinInvitations,
+    cleanupStaleEnrollments,
+    pendingConnectionTimeout,
+    reclassifyLinkedinChatsDaily,
+    reclassifyLinkedinChatsOnce,
+    resolveUnipileIds,
+    renewWebhookSubscriptions,
   ],
 });
