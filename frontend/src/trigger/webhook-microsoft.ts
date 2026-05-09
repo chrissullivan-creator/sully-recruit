@@ -24,14 +24,15 @@ interface MicrosoftWebhookPayload {
  * Tenant: emeraldrecruit.com (Chris, Nancy, Ashley).
  * Matches sender email to candidates/contacts and logs activity.
  */
-export const processMicrosoftEvent = task({
-  id: "process-microsoft-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: MicrosoftWebhookPayload) => {
-    const supabase = getSupabaseAdmin();
-    const { notification } = payload;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runProcessMicrosoftEvent(payload: MicrosoftWebhookPayload) {
+  const supabase = getSupabaseAdmin();
+  const { notification } = payload;
 
-    logger.info("Processing Microsoft Graph notification", {
+  logger.info("Processing Microsoft Graph notification", {
       changeType: notification.changeType,
       resource: notification.resource,
     });
@@ -80,7 +81,17 @@ export const processMicrosoftEvent = task({
 
     logger.info("Unhandled resource type", { resource: notification.resource });
     return { action: "skipped", reason: "unhandled_resource_type" };
-  },
+}
+
+// Trigger.dev wrapper — kept so the Trigger.dev queue still flushes
+// any pre-migration `process-microsoft-event` jobs that were already
+// in flight on cutover. The Vercel webhook entrypoint now sends
+// `microsoft/notification-received` events instead. Phase 5b deletes
+// the wrapper.
+export const processMicrosoftEvent = task({
+  id: "process-microsoft-event",
+  retry: { maxAttempts: 3 },
+  run: (payload: MicrosoftWebhookPayload) => runProcessMicrosoftEvent(payload),
 });
 
 const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";

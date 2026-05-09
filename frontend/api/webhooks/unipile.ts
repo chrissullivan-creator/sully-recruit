@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../../src/inngest/client";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 
@@ -85,16 +85,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await tasks.trigger("process-unipile-event", {
-      body: req.body,
-      receivedAt: new Date().toISOString(),
-      verified,
+    // Migrated from `tasks.trigger("process-unipile-event")` (Trigger.dev)
+    // to `inngest.send("unipile/event-received")` as part of Phase 4c.
+    // Same payload shape; the Inngest function in
+    // src/inngest/functions/process-unipile-event.ts handles the work.
+    await inngest.send({
+      name: "unipile/event-received",
+      data: {
+        body: req.body,
+        receivedAt: new Date().toISOString(),
+        verified,
+      },
     });
     return res.status(200).json({ received: true, verified });
   } catch (err: any) {
     console.error("Unipile webhook error:", err.message);
-    // Always 200 so Unipile doesn't retry-storm. The trigger task is
-    // queued or the server is having a hiccup; either way, ack.
+    // Always 200 so Unipile doesn't retry-storm. Either the event is
+    // queued or the dispatch is having a hiccup; either way, ack.
     return res.status(200).json({ received: true, error: "processing_queued" });
   }
 }

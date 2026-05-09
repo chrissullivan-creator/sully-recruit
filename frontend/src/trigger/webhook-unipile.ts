@@ -25,12 +25,13 @@ interface UnipileWebhookPayload {
  * Matches by provider_id in candidate_channels, logs activity,
  * runs sentiment analysis on replies via Claude Haiku.
  */
-export const processUnipileEvent = task({
-  id: "process-unipile-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: UnipileWebhookPayload) => {
-    const supabase = getSupabaseAdmin();
-    const event = payload.body;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runProcessUnipileEvent(payload: UnipileWebhookPayload) {
+  const supabase = getSupabaseAdmin();
+  const event = payload.body;
     const eventType = event.event || event.type || "";
 
     logger.info("Processing Unipile event", { eventType });
@@ -58,7 +59,15 @@ export const processUnipileEvent = task({
 
     logger.info("Unhandled Unipile event type", { eventType });
     return { action: "skipped", reason: "unhandled_event_type" };
-  },
+}
+
+// Trigger.dev wrapper — kept so the queue still flushes any
+// pre-migration `process-unipile-event` jobs in flight on cutover.
+// Phase 5b deletes it.
+export const processUnipileEvent = task({
+  id: "process-unipile-event",
+  retry: { maxAttempts: 3 },
+  run: (payload: UnipileWebhookPayload) => runProcessUnipileEvent(payload),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

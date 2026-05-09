@@ -19,6 +19,9 @@ import { backfillEmails } from "./backfill-emails";
 import { backfillLinkedinMessages } from "./backfill-linkedin-messages";
 import { backfillEnrollmentInit } from "./backfill-enrollment-init";
 import { reconcileOrphanedResumes } from "./reconcile-orphaned-resumes";
+import { processMicrosoftEvent } from "./process-microsoft-event";
+import { processUnipileEvent } from "./process-unipile-event";
+import { processRingcentralEvent } from "./process-ringcentral-event";
 
 export const functions = [
   syncInmailCredits,
@@ -37,4 +40,7 @@ export const functions = [
   backfillLinkedinMessages,
   backfillEnrollmentInit,
   reconcileOrphanedResumes,
+  processMicrosoftEvent,
+  processUnipileEvent,
+  processRingcentralEvent,
 ];

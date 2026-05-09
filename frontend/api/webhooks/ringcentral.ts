@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../../src/inngest/client";
 
 /**
  * Vercel serverless function — RingCentral webhook receiver.
@@ -38,13 +38,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Fire-and-forget: trigger the processing task
-    await tasks.trigger("process-ringcentral-event", {
-      body: req.body,
-      headers: {
-        "validation-token": req.headers["validation-token"],
+    // Fire-and-forget Inngest event (was tasks.trigger pre-migration).
+    await inngest.send({
+      name: "ringcentral/event-received",
+      data: {
+        body: req.body,
+        headers: {
+          "validation-token": req.headers["validation-token"],
+        },
+        receivedAt: new Date().toISOString(),
       },
-      receivedAt: new Date().toISOString(),
     });
 
     return res.status(200).json({ received: true });

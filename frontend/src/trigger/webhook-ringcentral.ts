@@ -18,12 +18,13 @@ interface RingCentralWebhookPayload {
  * For completed calls: fetches recording, transcribes with Claude,
  * extracts candidate fields, generates summary, stores in notes + back_of_resume_notes.
  */
-export const processRingcentralEvent = task({
-  id: "process-ringcentral-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: RingCentralWebhookPayload) => {
-    const supabase = getSupabaseAdmin();
-    const event = payload.body;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runProcessRingcentralEvent(payload: RingCentralWebhookPayload) {
+  const supabase = getSupabaseAdmin();
+  const event = payload.body;
 
     logger.info("Processing RingCentral event", { event });
 
@@ -253,7 +254,14 @@ export const processRingcentralEvent = task({
     });
 
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };
-  },
+}
+
+// Trigger.dev wrapper — kept so the queue flushes pre-migration jobs
+// already in flight on cutover. Phase 5b deletes it.
+export const processRingcentralEvent = task({
+  id: "process-ringcentral-event",
+  retry: { maxAttempts: 3 },
+  run: (payload: RingCentralWebhookPayload) => runProcessRingcentralEvent(payload),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
