@@ -1,9 +1,8 @@
 import { Inngest } from "inngest";
 
 /**
- * Phase 1 of the Trigger.dev → Inngest cutover. The client is single-tenant —
- * all Sully background work goes through this id. Event keys are per-event-source
- * (we currently have one: the manually-fired `infra/bulk-migrate-sequences.requested`).
+ * Single-tenant Inngest client. All Sully background work goes through
+ * this app id. Event keys are per-event-source.
  *
  * On Vercel, INNGEST_EVENT_KEY + INNGEST_SIGNING_KEY come from project env;
  * locally, the dev server runs unsigned with `npx inngest-cli@latest dev`.
@@ -36,16 +35,28 @@ export type MigrateSequenceToInngestRequested = {
   };
 };
 
-export type SequenceRunRequested = {
-  name: "sequence/run.requested";
+/**
+ * Emitted by the Inngest sweep cron once a step_log has been atomically
+ * claimed (status='in_flight'). Mirrors the payload Trigger.dev's sweep
+ * passes to `sequenceActionExecute.trigger(...)` so both engines drive
+ * the shared `runSequenceAction` with the same shape.
+ */
+export type SequenceActionExecuteRequested = {
+  name: "sequence/action.execute.requested";
   data: {
+    stepLogId: string;
     enrollmentId: string;
+    actionId: string;
+    nodeId: string;
     sequenceId: string;
+    candidateId?: string;
+    contactId?: string;
     enrolledBy: string;
+    accountId?: string;
   };
 };
 
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
-  | SequenceRunRequested;
+  | SequenceActionExecuteRequested;
