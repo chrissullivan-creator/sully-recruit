@@ -184,6 +184,40 @@ export type ResumeIngestionRequested = {
   };
 };
 
+/** Outbound message dispatch (email / SMS / LinkedIn). */
+export type SendMessageRequested = {
+  name: "messages/send.requested";
+  data: {
+    channel: "email" | "sms" | "linkedin";
+    conversationId: string;
+    candidateId?: string;
+    contactId?: string;
+    to: string;
+    subject?: string;
+    body: string;
+    accountId?: string;
+    userId: string;
+  };
+};
+
+/** Joe intel extraction on a manually-logged call's recruiter notes. */
+export type ExtractCallIntelRequested = {
+  name: "messages/extract-call-intel.requested";
+  data: { callLogId: string };
+};
+
+/** On-demand fetch of historical email + LinkedIn for a contact. */
+export type FetchEntityHistoryRequested = {
+  name: "messages/fetch-entity-history.requested";
+  data: { contact_id: string };
+};
+
+/** One-off recovery for orphaned resume files in storage. */
+export type RecoverOrphanResumesRequested = {
+  name: "ops/recover-orphan-resumes.requested";
+  data: { limit?: number; since?: string };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -195,4 +229,8 @@ export type AllInngestEvents =
   | WebhookUnipileReceived
   | WebhookMicrosoftReceived
   | JoeSaysRequested
-  | ResumeIngestionRequested;
+  | ResumeIngestionRequested
+  | SendMessageRequested
+  | ExtractCallIntelRequested
+  | FetchEntityHistoryRequested
+  | RecoverOrphanResumesRequested;
