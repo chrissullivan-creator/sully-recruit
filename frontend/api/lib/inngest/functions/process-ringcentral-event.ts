@@ -1,6 +1,5 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
@@ -11,20 +10,12 @@ import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
  * Process inbound RingCentral events (calls, SMS, voicemail). Matches
  * the caller phone to a candidate or contact, logs to call_logs /
  * messages, fires a delayed `call/transcribe.requested` event for
- * completed calls ≥30s, and chain-triggers Joe Says.
+ * completed calls ≥30s, and fires `ai/joe-says.requested` so the brief
+ * stays current.
  *
- * Ported from `src/trigger/webhook-ringcentral.ts` — the API route at
- * `api/webhooks/ringcentral.ts` now sends `webhooks/ringcentral.received`
- * and Inngest drives the work. The Trigger.dev `processCallDeepgram`
- * wrapper is gone; this file's `inngest.send("call/transcribe.requested")`
- * with `ts: now+90_000` reproduces the old `delay: "90s"` semantics
- * (RC recordings usually need 1–2 min before they're exposed in the
- * call-log API).
- *
- * `generateJoeSays.trigger(...)` still routes through Trigger.dev for
- * now; it'll switch to Inngest when generate-joe-says is ported.
- *
- * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ * `inngest.send("call/transcribe.requested")` with `ts: now+90_000`
+ * reproduces the old `delay: "90s"` semantics (RC recordings usually
+ * need 1–2 min before they're exposed in the call-log API).
  */
 interface RingCentralWebhookPayload {
   body: any;
@@ -242,10 +233,12 @@ export const processRingcentralEvent = inngest.createFunction(
     }
 
     // Chain-trigger Joe Says refresh after processing communication.
-    // Still routes through Trigger.dev until generate-joe-says is ported.
-    await generateJoeSays.trigger({
-      entityId: match.entityId,
-      entityType: match.entityType as "candidate" | "contact",
+    await inngest.send({
+      name: "ai/joe-says.requested",
+      data: {
+        entityId: match.entityId,
+        entityType: match.entityType as "candidate" | "contact",
+      },
     });
 
     return { action: "logged", entityId: match.entityId, entityType: match.entityType, direction };

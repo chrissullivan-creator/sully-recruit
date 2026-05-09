@@ -16,138 +16,154 @@ import { matchPersonByEmail as matchPersonByEmailHelper } from "../../../../src/
  * parallel (dedup on tasks.external_id) when the Unipile calendar flag
  * is enabled.
  *
- * Every 30 minutes. Ported from `src/trigger/sync-outlook-events.ts` —
- * Inngest is the only scheduler now.
+ * Two registered Inngest functions share this body:
+ *   - `sync-outlook-events` (cron, every 30m) — the regular sweep
+ *   - `sync-outlook-events-once` (event: ops/sync-outlook-events.requested)
+ *     — fires when the Tasks page hits /api/trigger-sync-outlook for an
+ *     on-demand sync.
  */
+async function runSyncOutlookEvents(logger: any) {
+  const supabase = getSupabaseAdmin();
+
+  let graphEmailsRaw = "";
+  try {
+    graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || "";
+  } catch {}
+  const graphEmails = new Set(
+    graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
+  if (graphEmails.size === 0) {
+    logger.warn("No mailboxes configured (MICROSOFT_GRAPH_ACCOUNT_EMAILS empty)");
+    return { events_synced: 0, events_matched: 0, mailboxes_checked: 0 };
+  }
+
+  const { data: accounts } = await supabase
+    .from("integration_accounts")
+    .select("email_address, owner_user_id")
+    .eq("provider", "email")
+    .eq("is_active", true);
+  const ownerByEmail = new Map<string, string>();
+  for (const a of accounts ?? []) {
+    const e = (a.email_address || "").toLowerCase().trim();
+    if (e && a.owner_user_id) ownerByEmail.set(e, a.owner_user_id);
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getMicrosoftAccessToken();
+  } catch (err: any) {
+    await notifyError({ taskId: "sync-outlook-events", error: err, context: { phase: "token" } });
+    return { events_synced: 0, events_matched: 0, mailboxes_checked: 0, error: err.message };
+  }
+
+  let totalSynced = 0;
+  let totalMatched = 0;
+  let mailboxesChecked = 0;
+  const perMailbox: Array<{ email: string; synced: number; matched: number }> = [];
+
+  for (const email of graphEmails) {
+    mailboxesChecked++;
+    const ownerUserId = ownerByEmail.get(email);
+    try {
+      const result = await syncMailbox(supabase, email, ownerUserId, accessToken, logger);
+      totalSynced += result.synced;
+      totalMatched += result.matched;
+      perMailbox.push({ email, synced: result.synced, matched: result.matched });
+    } catch (err: any) {
+      await notifyError({
+        taskId: "sync-outlook-events",
+        error: err,
+        context: { mailbox: email },
+        severity: "WARN",
+      });
+    }
+  }
+
+  if (await shouldUseUnipileCalendar()) {
+    const { data: unipileAccts } = await supabase
+      .from("integration_accounts")
+      .select("email_address, owner_user_id, unipile_account_id, unipile_provider")
+      .eq("provider", "email")
+      .eq("is_active", true)
+      .not("unipile_account_id", "is", null);
+    const unipileSummary: Array<{ email: string; pulled: number; new: number }> = [];
+    const start = new Date().toISOString();
+    const end = new Date(Date.now() + 14 * 86_400_000).toISOString();
+
+    for (const acct of unipileAccts ?? []) {
+      const e = (acct.email_address || "").toLowerCase();
+      if (!graphEmails.has(e)) continue;
+      try {
+        const events = await fetchUnipileEventsForAccount(
+          supabase,
+          acct.unipile_account_id!,
+          start,
+          end,
+        );
+        let inserted = 0;
+        for (const ev of events) {
+          const dateOnly = ev.start_dt.slice(0, 10);
+          const { data: existing } = await supabase
+            .from("tasks")
+            .select("id")
+            .eq("external_id", ev.id)
+            .limit(1);
+          if (existing?.length) continue;
+
+          const { error } = await supabase.from("tasks").insert({
+            title: ev.subject,
+            description: (ev.description || "").slice(0, 500) || "Outlook calendar event",
+            priority: "medium",
+            due_date: dateOnly,
+            start_time: ev.start_dt.endsWith("Z") ? ev.start_dt : ev.start_dt + "Z",
+            end_time: ev.end_dt
+              ? (ev.end_dt.endsWith("Z") ? ev.end_dt : ev.end_dt + "Z")
+              : null,
+            timezone: ev.timezone || "UTC",
+            task_type: "meeting",
+            location: ev.location || null,
+            meeting_url: ev.meetingUrl || null,
+            assigned_to: acct.owner_user_id ?? null,
+            created_by: acct.owner_user_id ?? null,
+            external_id: ev.id,
+          } as any);
+          if (!error) inserted++;
+        }
+        unipileSummary.push({ email: e, pulled: events.length, new: inserted });
+      } catch (err: any) {
+        logger.warn("Unipile calendar fetch error (non-fatal)", { email: e, error: err.message });
+      }
+    }
+    if (unipileSummary.length) {
+      logger.info("Unipile calendar parallel sweep", { unipileSummary });
+    }
+  }
+
+  const summary = {
+    events_synced: totalSynced,
+    events_matched: totalMatched,
+    mailboxes_checked: mailboxesChecked,
+    per_mailbox: perMailbox,
+  };
+  logger.info("Outlook calendar sync complete", summary);
+  return summary;
+}
+
 export const syncOutlookEvents = inngest.createFunction(
   { id: "sync-outlook-events", name: "Sync Outlook calendar events (Inngest)" },
   { cron: "*/30 * * * *" },
-  async ({ logger }) => {
-    const supabase = getSupabaseAdmin();
+  async ({ logger }) => runSyncOutlookEvents(logger),
+);
 
-    let graphEmailsRaw = "";
-    try {
-      graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || "";
-    } catch {}
-    const graphEmails = new Set(
-      graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
-    );
-    if (graphEmails.size === 0) {
-      logger.warn("No mailboxes configured (MICROSOFT_GRAPH_ACCOUNT_EMAILS empty)");
-      return { events_synced: 0, events_matched: 0, mailboxes_checked: 0 };
-    }
-
-    const { data: accounts } = await supabase
-      .from("integration_accounts")
-      .select("email_address, owner_user_id")
-      .eq("provider", "email")
-      .eq("is_active", true);
-    const ownerByEmail = new Map<string, string>();
-    for (const a of accounts ?? []) {
-      const e = (a.email_address || "").toLowerCase().trim();
-      if (e && a.owner_user_id) ownerByEmail.set(e, a.owner_user_id);
-    }
-
-    let accessToken: string;
-    try {
-      accessToken = await getMicrosoftAccessToken();
-    } catch (err: any) {
-      await notifyError({ taskId: "sync-outlook-events", error: err, context: { phase: "token" } });
-      return { events_synced: 0, events_matched: 0, mailboxes_checked: 0, error: err.message };
-    }
-
-    let totalSynced = 0;
-    let totalMatched = 0;
-    let mailboxesChecked = 0;
-    const perMailbox: Array<{ email: string; synced: number; matched: number }> = [];
-
-    for (const email of graphEmails) {
-      mailboxesChecked++;
-      const ownerUserId = ownerByEmail.get(email);
-      try {
-        const result = await syncMailbox(supabase, email, ownerUserId, accessToken, logger);
-        totalSynced += result.synced;
-        totalMatched += result.matched;
-        perMailbox.push({ email, synced: result.synced, matched: result.matched });
-      } catch (err: any) {
-        await notifyError({
-          taskId: "sync-outlook-events",
-          error: err,
-          context: { mailbox: email },
-          severity: "WARN",
-        });
-      }
-    }
-
-    if (await shouldUseUnipileCalendar()) {
-      const { data: unipileAccts } = await supabase
-        .from("integration_accounts")
-        .select("email_address, owner_user_id, unipile_account_id, unipile_provider")
-        .eq("provider", "email")
-        .eq("is_active", true)
-        .not("unipile_account_id", "is", null);
-      const unipileSummary: Array<{ email: string; pulled: number; new: number }> = [];
-      const start = new Date().toISOString();
-      const end = new Date(Date.now() + 14 * 86_400_000).toISOString();
-
-      for (const acct of unipileAccts ?? []) {
-        const e = (acct.email_address || "").toLowerCase();
-        if (!graphEmails.has(e)) continue;
-        try {
-          const events = await fetchUnipileEventsForAccount(
-            supabase,
-            acct.unipile_account_id!,
-            start,
-            end,
-          );
-          let inserted = 0;
-          for (const ev of events) {
-            const dateOnly = ev.start_dt.slice(0, 10);
-            const { data: existing } = await supabase
-              .from("tasks")
-              .select("id")
-              .eq("external_id", ev.id)
-              .limit(1);
-            if (existing?.length) continue;
-
-            const { error } = await supabase.from("tasks").insert({
-              title: ev.subject,
-              description: (ev.description || "").slice(0, 500) || "Outlook calendar event",
-              priority: "medium",
-              due_date: dateOnly,
-              start_time: ev.start_dt.endsWith("Z") ? ev.start_dt : ev.start_dt + "Z",
-              end_time: ev.end_dt
-                ? (ev.end_dt.endsWith("Z") ? ev.end_dt : ev.end_dt + "Z")
-                : null,
-              timezone: ev.timezone || "UTC",
-              task_type: "meeting",
-              location: ev.location || null,
-              meeting_url: ev.meetingUrl || null,
-              assigned_to: acct.owner_user_id ?? null,
-              created_by: acct.owner_user_id ?? null,
-              external_id: ev.id,
-            } as any);
-            if (!error) inserted++;
-          }
-          unipileSummary.push({ email: e, pulled: events.length, new: inserted });
-        } catch (err: any) {
-          logger.warn("Unipile calendar fetch error (non-fatal)", { email: e, error: err.message });
-        }
-      }
-      if (unipileSummary.length) {
-        logger.info("Unipile calendar parallel sweep", { unipileSummary });
-      }
-    }
-
-    const summary = {
-      events_synced: totalSynced,
-      events_matched: totalMatched,
-      mailboxes_checked: mailboxesChecked,
-      per_mailbox: perMailbox,
-    };
-    logger.info("Outlook calendar sync complete", summary);
-    return summary;
-  },
+/**
+ * Manual one-off variant for the Tasks page "Sync Outlook" button. Send
+ * via `inngest.send({ name: "ops/sync-outlook-events.requested" })` from
+ * `/api/trigger-sync-outlook`.
+ */
+export const syncOutlookEventsOnce = inngest.createFunction(
+  { id: "sync-outlook-events-once", name: "Sync Outlook calendar events (one-off, Inngest)" },
+  { event: "ops/sync-outlook-events.requested" },
+  async ({ logger }) => runSyncOutlookEvents(logger),
 );
 
 async function syncMailbox(

@@ -1,6 +1,5 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
@@ -14,14 +13,8 @@ import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-
  * Process Unipile webhook events (LinkedIn messages, connection updates,
  * Outlook email via the Phase-3 parallel feed). Matches by provider_id /
  * email, logs to messages + conversations, runs Joe sentiment-and-intel
- * extraction on inbound, and stops active enrollments on any reply.
- *
- * Ported from `src/trigger/webhook-unipile.ts` — the API route at
- * `api/webhooks/unipile.ts` now sends `webhooks/unipile.received` and
- * Inngest drives the work. `generateJoeSays.trigger(...)` still routes
- * via Trigger.dev (will switch when generate-joe-says is ported).
- *
- * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ * extraction on inbound, stops active enrollments on any reply, and
+ * fires `ai/joe-says.requested` to keep the brief current.
  */
 interface UnipileWebhookPayload {
   body: {
@@ -224,9 +217,12 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     }
   }
 
-  await generateJoeSays.trigger({
-    entityId: match.entityId,
-    entityType: match.entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "ai/joe-says.requested",
+    data: {
+      entityId: match.entityId,
+      entityType: match.entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "email_logged", entityId: match.entityId, entityType: match.entityType };
@@ -445,9 +441,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
 
   logger.info("LinkedIn message logged", { entityId, entityType });
 
-  await generateJoeSays.trigger({
-    entityId,
-    entityType: entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "ai/joe-says.requested",
+    data: {
+      entityId,
+      entityType: entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "logged", entityId, entityType, type: "linkedin_message" };

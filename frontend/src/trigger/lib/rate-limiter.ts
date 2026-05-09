@@ -4,7 +4,7 @@
  * Daily + hourly caps prevent burst sends and platform throttling.
  * Scoped to enrolled_by user so Chris, Nancy, Ashley don't starve each other.
  */
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 
 interface ChannelCap {
   daily: number;

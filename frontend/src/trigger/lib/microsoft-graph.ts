@@ -1,4 +1,4 @@
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 import { getMicrosoftGraphCredentials } from "./supabase.js";
 import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
 import { getSupabaseAdmin } from "./supabase.js";

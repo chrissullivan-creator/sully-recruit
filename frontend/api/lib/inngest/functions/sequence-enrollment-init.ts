@@ -1,16 +1,12 @@
 import { inngest } from "../client.js";
-import { runSequenceEnrollmentInit } from "../../../../src/trigger/sequence-scheduler.js";
+import { runSequenceEnrollmentInit } from "../../../../src/trigger/lib/enrollment-init-runner.js";
 
 /**
- * Inngest mirror of Trigger.dev's `sequenceEnrollmentInit` task. The
- * body is shared via `runSequenceEnrollmentInit` in
- * `src/trigger/sequence-scheduler.ts` — same recipient pre-flight,
- * pre-skip rules, scheduled_at calculation (window-aware via
- * calculateSendTime), and idempotency gate (skips actions that already
- * have non-cancelled step_logs from a prior run / re-pace).
- *
- * `retries: 3` matches Trigger.dev's `maxAttempts: 3` so transient
- * errors have the same retry budget on either engine.
+ * Inngest function for `sequence/enrollment-init.requested`. The body
+ * lives in `src/trigger/lib/enrollment-init-runner.ts` — recipient
+ * pre-flight, pre-skip rules, window-aware scheduled_at via
+ * calculateSendTime, idempotency gate against existing non-cancelled
+ * step_logs.
  *
  * Concurrency keyed by enrollmentId so a duplicate request for the
  * same enrollment (the api/trigger-sequence-enroll route retrying on

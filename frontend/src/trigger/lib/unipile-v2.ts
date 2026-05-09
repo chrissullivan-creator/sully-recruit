@@ -21,7 +21,7 @@
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 
 interface ResolvedConfig {
   base: string;

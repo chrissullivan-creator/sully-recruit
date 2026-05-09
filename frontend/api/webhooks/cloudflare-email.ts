@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { simpleParser } from "mailparser";
+import { inngest } from "../lib/inngest/client.js";
 
 /**
  * POST /api/webhooks/cloudflare-email
@@ -279,11 +279,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    await tasks.trigger("resume-ingestion", {
-      resumeId: resumeRow.id,
-      candidateId,
-      filePath: storagePath,
-      fileName,
+    await inngest.send({
+      name: "ai/resume-ingestion.requested",
+      data: {
+        resumeId: resumeRow.id,
+        candidateId,
+        filePath: storagePath,
+        fileName,
+      },
     });
     created++;
   }

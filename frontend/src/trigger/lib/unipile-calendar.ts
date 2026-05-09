@@ -11,7 +11,7 @@
  *
  * Field shapes vary by provider — defensive readers below.
  */
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 import { getAppSetting } from "./supabase";
 
 export interface UnipileCalendarEvent {
