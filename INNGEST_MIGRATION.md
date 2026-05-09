@@ -1,5 +1,70 @@
 # Inngest + Vercel Migration Roadmap
 
+## Status (latest commit on `claude/inngest-migration-phase-1`)
+
+**Code complete.** Every Trigger.dev task in `frontend/src/trigger/`
+has been refactored into `runX` helpers + null-stub wrappers; the
+matching Inngest function lives in `frontend/src/inngest/functions/`
+and calls the same helper. **33 Inngest functions** registered.
+
+The only Trigger.dev code that still does real work is the legacy v2
+sequence engine triplet (`sequenceEnrollmentInit`,
+`sequenceActionExecute`, `sequenceSweep`) which serves any sequences
+still on `engine='trigger'`. Everything else either:
+- never registers as a Trigger.dev task (wrapper = `null`), or
+- exists as a wrapper that delegates to the same `runX` helper the
+  Inngest function uses.
+
+Phase 5b (`rm -rf frontend/src/trigger/` + drop the SDK dep) is held
+back ONLY so the legacy enrollments under `engine='trigger'` can drain
+or be migrated. Once every sequence is on `engine='inngest'`, the
+directory can be deleted.
+
+## Cutover playbook
+
+1. **Set env vars** in BOTH Vercel (production) AND Trigger.dev:
+   - `INNGEST_EVENT_KEY` — pulls from Inngest dashboard
+   - `INNGEST_SIGNING_KEY` — for `/api/inngest` validation
+2. **Deploy** the branch (merge to `main` → Vercel auto-deploys frontend
+   AND Trigger.dev auto-deploys whatever's left in `frontend/src/trigger/`).
+3. **Inngest discovers** the 33 functions automatically via the
+   `/api/inngest` registration on first deploy. Watch the Inngest
+   dashboard for the cron functions firing. Inngest crons replace
+   Trigger.dev crons of the same id (the Trigger.dev wrappers we
+   stubbed don't compete).
+4. **Per-sequence flip** to Inngest:
+   ```
+   inngest.send({
+     name: "sequence/migrate-to-inngest.requested",
+     data: { sequenceId: "<uuid>", enrolledBy: "<operator-uuid>" },
+   })
+   ```
+   The `migrate-sequence-to-inngest` Inngest function pauses the
+   sequence, cancels pending Trigger.dev step_logs, flips
+   `sequences.engine='inngest'`, resumes, and re-fires
+   `sequence/enrolled` for every active enrollment so they pick up
+   on the Inngest engine. Idempotent — safe to re-run.
+5. **Verify** via Inngest dashboard that:
+   - the 5-min `backfill-emails` and `backfill-linkedin-messages`
+     crons are firing
+   - `sequence-run` has runs for the sequence you flipped
+   - no Trigger.dev tasks dispatch new runs (the dashboard should
+     show the registered task list shrinking to just the 4 v2 sequence
+     legacy tasks)
+6. **Phase 5b** (after all sequences are on Inngest, ~24h watching):
+   ```
+   rm -rf frontend/src/trigger/
+   rm frontend/trigger.config.ts
+   # edit frontend/package.json: remove "@trigger.dev/sdk", "trigger:*" scripts
+   # remove frontend/src/inngest/functions/*.ts imports of frontend/src/trigger/lib/*
+   #   (move helpers to frontend/src/server/lib/ first)
+   npm install
+   ```
+   The `runX` helpers will need to move with the libs they import
+   (`unipile-v2`, `send-channels`, `merge-tags`, etc.) — currently
+   nested under `src/trigger/lib/`. Move to `src/server/lib/` and
+   update imports in the Inngest function files.
+
 ## Why
 
 Trigger.dev costs scale with run volume; Inngest's event-based pricing is

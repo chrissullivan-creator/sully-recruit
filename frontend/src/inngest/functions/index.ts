@@ -35,6 +35,7 @@ import { backfillCalendarEvents } from "./backfill-calendar-events";
 import { processCallDeepgram } from "./process-call-deepgram";
 import { recoverOrphanResumes } from "./recover-orphan-resumes";
 import { processClayEnrichment } from "./process-clay-enrichment";
+import { migrateSequenceToInngest } from "./migrate-sequence-to-inngest";
 
 export const functions = [
   syncInmailCredits,
@@ -69,4 +70,5 @@ export const functions = [
   processCallDeepgram,
   recoverOrphanResumes,
   processClayEnrichment,
+  migrateSequenceToInngest,
 ];
