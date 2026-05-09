@@ -23,7 +23,7 @@
  * back to the Graph path.
  */
 import { logger } from "@trigger.dev/sdk/v3";
-import { getAppSetting } from "./supabase";
+import { getAppSetting } from "./supabase.js";
 
 interface UnipileSendInput {
   fromEmail: string;

@@ -1,7 +1,7 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getMicrosoftGraphCredentials } from "./supabase";
-import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email";
-import { getSupabaseAdmin } from "./supabase";
+import { getMicrosoftGraphCredentials } from "./supabase.js";
+import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
+import { getSupabaseAdmin } from "./supabase.js";
 
 /**
  * Shared Microsoft Graph helpers.

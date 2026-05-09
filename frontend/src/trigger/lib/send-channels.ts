@@ -1,9 +1,9 @@
 import { logger } from "@trigger.dev/sdk/v3";
-import { getAppSetting } from "./supabase";
-import { getMicrosoftAccessToken } from "./microsoft-graph";
-import { fetchWithRetry } from "./fetch-retry";
-import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email";
-import { unipileFetch } from "./unipile-v2";
+import { getAppSetting } from "./supabase.js";
+import { getMicrosoftAccessToken } from "./microsoft-graph.js";
+import { fetchWithRetry } from "./fetch-retry.js";
+import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
+import { unipileFetch } from "./unipile-v2.js";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
