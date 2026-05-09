@@ -4,14 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mergeVarsFromPerson } from "@/lib/merge-tags";
 import { authHeaders } from "@/lib/api-auth";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
 import { FlowBuilder, type SequenceBranch } from "@/components/sequences/FlowBuilder";
 import { SequenceReview } from "@/components/sequences/SequenceReview";
 import { compareSequenceNodes, createEmptyBranches, flattenBranchSteps, hydrateBranchesFromNodes, normalizeBranches } from "@/components/sequences/sequenceBranches";
+import { Save, Rocket, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 function toTimeInput(value: unknown, fallback: string) {
@@ -86,7 +87,6 @@ export default function SequenceBuilder() {
   // metadata edits skip the prompt entirely since they don't need
   // queued step logs to be rebuilt.
   const lastStructuralRef = useRef<string | null>(null);
-  const [activeTab, setActiveTab] = useState(isEdit ? "flow" : "setup");
   // Live preview: merge-vars dict for whichever recipient the
   // recruiter picked from the "Preview as" selector. null = preview off.
   const [previewVars, setPreviewVars] = useState<Record<string, string> | null>(null);
@@ -552,9 +552,17 @@ export default function SequenceBuilder() {
     }
   }, [saveSequence, navigate, id, repaceIfNeeded]);
 
+  const totalSteps = flattenBranchSteps(branches).length;
+  const totalActions = flattenBranchSteps(branches).reduce((sum, step) => sum + (step.actions?.length || 0), 0);
+
   return (
     <MainLayout>
-      <div className="container mx-auto py-6 space-y-6">
+      {/* Single-scroll page (was a 3-tab nav: Setup / Flow / Review).
+          Three vertical sections instead of click-to-tab — drops
+          two clicks per save cycle and lets recruiters scan the
+          whole sequence top-to-bottom while editing. Save Draft +
+          Activate bar sticks to the bottom so they're always reachable. */}
+      <div className="container mx-auto py-6 space-y-6 pb-28">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
@@ -571,25 +579,25 @@ export default function SequenceBuilder() {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="setup">1. Setup</TabsTrigger>
-          <TabsTrigger value="flow">2. Flow Builder</TabsTrigger>
-          <TabsTrigger value="review">3. Review</TabsTrigger>
-        </TabsList>
-
-          <TabsContent value="setup" className="mt-4">
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm">Setup</CardTitle>
+          </CardHeader>
+          <CardContent>
             <div className="max-w-2xl">
               <SequenceSetup data={setup} onChange={setSetup} />
-              <div className="mt-4 flex justify-end">
-                <Button onClick={() => setActiveTab("flow")}>
-                  Next: Build Flow
-                </Button>
-              </div>
             </div>
-          </TabsContent>
+          </CardContent>
+        </Card>
 
-          <TabsContent value="flow" className="mt-4">
+        <Card>
+          <CardHeader className="py-3 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Flow</CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {totalSteps} step{totalSteps === 1 ? "" : "s"} · {totalActions} action{totalActions === 1 ? "" : "s"}
+            </span>
+          </CardHeader>
+          <CardContent>
             <PreviewAsPicker
               audience={setup.audienceType}
               previewVars={previewVars}
@@ -601,36 +609,38 @@ export default function SequenceBuilder() {
               onAskJoe={handleAskJoe}
               previewMergeVars={previewVars ?? undefined}
             />
-            <div className="mt-4 flex justify-between items-center">
-              <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
-              <div className="text-xs text-muted-foreground">
-                {flattenBranchSteps(branches).length} total step(s),{" "}
-                {flattenBranchSteps(branches).reduce((sum, step) => sum + (step.actions?.length || 0), 0)} total action(s)
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
-                  Save Draft
-                </Button>
-                <Button onClick={() => setActiveTab("review")}>Next: Review</Button>
-              </div>
-            </div>
-          </TabsContent>
+          </CardContent>
+        </Card>
 
-          <TabsContent value="review" className="mt-4">
-            <div className="max-w-2xl">
-              <SequenceReview
-                setup={setup}
-                branches={branches}
-                onSaveDraft={handleSaveDraft}
-                onActivate={handleActivate}
-                saving={saving}
-              />
-              <div className="mt-4">
-                <Button variant="outline" onClick={() => setActiveTab("flow")}>Back</Button>
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+        <div className="max-w-2xl">
+          <SequenceReview
+            setup={setup}
+            branches={branches}
+            onSaveDraft={handleSaveDraft}
+            onActivate={handleActivate}
+            saving={saving}
+          />
+        </div>
+      </div>
+
+      {/* Sticky action bar — Save Draft + Activate are always one
+          click away no matter how far down the recruiter has scrolled. */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-card-border bg-page-bg/95 backdrop-blur supports-[backdrop-filter]:bg-page-bg/75">
+        <div className="container mx-auto py-3 flex items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            {totalSteps} step{totalSteps === 1 ? "" : "s"} · {totalActions} action{totalActions === 1 ? "" : "s"}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Draft
+            </Button>
+            <Button onClick={handleActivate} disabled={saving} variant="gold">
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Rocket className="h-4 w-4 mr-2" />}
+              Activate
+            </Button>
+          </div>
+        </div>
       </div>
     </MainLayout>
   );

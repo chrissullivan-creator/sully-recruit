@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api-auth";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
 import { DailyUtilization } from "./DailyUtilization";
+import { SequenceScheduleDrawer } from "./SequenceScheduleDrawer";
+import { FailureSummary } from "./FailureSummary";
 
 interface SequenceRow {
   id: string;
@@ -39,6 +41,7 @@ export function SequenceList() {
   const [loading, setLoading] = useState(true);
   const [drillSequence, setDrillSequence] = useState<SequenceRow | null>(null);
   const [stopTarget, setStopTarget] = useState<SequenceRow | null>(null);
+  const [scheduleDrawerSeq, setScheduleDrawerSeq] = useState<SequenceRow | null>(null);
   // Tracks per-row pause/resume mutation state so we can disable
   // the buttons + show a spinner.
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -230,32 +233,31 @@ export function SequenceList() {
           </p>
           <DailyUtilization />
         </div>
-        {(stuckInFlight > 0 || staleConnections > 0) && (
-          <div className="mb-4 space-y-1.5">
-            {stuckInFlight > 0 && (
-              <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-                <span className="inline-flex items-center gap-2 text-amber-900">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {stuckInFlight} step log{stuckInFlight === 1 ? "" : "s"} stuck in <code className="font-mono">in_flight</code> &gt; 10 min
-                </span>
-                <Button variant="outline" size="sm" onClick={handleResetStuckInFlight} className="h-7 text-xs">
-                  Reset
-                </Button>
-              </div>
-            )}
-            {staleConnections > 0 && (
-              <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-                <span className="inline-flex items-center gap-2 text-amber-900">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {staleConnections} LinkedIn invite{staleConnections === 1 ? "" : "s"} pending acceptance &gt; 14 days
-                </span>
-                <span className="text-[10px] text-amber-900/70 italic">
-                  cleaned by sequence-pending-connection-timeout daily
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="mb-4 space-y-1.5">
+          {stuckInFlight > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+              <span className="inline-flex items-center gap-2 text-amber-900">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {stuckInFlight} step log{stuckInFlight === 1 ? "" : "s"} stuck in <code className="font-mono">in_flight</code> &gt; 10 min
+              </span>
+              <Button variant="outline" size="sm" onClick={handleResetStuckInFlight} className="h-7 text-xs">
+                Reset
+              </Button>
+            </div>
+          )}
+          {staleConnections > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+              <span className="inline-flex items-center gap-2 text-amber-900">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {staleConnections} LinkedIn invite{staleConnections === 1 ? "" : "s"} pending acceptance &gt; 14 days
+              </span>
+              <span className="text-[10px] text-amber-900/70 italic">
+                cleaned by sequence-pending-connection-timeout daily
+              </span>
+            </div>
+          )}
+          <FailureSummary onRetryDone={loadSequences} />
+        </div>
         {loading ? (
           <p className="text-muted-foreground text-sm">Loading...</p>
         ) : sequences.length === 0 ? (
@@ -363,11 +365,14 @@ export function SequenceList() {
                           <OctagonX className="h-4 w-4" />
                         </Button>
                       )}
-                      <Link to={`/sequences/${seq.id}/schedule`}>
-                        <Button variant="ghost" size="sm">
-                          <Calendar className="h-4 w-4" />
-                        </Button>
-                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setScheduleDrawerSeq(seq)}
+                        title="Quick peek at next 24h queue"
+                      >
+                        <Calendar className="h-4 w-4" />
+                      </Button>
                       <Link to={`/sequences/${seq.id}/analytics`}>
                         <Button variant="ghost" size="sm">
                           <BarChart3 className="h-4 w-4" />
@@ -387,6 +392,12 @@ export function SequenceList() {
         audienceType={drillSequence?.audience_type ?? "candidates"}
         open={!!drillSequence}
         onOpenChange={(o) => { if (!o) setDrillSequence(null); }}
+      />
+      <SequenceScheduleDrawer
+        sequenceId={scheduleDrawerSeq?.id ?? null}
+        sequenceName={scheduleDrawerSeq?.name ?? ""}
+        open={!!scheduleDrawerSeq}
+        onOpenChange={(o) => { if (!o) setScheduleDrawerSeq(null); }}
       />
       <AlertDialog open={!!stopTarget} onOpenChange={(o) => { if (!o) setStopTarget(null); }}>
         <AlertDialogContent>
