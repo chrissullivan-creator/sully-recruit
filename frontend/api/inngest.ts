@@ -39,6 +39,11 @@ import { processUnipileEvent } from "./lib/inngest/functions/process-unipile-eve
 import { processMicrosoftEvent } from "./lib/inngest/functions/process-microsoft-event.js";
 import { generateJoeSays } from "./lib/inngest/functions/generate-joe-says.js";
 import { resumeIngestion } from "./lib/inngest/functions/resume-ingestion.js";
+import { sendMessage } from "./lib/inngest/functions/send-message.js";
+import { extractManualCallIntel } from "./lib/inngest/functions/extract-manual-call-intel.js";
+import { fetchEntityHistory } from "./lib/inngest/functions/fetch-entity-history.js";
+import { recoverOrphanResumes } from "./lib/inngest/functions/recover-orphan-resumes.js";
+import { backfillEnrollmentInit } from "./lib/inngest/functions/backfill-enrollment-init.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -90,5 +95,10 @@ export default serve({
     processMicrosoftEvent,
     generateJoeSays,
     resumeIngestion,
+    sendMessage,
+    extractManualCallIntel,
+    fetchEntityHistory,
+    recoverOrphanResumes,
+    backfillEnrollmentInit,
   ],
 });
