@@ -6,10 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, BarChart3, Calendar, Pause, Play, Loader2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, BarChart3, Calendar, Pause, Play, Loader2, OctagonX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api-auth";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
+import { DailyUtilization } from "./DailyUtilization";
 
 interface SequenceRow {
   id: string;
@@ -27,6 +38,7 @@ export function SequenceList() {
   const [sequences, setSequences] = useState<SequenceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [drillSequence, setDrillSequence] = useState<SequenceRow | null>(null);
+  const [stopTarget, setStopTarget] = useState<SequenceRow | null>(null);
   // Tracks per-row pause/resume mutation state so we can disable
   // the buttons + show a spinner.
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -43,6 +55,42 @@ export function SequenceList() {
       await loadSequences();
     } catch (err: any) {
       toast.error(err?.message || "Failed to pause");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleStopConfirmed(seq: SequenceRow) {
+    setBusyId(seq.id);
+    try {
+      // stop_sequence RPC bulk-terminates active enrollments and
+      // cancels their pending step_logs in one transaction. Matches
+      // the engine's existing stop semantics (status='stopped',
+      // stop_reason set) so reply-stop and operator-stop are
+      // indistinguishable downstream.
+      const { data, error } = await (supabase as any).rpc("stop_sequence", {
+        p_sequence_id: seq.id,
+        p_reason: "manual_stop",
+      });
+      if (error) throw error;
+      // Also flip the sequence status itself so it doesn't keep
+      // accepting new enrollments. Pause leaves it resumable; Stop
+      // is a terminal mark for the campaign.
+      const { error: seqErr } = await supabase
+        .from("sequences")
+        .update({ status: "stopped", updated_at: new Date().toISOString() } as any)
+        .eq("id", seq.id);
+      if (seqErr) throw seqErr;
+      const row = Array.isArray(data) ? data[0] : data;
+      const stopped = row?.stopped_enrollments ?? 0;
+      const cancelled = row?.cancelled_step_logs ?? 0;
+      toast.success(
+        `Stopped ${stopped} enrollment${stopped === 1 ? "" : "s"} — ${cancelled} pending send${cancelled === 1 ? "" : "s"} cancelled`,
+      );
+      setStopTarget(null);
+      await loadSequences();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to stop sequence");
     } finally {
       setBusyId(null);
     }
@@ -130,6 +178,12 @@ export function SequenceList() {
         </Link>
       </CardHeader>
       <CardContent>
+        <div className="mb-4">
+          <p className="text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Today's send utilization
+          </p>
+          <DailyUtilization />
+        </div>
         {loading ? (
           <p className="text-muted-foreground text-sm">Loading...</p>
         ) : sequences.length === 0 ? (
@@ -225,6 +279,18 @@ export function SequenceList() {
                           {busyId === seq.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                         </Button>
                       )}
+                      {(seq.status === "active" || seq.status === "paused") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setStopTarget(seq)}
+                          disabled={busyId === seq.id}
+                          title="Stop campaign — cancels pending sends and ends all active enrollments"
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <OctagonX className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Link to={`/sequences/${seq.id}/schedule`}>
                         <Button variant="ghost" size="sm">
                           <Calendar className="h-4 w-4" />
@@ -250,6 +316,41 @@ export function SequenceList() {
         open={!!drillSequence}
         onOpenChange={(o) => { if (!o) setDrillSequence(null); }}
       />
+      <AlertDialog open={!!stopTarget} onOpenChange={(o) => { if (!o) setStopTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop "{stopTarget?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>This terminates the campaign:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>{stopTarget?._activeCount ?? 0}</strong> active enrollment{(stopTarget?._activeCount ?? 0) === 1 ? "" : "s"} will be marked <span className="font-mono">stopped</span></li>
+                  <li>All pending sends (scheduled + waiting-for-connection) will be cancelled</li>
+                  <li>Sent history is preserved for analytics</li>
+                  <li>The sequence won't accept new enrollments</li>
+                </ul>
+                <p className="text-muted-foreground italic pt-1">
+                  This can't be undone. Use Pause if you only want to halt sends temporarily.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busyId === stopTarget?.id}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (stopTarget) handleStopConfirmed(stopTarget);
+              }}
+              disabled={busyId === stopTarget?.id}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {busyId === stopTarget?.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <OctagonX className="h-4 w-4 mr-2" />}
+              Stop sequence
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

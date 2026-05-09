@@ -5,8 +5,12 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Users, MessageSquare, Calendar, TrendingUp, PieChart, Eye, Send } from "lucide-react";
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+
+type RangeKey = "7d" | "30d" | "all";
+const RANGE_DAYS: Record<RangeKey, number | null> = { "7d": 7, "30d": 30, all: null };
 
 const SENTIMENT_COLORS: Record<string, string> = {
   interested: "#22c55e",
@@ -33,10 +37,33 @@ export default function SequenceAnalyticsPage() {
   const [stepLogs, setStepLogs] = useState<any[]>([]);
   const [nodes, setNodes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<RangeKey>("30d");
 
   useEffect(() => {
     if (id) loadData();
   }, [id]);
+
+  // Cutoff for the selected range. Enrollments are filtered by
+  // enrolled_at; step logs by sent_at when present, scheduled_at as
+  // fallback for not-yet-sent rows. "all" returns null = no filter.
+  const rangeCutoff = useMemo<Date | null>(() => {
+    const days = RANGE_DAYS[range];
+    if (days == null) return null;
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  }, [range]);
+
+  const filteredEnrollments = useMemo(() => {
+    if (!rangeCutoff) return enrollments;
+    return enrollments.filter((e) => e.enrolled_at && new Date(e.enrolled_at) >= rangeCutoff);
+  }, [enrollments, rangeCutoff]);
+
+  const filteredStepLogs = useMemo(() => {
+    if (!rangeCutoff) return stepLogs;
+    return stepLogs.filter((l) => {
+      const ts = l.sent_at || l.scheduled_at || l.created_at;
+      return ts && new Date(ts) >= rangeCutoff;
+    });
+  }, [stepLogs, rangeCutoff]);
 
   async function loadData() {
     const [seqRes, enrollRes, logRes, nodeRes] = await Promise.all([
@@ -56,22 +83,22 @@ export default function SequenceAnalyticsPage() {
   }
 
   const metrics = useMemo(() => {
-    const total = enrollments.length;
-    const active = enrollments.filter((e) => e.status === "active").length;
-    const stopped = enrollments.filter((e) => e.status === "stopped").length;
-    const completed = enrollments.filter((e) => e.status === "completed").length;
-    const replied = enrollments.filter((e) => e.stop_trigger === "reply_received").length;
-    const calendarBooked = enrollments.filter((e) => e.stop_trigger === "calendar_booked").length;
+    const total = filteredEnrollments.length;
+    const active = filteredEnrollments.filter((e) => e.status === "active").length;
+    const stopped = filteredEnrollments.filter((e) => e.status === "stopped").length;
+    const completed = filteredEnrollments.filter((e) => e.status === "completed").length;
+    const replied = filteredEnrollments.filter((e) => e.stop_trigger === "reply_received").length;
+    const calendarBooked = filteredEnrollments.filter((e) => e.stop_trigger === "calendar_booked").length;
 
-    const sent = stepLogs.filter((l) => l.status === "sent").length;
-    const failed = stepLogs.filter((l) => l.status === "failed").length;
-    const skipped = stepLogs.filter((l) => l.status === "skipped").length;
-    const scheduled = stepLogs.filter((l) => l.status === "scheduled").length;
+    const sent = filteredStepLogs.filter((l) => l.status === "sent").length;
+    const failed = filteredStepLogs.filter((l) => l.status === "failed").length;
+    const skipped = filteredStepLogs.filter((l) => l.status === "skipped").length;
+    const scheduled = filteredStepLogs.filter((l) => l.status === "scheduled").length;
 
     // Email-only open metrics — opens come from the 1×1 tracking pixel
     // appended to outbound sequence emails (see send-channels.ts).
     // open_count tracks repeated opens; opened_at marks the first open.
-    const sentEmails = stepLogs.filter((l) => l.status === "sent" && l.channel === "email");
+    const sentEmails = filteredStepLogs.filter((l) => l.status === "sent" && l.channel === "email");
     const openedEmails = sentEmails.filter((l) => l.opened_at);
     const totalOpens = sentEmails.reduce((sum, l) => sum + (Number(l.open_count) || 0), 0);
     const openRate = sentEmails.length > 0
@@ -91,12 +118,12 @@ export default function SequenceAnalyticsPage() {
       openRate,
       replyRate, meetingRate, completionRate,
     };
-  }, [enrollments, stepLogs]);
+  }, [filteredEnrollments, filteredStepLogs]);
 
   // Sentiment breakdown
   const sentimentData = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const log of stepLogs) {
+    for (const log of filteredStepLogs) {
       if (log.sentiment) {
         counts[log.sentiment] = (counts[log.sentiment] || 0) + 1;
       }
@@ -106,12 +133,12 @@ export default function SequenceAnalyticsPage() {
       value,
       color: SENTIMENT_COLORS[name] || "#6b7280",
     }));
-  }, [stepLogs]);
+  }, [filteredStepLogs]);
 
   // Per-channel reply rates
   const channelStats = useMemo(() => {
     const byChannel: Record<string, { sent: number; replies: number; opens: number }> = {};
-    for (const log of stepLogs) {
+    for (const log of filteredStepLogs) {
       if (!log.channel) continue;
       if (!byChannel[log.channel]) byChannel[log.channel] = { sent: 0, replies: 0, opens: 0 };
       if (log.status === "sent") byChannel[log.channel].sent++;
@@ -127,14 +154,14 @@ export default function SequenceAnalyticsPage() {
       openRate: stats.sent > 0 ? Number(((stats.opens / stats.sent) * 100).toFixed(1)) : 0,
       color: CHANNEL_COLORS[channel] || "#6b7280",
     }));
-  }, [stepLogs]);
+  }, [filteredStepLogs]);
 
   // Per-step funnel — group step_logs by node_id, label by node_order.
   // Email steps surface open + reply rates; non-email steps just show
   // sent / replied since opens don't apply.
   const stepStats = useMemo(() => {
     const byNode: Record<string, { sent: number; opens: number; replies: number; channel: string }> = {};
-    for (const log of stepLogs) {
+    for (const log of filteredStepLogs) {
       const nid = (log as any).node_id;
       if (!nid) continue;
       if (!byNode[nid]) byNode[nid] = { sent: 0, opens: 0, replies: 0, channel: log.channel || "" };
@@ -159,7 +186,7 @@ export default function SequenceAnalyticsPage() {
           replyRate: s.sent > 0 ? Number(((s.replies / s.sent) * 100).toFixed(1)) : 0,
         };
       });
-  }, [nodes, stepLogs]);
+  }, [nodes, filteredStepLogs]);
 
   // Note: an earlier "connection accept rate" KPI lived here. It was a bogus
   // proxy (any non-reply non-active enrollment counted as accepted, which
@@ -171,11 +198,20 @@ export default function SequenceAnalyticsPage() {
   return (
     <MainLayout>
     <div className="container mx-auto py-6 space-y-6">
-      <div className="flex items-center gap-4">
-        <Link to={`/sequences/${id}/edit`}>
-          <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button>
-        </Link>
-        <h1 className="text-2xl font-bold">{sequence?.name} — Analytics</h1>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-4">
+          <Link to={`/sequences/${id}/edit`}>
+            <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button>
+          </Link>
+          <h1 className="text-2xl font-bold">{sequence?.name} — Analytics</h1>
+        </div>
+        <Tabs value={range} onValueChange={(v) => setRange(v as RangeKey)}>
+          <TabsList>
+            <TabsTrigger value="7d">Last 7 days</TabsTrigger>
+            <TabsTrigger value="30d">Last 30 days</TabsTrigger>
+            <TabsTrigger value="all">All time</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* KPI cards */}

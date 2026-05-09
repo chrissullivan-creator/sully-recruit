@@ -148,7 +148,8 @@ export default function SequenceScheduleView() {
     });
   };
 
-  const handlePauseSend = async (logId: string) => {
+  const handleSkipSend = async (logId: string) => {
+    const skipped = sends.find((s) => s.id === logId);
     const { error } = await supabase
       .from("sequence_step_logs")
       .update({ status: "skipped" } as any)
@@ -158,7 +159,33 @@ export default function SequenceScheduleView() {
       return;
     }
     setSends((prev) => prev.filter((s) => s.id !== logId));
-    toast.success("Send skipped");
+    // Surface an Undo affordance — recruiters click Skip by mistake on
+    // queue rows and previously had no way back without DB access. The
+    // RPC only restores rows whose scheduled_at is still in the future,
+    // so an undo arriving after the original send window passes will
+    // no-op (and we surface that case instead of silently failing).
+    toast.success("Send skipped", {
+      action: {
+        label: "Undo",
+        onClick: async () => {
+          const { data, error: rpcErr } = await (supabase as any).rpc("restore_skipped_step", {
+            p_step_log_id: logId,
+          });
+          if (rpcErr) {
+            toast.error(rpcErr.message || "Couldn't undo skip");
+            return;
+          }
+          const restored = typeof data === "number" ? data : Number(data ?? 0);
+          if (restored > 0 && skipped) {
+            setSends((prev) => [...prev, skipped]);
+            toast.success("Skip undone — send restored");
+          } else {
+            toast.message("Too late to restore — its send window already passed");
+          }
+        },
+      },
+      duration: 10_000,
+    });
   };
 
   if (loading) return <MainLayout><div className="container mx-auto py-6">Loading...</div></MainLayout>;
@@ -258,8 +285,8 @@ export default function SequenceScheduleView() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handlePauseSend(send.id)}
-                                title="Skip this send"
+                                onClick={() => handleSkipSend(send.id)}
+                                title="Skip this send (you can undo for 10 seconds)"
                               >
                                 <SkipForward className="h-3 w-3" />
                               </Button>

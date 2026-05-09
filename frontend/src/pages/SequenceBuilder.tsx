@@ -215,26 +215,37 @@ export default function SequenceBuilder() {
 
         toast.info("Joe is drafting...", { duration: 2000 });
 
-        const response = await fetch("/api/draft-sequence-message", {
-          method: "POST",
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            channel: action.channel,
-            step_type: action.channel,
-            step_number: stepNumber,
-            step_label: stepLabel || undefined,
-            total_steps: totalSteps,
-            audience_type: setup.audienceType,
-            sequence_name: setup.name,
-            sequence_objective: setup.objective,
-            sender_name: senderName,
-            sender_title: senderTitle,
-            job_title: jobDetails?.title,
-            job_company: jobDetails?.company_name,
-            job_description: jobDetails?.description,
-            previous_messages: previousMessages,
-          }),
-        });
+        // 30s budget — the AI cascade can stall on cold starts.
+        // Without an explicit abort the spinner spins forever and the
+        // recruiter has no way to recover without refreshing the tab.
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30_000);
+        let response: Response;
+        try {
+          response = await fetch("/api/draft-sequence-message", {
+            method: "POST",
+            headers: await authHeaders(),
+            signal: controller.signal,
+            body: JSON.stringify({
+              channel: action.channel,
+              step_type: action.channel,
+              step_number: stepNumber,
+              step_label: stepLabel || undefined,
+              total_steps: totalSteps,
+              audience_type: setup.audienceType,
+              sequence_name: setup.name,
+              sequence_objective: setup.objective,
+              sender_name: senderName,
+              sender_title: senderTitle,
+              job_title: jobDetails?.title,
+              job_company: jobDetails?.company_name,
+              job_description: jobDetails?.description,
+              previous_messages: previousMessages,
+            }),
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (!response.ok) {
           const err = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -247,7 +258,11 @@ export default function SequenceBuilder() {
         toast.success("Joe drafted a message");
         return result.message;
       } catch (err: any) {
-        toast.error(`Joe failed: ${err.message}`);
+        if (err?.name === "AbortError") {
+          toast.error("Joe timed out (30s) — try again");
+        } else {
+          toast.error(`Joe failed: ${err.message}`);
+        }
         return "";
       }
     },

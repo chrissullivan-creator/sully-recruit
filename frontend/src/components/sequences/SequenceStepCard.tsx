@@ -514,6 +514,27 @@ function AttachmentPicker({
     } catch { return "Attachment"; }
   };
 
+  // Best-effort delete of the underlying storage object so removing an
+  // attachment chip doesn't orphan the upload in the bucket. We only
+  // have RLS to delete files the current user uploaded (path is
+  // `${userId}/...`); failures are swallowed because the chip removal
+  // is local-only and the file may not be ours (e.g. teammate's draft).
+  const removeAttachment = async (url: string, idx: number) => {
+    onChange(attachmentUrls.filter((_, i) => i !== idx));
+    try {
+      const u = new URL(url);
+      const marker = "/sequence-attachments/";
+      const i = u.pathname.indexOf(marker);
+      if (i === -1) return;
+      const objectPath = decodeURIComponent(u.pathname.slice(i + marker.length));
+      if (!objectPath) return;
+      await supabase.storage.from("sequence-attachments").remove([objectPath]);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("Couldn't delete sequence attachment from storage", e);
+    }
+  };
+
   return (
     <div className="space-y-1.5">
       {attachmentUrls.length > 0 && (
@@ -534,7 +555,7 @@ function AttachmentPicker({
               </a>
               <button
                 type="button"
-                onClick={() => onChange(attachmentUrls.filter((_, i) => i !== idx))}
+                onClick={() => removeAttachment(url, idx)}
                 className="text-muted-foreground hover:text-destructive"
                 title="Remove attachment"
               >

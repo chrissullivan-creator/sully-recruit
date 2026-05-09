@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Mail, Linkedin, MessageSquare, Phone, Users, Loader2, Search, Clock } from 'lucide-react';
+import { DailyUtilization } from '@/components/sequences/DailyUtilization';
 
 interface EnrollInSequenceDialogProps {
   open: boolean;
@@ -33,6 +34,11 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
   const [enrolling, setEnrolling] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
+  // Pagination for the people picker. Used to silently cap to 50 — that
+  // hid the rest of the list from recruiters with no signal there were
+  // more matches. We expose the cap explicitly + a Load More button.
+  const PAGE_SIZE = 50;
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
   const { data: sequences = [], isLoading } = useSequences();
   const { data: candidates = [] } = useCandidates();
   const { data: contacts = [] } = useContacts();
@@ -59,6 +65,7 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
       setSearchQuery('');
       setSelectedPeople([]);
       setSelectedAccountId('');
+      setVisibleCount(PAGE_SIZE);
       if (!preselectedSequenceId) setSelectedSequenceId('');
     } else {
       // Auto-select current user's own email account
@@ -313,6 +320,30 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 </SelectContent>
               </Select>
             )}
+            {selectedAccountId && (() => {
+              const acct: any = allAccounts.find((a: any) => a.id === selectedAccountId);
+              const inmail = acct?.inmail_credits_remaining;
+              const ownerId = acct?.owner_user_id || acct?.user_id;
+              return (
+                <div className="space-y-1.5 text-[11px] text-muted-foreground">
+                  {/* Today's utilization for whichever owner the account
+                      belongs to. daily_send_log is keyed by sender user
+                      id (the recruiter), not by integration account id —
+                      see sequence-scheduler.ts:631. */}
+                  {ownerId && <DailyUtilization compact accountId={ownerId} />}
+                  {(typeof inmail === 'number') && (
+                    <p>
+                      InMail credits:{' '}
+                      <span className={inmail <= 5 ? 'text-amber-600 font-semibold' : 'font-semibold'}>
+                        {inmail}
+                      </span>{' '}
+                      remaining
+                      {inmail <= 0 && ' — sends will fail'}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {isPeoplePicker && (
@@ -328,30 +359,38 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                 />
               </div>
               <div className="flex items-center justify-between">
-                <Label className="text-sm">Select People</Label>
+                <Label className="text-sm">
+                  Select People{' '}
+                  <span className="text-xs text-muted-foreground">
+                    (showing {Math.min(visibleCount, people.length)} of {people.length})
+                  </span>
+                </Label>
                 {people.length > 0 && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      const allIds = people.slice(0, 50).map(p => p.id);
-                      const allSelected = allIds.every(id => selectedPeople.includes(id));
+                      const visibleIds = people.slice(0, visibleCount).map(p => p.id);
+                      const allSelected = visibleIds.every(id => selectedPeople.includes(id));
                       if (allSelected) {
-                        setSelectedPeople(prev => prev.filter(id => !allIds.includes(id)));
+                        setSelectedPeople(prev => prev.filter(id => !visibleIds.includes(id)));
                       } else {
-                        setSelectedPeople(prev => [...new Set([...prev, ...allIds])]);
+                        setSelectedPeople(prev => [...new Set([...prev, ...visibleIds])]);
                       }
                     }}
                     className="text-xs h-7 px-2"
+                    title="Selects only the people currently visible below"
                   >
-                    {people.slice(0, 50).every(p => selectedPeople.includes(p.id)) ? 'Deselect All' : 'Select All'}
+                    {people.slice(0, visibleCount).every(p => selectedPeople.includes(p.id))
+                      ? 'Deselect visible'
+                      : `Select visible (${Math.min(visibleCount, people.length)})`}
                   </Button>
                 )}
               </div>
               <ScrollArea className="h-48 rounded-md border border-border">
                 <div className="p-2 space-y-1">
-                  {people.slice(0, 50).map((person) => (
+                  {people.slice(0, visibleCount).map((person) => (
                     <label
                       key={`${person.type}-${person.id}`}
                       className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer"
@@ -369,6 +408,17 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
                   ))}
                   {people.length === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-4">No results found</p>
+                  )}
+                  {people.length > visibleCount && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                      className="w-full text-xs h-7 mt-1"
+                    >
+                      Load {Math.min(PAGE_SIZE, people.length - visibleCount)} more
+                    </Button>
                   )}
                 </div>
               </ScrollArea>
