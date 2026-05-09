@@ -5,8 +5,10 @@
  */
 import { syncInmailCredits } from "./sync-inmail-credits";
 import { sequenceRun } from "./sequence-run";
+import { cancelOnReply } from "./cancel-on-reply";
 
 export const functions = [
   syncInmailCredits,
   sequenceRun,
+  cancelOnReply,
 ];
