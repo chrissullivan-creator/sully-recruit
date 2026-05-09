@@ -1,4 +1,4 @@
-import { inngest } from "../client";
+import { inngest } from "../client.js";
 
 /**
  * Per-enrollment runner. Phase 1: NO-OP placeholder so the wiring is
