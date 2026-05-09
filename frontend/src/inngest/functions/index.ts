@@ -4,7 +4,9 @@
  * so adding a new migration is one entry here plus the function file.
  */
 import { syncInmailCredits } from "./sync-inmail-credits";
+import { sequenceRun } from "./sequence-run";
 
 export const functions = [
   syncInmailCredits,
+  sequenceRun,
 ];
