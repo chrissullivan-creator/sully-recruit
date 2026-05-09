@@ -1,45 +1,34 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting } from "./lib/supabase";
-import { getMicrosoftAccessToken } from "./lib/microsoft-graph";
-import { notifyError } from "./lib/alerting";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
+import { getMicrosoftAccessToken } from "../../../../src/trigger/lib/microsoft-graph.js";
+import { notifyError } from "../../../../src/trigger/lib/alerting.js";
 import {
   fetchUnipileEventsForAccount,
   shouldUseUnipileCalendar,
-} from "./lib/unipile-calendar";
-import { matchPersonByEmail as matchPersonByEmailHelper } from "./lib/match-person-by-email";
+} from "../../../../src/trigger/lib/unipile-calendar.js";
+import { matchPersonByEmail as matchPersonByEmailHelper } from "../../../../src/trigger/lib/match-person-by-email.js";
 
 /**
  * Pull each configured mailbox's upcoming Outlook calendar events and
  * upsert them as `tasks` (task_type='meeting'), with `meeting_attendees`
  * + `task_links` rows for any attendee that matches a candidate or
- * contact by email.
+ * contact by email. Optionally pulls the same events from Unipile in
+ * parallel (dedup on tasks.external_id) when the Unipile calendar flag
+ * is enabled.
  *
- * Architecture (mirrors backfill-emails / webhook-microsoft / send-channels):
- *   - App-level Microsoft Graph token from getMicrosoftAccessToken()
- *     (client_credentials grant via MICROSOFT_GRAPH_*).
- *   - List of mailboxes from app_settings.MICROSOFT_GRAPH_ACCOUNT_EMAILS.
- *   - Owner user_id resolved via integration_accounts.email_address.
- *   - Hits /users/{email}/calendarview — /me/calendarview won't work
- *     with an app token.
- *
- * Why this rewrite: the previous version filtered user_integrations for
- * integration_type='microsoft_oauth' (none exist; the rows are stored
- * as 'outlook'), and then fell back to /me/calendarview (incompatible
- * with app-level tokens). Result: 0 tasks, calendar page blank.
- *
- * Schedule: every 30 minutes — frequent enough that today's events
- * land before they're missed, light enough that we're not hammering
- * Graph for 14d of forward-looking events.
+ * Every 30 minutes. Ported from `src/trigger/sync-outlook-events.ts` —
+ * Inngest is the only scheduler now.
  */
-export const syncOutlookEvents = schedules.task({
-  id: "sync-outlook-events",
-  cron: "*/30 * * * *",
-  maxDuration: 300,
-  run: async () => {
+export const syncOutlookEvents = inngest.createFunction(
+  { id: "sync-outlook-events", name: "Sync Outlook calendar events (Inngest)" },
+  { cron: "*/30 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
     let graphEmailsRaw = "";
-    try { graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || ""; } catch {}
+    try {
+      graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || "";
+    } catch {}
     const graphEmails = new Set(
       graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     );
@@ -48,7 +37,6 @@ export const syncOutlookEvents = schedules.task({
       return { events_synced: 0, events_matched: 0, mailboxes_checked: 0 };
     }
 
-    // owner user_id per mailbox via integration_accounts.email_address
     const { data: accounts } = await supabase
       .from("integration_accounts")
       .select("email_address, owner_user_id")
@@ -77,7 +65,7 @@ export const syncOutlookEvents = schedules.task({
       mailboxesChecked++;
       const ownerUserId = ownerByEmail.get(email);
       try {
-        const result = await syncMailbox(supabase, email, ownerUserId, accessToken);
+        const result = await syncMailbox(supabase, email, ownerUserId, accessToken, logger);
         totalSynced += result.synced;
         totalMatched += result.matched;
         perMailbox.push({ email, synced: result.synced, matched: result.matched });
@@ -91,12 +79,6 @@ export const syncOutlookEvents = schedules.task({
       }
     }
 
-    // Phase 4: Unipile calendar in PARALLEL. When the flag is on, we
-    // also pull events from Unipile for every mailbox that has a
-    // unipile_account_id wired in integration_accounts. Dedup on
-    // tasks.external_id (the Outlook event id is the same coming
-    // from either provider) keeps the table clean. Failure is
-    // non-fatal — it's a parallel safety net, not the primary path.
     if (await shouldUseUnipileCalendar()) {
       const { data: unipileAccts } = await supabase
         .from("integration_accounts")
@@ -113,14 +95,19 @@ export const syncOutlookEvents = schedules.task({
         if (!graphEmails.has(e)) continue;
         try {
           const events = await fetchUnipileEventsForAccount(
-            supabase, acct.unipile_account_id!, start, end,
+            supabase,
+            acct.unipile_account_id!,
+            start,
+            end,
           );
           let inserted = 0;
           for (const ev of events) {
             const dateOnly = ev.start_dt.slice(0, 10);
-            // Dedup against what Graph already wrote.
             const { data: existing } = await supabase
-              .from("tasks").select("id").eq("external_id", ev.id).limit(1);
+              .from("tasks")
+              .select("id")
+              .eq("external_id", ev.id)
+              .limit(1);
             if (existing?.length) continue;
 
             const { error } = await supabase.from("tasks").insert({
@@ -161,15 +148,14 @@ export const syncOutlookEvents = schedules.task({
     logger.info("Outlook calendar sync complete", summary);
     return summary;
   },
-});
-
-// ─── per-mailbox sync ──────────────────────────────────────────────────────
+);
 
 async function syncMailbox(
   supabase: any,
   mailboxEmail: string,
   ownerUserId: string | undefined,
   accessToken: string,
+  logger: any,
 ): Promise<{ synced: number; matched: number; failed: number }> {
   const now = new Date().toISOString();
   const twoWeeksLater = new Date(Date.now() + 14 * 86_400_000).toISOString();
@@ -199,13 +185,20 @@ async function syncMailbox(
 
     if (externalId) {
       const { data: existing } = await supabase
-        .from("tasks").select("id").eq("external_id", externalId).limit(1);
+        .from("tasks")
+        .select("id")
+        .eq("external_id", externalId)
+        .limit(1);
       if (existing?.length) continue;
     } else {
       const dateOnly = startDt.slice(0, 10);
       const { data: existing } = await supabase
-        .from("tasks").select("id")
-        .eq("title", subject).eq("due_date", dateOnly).eq("created_by", ownerUserId).limit(1);
+        .from("tasks")
+        .select("id")
+        .eq("title", subject)
+        .eq("due_date", dateOnly)
+        .eq("created_by", ownerUserId)
+        .limit(1);
       if (existing?.length) continue;
     }
 
@@ -240,7 +233,8 @@ async function syncMailbox(
         created_by: ownerUserId ?? null,
         external_id: externalId || null,
       } as any)
-      .select("id").single();
+      .select("id")
+      .single();
 
     if (taskErr || !taskData) {
       logger.warn("Failed to insert task", { error: taskErr?.message, subject });
@@ -251,10 +245,14 @@ async function syncMailbox(
 
     for (const m of attendeeMatches) {
       await supabase.from("meeting_attendees").insert({
-        task_id: taskData.id, entity_type: m.entityType, entity_id: m.entityId,
+        task_id: taskData.id,
+        entity_type: m.entityType,
+        entity_id: m.entityId,
       } as any);
       await supabase.from("task_links").insert({
-        task_id: taskData.id, entity_type: m.entityType, entity_id: m.entityId,
+        task_id: taskData.id,
+        entity_type: m.entityType,
+        entity_id: m.entityId,
       } as any);
       matched++;
     }
@@ -263,9 +261,6 @@ async function syncMailbox(
   return { synced, matched, failed };
 }
 
-// Wraps the shared multi-column matcher (email / personal_email /
-// work_email) so calendar attendees still match a candidate or contact
-// even when they emailed in from a different address.
 async function matchByEmail(
   supabase: any,
   email: string,
