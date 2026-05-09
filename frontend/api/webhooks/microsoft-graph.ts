@@ -1,14 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../lib/inngest/client.js";
 
 /**
  * Vercel serverless function — Microsoft Graph webhook receiver.
  *
- * Pairs with the Trigger.dev `process-microsoft-event` task in
- * src/trigger/webhook-microsoft.ts. Microsoft requires a <3s response
- * to webhook calls or it disables the subscription, so this file does
- * the bare minimum (validation + queue) and the worker does the real
- * processing.
+ * Pairs with the Inngest `process-microsoft-event` function in
+ * `api/lib/inngest/functions/process-microsoft-event.ts`. Microsoft
+ * requires a <3s response to webhook calls or it disables the
+ * subscription, so this file does the bare minimum (validation + queue)
+ * and the worker does the real processing.
  *
  * Auth: Microsoft Graph echoes the `clientState` we set during
  * subscription creation back on every notification. Verify it matches
@@ -34,9 +34,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let queued = 0;
     let dropped = 0;
+    const events: Array<{ name: "webhooks/microsoft.received"; data: any }> = [];
+
     for (const notification of notifications) {
-      // clientState is the per-notification secret Microsoft sends. When
-      // we configured the subscription we set it to MICROSOFT_WEBHOOK_CLIENT_STATE.
       const got = String(notification?.clientState ?? "");
       if (expectedState) {
         if (got !== expectedState) {
@@ -46,15 +46,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             expectedPrefix: expectedState.slice(0, 6),
             subscription: notification?.subscriptionId,
           });
-          if (strict) { dropped++; continue; }
+          if (strict) {
+            dropped++;
+            continue;
+          }
         }
       }
-      await tasks.trigger("process-microsoft-event", {
-        notification,
-        receivedAt: new Date().toISOString(),
-        verified: !expectedState ? null : got === expectedState,
+      events.push({
+        name: "webhooks/microsoft.received",
+        data: {
+          notification,
+          receivedAt: new Date().toISOString(),
+          verified: !expectedState ? null : got === expectedState,
+        },
       });
       queued++;
+    }
+
+    if (events.length > 0) {
+      await inngest.send(events);
     }
 
     return res.status(202).json({ received: true, queued, dropped });

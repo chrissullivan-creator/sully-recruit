@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../lib/inngest/client.js";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 
@@ -8,8 +8,10 @@ import crypto from "node:crypto";
  *
  * Receives LinkedIn + Outlook events (Unipile webhook id
  * we_01kr07faywen98ywh3z8b52d5n is configured to listen to all 31
- * event types) and fires the `process-unipile-event` Trigger.dev task
- * for processing.
+ * event types) and fans the payload into Inngest via
+ * `webhooks/unipile.received`. The Inngest function in
+ * `api/lib/inngest/functions/process-unipile-event.ts` does the
+ * matching, logging, sentiment, and reply-stop work.
  *
  * Auth: shared "secret signature" Unipile sends in a header. Across
  * Unipile builds we've seen all of:
@@ -85,15 +87,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await tasks.trigger("process-unipile-event", {
-      body: req.body,
-      receivedAt: new Date().toISOString(),
-      verified,
+    await inngest.send({
+      name: "webhooks/unipile.received",
+      data: {
+        body: req.body,
+        receivedAt: new Date().toISOString(),
+        verified,
+      },
     });
     return res.status(200).json({ received: true, verified });
   } catch (err: any) {
     console.error("Unipile webhook error:", err.message);
-    // Always 200 so Unipile doesn't retry-storm. The trigger task is
+    // Always 200 so Unipile doesn't retry-storm. The Inngest event is
     // queued or the server is having a hiccup; either way, ack.
     return res.status(200).json({ received: true, error: "processing_queued" });
   }

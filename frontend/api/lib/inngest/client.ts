@@ -101,10 +101,70 @@ export type BackfillRcCallsRequested = {
   };
 };
 
+/**
+ * Inbound RingCentral webhook payload, fanned in by
+ * `api/webhooks/ringcentral.ts`. The Inngest handler at
+ * `api/lib/inngest/functions/process-ringcentral-event.ts` does the
+ * matching, logging, and chained transcription dispatch.
+ */
+export type WebhookRingcentralReceived = {
+  name: "webhooks/ringcentral.received";
+  data: {
+    body: any;
+    headers: Record<string, string | string[] | undefined>;
+    receivedAt: string;
+  };
+};
+
+/**
+ * Inbound Unipile webhook payload, fanned in by `api/webhooks/unipile.ts`.
+ * Handles LinkedIn messages, connection updates, and (Phase 3) Outlook
+ * email events.
+ */
+export type WebhookUnipileReceived = {
+  name: "webhooks/unipile.received";
+  data: {
+    body: {
+      event?: string;
+      type?: string;
+      data?: any;
+      message?: any;
+      conversation?: any;
+      connection?: any;
+    };
+    receivedAt: string;
+    verified?: boolean;
+  };
+};
+
+/**
+ * Inbound Microsoft Graph webhook notification (one per `value[]` entry,
+ * fanned out by `api/webhooks/microsoft-graph.ts`). Drives email +
+ * calendar handling for the emeraldrecruit.com tenant.
+ */
+export type WebhookMicrosoftReceived = {
+  name: "webhooks/microsoft.received";
+  data: {
+    notification: {
+      subscriptionId?: string;
+      changeType?: string;
+      resource?: string;
+      resourceData?: any;
+      clientState?: string;
+      tenantId?: string;
+    };
+    receivedAt: string;
+    verified?: boolean | null;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
   | SequenceActionExecuteRequested
   | SequenceEnrollmentInitRequested
   | CallTranscribeRequested
-  | BackfillRcCallsRequested;
+  | BackfillRcCallsRequested
+  | WebhookRingcentralReceived
+  | WebhookUnipileReceived
+  | WebhookMicrosoftReceived;

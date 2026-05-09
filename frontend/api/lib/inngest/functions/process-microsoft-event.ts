@@ -1,11 +1,33 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials, getAnthropicKey, getAppSetting } from "./lib/supabase";
-import { generateJoeSays } from "./generate-joe-says";
-import { extractMessageIntel, applyExtractedIntel } from "./lib/intel-extraction";
-import { stopEnrollment } from "./sequence-scheduler";
-import { resumeIngestion } from "./resume-ingestion";
-import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
+import { inngest } from "../client.js";
+import {
+  getSupabaseAdmin,
+  getMicrosoftGraphCredentials,
+  getAppSetting,
+} from "../../../../src/trigger/lib/supabase.js";
+import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
+import {
+  extractMessageIntel,
+  applyExtractedIntel,
+} from "../../../../src/trigger/lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
+import { resumeIngestion } from "../../../../src/trigger/resume-ingestion.js";
+import {
+  matchPersonByEmail,
+  classifyEmail,
+} from "../../../../src/trigger/lib/match-person-by-email.js";
 
+/**
+ * Process Microsoft Graph notifications (email, calendar events).
+ * Tenant: emeraldrecruit.com (Chris, Nancy, Ashley).
+ *
+ * Ported from `src/trigger/webhook-microsoft.ts`. The API route at
+ * `api/webhooks/microsoft-graph.ts` now sends `webhooks/microsoft.received`
+ * and Inngest drives the work. `generateJoeSays.trigger(...)` and
+ * `resumeIngestion.trigger(...)` still route via Trigger.dev (will
+ * switch when those tasks are ported).
+ *
+ * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ */
 interface MicrosoftWebhookPayload {
   notification: {
     subscriptionId?: string;
@@ -18,15 +40,15 @@ interface MicrosoftWebhookPayload {
   receivedAt: string;
 }
 
-/**
- * Process Microsoft Graph notifications (email, calendar events).
- * Tenant: emeraldrecruit.com (Chris, Nancy, Ashley).
- * Matches sender email to candidates/contacts and logs activity.
- */
-export const processMicrosoftEvent = task({
-  id: "process-microsoft-event",
-  retry: { maxAttempts: 3 },
-  run: async (payload: MicrosoftWebhookPayload) => {
+export const processMicrosoftEvent = inngest.createFunction(
+  {
+    id: "process-microsoft-event",
+    name: "Process inbound Microsoft Graph webhook (Inngest)",
+    retries: 3,
+  },
+  { event: "webhooks/microsoft.received" },
+  async ({ event, logger }) => {
+    const payload = event.data as MicrosoftWebhookPayload;
     const supabase = getSupabaseAdmin();
     const { notification } = payload;
 
@@ -35,26 +57,21 @@ export const processMicrosoftEvent = task({
       resource: notification.resource,
     });
 
-    // Verify client state if present (set during Graph subscription creation)
-    // The client state is embedded in the subscription, not a separate secret
     if (notification.clientState) {
       logger.info("Notification client state present", { clientState: notification.clientState });
     }
 
-    // Get access token for the emeraldrecruit.com tenant
-    const accessToken = await getMicrosoftAccessToken();
+    const accessToken = await getMicrosoftAccessToken(logger);
     if (!accessToken) {
       throw new Error("Could not obtain Microsoft Graph access token");
     }
 
-    // Fetch the full resource from Graph API
     const resourceUrl = `https://graph.microsoft.com/v1.0/${notification.resource}`;
     const resourceResp = await fetch(resourceUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     if (!resourceResp.ok) {
-      // 404 = resource deleted or no longer available — skip silently
       if (resourceResp.status === 404) {
         logger.info("Resource not found (likely deleted)", { resource: notification.resource });
         return { action: "skipped", reason: "resource_not_found" };
@@ -68,33 +85,29 @@ export const processMicrosoftEvent = task({
 
     const resourceData = await resourceResp.json();
 
-    // Route based on resource type
     if (notification.resource?.includes("/messages")) {
-      return await processEmailMessage(supabase, resourceData, payload.receivedAt, resourceUrl, accessToken);
+      return await processEmailMessage(supabase, resourceData, payload.receivedAt, resourceUrl, accessToken, logger);
     }
 
     if (notification.resource?.includes("/events")) {
-      return await processCalendarEvent(supabase, resourceData, payload.receivedAt);
+      return await processCalendarEvent(supabase, resourceData, payload.receivedAt, logger);
     }
 
     logger.info("Unhandled resource type", { resource: notification.resource });
     return { action: "skipped", reason: "unhandled_resource_type" };
   },
-});
+);
 
 const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB — skip anything larger
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
-/**
- * Fetch file attachments for a Graph message, upload them to Supabase Storage,
- * and return the metadata array to be persisted on the message row.
- */
 async function fetchAndUploadAttachments(
   supabase: any,
   resourceUrl: string,
   accessToken: string,
   conversationId: string,
   externalId: string,
+  logger: any,
 ): Promise<Array<{ name: string; storage_path: string; mime_type: string | null; size: number | null }>> {
   let attachments: any[];
   try {
@@ -115,7 +128,6 @@ async function fetchAndUploadAttachments(
   const result: Array<{ name: string; storage_path: string; mime_type: string | null; size: number | null }> = [];
 
   for (const att of attachments) {
-    // Only handle file attachments (not item-attachments / reference-attachments)
     if (att["@odata.type"] !== "#microsoft.graph.fileAttachment") continue;
     if (!att.contentBytes || !att.name) continue;
     if (att.size && att.size > MAX_ATTACHMENT_BYTES) {
@@ -123,10 +135,8 @@ async function fetchAndUploadAttachments(
       continue;
     }
 
-    // Decode base64 → Buffer (Node.js Buffer satisfies Uint8Array so Supabase Storage accepts it)
     const fileBuffer = Buffer.from(att.contentBytes as string, "base64");
 
-    // Build a deterministic, safe storage path
     const safeName = (att.name as string).replace(/[^a-zA-Z0-9._-]/g, "_");
     const safeExtId = (externalId || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
     const storagePath = `inbound/${conversationId}/${safeExtId}/${safeName}`;
@@ -155,16 +165,9 @@ async function fetchAndUploadAttachments(
   return result;
 }
 
-// Extensions we treat as resume payloads on inbound to the resumes inbox.
 const RESUME_FILE_EXTS = [".pdf", ".doc", ".docx"];
 const RESUMES_BUCKET = "resumes";
 
-/**
- * Read the configured resumes-inbox email(s) from app_settings. The setting
- * value is one address or a comma-separated list (lowercased on read).
- * Returns null if the setting isn't configured — callers should treat that
- * as "feature disabled".
- */
 async function getResumesInboxEmails(): Promise<Set<string> | null> {
   try {
     const raw = await getAppSetting("RESUMES_INBOX_EMAIL");
@@ -174,21 +177,10 @@ async function getResumesInboxEmails(): Promise<Set<string> | null> {
     );
     return set.size > 0 ? set : null;
   } catch {
-    // Setting absent — feature off.
     return null;
   }
 }
 
-/**
- * If this email was sent to the dedicated resumes inbox, treat each
- * PDF/DOC/DOCX attachment as a candidate resume: create a stub `people`
- * row, drop the file into the resumes bucket, and queue resume-ingestion
- * which fills in name/title/company/email/phone via the AI parser.
- *
- * Idempotent on (sender_email, attachment_name): we don't re-create a
- * candidate if one already exists for that email + the same filename has
- * already been ingested.
- */
 async function processResumesInboxEmail(
   supabase: any,
   message: any,
@@ -196,12 +188,9 @@ async function processResumesInboxEmail(
   accessToken: string,
   senderEmail: string,
   recipientEmail: string,
+  logger: any,
 ): Promise<{ created: number; skipped: number }> {
-  // Idempotency anchor: the Graph message id (or internetMessageId) lets
-  // us recognise a webhook redelivery and skip duplicate processing.
-  const sourceMessageId: string | null =
-    message.id || message.internetMessageId || null;
-  // Pull attachments from Graph
+  const sourceMessageId: string | null = message.id || message.internetMessageId || null;
   let attachments: any[] = [];
   try {
     const resp = await fetch(`${resourceUrl}/attachments`, {
@@ -228,17 +217,6 @@ async function processResumesInboxEmail(
 
   if (resumeAtts.length === 0) return { created: 0, skipped: 0 };
 
-  // Resumes inbox: the sender is almost always one of our recruiters
-  // forwarding from Outlook — not the candidate. Two paths:
-  //
-  //   - Forward (sender is a profiles row): create a blank stub owned
-  //     by the forwarder. resume-ingestion will redirect or fill the
-  //     stub once parsed_json surfaces the candidate's real identity.
-  //
-  //   - Direct send (sender is NOT in profiles): the sender IS the
-  //     candidate. Match across all three email columns and reuse;
-  //     otherwise create a stub with their email routed to
-  //     personal/work via classifyEmail.
   const senderDisplay = (message.from?.emailAddress?.name as string) || "";
   const lowerSender = senderEmail.toLowerCase();
 
@@ -269,7 +247,8 @@ async function processResumesInboxEmail(
       .single();
     if (createErr || !created?.id) {
       logger.error("Resumes inbox: failed to create forwarded stub", {
-        senderEmail, error: createErr?.message,
+        senderEmail,
+        error: createErr?.message,
       });
       return { created: 0, skipped: 0 };
     }
@@ -299,7 +278,8 @@ async function processResumesInboxEmail(
         .single();
       if (createErr || !created?.id) {
         logger.error("Resumes inbox: failed to create candidate stub", {
-          senderEmail, error: createErr?.message,
+          senderEmail,
+          error: createErr?.message,
         });
         return { created: 0, skipped: 0 };
       }
@@ -313,9 +293,6 @@ async function processResumesInboxEmail(
   for (const att of resumeAtts) {
     const fileName = att.name as string;
 
-    // Dedup: the same (source_message_id, file_name) was already ingested
-    // on a prior delivery — skip cleanly. This makes webhook redeliveries
-    // free; without it we'd duplicate-parse and double-queue.
     if (sourceMessageId) {
       const { data: existingResume } = await supabase
         .from("resumes")
@@ -333,7 +310,6 @@ async function processResumesInboxEmail(
     const storagePath = `inbox/${candidateId}/${Date.now()}_${safeName}`;
     const buffer = Buffer.from(att.contentBytes as string, "base64");
 
-    // Upload to the resumes/ bucket where resume-ingestion expects files.
     const { error: upErr } = await supabase.storage
       .from(RESUMES_BUCKET)
       .upload(storagePath, buffer, {
@@ -346,9 +322,6 @@ async function processResumesInboxEmail(
       continue;
     }
 
-    // Create resumes row. The (source_message_id, file_name) unique index
-    // is the dedup safety net — a redelivery race that wins the read but
-    // loses the insert lands here as a 23505 conflict, which we swallow.
     const { data: resumeRow, error: resErr } = await supabase
       .from("resumes")
       .insert({
@@ -362,16 +335,12 @@ async function processResumesInboxEmail(
       .select("id")
       .single();
     if (resErr || !resumeRow?.id) {
-      // Postgres unique_violation = a concurrent webhook delivery won.
-      // Quietly skip; the other branch will queue the parse.
       if ((resErr as any)?.code === "23505") {
         skipped++;
       } else {
         logger.warn("Resumes inbox: resumes row insert failed", { fileName, error: resErr?.message });
         skipped++;
       }
-      // Best-effort cleanup of the orphaned upload so storage doesn't
-      // accumulate duplicates from the loser branch.
       await supabase.storage.from(RESUMES_BUCKET).remove([storagePath]);
       continue;
     }
@@ -395,27 +364,20 @@ async function processEmailMessage(
   receivedAt: string,
   resourceUrl: string,
   accessToken: string,
+  logger: any,
 ) {
   const senderEmail = message.from?.emailAddress?.address?.toLowerCase();
   if (!senderEmail) {
     return { action: "skipped", reason: "no_sender_email" };
   }
 
-  // Hard-bounce / Non-Delivery Report (NDR) detection. When the receiving
-  // mailbox surfaces a bounce we mark the failed recipient's email as
-  // invalid on `people` and stop any active sequence enrollments for them
-  // — instead of treating the NDR as a genuine reply (which the universal
-  // stop rule would otherwise do).
-  const bounce = await maybeHandleBounce(supabase, message, senderEmail);
+  const bounce = await maybeHandleBounce(supabase, message, senderEmail, logger);
   if (bounce) {
     return { action: "bounce_handled", recipient: bounce.failedRecipient, reason: bounce.reason };
   }
 
-  // When mail is forwarded by Cloudflare Email Routing (or any other
-  // SRS-style forwarder) the visible From: can be rewritten to a
-  // forwarder-owned address. The real candidate email is preserved in
-  // Reply-To. Prefer Reply-To when the From: is from a known forwarder
-  // domain so we still match/create the right candidate.
+  // Cloudflare Email Routing rewrites From: to a forwarder address —
+  // prefer Reply-To when available so we still match the real sender.
   const FORWARDER_DOMAINS = ["cloudflareemail.com", "cloudflarenet.com"];
   const isFromForwarder = FORWARDER_DOMAINS.some((d) => senderEmail.endsWith("@" + d));
   let effectiveSender = senderEmail;
@@ -427,22 +389,12 @@ async function processEmailMessage(
     }
   }
 
-  // Resumes-inbox short-circuit: if the recipient is configured as a
-  // resumes drop-box, treat each PDF/DOCX attachment as an inbound resume
-  // and fan it out to the parser. Runs alongside (not instead of) normal
-  // sender-matching: a known candidate emailing in still gets the message
-  // logged AND their resume parsed.
-  //
-  // We check both `toRecipients` (direct send) and original `To:` from
-  // `internetMessageHeaders` (so a mail forwarded into a monitored
-  // mailbox still trips the resumes-inbox rule on the *original* address).
   const toRecipients: string[] = (message.toRecipients || [])
     .map((r: any) => r?.emailAddress?.address?.toLowerCase())
     .filter(Boolean);
   const headerToValues: string[] = (message.internetMessageHeaders || [])
     .filter((h: any) => typeof h?.name === "string" && /^to$/i.test(h.name))
     .map((h: any) => String(h.value || "").toLowerCase());
-  // header `To:` lines look like `Name <addr@x>, addr2@y` — extract emails.
   const headerEmails = headerToValues.flatMap((line) =>
     Array.from(line.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]+/g)).map((m) => m[0].toLowerCase()),
   );
@@ -454,12 +406,18 @@ async function processEmailMessage(
     : null;
   if (matchedInbox) {
     await processResumesInboxEmail(
-      supabase, message, resourceUrl, accessToken, effectiveSender, matchedInbox,
+      supabase,
+      message,
+      resourceUrl,
+      accessToken,
+      effectiveSender,
+      matchedInbox,
+      logger,
     );
-    // Continue on — we still want to log the email + match sender below.
   }
 
-  // ── Bounce / NDR detection ──────────────────────────────────────
+  // Legacy bounce-by-subject path (kept for safety; maybeHandleBounce
+  // covers the modern cases above).
   const subject = (message.subject || "").toLowerCase();
   const isBounce =
     subject.startsWith("undeliverable") ||
@@ -470,11 +428,9 @@ async function processEmailMessage(
     senderEmail.includes("mailer-daemon");
 
   if (isBounce) {
-    // Extract the bounced email from the body
     const bodyText = (message.body?.content || message.bodyPreview || "");
     const emailPattern = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
     const foundEmails = bodyText.match(emailPattern) || [];
-    // Filter out our own domain and system addresses
     const bouncedEmail = foundEmails.find(
       (e: string) =>
         !e.toLowerCase().includes("emeraldrecruit") &&
@@ -483,10 +439,8 @@ async function processEmailMessage(
     )?.toLowerCase();
 
     if (bouncedEmail) {
-      // Find the contact/candidate with this email
       const match = await matchByEmail(supabase, bouncedEmail);
       if (match) {
-        // Stop any active sequence enrollments for this entity
         const { data: enrollments } = await supabase
           .from("sequence_enrollments")
           .select("id")
@@ -504,9 +458,6 @@ async function processEmailMessage(
             } as any)
             .eq("id", enrollment.id);
 
-          // sequence_step_executions was the v1 table; dropped in v2
-          // schema. Only sequence_step_logs is live now — mark any
-          // pending sends as cancelled when we detect a bounce.
           await supabase
             .from("sequence_step_logs")
             .update({ status: "cancelled" } as any)
@@ -527,7 +478,6 @@ async function processEmailMessage(
     return { action: "skipped", reason: "bounce_no_match" };
   }
 
-  // Match sender to candidate or contact
   const match = await matchByEmail(supabase, senderEmail);
 
   if (!match) {
@@ -535,7 +485,6 @@ async function processEmailMessage(
     return { action: "no_match", email: senderEmail };
   }
 
-  // Check for duplicate message (by external ID)
   const externalId = message.id || message.internetMessageId;
   if (externalId) {
     const { data: existing } = await supabase
@@ -548,7 +497,6 @@ async function processEmailMessage(
     }
   }
 
-  // Determine or create conversation
   const conversationId = `graph_${match.entityId}`;
   const { data: existingConv } = await supabase
     .from("conversations")
@@ -565,12 +513,10 @@ async function processEmailMessage(
     } as any);
   }
 
-  // Fetch and upload inbound file attachments (best-effort — never blocks message logging)
   const attachmentsForDb = message.hasAttachments
-    ? await fetchAndUploadAttachments(supabase, resourceUrl, accessToken, conversationId, externalId || "")
+    ? await fetchAndUploadAttachments(supabase, resourceUrl, accessToken, conversationId, externalId || "", logger)
     : [];
 
-  // Insert message
   await supabase.from("messages").insert({
     conversation_id: conversationId,
     [match.entityColumn]: match.entityId,
@@ -587,7 +533,6 @@ async function processEmailMessage(
     attachments: attachmentsForDb,
   } as any);
 
-  // Update conversation
   await supabase
     .from("conversations")
     .update({
@@ -597,7 +542,6 @@ async function processEmailMessage(
     })
     .eq("id", conversationId);
 
-  // Update entity timestamps
   const table = match.entityType === "candidate" ? "candidates" : "contacts";
   await supabase
     .from(table)
@@ -607,12 +551,10 @@ async function processEmailMessage(
     } as any)
     .eq("id", match.entityId);
 
-  // Extract intelligence from inbound email (sentiment + comp, motivation, location, etc.)
   const emailBody = message.body?.content || message.bodyPreview || "";
   if (emailBody.length > 10) {
     const intel = await extractMessageIntel(emailBody, message.subject);
     if (intel) {
-      // Find active enrollment for this entity (if any)
       const { data: enrollment } = await supabase
         .from("sequence_enrollments")
         .select("id")
@@ -623,13 +565,16 @@ async function processEmailMessage(
         .maybeSingle();
 
       await applyExtractedIntel(
-        supabase, match.entityId, match.entityType as "candidate" | "contact",
-        intel, "email", enrollment?.id,
+        supabase,
+        match.entityId,
+        match.entityType as "candidate" | "contact",
+        intel,
+        "email",
+        enrollment?.id,
       );
     }
   }
 
-  // V2: Universal stop rule — any email reply stops active enrollments
   const { data: activeEnrollments } = await supabase
     .from("sequence_enrollments")
     .select("*, sequences!inner(*)")
@@ -648,7 +593,6 @@ async function processEmailMessage(
 
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
 
-  // Chain-trigger Joe Says refresh
   await generateJoeSays.trigger({
     entityId: match.entityId,
     entityType: match.entityType as "candidate" | "contact",
@@ -657,8 +601,7 @@ async function processEmailMessage(
   return { action: "logged", entityId: match.entityId, type: "email" };
 }
 
-async function processCalendarEvent(supabase: any, event: any, receivedAt: string) {
-  // Extract attendee emails and try to match
+async function processCalendarEvent(supabase: any, event: any, receivedAt: string, logger: any) {
   const attendees = event.attendees || [];
   const matches: { entityId: string; entityType: string; entityColumn: string; email: string }[] = [];
 
@@ -674,7 +617,6 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     return { action: "no_match", reason: "no_matching_attendees" };
   }
 
-  // Dedup by event ID to avoid duplicate tasks on updates
   const externalEventId = event.id || event.iCalUId;
   if (externalEventId) {
     const { data: existing } = await supabase
@@ -687,15 +629,13 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     }
   }
 
-  // Build meeting metadata
   const startDt = event.start?.dateTime || "";
   const endDt = event.end?.dateTime || "";
   const dateOnly = startDt ? startDt.slice(0, 10) : null;
   const locationText = event.location?.displayName || "";
   const meetingUrl = event.onlineMeetingUrl || event.onlineMeeting?.joinUrl || "";
-  const attendeeNames = matches.map(m => m.email).join(", ");
+  const attendeeNames = matches.map((m) => m.email).join(", ");
 
-  // Create a single meeting task for this event
   const { data: taskData, error: taskErr } = await supabase
     .from("tasks")
     .insert({
@@ -720,7 +660,6 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     return { action: "error", reason: "task_insert_failed" };
   }
 
-  // Link all matched people as meeting_attendees AND task_links
   for (const match of matches) {
     await supabase.from("meeting_attendees").insert({
       task_id: taskData.id,
@@ -734,7 +673,6 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
       entity_id: match.entityId,
     } as any);
 
-    // Calendar booking stops active enrollments for each matched entity
     const { data: activeEnrollments } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -781,12 +719,12 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
   logger.info("Calendar event processed — single meeting with attendees", {
     taskId: taskData.id,
     matchCount: matches.length,
-    attendees: matches.map(m => m.email),
+    attendees: matches.map((m) => m.email),
   });
   return { action: "logged", type: "calendar", taskId: taskData.id, matchCount: matches.length };
 }
 
-async function getMicrosoftAccessToken(): Promise<string | null> {
+async function getMicrosoftAccessToken(logger: any): Promise<string | null> {
   try {
     const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
@@ -815,8 +753,6 @@ async function getMicrosoftAccessToken(): Promise<string | null> {
   }
 }
 
-// Routes inbound senders + meeting attendees to a person via the
-// shared matcher (email / personal_email / work_email).
 async function matchByEmail(
   supabase: any,
   email: string,
@@ -827,50 +763,21 @@ async function matchByEmail(
     : null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HARD-BOUNCE / NDR HANDLING
-//
-// Microsoft surfaces undeliverable-mail reports as inbound emails from
-// `postmaster@<tenant>` (sometimes mailer-daemon@). The body has the
-// Final-Recipient + diagnostic. We detect the pattern, extract the
-// failed address, and:
-//   1. mark `people.email_invalid = true` (skip future email steps)
-//   2. stop any active enrollments for that person
-//
-// Non-fatal: detection or extraction failure falls through and the
-// message is processed as a normal inbound (which is mostly fine — at
-// worst the universal-stop rule fires which is the existing behaviour
-// anyway).
-// ─────────────────────────────────────────────────────────────────────────────
-
 const BOUNCE_SENDER_RE = /^(postmaster|mailer-?daemon|mail\.?daemon)@/i;
 const BOUNCE_SUBJECT_RE = /undeliverable|delivery (status|has|failure)|delivery has failed|returned mail|mail delivery (subsystem|failed)/i;
 
 function extractFailedRecipient(body: string): string | null {
-  // Multiple shapes — try them in order.
-  // 1. "Final-Recipient: rfc822;<email>" (RFC 3464 standard)
   const final = body.match(/Final-Recipient[^\n]*?(?:rfc822;\s*)?([\w.+-]+@[\w.-]+)/i);
   if (final?.[1]) return final[1].toLowerCase();
-  // 2. Plain "<email> ... could not be delivered"
   const plain = body.match(/<([\w.+-]+@[\w.-]+)>[^\n]{0,200}?(?:not be delivered|undeliverable|address not found|user (?:unknown|not found)|550 5\.\d)/i);
   if (plain?.[1]) return plain[1].toLowerCase();
-  // 3. "Recipient address rejected: <email>"
   const reject = body.match(/[Rr]ecipient(?: address)?[^\n]{0,40}(?:rejected|unknown)[^\n]*?([\w.+-]+@[\w.-]+)/);
   if (reject?.[1]) return reject[1].toLowerCase();
-  // 4. Last-resort: the only non-postmaster email in the body.
   const all = Array.from(body.matchAll(/([\w.+-]+@[\w.-]+)/g)).map((m) => m[1].toLowerCase());
   const candidate = all.find((e) => !/^(postmaster|mailer-?daemon|noreply|no-reply)@/i.test(e));
   return candidate ?? null;
 }
 
-/**
- * Fallback when the body has been scrubbed (e.g. JPMorgan's NDRs
- * replace the email address with "..." everywhere). The bounce
- * subject is conventionally "Undeliverable: <original subject>" or
- * "Returned mail: <original subject>" — strip the prefix and look
- * up our most recent outbound message with that subject. The
- * recipient_address on that row is the failed recipient.
- */
 async function extractFailedRecipientFromOriginalSubject(
   supabase: any,
   bounceSubject: string,
@@ -895,22 +802,17 @@ async function maybeHandleBounce(
   supabase: any,
   message: any,
   senderEmail: string,
+  logger: any,
 ): Promise<{ failedRecipient: string; reason: string } | null> {
   const subject = (message.subject || "").trim();
   const body = (message.body?.content || message.bodyPreview || "").toString();
 
   const senderMatches = BOUNCE_SENDER_RE.test(senderEmail);
   const subjectMatches = BOUNCE_SUBJECT_RE.test(subject);
-  // Need at least one strong + one weak signal. A postmaster sender
-  // alone is enough; otherwise require subject match too.
   if (!senderMatches && !subjectMatches) return null;
 
   let failedRecipient = extractFailedRecipient(body);
   if (!failedRecipient) {
-    // Some NDRs (e.g. JPMorgan) scrub the email out of the body —
-    // the failed address gets replaced with "..." everywhere. Fall
-    // back to looking up our most recent outbound message with the
-    // subject the bounce is wrapped around ("Undeliverable: <subj>").
     failedRecipient = await extractFailedRecipientFromOriginalSubject(supabase, subject);
   }
   if (!failedRecipient) {
@@ -918,8 +820,6 @@ async function maybeHandleBounce(
     return null;
   }
 
-  // Find the candidate / contact by ANY of their stored emails so a
-  // bounce on someone's work address still flags their record.
   const bouncedMatch = await matchPersonByEmail(supabase, failedRecipient);
   const cand = bouncedMatch?.entityType !== "contact"
     ? (bouncedMatch ? { id: bouncedMatch.entityId } : null)
@@ -941,7 +841,6 @@ async function maybeHandleBounce(
       } as any)
       .eq("id", cand.id);
 
-    // Stop active sequence enrollments for this person.
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -952,9 +851,6 @@ async function maybeHandleBounce(
     }
     logger.info("Bounce handled", { failedRecipient, candidateId: cand.id, stopped: (enrollments ?? []).length });
   } else if (cont?.id) {
-    // Contact: contacts is a view; the underlying column lives on
-    // people-as-client rows. The view's INSTEAD OF UPDATE trigger
-    // should let this through.
     await supabase
       .from("contacts")
       .update({

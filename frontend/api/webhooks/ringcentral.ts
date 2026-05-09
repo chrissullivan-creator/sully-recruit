@@ -1,9 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { inngest } from "../lib/inngest/client.js";
 
 /**
- * Vercel serverless function — RingCentral webhook receiver.
- * Handles validation challenge and fires Trigger.dev task for real events.
+ * Vercel serverless function — RingCentral webhook receiver. Handles
+ * the validation challenge and fans the real event into Inngest via
+ * `webhooks/ringcentral.received`. The Inngest function in
+ * `api/lib/inngest/functions/process-ringcentral-event.ts` does the
+ * matching, logging, and chained transcription dispatch.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // RingCentral sends a validation token on subscription setup
@@ -16,11 +19,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Verify the request is from RingCentral. When the env var is set we
-  // REQUIRE the verification-token header to match — the previous "only
-  // check when both are present" gate let pre-rotation subscriptions
-  // bypass auth indefinitely. Set RINGCENTRAL_WEBHOOK_STRICT=false (env)
-  // during a subscription rotation if you need to temporarily fall
-  // through to log-and-accept.
+  // REQUIRE the verification-token header to match. Set
+  // RINGCENTRAL_WEBHOOK_STRICT=false during a subscription rotation to
+  // temporarily fall through to log-and-accept.
   const expectedToken = process.env.RINGCENTRAL_WEBHOOK_TOKEN;
   const strict = (process.env.RINGCENTRAL_WEBHOOK_STRICT ?? "true").toLowerCase() !== "false";
   const incomingToken = req.headers["verification-token"];
@@ -38,13 +39,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Fire-and-forget: trigger the processing task
-    await tasks.trigger("process-ringcentral-event", {
-      body: req.body,
-      headers: {
-        "validation-token": req.headers["validation-token"],
+    await inngest.send({
+      name: "webhooks/ringcentral.received",
+      data: {
+        body: req.body,
+        headers: {
+          "validation-token": req.headers["validation-token"],
+        },
+        receivedAt: new Date().toISOString(),
       },
-      receivedAt: new Date().toISOString(),
     });
 
     return res.status(200).json({ received: true });
