@@ -1,21 +1,28 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getMicrosoftGraphCredentials } from "./lib/supabase";
+import { inngest } from "../client.js";
+import {
+  getSupabaseAdmin,
+  getMicrosoftGraphCredentials,
+} from "../../../../src/trigger/lib/supabase.js";
 
 const WEBHOOK_BASE_URL = "https://www.sullyrecruit.app";
 
 /**
- * Scheduled task: renew Microsoft Graph and RingCentral webhook subscriptions.
+ * Renew Microsoft Graph + RingCentral webhook subscriptions before they
+ * expire. Graph subs cap at 3 days, RC at 7 — daily renewal keeps both
+ * comfortably alive.
  *
- * Graph subscriptions expire every 3 days max, RC every 7 days.
- * This runs daily to keep them alive.
+ * On RC, if no active subscription is found, this also creates one
+ * pointing at /api/webhooks/ringcentral so a fresh tenant doesn't need
+ * a manual setup step.
  *
- * Schedule in Trigger.dev Dashboard:
- *   Task: renew-webhook-subscriptions
- *   Cron: 0 6 * * * (daily at 6 AM UTC)
+ * Daily at 06:00 UTC. Ported from
+ * `src/trigger/webhook-subscription-renewal.ts` — Inngest is the only
+ * scheduler now.
  */
-export const renewWebhookSubscriptions = schedules.task({
-  id: "renew-webhook-subscriptions",
-  run: async () => {
+export const renewWebhookSubscriptions = inngest.createFunction(
+  { id: "renew-webhook-subscriptions", name: "Renew Graph + RingCentral webhook subscriptions (Inngest)" },
+  { cron: "0 6 * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const results: { service: string; user: string; status: string; error?: string }[] = [];
 
@@ -40,7 +47,6 @@ export const renewWebhookSubscriptions = schedules.task({
       if (!tokenResp.ok) throw new Error(`Token error: ${await tokenResp.text()}`);
       const { access_token } = await tokenResp.json();
 
-      // List all existing subscriptions
       const listResp = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
         headers: { Authorization: `Bearer ${access_token}` },
       });
@@ -107,12 +113,16 @@ export const renewWebhookSubscriptions = schedules.task({
         const jwt = integration.rc_jwt;
 
         if (!clientId || !clientSecret || !jwt) {
-          results.push({ service: "ringcentral", user: userLabel, status: "error", error: "Missing rc_client_id/secret or rc_jwt" });
+          results.push({
+            service: "ringcentral",
+            user: userLabel,
+            status: "error",
+            error: "Missing rc_client_id/secret or rc_jwt",
+          });
           continue;
         }
 
         try {
-          // Authenticate
           const authResp = await fetch(`${serverUrl}/restapi/oauth/token`, {
             method: "POST",
             headers: {
@@ -126,13 +136,17 @@ export const renewWebhookSubscriptions = schedules.task({
           });
 
           if (!authResp.ok) {
-            results.push({ service: "ringcentral", user: userLabel, status: "error", error: `Auth failed: ${await authResp.text()}` });
+            results.push({
+              service: "ringcentral",
+              user: userLabel,
+              status: "error",
+              error: `Auth failed: ${await authResp.text()}`,
+            });
             continue;
           }
 
           const { access_token } = await authResp.json();
 
-          // List subscriptions
           const listResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
             headers: { Authorization: `Bearer ${access_token}` },
           });
@@ -164,11 +178,10 @@ export const renewWebhookSubscriptions = schedules.task({
               logger.info("Renewed RingCentral subscription", { userId, subId: ourSub.id });
               continue;
             }
-            // Fall through to create on renew failure
             logger.warn("RC renew failed, creating new subscription", { userId, status: renewResp.status });
           }
 
-          // No (active) subscription found — create one
+          // No active subscription found — create one
           const deliveryMode: Record<string, string> = {
             transportType: "WebHook",
             address: `${WEBHOOK_BASE_URL}/api/webhooks/ringcentral`,
@@ -211,4 +224,4 @@ export const renewWebhookSubscriptions = schedules.task({
     logger.info("Webhook subscription renewal complete", { results });
     return { results };
   },
-});
+);

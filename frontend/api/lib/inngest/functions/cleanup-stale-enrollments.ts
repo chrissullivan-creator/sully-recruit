@@ -1,28 +1,27 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 
 /**
- * Scheduled task: clean up stale enrollments.
+ * Daily cleanup pass over `sequence_enrollments`:
+ *   - Expire enrollments waiting for LinkedIn connection acceptance for
+ *     30+ days (UI shows them as "active" forever otherwise).
+ *   - Stop enrollments with no activity in 60 days.
+ *   - Mark sent linkedin_connection step_logs older than 30d as expired
+ *     so the LinkedIn account's outbound-invite slot frees up.
  *
- * Expires enrollments that have been waiting for LinkedIn connection
- * acceptance for 30+ days, and stops enrollments with no activity
- * for 60+ days.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: cleanup-stale-enrollments
- *   Cron: 0 5 * * * (daily at 5 AM UTC)
+ * Ported from `src/trigger/cleanup-stale-enrollments.ts`. Inngest is
+ * the only scheduler now.
  */
-export const cleanupStaleEnrollments = schedules.task({
-  id: "cleanup-stale-enrollments",
-  maxDuration: 120,
-  run: async () => {
+export const cleanupStaleEnrollments = inngest.createFunction(
+  { id: "cleanup-stale-enrollments", name: "Cleanup stale sequence enrollments (Inngest)" },
+  { cron: "0 5 * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const now = new Date();
 
     let connectionExpired = 0;
     let inactiveExpired = 0;
 
-    // 1. Expire enrollments waiting for connection acceptance > 30 days
     const connectionCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: staleConnections, error: connErr } = await supabase
@@ -49,7 +48,6 @@ export const cleanupStaleEnrollments = schedules.task({
         } as any)
         .in("id", ids);
 
-      // Also cancel any pending v2 step logs for these enrollments
       await supabase
         .from("sequence_step_logs")
         .update({ status: "cancelled" } as any)
@@ -64,7 +62,6 @@ export const cleanupStaleEnrollments = schedules.task({
       }
     }
 
-    // 2. Stop enrollments with no activity for 60+ days
     const inactiveCutoff = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: inactive, error: inactiveErr } = await supabase
@@ -88,7 +85,6 @@ export const cleanupStaleEnrollments = schedules.task({
         } as any)
         .in("id", ids);
 
-      // Also cancel any pending v2 step logs for these enrollments
       await supabase
         .from("sequence_step_logs")
         .update({ status: "cancelled" } as any)
@@ -103,10 +99,8 @@ export const cleanupStaleEnrollments = schedules.task({
       }
     }
 
-    // 3. Cancel stale outbound LinkedIn connection requests (30+ days)
-    // These clutter the LinkedIn account and waste connection slots.
-    // sequence_step_executions was the v1 table — dropped in the v2
-    // schema migration; only sequence_step_logs is live now.
+    // Cancel stale outbound LinkedIn connection requests (30+ days). They
+    // clutter the LinkedIn account and waste connection slots.
     const { data: staleInvitesV2 } = await supabase
       .from("sequence_step_logs")
       .select("id")
@@ -128,4 +122,4 @@ export const cleanupStaleEnrollments = schedules.task({
     logger.info("Stale enrollment cleanup complete", summary);
     return summary;
   },
-});
+);

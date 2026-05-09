@@ -1,36 +1,24 @@
-import { task, schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { unipileFetch, canonicalChannel } from "./lib/unipile-v2";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { unipileFetch, canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
 
 /**
- * One-off (idempotent) reclassify pass: re-pull every LinkedIn
- * conversation from Unipile v2 to read its real `content_type` +
- * `folder`, then re-stamp `conversations.channel`, `messages.channel`
- * and `conversations.content_type`.
+ * Re-pull every LinkedIn conversation from Unipile v2 to read its real
+ * `content_type` + `folder`, then re-stamp `conversations.channel`,
+ * `messages.channel` and `conversations.content_type`.
  *
- * Why: the webhook never persisted these signals before today, so
- * historical rows for Chris/Nancy are split between "linkedin" and
- * "linkedin_recruiter" by inference (subject heuristic, account_type
- * fallback) — neither of which is reliable. The Unipile chat
- * object's `content_type='inmail'` and `folder` array are the
- * canonical InMail markers per the unipile-node-sdk types.
+ * Why: webhooks didn't always persist these signals, so historical rows
+ * are split between "linkedin" and "linkedin_recruiter" by inference
+ * (subject heuristic, account_type fallback) — neither of which is
+ * reliable. The chat object's `content_type='inmail'` and `folder` array
+ * are the canonical InMail markers per the unipile-node-sdk types.
  *
- * Modes:
- *   - Trigger one-off via the Trigger.dev dashboard:
- *       task `reclassify-linkedin-chats-once`, no payload.
- *   - Or schedule it (cron) — re-runs are cheap because we skip rows
- *     whose content_type is already set.
+ * Daily at 06:00 UTC. Re-runs are cheap because we skip rows whose
+ * content_type is already set. Also exposed as an event-triggered
+ * function for one-off forced re-classifications.
  *
- * Strategy:
- *   1. Find LinkedIn conversations that don't have content_type set
- *      yet (one-off mode) or all of them (force=true payload).
- *   2. Group by integration_account so we hit Unipile with the right
- *      auth/account_id.
- *   3. For each, GET /v2/{account_id}/chats/{external_conversation_id}
- *   4. Read content_type and folder; classify via canonicalChannel.
- *   5. UPDATE the conversation + every message row inside it.
- *
- * Rate-limited at ~3 req/s per account to stay polite with Unipile.
+ * Ported from `src/trigger/reclassify-linkedin-chats.ts`. Inngest is
+ * the only scheduler now.
  */
 
 interface ReclassifyPayload {
@@ -41,17 +29,13 @@ interface ReclassifyPayload {
 }
 
 const DEFAULT_LIMIT = 5_000;
-// Concurrent chat fetches per pass. Each Unipile chat lookup is ~500ms,
-// so 4-way concurrency processes ~8 chats/sec — keeps us well under
-// Unipile rate-limits while clearing 1k convs in ~2min instead of 20.
 const CONCURRENCY = 4;
 
-async function reclassifyOnce(payload: ReclassifyPayload = {}) {
+async function reclassifyOnce(payload: ReclassifyPayload, logger: any) {
   const supabase = getSupabaseAdmin();
   const force = !!payload.force;
   const limit = payload.limit ?? DEFAULT_LIMIT;
 
-  // Pull candidates: LinkedIn conversations that still need an answer.
   let query = supabase
     .from("conversations")
     .select("id, external_conversation_id, integration_account_id, channel, content_type")
@@ -69,8 +53,6 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
     return { scanned: 0, updated: 0, errors: 0 };
   }
 
-  // Cache integration_account → unipile_account_id so we don't query
-  // for the same recruiter 3,500 times.
   const acctIds = Array.from(new Set(convs.map((c) => c.integration_account_id))) as string[];
   const { data: acctRows } = await supabase
     .from("integration_accounts")
@@ -85,9 +67,6 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   let errors = 0;
   let skipped = 0;
 
-  // Process a single conversation row: fetch the Unipile chat, decide
-  // whether anything needs updating, and apply the writes. Returns the
-  // counter to bump.
   type Outcome = "updated" | "skipped" | "errored";
   const processOne = async (conv: typeof convs[number]): Promise<Outcome> => {
     const unipileAcctId = acctMap.get(conv.integration_account_id);
@@ -131,15 +110,12 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
       return "skipped";
     } catch (err: any) {
       const msg = err.message || String(err);
-      if (/\b404\b/.test(msg)) return "skipped"; // chat deleted on Unipile side
+      if (/\b404\b/.test(msg)) return "skipped";
       logger.warn("Chat fetch failed", { convId: conv.id, error: msg });
       return "errored";
     }
   };
 
-  // Walk the work-list with a fixed-size pool so we don't blow Unipile's
-  // rate-limit. Slicing into chunks keeps the implementation simple and
-  // avoids needing a 3rd-party concurrency library.
   for (let i = 0; i < convs.length; i += CONCURRENCY) {
     const batch = convs.slice(i, i + CONCURRENCY);
     const outcomes = await Promise.all(batch.map(processOne));
@@ -155,19 +131,22 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   return summary;
 }
 
-/** Manual one-shot trigger — fire from the Trigger.dev dashboard. */
-export const reclassifyLinkedinChatsOnce = task({
-  id: "reclassify-linkedin-chats-once",
-  maxDuration: 540,
-  retry: { maxAttempts: 1 },
-  run: async (payload: ReclassifyPayload) => reclassifyOnce(payload),
-});
+export const reclassifyLinkedinChatsDaily = inngest.createFunction(
+  { id: "reclassify-linkedin-chats-daily", name: "Reclassify LinkedIn chats (daily, Inngest)" },
+  { cron: "0 6 * * *" },
+  async ({ logger }) => reclassifyOnce({ limit: 1_500 }, logger),
+);
 
-/** Daily schedule — picks up any rows that arrived before content_type
- *  capture lands or that the webhook missed. Skips rows already stamped. */
-export const reclassifyLinkedinChatsDaily = schedules.task({
-  id: "reclassify-linkedin-chats-daily",
-  cron: "0 6 * * *", // 06:00 UTC every day
-  maxDuration: 540,
-  run: async () => reclassifyOnce({ limit: 1_500 }),
-});
+/**
+ * One-off event-triggered version for manual reclassification runs.
+ * Send via:
+ *   await inngest.send({
+ *     name: "ops/reclassify-linkedin-chats.requested",
+ *     data: { force: true, limit: 5000 },
+ *   });
+ */
+export const reclassifyLinkedinChatsOnce = inngest.createFunction(
+  { id: "reclassify-linkedin-chats-once", name: "Reclassify LinkedIn chats (one-off, Inngest)" },
+  { event: "ops/reclassify-linkedin-chats.requested" },
+  async ({ event, logger }) => reclassifyOnce(event.data ?? {}, logger),
+);
