@@ -110,15 +110,23 @@ const LINKEDIN_ACCOUNTS: Record<string, { email: string; maxChats: number }> = {
   "backfill-linkedin-ashley": { email: "ashley.leichner@emeraldrecruit.com", maxChats: 50 },
 };
 
-export const backfillLinkedinMessages = schedules.task({
-  id: "backfill-linkedin-messages",
-  maxDuration: 300,
-  run: async (payload) => {
-    const config = LINKEDIN_ACCOUNTS[payload.externalId ?? ""] ?? LINKEDIN_ACCOUNTS["backfill-linkedin-chris"];
-    const accountEmail = config.email;
-    const maxChats = 20; // Keep small since this runs every 5 min
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the Trigger.dev wrapper.
+ *
+ * `externalId` selects which LinkedIn account to backfill (one per
+ * recruiter). The Trigger.dev model fanned this out across three
+ * separate dashboard schedules; the Inngest model loops over all
+ * configured accounts in one cron tick (see runBackfillLinkedinAll
+ * below) but the per-account logic stays parameterised so a single
+ * recruiter can also be retried in isolation.
+ */
+export async function runBackfillLinkedinMessages(externalId: string) {
+  const config = LINKEDIN_ACCOUNTS[externalId] ?? LINKEDIN_ACCOUNTS["backfill-linkedin-chris"];
+  const accountEmail = config.email;
+  const maxChats = 20; // Keep small since this runs every 5 min
 
-    const supabase = getSupabaseAdmin();
+  const supabase = getSupabaseAdmin();
 
     // Filter by account_type — each recruiter has multiple rows
     // (email / linkedin_recruiter / phone / sms) sharing the same
@@ -331,5 +339,12 @@ export const backfillLinkedinMessages = schedules.task({
 
     logger.info("LinkedIn backfill complete", { account: accountEmail, ...stats });
     return { account: accountEmail, stats };
-  },
-});
+}
+
+/** All configured externalIds for the LinkedIn backfill cron. */
+export const LINKEDIN_BACKFILL_ACCOUNT_IDS = Object.keys(LINKEDIN_ACCOUNTS);
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/backfill-linkedin-messages.ts.
+// The 3 dashboard schedules (Chris/Nancy/Ashley) are replaced by a
+// single Inngest cron that fans out to each account internally.
+export const backfillLinkedinMessages = null;

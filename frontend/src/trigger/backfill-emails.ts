@@ -284,12 +284,13 @@ async function processAccount(
   return { inserted, skipped, unmatched, errors, hit_limit };
 }
 
-export const backfillEmails = schedules.task({
-  id: "backfill-emails",
-  maxDuration: 300,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
-    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the Trigger.dev wrapper.
+ */
+export async function runBackfillEmails() {
+  const supabase = getSupabaseAdmin();
+  const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
     // Look back 3 days by default since this runs every 5 min.
     // 3 days gives enough buffer to survive brief outages or missed runs
@@ -347,5 +348,9 @@ export const backfillEmails = schedules.task({
     logger.info("Email backfill complete", { totalInserted, totalUnmatched, accounts: results.length });
 
     return { dateFrom, dateTo, knownEmails: emailLookup.size, results, totalInserted, totalUnmatched };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/backfill-emails.ts.
+// Stub disables the Trigger.dev cron (running both = double Graph API
+// calls every 5 minutes against every mailbox).
+export const backfillEmails = null;

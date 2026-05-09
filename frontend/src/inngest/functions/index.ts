@@ -15,6 +15,10 @@ import { syncLinkedinInvitations } from "./sync-linkedin-invitations";
 import { pendingConnectionTimeout } from "./pending-connection-timeout";
 import { resumeIngestion } from "./resume-ingestion";
 import { syncOutlookEvents } from "./sync-outlook-events";
+import { backfillEmails } from "./backfill-emails";
+import { backfillLinkedinMessages } from "./backfill-linkedin-messages";
+import { backfillEnrollmentInit } from "./backfill-enrollment-init";
+import { reconcileOrphanedResumes } from "./reconcile-orphaned-resumes";
 
 export const functions = [
   syncInmailCredits,
@@ -29,4 +33,8 @@ export const functions = [
   pendingConnectionTimeout,
   resumeIngestion,
   syncOutlookEvents,
+  backfillEmails,
+  backfillLinkedinMessages,
+  backfillEnrollmentInit,
+  reconcileOrphanedResumes,
 ];

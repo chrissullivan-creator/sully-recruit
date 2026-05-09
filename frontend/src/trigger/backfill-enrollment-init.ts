@@ -21,14 +21,14 @@ import { notifyError } from "./lib/alerting";
  *
  * Runs every 10 minutes.
  */
-export const backfillEnrollmentInit = schedules.task({
-  id: "backfill-enrollment-init",
-  cron: "*/10 * * * *",
-  maxDuration: 300,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the Trigger.dev wrapper.
+ */
+export async function runBackfillEnrollmentInit() {
+  const supabase = getSupabaseAdmin();
 
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
     // Pull active enrollments older than the grace window.
     const { data: candidates, error: enrollErr } = await supabase
@@ -92,5 +92,7 @@ export const backfillEnrollmentInit = schedules.task({
     }
 
     return { triggered, scanned: list.length, stuck: stuck.length };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/backfill-enrollment-init.ts.
+export const backfillEnrollmentInit = null;
