@@ -1,4 +1,4 @@
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 
 /**
  * fetch with automatic retry on transient failures.

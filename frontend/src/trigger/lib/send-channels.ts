@@ -1,4 +1,4 @@
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 import { getAppSetting } from "./supabase.js";
 import { getMicrosoftAccessToken } from "./microsoft-graph.js";
 import { fetchWithRetry } from "./fetch-retry.js";

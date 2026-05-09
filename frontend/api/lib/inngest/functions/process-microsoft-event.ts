@@ -4,13 +4,11 @@ import {
   getMicrosoftGraphCredentials,
   getAppSetting,
 } from "../../../../src/trigger/lib/supabase.js";
-import { generateJoeSays } from "../../../../src/trigger/generate-joe-says.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
 } from "../../../../src/trigger/lib/intel-extraction.js";
 import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
-import { resumeIngestion } from "../../../../src/trigger/resume-ingestion.js";
 import {
   matchPersonByEmail,
   classifyEmail,
@@ -20,13 +18,9 @@ import {
  * Process Microsoft Graph notifications (email, calendar events).
  * Tenant: emeraldrecruit.com (Chris, Nancy, Ashley).
  *
- * Ported from `src/trigger/webhook-microsoft.ts`. The API route at
- * `api/webhooks/microsoft-graph.ts` now sends `webhooks/microsoft.received`
- * and Inngest drives the work. `generateJoeSays.trigger(...)` and
- * `resumeIngestion.trigger(...)` still route via Trigger.dev (will
- * switch when those tasks are ported).
- *
- * `retries: 3` matches Trigger.dev's `maxAttempts: 3`.
+ * Fires `ai/joe-says.requested` after every logged inbound email and
+ * `ai/resume-ingestion.requested` for each resume attachment that
+ * lands in the resumes-inbox short-circuit.
  */
 interface MicrosoftWebhookPayload {
   notification: {
@@ -345,11 +339,14 @@ async function processResumesInboxEmail(
       continue;
     }
 
-    await resumeIngestion.trigger({
-      resumeId: resumeRow.id,
-      candidateId,
-      filePath: storagePath,
-      fileName,
+    await inngest.send({
+      name: "ai/resume-ingestion.requested",
+      data: {
+        resumeId: resumeRow.id,
+        candidateId,
+        filePath: storagePath,
+        fileName,
+      },
     });
     created++;
   }
@@ -593,9 +590,12 @@ async function processEmailMessage(
 
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
 
-  await generateJoeSays.trigger({
-    entityId: match.entityId,
-    entityType: match.entityType as "candidate" | "contact",
+  await inngest.send({
+    name: "ai/joe-says.requested",
+    data: {
+      entityId: match.entityId,
+      entityType: match.entityType as "candidate" | "contact",
+    },
   });
 
   return { action: "logged", entityId: match.entityId, type: "email" };

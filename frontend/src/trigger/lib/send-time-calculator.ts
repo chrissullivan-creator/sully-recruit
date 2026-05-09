@@ -13,7 +13,7 @@
  *
  * LinkedIn connections ignore the window entirely — fire immediately 24/7.
  */
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EST helpers

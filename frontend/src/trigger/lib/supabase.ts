@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 
 /**
  * Server-side Supabase client using service role key.

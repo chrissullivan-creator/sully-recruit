@@ -19,7 +19,7 @@
  *   }
  */
 
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 import { getSupabaseAdmin } from "./supabase";
 import { sendInternalEmail } from "./microsoft-graph";
 

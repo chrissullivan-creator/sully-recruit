@@ -8,7 +8,7 @@
  * Extracted fields are written directly to the candidate/contact record
  * and appended to back_of_resume_notes for context preservation.
  */
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "./logger";
 import { getAnthropicKey, getOpenAIKey } from "./supabase";
 import { callAIWithFallback } from "../../lib/ai-fallback";
 import { notifyError } from "./alerting";
