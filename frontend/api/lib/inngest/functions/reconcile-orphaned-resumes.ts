@@ -1,8 +1,17 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting, getGeminiKey, getOpenAIKey, getMistralKey } from "./lib/supabase";
-import { sendInternalEmail } from "./lib/microsoft-graph";
-import { notifyError } from "./lib/alerting";
-import { matchPersonByEmail, classifyEmail } from "./lib/match-person-by-email";
+import { inngest } from "../client.js";
+import {
+  getSupabaseAdmin,
+  getAppSetting,
+  getGeminiKey,
+  getOpenAIKey,
+  getMistralKey,
+} from "../../../../src/trigger/lib/supabase.js";
+import { sendInternalEmail } from "../../../../src/trigger/lib/microsoft-graph.js";
+import { notifyError } from "../../../../src/trigger/lib/alerting.js";
+import {
+  matchPersonByEmail,
+  classifyEmail,
+} from "../../../../src/trigger/lib/match-person-by-email.js";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -10,9 +19,9 @@ import {
   normalizeEmail,
   normalizeLinkedIn,
   delay,
-} from "./lib/resume-parsing";
-import { parseResume } from "../lib/resume-parser";
-import { callAIWithFallback } from "../lib/ai-fallback";
+} from "../../../../src/trigger/lib/resume-parsing.js";
+import { parseResume } from "../../../../src/lib/resume-parser.js";
+import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
 type Verdict = "matched" | "created" | "failed" | "skipped";
 interface ResumeOutcome {
@@ -22,7 +31,7 @@ interface ResumeOutcome {
   detail?: string;
 }
 
-async function maybeSendReport(outcomes: ResumeOutcome[]) {
+async function maybeSendReport(outcomes: ResumeOutcome[], logger: any) {
   if (outcomes.length === 0) return;
   let sender = "";
   let recipients: string[] = [];
@@ -33,7 +42,8 @@ async function maybeSendReport(outcomes: ResumeOutcome[]) {
   } catch { /* not configured */ }
   if (!sender || recipients.length === 0) {
     logger.info("Resume report email skipped — sender/recipients not configured", {
-      have_sender: !!sender, recipient_count: recipients.length,
+      have_sender: !!sender,
+      recipient_count: recipients.length,
     });
     return;
   }
@@ -92,15 +102,6 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-/**
- * Find orphaned resumes (no candidate_id), parse them with Claude,
- * match to existing candidates or create new ones, embed with Voyage.
- *
- * Schedule in Trigger.dev Dashboard:
- *   Task: reconcile-orphaned-resumes
- *   Cron: * * * * * (every minute)
- */
-
 async function isBlacklisted(supabase: any, parsed: any, fileName: string): Promise<boolean> {
   const email = normalizeEmail(parsed.email);
   const fullName = [parsed.first_name, parsed.last_name].filter(Boolean).join(" ").toLowerCase();
@@ -127,8 +128,6 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   const li = normalizeLinkedIn(parsed.linkedin_url);
 
   if (email) {
-    // Match across all three address columns so a re-uploaded résumé
-    // dedups even when the candidate uses a different mailbox now.
     const m = await matchPersonByEmail(supabase, email);
     if (m && m.entityType !== "contact") return m.entityId;
   }
@@ -149,15 +148,21 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   return null;
 }
 
-export const reconcileOrphanedResumes = schedules.task({
-  id: "reconcile-orphaned-resumes",
-  cron: "* * * * *", // every minute — was previously dashboard-only, made explicit to survive redeploys
-  maxDuration: 600, // 10 min — pdf-parse + AI fallback + voyage can stretch past 5 min on a large batch
-  run: async () => {
+/**
+ * Find orphaned resumes (no candidate_id), parse them via the Mistral
+ * OCR + Gemini→OpenAI cascade, match to existing people or create new
+ * ones, embed with Voyage, and email a daily summary.
+ *
+ * Every minute. Ported from `src/trigger/reconcile-orphaned-resumes.ts`
+ * — Inngest is the only scheduler now.
+ */
+export const reconcileOrphanedResumes = inngest.createFunction(
+  { id: "reconcile-orphaned-resumes", name: "Reconcile orphaned resumes (Inngest)" },
+  { cron: "* * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
-    const limit = 4; // pdf-parse + Claude+OpenAI fallback + voyage embed adds up; 4/run keeps each sweep < 10 min
+    const limit = 4;
 
-    // Resumes with existing parsed data but no candidate
     const { data: withData } = await supabase
       .from("resumes")
       .select("id, file_path, file_name, raw_text, parsed_json, parsing_status")
@@ -166,7 +171,6 @@ export const reconcileOrphanedResumes = schedules.task({
       .or("raw_text.not.is.null,parsed_json.not.is.null")
       .limit(5);
 
-    // Resumes needing parsing
     const { data: unparsed } = await supabase
       .from("resumes")
       .select("id, file_path, file_name, parsing_status")
@@ -213,12 +217,14 @@ export const reconcileOrphanedResumes = schedules.task({
       return { processed: 0, remaining: count ?? 0, junkFlagged: junkIds.length };
     }
 
-    let matched = 0, created = 0, failed = 0, embedded = 0, blacklistedSkipped = 0;
+    let matched = 0,
+      created = 0,
+      failed = 0,
+      embedded = 0,
+      blacklistedSkipped = 0;
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
-    // Resolve AI keys once per sweep — Mistral OCR for text extraction,
-    // Gemini → OpenAI cascade for structured parsing.
     const [geminiKey, openaiKey, mistralKey] = await Promise.all([
       getGeminiKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
@@ -249,14 +255,18 @@ export const reconcileOrphanedResumes = schedules.task({
           rawText = resume.raw_text ?? null;
           if (!parsed.first_name && rawText) {
             const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-            const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
+            const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
+              r.arrayBuffer(),
+            );
             const result = await parseResume(buf, resume.fileName, parseOpts);
             parsed = result.parsed;
             rawText = result.rawText;
           }
         } else {
           const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-          const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) => r.arrayBuffer());
+          const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
+            r.arrayBuffer(),
+          );
           const result = await parseResume(buf, resume.fileName, parseOpts);
           parsed = result.parsed;
           rawText = result.rawText;
@@ -270,17 +280,26 @@ export const reconcileOrphanedResumes = schedules.task({
 
         if (!fullName && !parsed.email) {
           await supabase.from("resumes").update({ parsing_status: "skipped" }).eq("id", resume.id);
-          outcomes.push({ fileName: resume.fileName, candidateName: null, verdict: "skipped", detail: "no name or email" });
+          outcomes.push({
+            fileName: resume.fileName,
+            candidateName: null,
+            verdict: "skipped",
+            detail: "no name or email",
+          });
           continue;
         }
 
-        // Blacklist check
         const blacklisted = await isBlacklisted(supabase, parsed, resume.fileName);
         if (blacklisted) {
           logger.info(`Blacklisted: ${fullName || parsed.email} (${resume.fileName})`);
           await supabase.from("resumes").update({ parsing_status: "skipped" }).eq("id", resume.id);
           blacklistedSkipped++;
-          outcomes.push({ fileName: resume.fileName, candidateName: fullName || parsed.email || null, verdict: "skipped", detail: "previously deleted" });
+          outcomes.push({
+            fileName: resume.fileName,
+            candidateName: fullName || parsed.email || null,
+            verdict: "skipped",
+            detail: "previously deleted",
+          });
           continue;
         }
 
@@ -288,7 +307,6 @@ export const reconcileOrphanedResumes = schedules.task({
         const wasMatch = !!candidateId;
 
         if (candidateId) {
-          // Update existing candidate with missing fields
           const { data: existing } = await supabase
             .from("people")
             .select("current_title, current_company, location_text, skills, resume_url")
@@ -297,10 +315,14 @@ export const reconcileOrphanedResumes = schedules.task({
 
           if (existing) {
             const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-            if (!existing.current_title && parsed.current_title) updates.current_title = parsed.current_title;
-            if (!existing.current_company && parsed.current_company) updates.current_company = parsed.current_company;
-            if (!existing.location_text && parsed.location) updates.location_text = parsed.location;
-            if ((!existing.skills || !existing.skills.length) && skills.length) updates.skills = skills;
+            if (!existing.current_title && parsed.current_title)
+              updates.current_title = parsed.current_title;
+            if (!existing.current_company && parsed.current_company)
+              updates.current_company = parsed.current_company;
+            if (!existing.location_text && parsed.location)
+              updates.location_text = parsed.location;
+            if ((!existing.skills || !existing.skills.length) && skills.length)
+              updates.skills = skills;
             if (!existing.resume_url) {
               const { data: pub } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
               updates.resume_url = pub.publicUrl;
@@ -311,7 +333,6 @@ export const reconcileOrphanedResumes = schedules.task({
           }
           matched++;
         } else {
-          // Create new candidate
           const { data: pub } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
           const { data: newCand, error: insertErr } = await supabase
             .from("people")
@@ -338,7 +359,6 @@ export const reconcileOrphanedResumes = schedules.task({
           created++;
         }
 
-        // Update resume record
         await supabase
           .from("resumes")
           .update({
@@ -350,16 +370,25 @@ export const reconcileOrphanedResumes = schedules.task({
           })
           .eq("id", resume.id);
 
-        // Embed
         try {
           const profileText = buildProfileText(
-            { full_name: fullName, current_title: parsed.current_title, current_company: parsed.current_company, location_text: parsed.location, skills },
+            {
+              full_name: fullName,
+              current_title: parsed.current_title,
+              current_company: parsed.current_company,
+              location_text: parsed.location,
+              skills,
+            },
             normalizedRawText,
             parsed,
           );
           if (profileText.trim().length >= 50) {
             const embedding = await getVoyageEmbedding(profileText);
-            await supabase.from("resume_embeddings").delete().eq("candidate_id", candidateId).eq("embed_type", "full_profile");
+            await supabase
+              .from("resume_embeddings")
+              .delete()
+              .eq("candidate_id", candidateId)
+              .eq("embed_type", "full_profile");
             await supabase.from("resume_embeddings").insert({
               candidate_id: candidateId,
               resume_id: resume.id,
@@ -396,12 +425,10 @@ export const reconcileOrphanedResumes = schedules.task({
         });
       }
 
-      // Light spacing between resumes to avoid bursting Voyage; AI fallbacks
-      // already self-throttle. Was 1500ms — too much for a batch of 4.
       await delay(300);
     }
 
-    await maybeSendReport(outcomes);
+    await maybeSendReport(outcomes, logger);
 
     const { count: remaining } = await supabase
       .from("resumes")
@@ -409,7 +436,23 @@ export const reconcileOrphanedResumes = schedules.task({
       .is("candidate_id", null)
       .not("parsing_status", "in", '("failed","skipped")');
 
-    logger.info("Reconcile complete", { matched, created, embedded, failed, blacklistedSkipped, remaining: remaining ?? 0 });
-    return { processed: allToProcess.length, matched, created, embedded, failed, blacklistedSkipped, junkFlagged: junkIds.length, remaining: remaining ?? 0 };
+    logger.info("Reconcile complete", {
+      matched,
+      created,
+      embedded,
+      failed,
+      blacklistedSkipped,
+      remaining: remaining ?? 0,
+    });
+    return {
+      processed: allToProcess.length,
+      matched,
+      created,
+      embedded,
+      failed,
+      blacklistedSkipped,
+      junkFlagged: junkIds.length,
+      remaining: remaining ?? 0,
+    };
   },
-});
+);
