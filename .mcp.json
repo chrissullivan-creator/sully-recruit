@@ -14,13 +14,6 @@
       "env": {
         "SUPABASE_ACCESS_TOKEN": "sbp_ba8fe3c9d185a6a43c576a23885029b6a46f68f2"
       }
-    },
-    "trigger": {
-      "command": "npx",
-      "args": ["-y", "@trigger.dev/mcp-server@latest"],
-      "env": {
-        "TRIGGER_SECRET_KEY": "tr_prod_EbAkTQbyHRnlHqQzaIPT"
-      }
     }
   }
 }
