@@ -5,6 +5,9 @@ import { migrateSequenceToInngest } from "./lib/inngest/functions/migrate-sequen
 import { sequenceSweep } from "./lib/inngest/functions/sequence-sweep.js";
 import { sequenceActionExecute } from "./lib/inngest/functions/sequence-action-execute.js";
 import { sequenceEnrollmentInit } from "./lib/inngest/functions/sequence-enrollment-init.js";
+import { checkConnections } from "./lib/inngest/functions/check-connections.js";
+import { syncInmailCredits } from "./lib/inngest/functions/sync-inmail-credits.js";
+import { syncLinkedinInvitations } from "./lib/inngest/functions/sync-linkedin-invitations.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -25,5 +28,8 @@ export default serve({
     sequenceSweep,
     sequenceActionExecute,
     sequenceEnrollmentInit,
+    checkConnections,
+    syncInmailCredits,
+    syncLinkedinInvitations,
   ],
 });

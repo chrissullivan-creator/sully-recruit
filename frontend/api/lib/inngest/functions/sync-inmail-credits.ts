@@ -1,28 +1,32 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
-import { unipileFetch } from "./lib/unipile-v2";
+import { createClient } from "@supabase/supabase-js";
+import { inngest } from "../client.js";
+import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
 
 /**
  * Pull each LinkedIn Recruiter account's remaining InMail credits and
- * stamp them on integration_accounts. Lets the UI show a "12 InMails
- * left" badge and lets sendLinkedIn block InMail sends when the well
- * is dry instead of waiting for Unipile to 422.
+ * stamp them on `integration_accounts`. Lets the UI show a "12 InMails
+ * left" badge and lets sendLinkedIn block InMail sends when the well is
+ * dry instead of waiting for Unipile to 422.
  *
- * v2 path:
- *   GET /api/v2/{account_id}/linkedin/recruiter/inmail-credits
+ * v2 path: GET /api/v2/{account_id}/linkedin/recruiter/inmail-credits
  *
- * Response shape varies a little across Unipile builds, so we look at
- * a small list of common keys (remaining/credits/balance).
+ * Response shape varies a little across Unipile builds, so we look at a
+ * small list of common keys (remaining/credits/balance).
  *
- * Schedule: every hour. Cheaper than every send and credits change
- * slowly enough that a 60-min stale read is harmless.
+ * Hourly cadence is cheaper than every send and credits change slowly
+ * enough that a 60-min stale read is harmless.
+ *
+ * Ported from `src/trigger/sync-inmail-credits.ts` — Inngest is the
+ * only scheduler now.
  */
-export const syncInmailCredits = schedules.task({
-  id: "sync-inmail-credits",
-  cron: "0 * * * *",
-  maxDuration: 120,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+export const syncInmailCredits = inngest.createFunction(
+  { id: "sync-inmail-credits", name: "Sync LinkedIn Recruiter InMail credits (Inngest)" },
+  { cron: "0 * * * *" },
+  async ({ logger }) => {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
@@ -83,4 +87,4 @@ export const syncInmailCredits = schedules.task({
     logger.info("InMail credits sync complete", { checked, updated, summary });
     return { checked, updated, summary };
   },
-});
+);
