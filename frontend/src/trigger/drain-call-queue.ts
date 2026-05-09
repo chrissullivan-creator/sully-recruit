@@ -6,12 +6,13 @@ import { getSupabaseAdmin } from "./lib/supabase";
 //
 // Schedule: every 3 minutes
 
-export const drainCallQueue = schedules.task({
-  id: "drain-call-queue",
-  maxDuration: 180,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
-    const batchSize = 5;
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runDrainCallQueue() {
+  const supabase = getSupabaseAdmin();
+  const batchSize = 5;
 
     // Grab next batch of pending calls
     const { data: batch, error } = await supabase
@@ -102,5 +103,7 @@ export const drainCallQueue = schedules.task({
 
     logger.info("Queue drain complete", { processed, failed, remaining: remaining ?? 0 });
     return { processed, failed, remaining: remaining ?? 0 };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/drain-call-queue.ts.
+export const drainCallQueue = null;

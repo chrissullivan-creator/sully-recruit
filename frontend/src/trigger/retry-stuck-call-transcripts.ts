@@ -20,12 +20,12 @@ import { notifyError } from "./lib/alerting";
  *
  * Schedule: every 15 minutes.
  */
-export const retryStuckCallTranscripts = schedules.task({
-  id: "retry-stuck-call-transcripts",
-  cron: "*/15 * * * *",
-  maxDuration: 600,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runRetryStuckCallTranscripts() {
+  const supabase = getSupabaseAdmin();
 
     // Pull eligible call_logs in the retry window (5 min .. 7 days old).
     const { data: eligible } = await supabase
@@ -86,5 +86,7 @@ export const retryStuckCallTranscripts = schedules.task({
     });
 
     return { triggered, scanned: eligible.length, stuck: stuck.length };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/retry-stuck-call-transcripts.ts.
+export const retryStuckCallTranscripts = null;

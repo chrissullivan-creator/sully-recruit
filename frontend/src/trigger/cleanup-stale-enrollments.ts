@@ -12,12 +12,13 @@ import { getSupabaseAdmin } from "./lib/supabase";
  *   Task: cleanup-stale-enrollments
  *   Cron: 0 5 * * * (daily at 5 AM UTC)
  */
-export const cleanupStaleEnrollments = schedules.task({
-  id: "cleanup-stale-enrollments",
-  maxDuration: 120,
-  run: async () => {
-    const supabase = getSupabaseAdmin();
-    const now = new Date();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runCleanupStaleEnrollments() {
+  const supabase = getSupabaseAdmin();
+  const now = new Date();
 
     let connectionExpired = 0;
     let inactiveExpired = 0;
@@ -127,5 +128,7 @@ export const cleanupStaleEnrollments = schedules.task({
     const summary = { connectionExpired, inactiveExpired, invitesWithdrawn };
     logger.info("Stale enrollment cleanup complete", summary);
     return summary;
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/cleanup-stale-enrollments.ts.
+export const cleanupStaleEnrollments = null;

@@ -46,7 +46,7 @@ const DEFAULT_LIMIT = 5_000;
 // Unipile rate-limits while clearing 1k convs in ~2min instead of 20.
 const CONCURRENCY = 4;
 
-async function reclassifyOnce(payload: ReclassifyPayload = {}) {
+export async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   const supabase = getSupabaseAdmin();
   const force = !!payload.force;
   const limit = payload.limit ?? DEFAULT_LIMIT;
@@ -155,19 +155,11 @@ async function reclassifyOnce(payload: ReclassifyPayload = {}) {
   return summary;
 }
 
-/** Manual one-shot trigger — fire from the Trigger.dev dashboard. */
-export const reclassifyLinkedinChatsOnce = task({
-  id: "reclassify-linkedin-chats-once",
-  maxDuration: 540,
-  retry: { maxAttempts: 1 },
-  run: async (payload: ReclassifyPayload) => reclassifyOnce(payload),
-});
-
-/** Daily schedule — picks up any rows that arrived before content_type
- *  capture lands or that the webhook missed. Skips rows already stamped. */
-export const reclassifyLinkedinChatsDaily = schedules.task({
-  id: "reclassify-linkedin-chats-daily",
-  cron: "0 6 * * *", // 06:00 UTC every day
-  maxDuration: 540,
-  run: async () => reclassifyOnce({ limit: 1_500 }),
-});
+// Helper `reclassifyOnce(payload)` is exported above and used directly
+// by the Inngest function in frontend/src/inngest/functions/reclassify-linkedin-chats.ts.
+// Both the manual one-shot trigger and the daily 06:00 UTC cron route
+// through Inngest now.
+//
+// MIGRATED to Inngest — Trigger.dev wrappers gutted to null stubs.
+export const reclassifyLinkedinChatsOnce = null;
+export const reclassifyLinkedinChatsDaily = null;

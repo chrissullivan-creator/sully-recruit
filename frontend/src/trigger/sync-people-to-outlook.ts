@@ -18,11 +18,12 @@ import {
  * dedup), so we skip them. Owners without a profile email are skipped
  * silently.
  */
-export const syncPeopleToOutlook = schedules.task({
-  id: "sync-people-to-outlook",
-  cron: "*/30 * * * *",
-  run: async () => {
-    const supabase = getSupabaseAdmin();
+/**
+ * Pure run body — extracted so Inngest + Trigger.dev share one source
+ * of truth. Phase 5b deletes the wrapper.
+ */
+export async function runSyncPeopleToOutlook() {
+  const supabase = getSupabaseAdmin();
 
     // Pick a batch — newly added or recently updated, owned + has email,
     // not yet synced or stale (>24h since last sync).
@@ -101,5 +102,7 @@ export const syncPeopleToOutlook = schedules.task({
     }
 
     return { action: "synced", synced, skipped, failed, found: rows.length };
-  },
-});
+}
+
+// MIGRATED to Inngest — see frontend/src/inngest/functions/sync-people-to-outlook.ts.
+export const syncPeopleToOutlook = null;

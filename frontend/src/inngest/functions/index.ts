@@ -22,6 +22,11 @@ import { reconcileOrphanedResumes } from "./reconcile-orphaned-resumes";
 import { processMicrosoftEvent } from "./process-microsoft-event";
 import { processUnipileEvent } from "./process-unipile-event";
 import { processRingcentralEvent } from "./process-ringcentral-event";
+import { cleanupStaleEnrollments } from "./cleanup-stale-enrollments";
+import { retryStuckCallTranscripts } from "./retry-stuck-call-transcripts";
+import { syncPeopleToOutlook } from "./sync-people-to-outlook";
+import { drainCallQueue } from "./drain-call-queue";
+import { reclassifyLinkedinChatsDaily } from "./reclassify-linkedin-chats";
 
 export const functions = [
   syncInmailCredits,
@@ -43,4 +48,9 @@ export const functions = [
   processMicrosoftEvent,
   processUnipileEvent,
   processRingcentralEvent,
+  cleanupStaleEnrollments,
+  retryStuckCallTranscripts,
+  syncPeopleToOutlook,
+  drainCallQueue,
+  reclassifyLinkedinChatsDaily,
 ];
