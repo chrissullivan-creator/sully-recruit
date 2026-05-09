@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { inngest } from "../client";
+import { inngest } from "../client.js";
 
 /**
  * Fan-out orchestrator. For every sequence still on `engine='trigger'` that has

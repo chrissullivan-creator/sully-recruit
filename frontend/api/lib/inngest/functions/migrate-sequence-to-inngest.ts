@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { inngest } from "../client";
+import { inngest } from "../client.js";
 
 /**
  * Per-sequence cutover. Phase 1: NO-OP — this handler exists so the fan-out
