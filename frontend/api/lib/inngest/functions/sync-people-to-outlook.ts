@@ -1,34 +1,30 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin } from "./lib/supabase";
+import { inngest } from "../client.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 import {
   getMicrosoftAccessToken,
   createOrUpdateOutlookContact,
-} from "./lib/microsoft-graph";
+} from "../../../../src/trigger/lib/microsoft-graph.js";
 
 /**
  * Push every Sully candidate/contact into the owner's Outlook Contacts.
- *
  * One-way for now (Sully → Outlook). Idempotent on
- * `people.outlook_contact_id`: NULL = create, non-null = patch. Runs
- * twice an hour to keep mailboxes fresh without hammering Graph.
+ * `people.outlook_contact_id`: NULL = create, non-null = patch.
  *
  * Owner resolution: `people.owner_user_id` → `profiles.email`. We only
- * sync rows that have BOTH an owner email *and* a person email — Outlook
+ * sync rows that have BOTH an owner email and a person email — Outlook
  * contacts without an email are mostly useless (no auto-suggest, no
- * dedup), so we skip them. Owners without a profile email are skipped
- * silently.
+ * dedup). Owners without a profile email are skipped silently.
+ *
+ * Every 30 minutes. Ported from `src/trigger/sync-people-to-outlook.ts`
+ * — Inngest is the only scheduler now.
  */
-export const syncPeopleToOutlook = schedules.task({
-  id: "sync-people-to-outlook",
-  cron: "*/30 * * * *",
-  run: async () => {
+export const syncPeopleToOutlook = inngest.createFunction(
+  { id: "sync-people-to-outlook", name: "Sync people → Outlook contacts (Inngest)" },
+  { cron: "*/30 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
-    // Pick a batch — newly added or recently updated, owned + has email,
-    // not yet synced or stale (>24h since last sync).
     const stale = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    // primary_email is the new generated column = COALESCE(work_email, personal_email).
-    // The plain `people.email` column was retired in 20260507140000.
     const { data: rows, error } = await supabase
       .from("people")
       .select(`
@@ -47,8 +43,6 @@ export const syncPeopleToOutlook = schedules.task({
     }
     if (!rows || rows.length === 0) return { action: "idle" };
 
-    // Resolve owner emails in one trip (a person can be owned by any of
-    // 3-ish recruiters, so this is tiny).
     const ownerIds = Array.from(new Set(rows.map((r: any) => r.owner_user_id).filter(Boolean)));
     const { data: profiles } = await supabase
       .from("profiles")
@@ -66,7 +60,10 @@ export const syncPeopleToOutlook = schedules.task({
 
     for (const r of rows as any[]) {
       const ownerAddr = ownerEmail.get(r.owner_user_id);
-      if (!ownerAddr) { skipped++; continue; }
+      if (!ownerAddr) {
+        skipped++;
+        continue;
+      }
 
       try {
         const contactId = await createOrUpdateOutlookContact(
@@ -94,7 +91,9 @@ export const syncPeopleToOutlook = schedules.task({
         synced++;
       } catch (err: any) {
         logger.warn("Outlook contact sync failed for person", {
-          personId: r.id, owner: ownerAddr, error: err.message,
+          personId: r.id,
+          owner: ownerAddr,
+          error: err.message,
         });
         failed++;
       }
@@ -102,4 +101,4 @@ export const syncPeopleToOutlook = schedules.task({
 
     return { action: "synced", synced, skipped, failed, found: rows.length };
   },
-});
+);

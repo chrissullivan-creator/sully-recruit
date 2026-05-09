@@ -1,15 +1,24 @@
-import { schedules, logger } from "@trigger.dev/sdk/v3";
-import { getSupabaseAdmin, getAppSetting, getMicrosoftGraphCredentials } from "./lib/supabase";
-import { normalizeEmail, delay } from "./lib/resume-parsing";
-import { isMarketingEmail } from "./purge-marketing-emails";
+import { inngest } from "../client.js";
+import {
+  getSupabaseAdmin,
+  getAppSetting,
+  getMicrosoftGraphCredentials,
+} from "../../../../src/trigger/lib/supabase.js";
+import { normalizeEmail } from "../../../../src/trigger/lib/resume-parsing.js";
+import { isMarketingEmail } from "../../../../src/trigger/lib/marketing-blocklist.js";
 
-// Backfill emails from Microsoft Graph (Inbox + SentItems).
-//
-// CRITICAL FIX: syncs ALL emails, not just those matching known
-// candidates/contacts. Unmatched emails get candidate_id and contact_id
-// set to null so they still appear in the Inbox UI.
-//
-// Schedule: every 5 minutes (1-56/5 * * * *)
+/**
+ * Backfill emails from Microsoft Graph (Inbox + SentItems) every 5
+ * minutes. Syncs ALL emails (matched + unmatched), so unmatched ones
+ * still appear in the Inbox UI with candidate_id/contact_id null.
+ *
+ * Looks back 3 days each run — that buffer covers brief outages /
+ * missed runs without blowing up the API budget. Dedup by
+ * external_message_id prevents double-inserts.
+ *
+ * Ported from `src/trigger/backfill-emails.ts` — Inngest is the only
+ * scheduler now.
+ */
 
 function stripHtml(html: string | null | undefined): string {
   if (!html) return "";
@@ -27,7 +36,13 @@ function stripHtml(html: string | null | undefined): string {
     .trim();
 }
 
-async function refreshToken(supabase: any, account: any, tenantId: string, clientId: string, clientSecret: string): Promise<string> {
+async function refreshToken(
+  supabase: any,
+  account: any,
+  tenantId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
   const resp = await fetch(
     `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
     {
@@ -58,7 +73,13 @@ async function refreshToken(supabase: any, account: any, tenantId: string, clien
   return data.access_token;
 }
 
-async function getToken(supabase: any, account: any, tenantId: string, clientId: string, clientSecret: string): Promise<string> {
+async function getToken(
+  supabase: any,
+  account: any,
+  tenantId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
   if (
     account.access_token &&
     account.token_expires_at &&
@@ -75,15 +96,9 @@ async function buildEmailLookup(
   const map = new Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>();
 
   // Supabase's default range is 1000 rows. With ~6k people in the firm,
-  // an unpaginated query silently dropped everyone past the first page —
-  // any inbound email from a "page 2+" person landed unmatched.
-  // Paginate explicitly until we hit a partial page.
+  // an unpaginated query silently dropped everyone past the first page.
   const PAGE = 1000;
   const loadAll = async (table: "people" | "contacts", as: "candidate" | "contact") => {
-    // Plain people.email column was retired; primary_email is the
-    // generated COALESCE that the backfill needs to filter on. The
-    // contacts view still exposes `email` (computed), but use
-    // primary_email here too for consistency — it works on both.
     let from = 0;
     while (true) {
       const { data } = await supabase
@@ -94,12 +109,12 @@ async function buildEmailLookup(
         .range(from, from + PAGE - 1);
       const rows = data ?? [];
       for (const c of rows) {
-        // For the unified `people` table, route by row.type — clients
-        // become contact entries, anything else stays candidate. The
-        // contacts view already filters, so `as` wins there.
         const resolvedType: "candidate" | "contact" =
-          table === "contacts" ? "contact"
-            : (c as any).type === "client" ? "contact" : "candidate";
+          table === "contacts"
+            ? "contact"
+            : (c as any).type === "client"
+              ? "contact"
+              : "candidate";
         const e = normalizeEmail(c.email);
         if (e) map.set(e, { type: resolvedType, id: c.id, owner_user_id: c.owner_user_id });
       }
@@ -122,6 +137,7 @@ async function processAccount(
   dateTo: string,
   maxPages: number,
   token: string,
+  logger: any,
 ): Promise<{ inserted: number; skipped: number; unmatched: number; errors: number; hit_limit: boolean }> {
   let inserted = 0,
     skipped = 0,
@@ -151,7 +167,6 @@ async function processAccount(
       pageCount++;
       if (pageCount >= maxPages && data["@odata.nextLink"]) hit_limit = true;
 
-      // Batch dedup: load all known external_message_ids for this page in one query
       const pageMessageIds = messages.map((m: any) => m.id).filter(Boolean);
       const existingIds = new Set<string>();
       if (pageMessageIds.length > 0) {
@@ -191,28 +206,28 @@ async function processAccount(
             continue;
           }
 
-          // Channel routing rule: Outlook ingestion ALWAYS produces channel='email'.
-          // Unipile is the only source that creates channel='linkedin' / 'linkedin_recruiter'.
-          // We still drop pure LinkedIn marketing/notification noise from messages-noreply@.
+          // Outlook ingestion ALWAYS produces channel='email'. Unipile is
+          // the only source for channel='linkedin'/'linkedin_recruiter'.
+          // Drop pure LinkedIn marketing/notification noise from
+          // messages-noreply@.
           if (!isOutbound && senderEmail === "messages-noreply@linkedin.com") {
             skipped++;
             continue;
           }
 
-          // Skip marketing/newsletter emails
           if (isMarketingEmail(isOutbound ? null : senderEmail)) {
             skipped++;
             continue;
           }
 
-          // CRITICAL FIX: Match to entity but do NOT skip if no match found
+          // Match to entity but do NOT skip if no match found — unmatched
+          // emails still surface in the Inbox UI.
           const entity = emailLookup.get(matchEmail);
           const candidateId = entity?.type === "candidate" ? entity.id : null;
           const contactId = entity?.type === "contact" ? entity.id : null;
 
           if (!entity) unmatched++;
 
-          // Upsert conversation
           let { data: conversation } = await supabase
             .from("conversations")
             .select("id")
@@ -246,7 +261,6 @@ async function processAccount(
             continue;
           }
 
-          // Insert message
           const { error: msgErr } = await supabase.from("messages").insert({
             conversation_id: conversation.id,
             candidate_id: candidateId,
@@ -284,28 +298,23 @@ async function processAccount(
   return { inserted, skipped, unmatched, errors, hit_limit };
 }
 
-export const backfillEmails = schedules.task({
-  id: "backfill-emails",
-  maxDuration: 300,
-  run: async () => {
+export const backfillEmails = inngest.createFunction(
+  { id: "backfill-emails", name: "Backfill emails from Microsoft Graph (Inngest)" },
+  { cron: "1-56/5 * * * *" },
+  async ({ logger }) => {
     const supabase = getSupabaseAdmin();
     const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
-    // Look back 3 days by default since this runs every 5 min.
-    // 3 days gives enough buffer to survive brief outages or missed runs
-    // without creating excessive API calls on each run.
-    // Dedup by external_message_id prevents double-inserts.
     const daysBack = 3;
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = new Date().toISOString();
-    const maxPages = 3; // 3 pages × 50 = 150 emails per folder per account
+    const maxPages = 3;
 
     logger.info("Starting email backfill", { dateFrom, dateTo });
 
     const emailLookup = await buildEmailLookup(supabase);
     logger.info(`Loaded ${emailLookup.size} known emails for matching`);
 
-    // Get configured Graph account emails
     const graphEmailsSetting = await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS");
     const graphEmails = new Set(
       graphEmailsSetting
@@ -333,7 +342,16 @@ export const backfillEmails = schedules.task({
     for (const account of emailAccounts) {
       try {
         const token = await getToken(supabase, account, tenantId, clientId, clientSecret);
-        const result = await processAccount(supabase, account, emailLookup, dateFrom, dateTo, maxPages, token);
+        const result = await processAccount(
+          supabase,
+          account,
+          emailLookup,
+          dateFrom,
+          dateTo,
+          maxPages,
+          token,
+          logger,
+        );
         results.push({ email: account.email_address, ...result });
         logger.info(`Processed ${account.email_address}`, result);
       } catch (err: any) {
@@ -348,4 +366,4 @@ export const backfillEmails = schedules.task({
 
     return { dateFrom, dateTo, knownEmails: emailLookup.size, results, totalInserted, totalUnmatched };
   },
-});
+);
