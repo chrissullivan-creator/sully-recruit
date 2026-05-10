@@ -1,6 +1,31 @@
 import { getSupabaseAdmin } from "./supabase";
 import { calculateSendTime } from "./send-time-calculator";
-import { compareSequenceNodes } from "@/components/sequences/sequenceBranches";
+
+// Inlined from `@/components/sequences/sequenceBranches` so Vercel's
+// Node function bundler doesn't have to resolve the `@/` Vite path
+// alias (it doesn't, and it breaks at runtime with ERR_MODULE_NOT_FOUND).
+// Branch ordering: branch_a sorts before branch_b; un-branched steps
+// fall back to node_order.
+const BRANCH_SORT_ORDER: Record<string, number> = { branch_a: 0, branch_b: 1 };
+
+function compareSequenceNodes(
+  a: { branch_id?: string | null; branch_step_order?: number | null; node_order?: number | null },
+  b: { branch_id?: string | null; branch_step_order?: number | null; node_order?: number | null },
+) {
+  const branchA = a?.branch_id === "branch_a" || a?.branch_id === "branch_b" ? a.branch_id : null;
+  const branchB = b?.branch_id === "branch_a" || b?.branch_id === "branch_b" ? b.branch_id : null;
+
+  if (branchA && branchB && branchA !== branchB) {
+    return BRANCH_SORT_ORDER[branchA] - BRANCH_SORT_ORDER[branchB];
+  }
+  if (branchA && branchB) {
+    return (
+      (Number(a?.branch_step_order) || Number(a?.node_order) || 0) -
+      (Number(b?.branch_step_order) || Number(b?.node_order) || 0)
+    );
+  }
+  return (Number(a?.node_order) || 0) - (Number(b?.node_order) || 0);
+}
 
 export interface EnrollmentInitPayload {
   enrollmentId: string;
