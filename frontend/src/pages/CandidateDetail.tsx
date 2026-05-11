@@ -511,6 +511,9 @@ const CandidateDetail = () => {
 
       // Optional kickoff note → polymorphic notes row pointing at the
       // new send_out so it appears in the candidate's activity feed.
+      // The StickyNote dialog reads + writes this same notes table
+      // (entity_type='send_out'), so the kickoff note shows up there
+      // automatically without touching submittal_notes.
       const trimmed = note.trim();
       if (created?.id && trimmed) {
         await supabase.from('notes').insert({
@@ -2083,13 +2086,8 @@ const CandidateDetail = () => {
                               )}
                               <Button
                                 variant="ghost" size="icon"
-                                className={cn(
-                                  'h-7 w-7',
-                                  so.submittal_notes
-                                    ? 'text-gold-deep hover:text-gold-deep'
-                                    : 'text-muted-foreground hover:text-foreground',
-                                )}
-                                title={so.submittal_notes ? 'View / edit notes' : 'Add notes'}
+                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                title="View / add notes"
                                 onClick={() => setEditingNotesFor({
                                   id: so.id,
                                   candidateName: candidate?.full_name ?? null,
