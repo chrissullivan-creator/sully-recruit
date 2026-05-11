@@ -206,10 +206,17 @@ export type ExtractCallIntelRequested = {
   data: { callLogId: string };
 };
 
-/** On-demand fetch of historical email + LinkedIn for a contact. */
+/**
+ * On-demand fetch of historical email + LinkedIn for a person. Accepts
+ * either the legacy `{ contact_id }` shape (from /api/trigger-fetch-history)
+ * or the unified `{ entity_id, entity_type }` shape (from the new
+ * `backfill-entity-histories` cron and any future caller). Both work.
+ */
 export type FetchEntityHistoryRequested = {
   name: "messages/fetch-entity-history.requested";
-  data: { contact_id: string };
+  data:
+    | { contact_id: string }
+    | { entity_id: string; entity_type: "candidate" | "contact" };
 };
 
 /** One-off recovery for orphaned resume files in storage. */
