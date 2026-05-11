@@ -11,7 +11,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Users, Loader2, Briefcase, Play } from 'lucide-react';
+import { Users, Loader2, Briefcase, Play, Wand2 } from 'lucide-react';
+import { authHeaders } from '@/lib/api-auth';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 import { invalidateSendOutScope, invalidateTaskScope } from '@/lib/invalidate';
 
@@ -81,6 +82,7 @@ export const BulkCandidateActionsDialog = ({
   const [processing, setProcessing] = useState(false);
   const [rejectedBy, setRejectedBy] = useState<string>('');
   const [rejectionDetails, setRejectionDetails] = useState<string>('');
+  const [enriching, setEnriching] = useState(false);
 
   const { data: jobs = [] } = useJobs();
   const { data: sequences = [] } = useSequences();
@@ -223,6 +225,58 @@ export const BulkCandidateActionsDialog = ({
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Users className="h-4 w-4" />
             <span>{selectedCountLabel} selected</span>
+          </div>
+
+          {/* Bytemine enrichment — stand-alone action (work email + contact info
+              via LinkedIn URL lookup). Doesn't gate the rest of the dialog. */}
+          <div className="rounded-md border border-card-border bg-secondary/30 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Enrich via Bytemine</p>
+                <p className="text-xs text-muted-foreground">
+                  Pull verified work email, phone, title, company from LinkedIn URLs.
+                </p>
+              </div>
+              <Button
+                size="sm" variant="outline"
+                disabled={enriching || candidateIds.length === 0 || candidateIds.length > 100}
+                onClick={async () => {
+                  setEnriching(true);
+                  try {
+                    // Bytemine endpoint caps at 100/request — chunk if larger.
+                    const chunks: string[][] = [];
+                    for (let i = 0; i < candidateIds.length; i += 100) {
+                      chunks.push(candidateIds.slice(i, i + 100));
+                    }
+                    let okTotal = 0, failTotal = 0, noLinkedinTotal = 0;
+                    for (const chunk of chunks) {
+                      const res = await fetch('/api/people/bytemine-enrich', {
+                        method: 'POST',
+                        headers: await authHeaders(),
+                        body: JSON.stringify({ peopleIds: chunk }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Enrich failed');
+                      okTotal += data.counts?.ok ?? 0;
+                      failTotal += data.counts?.failed ?? 0;
+                      noLinkedinTotal += data.counts?.no_linkedin ?? 0;
+                    }
+                    toast.success(
+                      `Enriched: ${okTotal} ok, ${failTotal} failed` +
+                      (noLinkedinTotal > 0 ? ` (${noLinkedinTotal} had no LinkedIn URL)` : ''),
+                    );
+                    queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                  } catch (e: any) {
+                    toast.error(e.message || 'Enrich failed');
+                  } finally {
+                    setEnriching(false);
+                  }
+                }}
+              >
+                {enriching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}
+                Enrich {candidateIds.length > 0 ? `(${candidateIds.length})` : ''}
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">

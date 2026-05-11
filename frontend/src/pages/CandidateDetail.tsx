@@ -26,7 +26,7 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge, CalendarPlus, StickyNote,
+  Search, Calendar, Merge, CalendarPlus, StickyNote, Wand2,
 } from 'lucide-react';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
@@ -228,6 +228,7 @@ const CandidateDetail = () => {
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [compExpanded, setCompExpanded] = useState(false);
   const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
@@ -1051,6 +1052,42 @@ const CandidateDetail = () => {
           </Button>
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={enriching || !c.linkedin_url}
+            title={c.linkedin_url ? 'Pull verified work email + contact info from Bytemine' : 'No LinkedIn URL on file'}
+            onClick={async () => {
+              if (!id) return;
+              setEnriching(true);
+              try {
+                const res = await fetch('/api/people/bytemine-enrich', {
+                  method: 'POST',
+                  headers: await authHeaders(),
+                  body: JSON.stringify({ peopleIds: [id] }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Enrich failed');
+                const result = data.results?.[0];
+                if (!result?.ok) {
+                  toast.error(`Enrich failed: ${result?.error || 'unknown'}`);
+                } else if (!result.updated?.length) {
+                  toast.info('No new info from Bytemine');
+                } else {
+                  toast.success(`Updated: ${result.updated.join(', ')}`);
+                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                }
+              } catch (e: any) {
+                toast.error(e.message || 'Enrich failed');
+              } finally {
+                setEnriching(false);
+              }
+            }}
+          >
+            {enriching ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1" />}
+            Enrich
           </Button>
           <Button
             variant="outline"
