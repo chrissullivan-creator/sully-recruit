@@ -15,11 +15,30 @@ import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-
  * email, logs to messages + conversations, runs Joe sentiment-and-intel
  * extraction on inbound, stops active enrollments on any reply, and
  * fires `ai/joe-says.requested` to keep the brief current.
+ *
+ * Envelope: Unipile v2 wraps payloads as:
+ *   { object: "Event", type: "<dotted.path>", account_id, account_name,
+ *     account_provider: "outlook"|"linkedin"|...,  payload: { ... } }
+ * The inner handlers below unwrap `payload` first (v2) and fall back to
+ * `data`/`message`/`connection`/the whole event (v1 / older webhooks)
+ * so we stay backwards-compatible with anything Unipile-side that
+ * hasn't migrated.
+ *
+ * Non-actionable event types — folder counters, account state pings,
+ * profile views — get filtered upfront so we don't waste a function
+ * invocation pretending they're a message.
  */
 interface UnipileWebhookPayload {
   body: {
-    event?: string;
+    // v2 envelope
+    object?: string;
     type?: string;
+    account_id?: string;
+    account_name?: string;
+    account_provider?: string;
+    payload?: any;
+    // v1 / legacy fallbacks
+    event?: string;
     data?: any;
     message?: any;
     conversation?: any;
@@ -28,6 +47,10 @@ interface UnipileWebhookPayload {
   receivedAt: string;
   verified?: boolean;
 }
+
+// v2 event types we deliberately ignore — they fire frequently and
+// don't represent inbound communication we need to log.
+const IGNORED_V2_TYPES = /^(email\.folder\.|email\.account\.|account\.|users\.profile\.|message\.read|chat\.read)/i;
 
 export const processUnipileEvent = inngest.createFunction(
   {
@@ -40,32 +63,40 @@ export const processUnipileEvent = inngest.createFunction(
     const payload = event.data as UnipileWebhookPayload;
     const supabase = getSupabaseAdmin();
     const body = payload.body;
-    const eventType = body.event || body.type || "";
+    const eventType = body.type || body.event || "";
+    const provider = String(body.account_provider || "").toLowerCase();
 
-    logger.info("Processing Unipile event", { eventType });
+    logger.info("Processing Unipile event", {
+      eventType,
+      provider,
+      account_id: body.account_id,
+    });
 
-    // Phase 3: email events (Unipile Outlook). Runs in PARALLEL with the
-    // Graph webhook for the same mailbox until we're confident — dedup
-    // happens on insert via the messages.external_message_id unique
-    // constraint, so the second arrival is a no-op.
+    if (eventType && IGNORED_V2_TYPES.test(eventType)) {
+      return { action: "skipped", reason: "non_actionable_event", type: eventType };
+    }
+
+    // Email events: provider says outlook/gmail OR the type starts with
+    // mail./email. (and isn't a folder/account ping caught above).
     const isEmailEvent =
-      /^mail\.|^email\.|^message\.received|outlook|gmail/i.test(eventType)
-      || body.data?.account_type === "OUTLOOK"
-      || body.data?.account_type === "GMAIL"
-      || (body.data?.attachments !== undefined && body.data?.subject !== undefined);
+      provider === "outlook" ||
+      provider === "gmail" ||
+      /^mail\.|^email\.message|^message\.received/i.test(eventType) ||
+      body.data?.account_type === "OUTLOOK" ||
+      body.data?.account_type === "GMAIL";
     if (isEmailEvent) {
       return await processUnipileEmailEvent(supabase, body, payload.receivedAt, logger);
     }
 
-    if (eventType.includes("message") || body.message) {
+    if (eventType.includes("message") || body.message || body.payload?.text || body.payload?.body) {
       return await processLinkedInMessage(supabase, body, payload.receivedAt, logger);
     }
 
-    if (eventType.includes("connection") || body.connection) {
+    if (eventType.includes("invitation") || eventType.includes("connection") || body.connection) {
       return await processConnectionUpdate(supabase, body, payload.receivedAt, logger);
     }
 
-    logger.info("Unhandled Unipile event type", { eventType });
+    logger.info("Unhandled Unipile event type", { eventType, provider });
     return { action: "skipped", reason: "unhandled_event_type" };
   },
 );
@@ -84,7 +115,9 @@ function extractFailedRecipient(body: string): string | null {
 }
 
 async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: string, logger: any) {
-  const data = event.data || event.email || event;
+  // v2 envelope wraps the email in `payload`; legacy webhooks used
+  // `data` / `email` / the event itself. Try v2 first, fall through.
+  const data = event.payload || event.data || event.email || event;
 
   const fromField = data.from || data.sender || {};
   const senderEmail = String(
@@ -229,7 +262,9 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
 }
 
 async function processLinkedInMessage(supabase: any, event: any, receivedAt: string, logger: any) {
-  const messageData = event.data || event.message || event;
+  // v2 envelope wraps the message in `payload`; older variants use
+  // `data` / `message` / the event itself.
+  const messageData = event.payload || event.data || event.message || event;
   const senderId = messageData.sender_id || messageData.provider_id || messageData.from?.provider_id;
   const messageBody = messageData.text || messageData.body || "";
   const externalMessageId = messageData.id || messageData.message_id;
@@ -453,7 +488,9 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
 }
 
 async function processConnectionUpdate(supabase: any, event: any, receivedAt: string, logger: any) {
-  const connectionData = event.data || event.connection || event;
+  // v2 envelope wraps the connection update in `payload`; older
+  // variants use `data` / `connection` / the event itself.
+  const connectionData = event.payload || event.data || event.connection || event;
   const providerId = connectionData.provider_id || connectionData.attendee_provider_id;
   const status = connectionData.status || connectionData.state || "";
 
