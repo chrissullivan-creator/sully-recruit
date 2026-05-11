@@ -1,12 +1,14 @@
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical, Trash2 } from 'lucide-react';
+import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical, Trash2, StickyNote } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { type SendOutRow, formatComp, lastTouchAt } from '@/lib/queries/send-outs';
 import { daysSince, type CanonicalStage, nextStage, canonicalConfig } from '@/lib/pipeline';
+import { EditSendOutNotesDialog } from './EditSendOutNotesDialog';
 
 interface CandidateRowProps {
   row: SendOutRow;
@@ -36,6 +38,7 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
   const daysInStage = daysSince(row.updated_at);
   const next = nextStage(stage);
   const nextLabel = next ? canonicalConfig(next).shortLabel : null;
+  const [notesOpen, setNotesOpen] = useState(false);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -141,6 +144,18 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
               <Linkedin className="h-3.5 w-3.5" />
             </a>
           )}
+          <button
+            onClick={() => setNotesOpen(true)}
+            title={row.submittal_notes ? 'View / edit notes' : 'Add notes'}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              row.submittal_notes
+                ? 'text-gold-deep hover:bg-gold-bg'
+                : 'text-muted-foreground hover:bg-emerald-light hover:text-emerald',
+            )}
+          >
+            <StickyNote className="h-3.5 w-3.5" />
+          </button>
           {next && (
             <button
               onClick={() => onAdvance(row)}
@@ -167,6 +182,13 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
             </button>
           )}
         </div>
+        <EditSendOutNotesDialog
+          open={notesOpen}
+          onOpenChange={setNotesOpen}
+          sendOutId={row.id}
+          candidateName={name}
+          jobTitle={j?.title ?? null}
+        />
       </td>
     </tr>
   );
