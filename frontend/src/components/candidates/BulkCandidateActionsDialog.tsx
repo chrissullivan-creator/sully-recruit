@@ -12,6 +12,7 @@ import { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Users, Loader2, Briefcase, Play } from 'lucide-react';
+import { EnrichButton } from '@/components/shared/EnrichButton';
 import { ensureInterviewArtifacts, normalizeInterviewStage } from '@/lib/interviewWorkflow';
 import { invalidateSendOutScope, invalidateTaskScope } from '@/lib/invalidate';
 
@@ -223,6 +224,24 @@ export const BulkCandidateActionsDialog = ({
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Users className="h-4 w-4" />
             <span>{selectedCountLabel} selected</span>
+          </div>
+
+          {/* Enrichment — stand-alone action (LeadMagic → Bytemine cascade,
+              per-field selection). Doesn't gate the rest of the dialog. */}
+          <div className="rounded-md border border-card-border bg-secondary/30 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Enrich contact info</p>
+                <p className="text-xs text-muted-foreground">
+                  Pick fields to verify — LeadMagic first, Bytemine fallback.
+                </p>
+              </div>
+              <EnrichButton
+                peopleIds={candidateIds}
+                invalidateKeys={[['candidates']]}
+                align="end"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

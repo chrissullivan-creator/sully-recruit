@@ -32,6 +32,7 @@ import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
+import { EnrichButton } from '@/components/shared/EnrichButton';
 import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -1052,6 +1053,13 @@ const CandidateDetail = () => {
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
+          {id && (
+            <EnrichButton
+              peopleIds={[id]}
+              disabled={!c.linkedin_url}
+              invalidateKeys={[['candidate', id], ['candidates']]}
+            />
+          )}
           <Button
             variant="outline"
             size="sm"
