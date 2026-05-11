@@ -21,6 +21,12 @@
       "env": {
         "TRIGGER_SECRET_KEY": "tr_prod_EbAkTQbyHRnlHqQzaIPT"
       }
+    },
+    "bytemine": {
+      "url": "https://bvjmtgaxijpyasjtaqiv.supabase.co/functions/v1/mcp-server",
+      "headers": {
+        "Authorization": "Bearer b3079575-b549-41c6-b6dc-ba6d211a234b"
+      }
     }
   }
 }
