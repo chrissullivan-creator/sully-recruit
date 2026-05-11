@@ -82,31 +82,40 @@ async function upsertConversation(
   integrationAccountId: string,
   contentType: string | null,
 ): Promise<string> {
+  // .limit(1) instead of .maybeSingle() — historical duplicates would
+  // make maybeSingle() return null on multi-match and trigger a fresh
+  // INSERT. The DB-level UNIQUE index (uniq_conversations_external_id)
+  // now blocks that, but the lookup must still tolerate any leftover.
   const { data: existing } = await supabase
     .from("conversations")
     .select("id")
     .eq("external_conversation_id", chatId)
     .eq("integration_account_id", integrationAccountId)
-    .maybeSingle();
-  if (existing) return existing.id;
+    .eq("channel", channel)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (existing && existing.length > 0) return existing[0].id;
 
   const now = new Date().toISOString();
   const { data: created, error } = await supabase
     .from("conversations")
-    .insert({
-      candidate_id: entity?.type === "candidate" ? entity.id : null,
-      contact_id: entity?.type === "contact" ? entity.id : null,
-      channel,
-      content_type: contentType,
-      integration_account_id: integrationAccountId,
-      external_conversation_id: chatId,
-      is_read: true,
-      is_archived: false,
-      assigned_user_id: entity?.owner_user_id ?? null,
-      last_message_at: now,
-      created_at: now,
-      updated_at: now,
-    })
+    .upsert(
+      {
+        candidate_id: entity?.type === "candidate" ? entity.id : null,
+        contact_id: entity?.type === "contact" ? entity.id : null,
+        channel,
+        content_type: contentType,
+        integration_account_id: integrationAccountId,
+        external_conversation_id: chatId,
+        is_read: true,
+        is_archived: false,
+        assigned_user_id: entity?.owner_user_id ?? null,
+        last_message_at: now,
+        created_at: now,
+        updated_at: now,
+      },
+      { onConflict: "integration_account_id,channel,external_conversation_id" },
+    )
     .select("id")
     .single();
 

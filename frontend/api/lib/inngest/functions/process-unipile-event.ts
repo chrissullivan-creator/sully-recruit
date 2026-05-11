@@ -270,6 +270,20 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const externalMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
+  // Resolve Unipile account_id → our internal integration_accounts.id.
+  // Used as part of the UNIQUE key when looking up / inserting conversations
+  // so we don't re-create a duplicate row per webhook delivery.
+  const unipileAccountId = event.account_id || event.payload?.account_id;
+  let integrationAccountId: string | null = null;
+  if (unipileAccountId) {
+    const { data: ia } = await supabase
+      .from("integration_accounts")
+      .select("id")
+      .eq("unipile_account_id", unipileAccountId)
+      .maybeSingle();
+    integrationAccountId = ia?.id ?? null;
+  }
+
   // Detect Recruiter InMail vs Classic DM via the canonical Unipile v2
   // signals on the chat object (per unipile-node-sdk types):
   //   chat.content_type === 'inmail'                  → InMail
@@ -336,29 +350,66 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     }
   }
 
+  // Find-or-create the conversation row. The lookup MUST match the unique
+  // index (integration_account_id, channel, external_conversation_id) so
+  // repeated webhook deliveries / backfill passes don't create dups.
+  // Previous code looked up by `id` (UUID PK) with a Unipile chat-id string,
+  // which never matched → every webhook inserted a fresh row.
+  async function findOrCreateConversation(personColumn: "candidate_id" | "contact_id" | null, personId: string | null): Promise<string | null> {
+    if (externalConversationId && integrationAccountId) {
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("external_conversation_id", externalConversationId)
+        .eq("integration_account_id", integrationAccountId)
+        .eq("channel", channel)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      if (existing && existing.length > 0) return existing[0].id;
+    }
+    const row: any = {
+      candidate_id: personColumn === "candidate_id" ? personId : null,
+      contact_id: personColumn === "contact_id" ? personId : null,
+      channel,
+      content_type: contentType || null,
+      external_conversation_id: externalConversationId || null,
+      integration_account_id: integrationAccountId,
+      last_message_at: receivedAt,
+      is_read: false,
+    };
+    const { data: created, error } = await supabase
+      .from("conversations")
+      .insert(row)
+      .select("id")
+      .single();
+    if (error) {
+      // UNIQUE-index race: another delivery created it first. Re-read.
+      if (externalConversationId && integrationAccountId) {
+        const { data: again } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("external_conversation_id", externalConversationId)
+          .eq("integration_account_id", integrationAccountId)
+          .eq("channel", channel)
+          .order("created_at", { ascending: true })
+          .limit(1);
+        if (again && again.length > 0) return again[0].id;
+      }
+      logger.error("Conversation create failed", { error: error.message });
+      return null;
+    }
+    return created?.id ?? null;
+  }
+
   if (!entityId) {
     logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
 
     const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
     const senderAddress = messageData.sender_address || messageData.from?.identifier || messageData.from?.profile_url || senderId;
 
-    const conversationId = externalConversationId || `li_unknown_${senderId}`;
-    const { data: existingConv } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("id", conversationId)
-      .maybeSingle();
-
-    if (!existingConv) {
-      await supabase.from("conversations").insert({
-        id: conversationId,
-        candidate_id: null,
-        contact_id: null,
-        channel,
-        external_conversation_id: externalConversationId,
-        last_message_at: receivedAt,
-        is_read: false,
-      } as any);
+    const conversationId = await findOrCreateConversation(null, null);
+    if (!conversationId) {
+      return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
     }
 
     await supabase.from("messages").insert({
@@ -389,22 +440,9 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "logged_unlinked", senderId, senderName, type: "linkedin_message" };
   }
 
-  const conversationId = externalConversationId || `li_${entityId}`;
-  const { data: existingConv } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("id", conversationId)
-    .maybeSingle();
-
-  if (!existingConv) {
-    await supabase.from("conversations").insert({
-      id: conversationId,
-      [entityColumn]: entityId,
-      channel,
-      content_type: contentType || null,
-      external_conversation_id: externalConversationId,
-      last_message_at: receivedAt,
-    } as any);
+  const conversationId = await findOrCreateConversation(entityColumn, entityId);
+  if (!conversationId) {
+    return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
   }
 
   await supabase.from("messages").insert({

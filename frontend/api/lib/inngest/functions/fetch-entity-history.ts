@@ -110,21 +110,39 @@ export const fetchEntityHistory = inngest.createFunction(
           const emails = ((await searchResp.json()) as any).value || [];
           results.email_history.searched = true;
 
-          const convId = `email_history_${entityId}`;
-          const { data: existingConv } = await supabase
+          // Find or create the synthetic "email history" conversation for this
+          // person. Previous code used .eq("id", "email_history_<uuid>") which
+          // never matched (id is UUID), then tried to INSERT id: "<text>" which
+          // failed silently — so messages.conversation_id stayed dangling.
+          const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
+          const historySubject = `Email history: ${person.full_name || personEmail}`;
+          let convUuid: string | null = null;
+          const { data: foundConv } = await supabase
             .from("conversations")
             .select("id")
-            .eq("id", convId)
-            .maybeSingle();
-
-          if (!existingConv) {
-            await supabase.from("conversations").insert({
-              id: convId,
-              [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
-              channel: "email",
-              subject: `Email history: ${person.full_name || personEmail}`,
-              account_id: acct.id,
-            } as any);
+            .eq(entityColumn, entityId)
+            .eq("channel", "email")
+            .eq("subject", historySubject)
+            .order("created_at", { ascending: true })
+            .limit(1);
+          if (foundConv && foundConv.length > 0) {
+            convUuid = foundConv[0].id;
+          } else {
+            const { data: created, error: convErr } = await supabase
+              .from("conversations")
+              .insert({
+                [entityColumn]: entityId,
+                channel: "email",
+                subject: historySubject,
+                account_id: acct.id,
+              } as any)
+              .select("id")
+              .single();
+            if (convErr || !created) {
+              logger.warn("Email history conversation create failed", { error: convErr?.message });
+              break;
+            }
+            convUuid = created.id;
           }
 
           for (const email of emails) {
@@ -141,8 +159,8 @@ export const fetchEntityHistory = inngest.createFunction(
             if (existing) continue;
 
             await supabase.from("messages").insert({
-              conversation_id: convId,
-              [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
+              conversation_id: convUuid,
+              [entityColumn]: entityId,
               channel: "email",
               direction,
               subject: email.subject,
@@ -193,6 +211,43 @@ export const fetchEntityHistory = inngest.createFunction(
             const channelBucket = canonicalChannel(
               liAcct.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
             );
+
+            // Resolve the conversations.id (UUID) for this Unipile chat. The
+            // previous code shoved the chat-id string directly into
+            // messages.conversation_id, which is a UUID FK — every insert
+            // failed silently and no history was ever ingested.
+            const entityCol = entityType === "candidate" ? "candidate_id" : "contact_id";
+            let conversationUuid: string | null = null;
+            const { data: foundConv } = await supabase
+              .from("conversations")
+              .select("id")
+              .eq("external_conversation_id", channel.external_conversation_id)
+              .eq("integration_account_id", liAcct.id)
+              .eq("channel", channelBucket)
+              .order("created_at", { ascending: true })
+              .limit(1);
+            if (foundConv && foundConv.length > 0) {
+              conversationUuid = foundConv[0].id;
+            } else {
+              const { data: created, error: convErr } = await supabase
+                .from("conversations")
+                .insert({
+                  [entityCol]: entityId,
+                  channel: channelBucket,
+                  external_conversation_id: channel.external_conversation_id,
+                  integration_account_id: liAcct.id,
+                } as any)
+                .select("id")
+                .single();
+              if (convErr || !created) {
+                logger.warn(`LinkedIn history conversation create failed: ${convErr?.message}`);
+              } else {
+                conversationUuid = created.id;
+              }
+            }
+
+            if (!conversationUuid) break;
+
             try {
               const data: any = await unipileFetch(
                 supabase,
@@ -215,8 +270,8 @@ export const fetchEntityHistory = inngest.createFunction(
 
                 const direction = msg.is_sender ? "outbound" : "inbound";
                 await supabase.from("messages").insert({
-                  conversation_id: channel.external_conversation_id,
-                  [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
+                  conversation_id: conversationUuid,
+                  [entityCol]: entityId,
                   channel: channelBucket,
                   direction,
                   body: msg.text || msg.body,
