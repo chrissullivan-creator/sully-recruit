@@ -89,19 +89,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // helper handles a missing key gracefully.
   let geminiKey = process.env.GEMINI_API_KEY || "";
   let openaiKey = process.env.OPENAI_API_KEY || "";
-  if (!geminiKey || !openaiKey) {
+  let openRouterKey = process.env.OPENROUTER_API_KEY || "";
+  if (!geminiKey || !openaiKey || !openRouterKey) {
     const admin = createClient(supabaseUrl, serviceKey);
     const { data } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY"]);
+      .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
     for (const row of data ?? []) {
       if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
       if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+      if (row.key === "OPENROUTER_API_KEY" && !openRouterKey) openRouterKey = row.value;
     }
   }
-  if (!geminiKey && !openaiKey) {
-    return res.status(500).json({ error: "Email-signature parser: neither GEMINI_API_KEY nor OPENAI_API_KEY configured" });
+  if (!geminiKey && !openaiKey && !openRouterKey) {
+    return res.status(500).json({ error: "Email-signature parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY configured" });
   }
 
   // Auth
@@ -153,6 +155,7 @@ JSON:`;
     const { text } = await callAIWithFallback({
       geminiKey: geminiKey || undefined,
       openaiKey: openaiKey || undefined,
+      openRouterKey: openRouterKey || undefined,
       systemPrompt: "You extract contact info from email signatures and return JSON.",
       userContent: userPrompt,
       model: "claude-haiku-4-5-20251001",

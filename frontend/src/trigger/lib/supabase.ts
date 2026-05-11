@@ -169,6 +169,20 @@ export async function getOpenAIKey(): Promise<string> {
 }
 
 /**
+ * Get OpenRouter API key from app_settings. Third fallback in the resume
+ * parsing cascade (Gemini → OpenAI → OpenRouter) — unlocks Claude/Llama/
+ * Mistral via a single account when both Google and OpenAI fail open.
+ * Returns empty string when missing so callers can branch cleanly.
+ */
+export async function getOpenRouterKey(): Promise<string> {
+  try {
+    return await getAppSetting("OPENROUTER_API_KEY");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Get Voyage AI API key from app_settings.
  */
 export async function getVoyageKey(): Promise<string> {

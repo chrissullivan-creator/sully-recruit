@@ -3,6 +3,7 @@ import {
   getSupabaseAdmin,
   getGeminiKey,
   getOpenAIKey,
+  getOpenRouterKey,
   getMistralKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import {
@@ -99,12 +100,13 @@ export const resumeIngestion = inngest.createFunction(
       }
 
       const rawText = sniffText;
-      const [geminiKey, openaiKey] = await Promise.all([
+      const [geminiKey, openaiKey, openRouterKey] = await Promise.all([
         getGeminiKey(),
         getOpenAIKey().catch(() => ""),
+        getOpenRouterKey().catch(() => ""),
       ]);
-      if (!geminiKey && !openaiKey) {
-        throw new Error("Resume parser: neither GEMINI_API_KEY nor OPENAI_API_KEY set in app_settings");
+      if (!geminiKey && !openaiKey && !openRouterKey) {
+        throw new Error("Resume parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY in app_settings");
       }
 
       const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
@@ -128,6 +130,7 @@ ${rawText.slice(0, 60000)}`;
       const { text, via } = await callAIWithFallback({
         geminiKey: geminiKey || undefined,
         openaiKey: openaiKey || undefined,
+        openRouterKey: openRouterKey || undefined,
         systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
         userContent: userPrompt,
         maxTokens: 2048,

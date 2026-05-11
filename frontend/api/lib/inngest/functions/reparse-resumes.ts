@@ -3,6 +3,7 @@ import {
   getSupabaseAdmin,
   getGeminiKey,
   getOpenAIKey,
+  getOpenRouterKey,
   getMistralKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import {
@@ -79,13 +80,14 @@ export const reparseResumes = inngest.createFunction(
       failedCount = 0;
     const errors: string[] = [];
 
-    const [geminiKey, openaiKey, mistralKey] = await Promise.all([
+    const [geminiKey, openaiKey, openRouterKey, mistralKey] = await Promise.all([
       getGeminiKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getOpenRouterKey().catch(() => ""),
       getMistralKey().catch(() => ""),
     ]);
-    if (!geminiKey && !openaiKey) {
-      logger.warn("Reparse: neither GEMINI_API_KEY nor OPENAI_API_KEY set — cannot run");
+    if (!geminiKey && !openaiKey && !openRouterKey) {
+      logger.warn("Reparse: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY — cannot run");
       return { skipped: true, reason: "no_ai_keys" };
     }
 
@@ -106,6 +108,7 @@ export const reparseResumes = inngest.createFunction(
               ...req,
               geminiKey: geminiKey || undefined,
               openaiKey: openaiKey || undefined,
+              openRouterKey: openRouterKey || undefined,
             }),
           log: logger,
         });
