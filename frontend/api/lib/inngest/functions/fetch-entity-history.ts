@@ -6,38 +6,85 @@ import {
 } from "../../../../src/trigger/lib/unipile-v2.js";
 
 /**
- * Fetch historical email + LinkedIn messages for a contact and insert
- * them as message records linked to the contact. Triggered on-demand
- * from the Contacts page "Fetch History" button.
+ * Fetch historical email + LinkedIn messages for a person and insert
+ * them as message records linked to the entity. Triggered:
+ *   - on-demand from the Contacts/Candidates page "Fetch History" button
+ *     via /api/trigger-fetch-history → contact_id payload
+ *   - automatically from the `backfill-entity-histories` cron for
+ *     stale-or-never-synced people (entity_id + entity_type payload)
+ *   - from the resumes pipeline / DB triggers when a new person is
+ *     created (TODO follow-up)
  *
- * Ported from `src/trigger/fetch-entity-history.ts`. The Trigger.dev
- * wrapper at the same source path forwards via
- * `messages/fetch-entity-history.requested`.
+ * Stamps `people.last_history_synced_at` on completion so the cron's
+ * scheduling query can skip already-fresh rows.
+ *
+ * Backward-compatible payload shape: legacy callers send `{ contact_id }`,
+ * new callers send `{ entity_id, entity_type }`. Either works.
  */
+interface FetchHistoryPayload {
+  /** Legacy: contact_id only (clients). */
+  contact_id?: string;
+  /** New: works for both candidates + contacts. */
+  entity_id?: string;
+  entity_type?: "candidate" | "contact";
+}
+
 export const fetchEntityHistory = inngest.createFunction(
-  { id: "fetch-entity-history", name: "Fetch entity history (Inngest)", retries: 2 },
-  { event: "messages/fetch-entity-history.requested" },
+  {
+    id: "fetch-entity-history",
+    name: "Fetch entity history (Inngest)",
+    retries: 2,
+    // Per-entity concurrency: prevents parallel fans for the same
+    // person from racing the messages-insert dedup. event.data.entity_id
+    // is the new shape; legacy contact_id callers don't get a key,
+    // which falls back to no concurrency cap (safe — they're rare).
+    concurrency: [{ key: "event.data.entity_id", limit: 1 }],
+  }, { event: "messages/fetch-entity-history.requested" },
   async ({ event, logger }) => {
-    const { contact_id } = event.data as { contact_id: string };
+    const payload = event.data as FetchHistoryPayload;
     const supabase = getSupabaseAdmin();
 
-    const { data: contact, error: contactErr } = await supabase
-      .from("contacts")
-      .select("id, email, phone, linkedin_url, full_name")
-      .eq("id", contact_id)
-      .single();
-
-    if (contactErr || !contact) {
-      logger.error("Contact not found", { contact_id });
-      return { error: "Contact not found" };
+    // Resolve which entity we're syncing — accept legacy + new shapes.
+    let entityId: string;
+    let entityType: "candidate" | "contact";
+    if (payload.entity_id && payload.entity_type) {
+      entityId = payload.entity_id;
+      entityType = payload.entity_type;
+    } else if (payload.contact_id) {
+      entityId = payload.contact_id;
+      entityType = "contact";
+    } else {
+      logger.warn("fetch-entity-history called with no entity id");
+      return { error: "missing entity id" };
     }
+
+    // Pull the person row out of `people` regardless of type — `contacts`
+    // is a view over people-where-type=client, so the underlying record
+    // is in `people` either way.
+    const { data: person, error: personErr } = await supabase
+      .from("people")
+      .select("id, type, primary_email, work_email, personal_email, phone, linkedin_url, full_name")
+      .eq("id", entityId)
+      .maybeSingle();
+
+    if (personErr || !person) {
+      logger.error("Person not found", { entityId, error: personErr?.message });
+      return { error: "person not found" };
+    }
+
+    const personEmail = (
+      entityType === "candidate"
+        ? person.personal_email || person.primary_email
+        : person.work_email || person.primary_email
+    ) || person.primary_email || person.personal_email || person.work_email;
 
     const results: { email_history: any; linkedin_history: any } = {
       email_history: { searched: false, inserted: 0 },
       linkedin_history: { searched: false, inserted: 0 },
     };
 
-    if (contact.email) {
+    // ── Email history via Microsoft Graph ───────────────────────────
+    if (personEmail) {
       try {
         const { data: msAccounts } = await supabase
           .from("integration_accounts")
@@ -49,7 +96,7 @@ export const fetchEntityHistory = inngest.createFunction(
           if (!acct.access_token) continue;
 
           const searchResp = await fetch(
-            `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${contact.email}' or toRecipients/any(r:r/emailAddress/address eq '${contact.email}')&$select=subject,bodyPreview,from,toRecipients,sentDateTime,receivedDateTime&$top=50&$orderby=receivedDateTime desc`,
+            `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${personEmail}' or toRecipients/any(r:r/emailAddress/address eq '${personEmail}')&$select=subject,bodyPreview,from,toRecipients,sentDateTime,receivedDateTime&$top=50&$orderby=receivedDateTime desc`,
             { headers: { Authorization: `Bearer ${acct.access_token}` } },
           );
 
@@ -63,7 +110,7 @@ export const fetchEntityHistory = inngest.createFunction(
           const emails = ((await searchResp.json()) as any).value || [];
           results.email_history.searched = true;
 
-          const convId = `email_history_${contact_id}`;
+          const convId = `email_history_${entityId}`;
           const { data: existingConv } = await supabase
             .from("conversations")
             .select("id")
@@ -73,16 +120,16 @@ export const fetchEntityHistory = inngest.createFunction(
           if (!existingConv) {
             await supabase.from("conversations").insert({
               id: convId,
-              contact_id,
+              [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
               channel: "email",
-              subject: `Email history: ${contact.full_name || contact.email}`,
+              subject: `Email history: ${person.full_name || personEmail}`,
               account_id: acct.id,
             } as any);
           }
 
           for (const email of emails) {
             const fromAddr = email.from?.emailAddress?.address?.toLowerCase();
-            const direction = fromAddr === contact.email?.toLowerCase() ? "inbound" : "outbound";
+            const direction = fromAddr === personEmail.toLowerCase() ? "inbound" : "outbound";
             const externalId = email.id;
 
             const { data: existing } = await supabase
@@ -95,7 +142,7 @@ export const fetchEntityHistory = inngest.createFunction(
 
             await supabase.from("messages").insert({
               conversation_id: convId,
-              contact_id,
+              [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
               channel: "email",
               direction,
               subject: email.subject,
@@ -117,7 +164,8 @@ export const fetchEntityHistory = inngest.createFunction(
       }
     }
 
-    if (contact.linkedin_url) {
+    // ── LinkedIn history via Unipile v2 ─────────────────────────────
+    if (person.linkedin_url) {
       try {
         const { data: liAccounts } = await supabase
           .from("integration_accounts")
@@ -130,10 +178,14 @@ export const fetchEntityHistory = inngest.createFunction(
         const liAcct = liAccounts?.[0];
 
         if (liAcct?.unipile_account_id) {
+          // Look up the resolved Unipile chat. candidate_channels +
+          // contact_channels are kept in sync with the person table.
+          const channelTable = entityType === "candidate" ? "candidate_channels" : "contact_channels";
+          const fkColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
           const { data: channel } = await supabase
-            .from("contact_channels")
+            .from(channelTable)
             .select("provider_id, unipile_id, external_conversation_id")
-            .eq("contact_id", contact_id)
+            .eq(fkColumn, entityId)
             .eq("channel", "linkedin")
             .maybeSingle();
 
@@ -164,11 +216,11 @@ export const fetchEntityHistory = inngest.createFunction(
                 const direction = msg.is_sender ? "outbound" : "inbound";
                 await supabase.from("messages").insert({
                   conversation_id: channel.external_conversation_id,
-                  contact_id,
+                  [entityType === "candidate" ? "candidate_id" : "contact_id"]: entityId,
                   channel: channelBucket,
                   direction,
                   body: msg.text || msg.body,
-                  sender_name: msg.sender_name || contact.full_name,
+                  sender_name: msg.sender_name || person.full_name,
                   sent_at: msg.timestamp || msg.created_at,
                   external_message_id: externalId,
                   provider: "unipile",
@@ -186,7 +238,13 @@ export const fetchEntityHistory = inngest.createFunction(
       }
     }
 
-    logger.info("Entity history fetched", results);
+    // Stamp last_history_synced_at so the cron skips this row next pass.
+    await supabase
+      .from("people")
+      .update({ last_history_synced_at: new Date().toISOString() } as any)
+      .eq("id", entityId);
+
+    logger.info("Entity history fetched", { entityId, entityType, ...results });
     return results;
   },
 );
