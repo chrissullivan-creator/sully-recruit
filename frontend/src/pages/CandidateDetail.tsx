@@ -496,20 +496,34 @@ const CandidateDetail = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id ?? null;
       // 'pitch' is the canonical first stage — candidate has been added
-      // to the pipeline and now needs to be pitched the role. Kickoff
-      // note lands directly on submittal_notes (one source of truth;
-      // the StickyNote dialog reads + edits the same column).
-      const trimmed = note.trim();
-      const { error } = await supabase
+      // to the pipeline and now needs to be pitched the role.
+      const { data: created, error } = await supabase
         .from('send_outs')
         .insert({
           candidate_id: id,
           job_id: selectedJobForSendOut,
           stage: 'pitch',
           recruiter_id: userId,
-          submittal_notes: trimmed || null,
-        } as any);
+        } as any)
+        .select('id')
+        .single();
       if (error) throw error;
+
+      // Optional kickoff note → polymorphic notes row pointing at the
+      // new send_out so it appears in the candidate's activity feed.
+      // The StickyNote dialog reads + writes this same notes table
+      // (entity_type='send_out'), so the kickoff note shows up there
+      // automatically without touching submittal_notes.
+      const trimmed = note.trim();
+      if (created?.id && trimmed) {
+        await supabase.from('notes').insert({
+          entity_type: 'send_out',
+          entity_id: created.id,
+          note: trimmed,
+          created_by: userId,
+          note_source: 'add_send_out',
+        } as any);
+      }
 
       queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
       setSelectedJobForSendOut('');
@@ -2072,13 +2086,8 @@ const CandidateDetail = () => {
                               )}
                               <Button
                                 variant="ghost" size="icon"
-                                className={cn(
-                                  'h-7 w-7',
-                                  so.submittal_notes
-                                    ? 'text-gold-deep hover:text-gold-deep'
-                                    : 'text-muted-foreground hover:text-foreground',
-                                )}
-                                title={so.submittal_notes ? 'View / edit notes' : 'Add notes'}
+                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                title="View / add notes"
                                 onClick={() => setEditingNotesFor({
                                   id: so.id,
                                   candidateName: candidate?.full_name ?? null,

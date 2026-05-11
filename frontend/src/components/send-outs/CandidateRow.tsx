@@ -146,13 +146,8 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
           )}
           <button
             onClick={() => setNotesOpen(true)}
-            title={row.submittal_notes ? 'View / edit notes' : 'Add notes'}
-            className={cn(
-              'p-1.5 rounded transition-colors',
-              row.submittal_notes
-                ? 'text-gold-deep hover:bg-gold-bg'
-                : 'text-muted-foreground hover:bg-emerald-light hover:text-emerald',
-            )}
+            title="View / add notes"
+            className="p-1.5 rounded text-muted-foreground hover:bg-emerald-light hover:text-emerald transition-colors"
           >
             <StickyNote className="h-3.5 w-3.5" />
           </button>
