@@ -22,7 +22,7 @@
  * email address. If we don't have one, throw so the caller can fall
  * back to the Graph path.
  */
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 import { getAppSetting } from "./supabase.js";
 
 interface UnipileSendInput {

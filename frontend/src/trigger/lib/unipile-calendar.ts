@@ -11,8 +11,8 @@
  *
  * Field shapes vary by provider — defensive readers below.
  */
-import { logger } from "./logger";
-import { getAppSetting } from "./supabase";
+import { logger } from "./logger.js";
+import { getAppSetting } from "./supabase.js";
 
 export interface UnipileCalendarEvent {
   id: string;

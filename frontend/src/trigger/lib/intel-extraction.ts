@@ -8,10 +8,10 @@
  * Extracted fields are written directly to the candidate/contact record
  * and appended to back_of_resume_notes for context preservation.
  */
-import { logger } from "./logger";
-import { getAnthropicKey, getOpenAIKey } from "./supabase";
-import { callAIWithFallback } from "../../lib/ai-fallback";
-import { notifyError } from "./alerting";
+import { logger } from "./logger.js";
+import { getAnthropicKey, getOpenAIKey } from "./supabase.js";
+import { callAIWithFallback } from "../../lib/ai-fallback.js";
+import { notifyError } from "./alerting.js";
 
 interface ExtractedIntel {
   sentiment: string;

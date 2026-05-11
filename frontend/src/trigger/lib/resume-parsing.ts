@@ -1,5 +1,5 @@
-import { logger } from "./logger";
-import { getVoyageKey } from "./supabase";
+import { logger } from "./logger.js";
+import { getVoyageKey } from "./supabase.js";
 
 const VOYAGE_MODEL = "voyage-finance-2";
 

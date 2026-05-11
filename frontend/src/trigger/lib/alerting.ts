@@ -19,9 +19,9 @@
  *   }
  */
 
-import { logger } from "./logger";
-import { getSupabaseAdmin } from "./supabase";
-import { sendInternalEmail } from "./microsoft-graph";
+import { logger } from "./logger.js";
+import { getSupabaseAdmin } from "./supabase.js";
+import { sendInternalEmail } from "./microsoft-graph.js";
 
 const ALERT_TTL_MS = 60 * 60 * 1000; // 1 hour per (task, signature)
 
