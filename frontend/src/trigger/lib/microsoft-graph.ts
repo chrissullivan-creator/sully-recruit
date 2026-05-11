@@ -1,4 +1,4 @@
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 import { getMicrosoftGraphCredentials } from "./supabase.js";
 import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
 import { getSupabaseAdmin } from "./supabase.js";

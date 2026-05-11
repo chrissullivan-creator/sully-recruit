@@ -1,5 +1,5 @@
-import { getSupabaseAdmin } from "./supabase";
-import { calculateSendTime } from "./send-time-calculator";
+import { getSupabaseAdmin } from "./supabase.js";
+import { calculateSendTime } from "./send-time-calculator.js";
 
 // Inlined from `@/components/sequences/sequenceBranches` so Vercel's
 // Node function bundler doesn't have to resolve the `@/` Vite path

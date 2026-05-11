@@ -1,5 +1,5 @@
-import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./supabase";
-import { callAIWithFallback } from "../../lib/ai-fallback";
+import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./supabase.js";
+import { callAIWithFallback } from "../../lib/ai-fallback.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 

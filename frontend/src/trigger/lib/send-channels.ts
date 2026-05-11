@@ -1,4 +1,4 @@
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 import { getAppSetting } from "./supabase.js";
 import { getMicrosoftAccessToken } from "./microsoft-graph.js";
 import { fetchWithRetry } from "./fetch-retry.js";

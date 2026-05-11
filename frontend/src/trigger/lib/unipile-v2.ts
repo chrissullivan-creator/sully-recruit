@@ -21,7 +21,7 @@
  *
  * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
  */
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 
 interface ResolvedConfig {
   base: string;
