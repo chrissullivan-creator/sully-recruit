@@ -496,11 +496,11 @@ const CandidateDetail = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id ?? null;
       // 'pitch' is the canonical first stage — candidate has been added
-      // to the pipeline and now needs to be pitched the role. Stamp
-      // the kickoff note onto submittal_notes too so the StickyNote
-      // dialog finds it without falling back to the audit trail.
+      // to the pipeline and now needs to be pitched the role. Kickoff
+      // note lands directly on submittal_notes (one source of truth;
+      // the StickyNote dialog reads + edits the same column).
       const trimmed = note.trim();
-      const { data: created, error } = await supabase
+      const { error } = await supabase
         .from('send_outs')
         .insert({
           candidate_id: id,
@@ -508,22 +508,8 @@ const CandidateDetail = () => {
           stage: 'pitch',
           recruiter_id: userId,
           submittal_notes: trimmed || null,
-        } as any)
-        .select('id')
-        .single();
-      if (error) throw error;
-
-      // Optional kickoff note → polymorphic notes row pointing at the
-      // new send_out so it appears in the candidate's activity feed.
-      if (created?.id && trimmed) {
-        await supabase.from('notes').insert({
-          entity_type: 'send_out',
-          entity_id: created.id,
-          note: trimmed,
-          created_by: userId,
-          note_source: 'add_send_out',
         } as any);
-      }
+      if (error) throw error;
 
       queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
       setSelectedJobForSendOut('');
