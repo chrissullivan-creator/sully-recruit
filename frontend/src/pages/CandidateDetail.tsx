@@ -26,11 +26,12 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge, CalendarPlus,
+  Search, Calendar, Merge, CalendarPlus, StickyNote,
 } from 'lucide-react';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
+import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -342,6 +343,11 @@ const CandidateDetail = () => {
   } | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectForm, setRejectForm] = useState({ rejected_by: '', rejection_reason: '', feedback: '' });
+  // Send-out whose notes are currently being read/edited via the dialog.
+  // Distinct from the stage-move note flow above.
+  const [editingNotesFor, setEditingNotesFor] = useState<{
+    id: string; candidateName: string | null; jobTitle: string | null;
+  } | null>(null);
 
   // Permission checks
   const currentProfile = profiles.find(p => p.id === user?.id);
@@ -2075,6 +2081,23 @@ const CandidateDetail = () => {
                                   {stageCfg.label}
                                 </span>
                               )}
+                              <Button
+                                variant="ghost" size="icon"
+                                className={cn(
+                                  'h-7 w-7',
+                                  so.submittal_notes
+                                    ? 'text-gold-deep hover:text-gold-deep'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
+                                title={so.submittal_notes ? 'View / edit notes' : 'Add notes'}
+                                onClick={() => setEditingNotesFor({
+                                  id: so.id,
+                                  candidateName: candidate?.full_name ?? null,
+                                  jobTitle: j?.title ?? null,
+                                })}
+                              >
+                                <StickyNote className="h-3.5 w-3.5" />
+                              </Button>
                               {isSendOutOwner && (
                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-400" onClick={() => handleDeleteSendOut(so.id)}>
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -2419,6 +2442,14 @@ const CandidateDetail = () => {
       </AlertDialog>
 
       <EnrollInSequenceDialog open={enrollOpen} onOpenChange={setEnrollOpen} candidateIds={id ? [id] : []} candidateNames={[fullName]} />
+
+      <EditSendOutNotesDialog
+        open={!!editingNotesFor}
+        onOpenChange={(v) => { if (!v) setEditingNotesFor(null); }}
+        sendOutId={editingNotesFor?.id ?? null}
+        candidateName={editingNotesFor?.candidateName ?? null}
+        jobTitle={editingNotesFor?.jobTitle ?? null}
+      />
 
       <SendOutNotesDialog
         open={sendOutNotesOpen}

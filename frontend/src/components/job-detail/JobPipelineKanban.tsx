@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Briefcase, Plus } from 'lucide-react';
+import { GripVertical, Briefcase, Plus, StickyNote } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import {
@@ -10,6 +10,7 @@ import {
 } from '@/lib/pipeline';
 import { formatComp } from '@/lib/queries/send-outs';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
+import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 
 export interface KanbanRow {
   id: string;                       // candidate_jobs id
@@ -201,6 +202,7 @@ function KanbanCard({ row, onClick }: { row: KanbanRow; onClick?: (row: KanbanRo
   const initials = ((c?.first_name?.[0] ?? '') + (c?.last_name?.[0] ?? '')).toUpperCase() || (name[0] ?? '?').toUpperCase();
   const comp = formatComp(c?.target_total_comp ?? c?.target_base_comp ?? null);
   const days = daysSince(row.stage_updated_at);
+  const [notesOpen, setNotesOpen] = useState(false);
 
   return (
     <div
@@ -234,15 +236,34 @@ function KanbanCard({ row, onClick }: { row: KanbanRow; onClick?: (row: KanbanRo
           )}
           <div className="flex items-center justify-between gap-2 mt-1.5">
             <span className="text-[10px] text-gold-deep font-semibold tabular-nums">{comp}</span>
-            <span className={cn(
-              'text-[10px] tabular-nums px-1.5 rounded',
-              days > 7 ? 'bg-amber-100 text-amber-800' : 'text-muted-foreground',
-            )}>
-              {days}d
-            </span>
+            <div className="flex items-center gap-1">
+              {row.send_out_id && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setNotesOpen(true); }}
+                  title="View / edit send-out notes"
+                  className="p-0.5 rounded text-muted-foreground/60 hover:text-gold-deep hover:bg-gold-bg/40 transition-colors"
+                >
+                  <StickyNote className="h-3 w-3" />
+                </button>
+              )}
+              <span className={cn(
+                'text-[10px] tabular-nums px-1.5 rounded',
+                days > 7 ? 'bg-amber-100 text-amber-800' : 'text-muted-foreground',
+              )}>
+                {days}d
+              </span>
+            </div>
           </div>
         </div>
       </div>
+      {row.send_out_id && (
+        <EditSendOutNotesDialog
+          open={notesOpen}
+          onOpenChange={setNotesOpen}
+          sendOutId={row.send_out_id}
+          candidateName={name}
+        />
+      )}
     </div>
   );
 }
