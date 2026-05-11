@@ -4,6 +4,7 @@ import {
   getAppSetting,
   getGeminiKey,
   getOpenAIKey,
+  getOpenRouterKey,
   getMistralKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import { sendInternalEmail } from "../../../../src/trigger/lib/microsoft-graph.js";
@@ -225,13 +226,14 @@ export const reconcileOrphanedResumes = inngest.createFunction(
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
-    const [geminiKey, openaiKey, mistralKey] = await Promise.all([
+    const [geminiKey, openaiKey, openRouterKey, mistralKey] = await Promise.all([
       getGeminiKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getOpenRouterKey().catch(() => ""),
       getMistralKey().catch(() => ""),
     ]);
-    if (!geminiKey && !openaiKey) {
-      logger.warn("Reconcile: neither GEMINI_API_KEY nor OPENAI_API_KEY set — cannot parse");
+    if (!geminiKey && !openaiKey && !openRouterKey) {
+      logger.warn("Reconcile: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY — cannot parse");
       return { skipped: true, reason: "no_ai_keys" };
     }
     const parseOpts = {
@@ -241,6 +243,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
           ...req,
           geminiKey: geminiKey || undefined,
           openaiKey: openaiKey || undefined,
+          openRouterKey: openRouterKey || undefined,
         }),
       log: logger,
     };

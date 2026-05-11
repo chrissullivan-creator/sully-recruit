@@ -54,19 +54,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let mistralKey = process.env.MISTRAL_API_KEY || "";
     let geminiKey = process.env.GEMINI_API_KEY || "";
     let openaiKey = process.env.OPENAI_API_KEY || "";
-    if (!mistralKey || !geminiKey || !openaiKey) {
+    let openRouterKey = process.env.OPENROUTER_API_KEY || "";
+    if (!mistralKey || !geminiKey || !openaiKey || !openRouterKey) {
       const { data } = await admin
         .from("app_settings")
         .select("key, value")
-        .in("key", ["MISTRAL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]);
+        .in("key", ["MISTRAL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
       for (const row of data ?? []) {
         if (row.key === "MISTRAL_API_KEY" && !mistralKey) mistralKey = row.value;
         if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
         if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+        if (row.key === "OPENROUTER_API_KEY" && !openRouterKey) openRouterKey = row.value;
       }
     }
-    if (!geminiKey && !openaiKey) {
-      return res.status(500).json({ error: "Resume parser: neither GEMINI_API_KEY nor OPENAI_API_KEY configured" });
+    if (!geminiKey && !openaiKey && !openRouterKey) {
+      return res.status(500).json({ error: "Resume parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY configured" });
     }
 
     const { data: downloadData, error: downloadErr } = await admin.storage
@@ -119,7 +121,7 @@ ${rawText.slice(0, 60_000)}`;
       "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.";
 
     const { text, via } = await callGeminiThenOpenAI({
-      geminiKey, openaiKey,
+      geminiKey, openaiKey, openRouterKey,
       systemPrompt, userContent: userPrompt,
       maxTokens: 2048,
     });
@@ -262,6 +264,7 @@ async function extractResumeText(
 interface CallOpts {
   geminiKey: string;
   openaiKey: string;
+  openRouterKey: string;
   systemPrompt: string;
   userContent: string;
   maxTokens: number;
@@ -270,7 +273,7 @@ interface CallOpts {
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
 
-async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via: "gemini" | "openai" }> {
+async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via: "gemini" | "openai" | "openrouter" }> {
   // Gemini first. JSON-mode + low temperature for structured output.
   if (opts.geminiKey) {
     try {
@@ -301,21 +304,57 @@ async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via
       return { text, via: "gemini" };
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      if (!FALLBACK_REGEX.test(msg) || !opts.openaiKey) throw err;
+      if (!FALLBACK_REGEX.test(msg) || (!opts.openaiKey && !opts.openRouterKey)) throw err;
       console.warn("Gemini failed, falling back to OpenAI:", msg);
     }
   }
 
   // OpenAI fallback.
   if (opts.openaiKey) {
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          temperature: 0,
+          max_tokens: opts.maxTokens,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: opts.systemPrompt },
+            { role: "user", content: opts.userContent },
+          ],
+        }),
+      });
+      if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      if (!text) throw new Error("OpenAI returned no text content");
+      return { text, via: "openai" };
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      if (!FALLBACK_REGEX.test(msg) || !opts.openRouterKey) throw err;
+      console.warn("OpenAI failed, falling back to OpenRouter:", msg);
+    }
+  }
+
+  // OpenRouter — final escape hatch. OpenAI-compatible chat-completions
+  // schema; the `openai/gpt-4o-mini` route mirrors our OpenAI stage so
+  // the prompt + temperature + JSON-mode behaviour stays consistent.
+  if (opts.openRouterKey) {
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${opts.openaiKey}`,
+        Authorization: `Bearer ${opts.openRouterKey}`,
+        "HTTP-Referer": "https://www.sullyrecruit.app",
+        "X-Title": "Sully Recruit",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "openai/gpt-4o-mini",
         temperature: 0,
         max_tokens: opts.maxTokens,
         response_format: { type: "json_object" },
@@ -325,11 +364,11 @@ async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via
         ],
       }),
     });
-    if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+    if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${await resp.text()}`);
     const data = await resp.json();
     const text = data.choices?.[0]?.message?.content || "";
-    if (!text) throw new Error("OpenAI returned no text content");
-    return { text, via: "openai" };
+    if (!text) throw new Error("OpenRouter returned no text content");
+    return { text, via: "openrouter" };
   }
 
   throw new Error("callGeminiThenOpenAI: no provider keys supplied");

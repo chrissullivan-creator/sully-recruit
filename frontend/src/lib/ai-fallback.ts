@@ -1,11 +1,14 @@
 /**
- * Unified AI cascade: Gemini → Claude → OpenAI.
+ * Unified AI cascade: Gemini → Claude → OpenAI → OpenRouter.
  *
  * Drops in anywhere we call an LLM. Tries each provider whose key is
  * supplied, in the listed order. On a fallback-able failure (credit
  * balance, 429, 401/403, model overload, etc.) it falls through to
  * the next provider; any other error is re-thrown so the caller's
  * retry policy still applies.
+ *
+ * Resume parsers pass `geminiKey + openaiKey + openRouterKey` (no Claude).
+ * Drafting / chat / sentiment / matching pass `anthropicKey + openaiKey`.
  *
  * Usable from both Vercel serverless functions and Trigger.dev tasks —
  * both run Node 20 with global fetch.
@@ -24,8 +27,12 @@ export interface CallAIOptions {
   geminiKey?: string;
   /** Anthropic API key. Tried second (or first if no geminiKey). */
   anthropicKey?: string;
-  /** OpenAI API key. Tried last. */
+  /** OpenAI API key. Tried third. */
   openaiKey?: string;
+  /** OpenRouter API key. Tried last — gateway to many providers in one
+   *  account, used as the final escape hatch when both Gemini and OpenAI
+   *  fail open. */
+  openRouterKey?: string;
   systemPrompt: string;
   /**
    * Either a plain string (user message) or an array of Anthropic-shaped
@@ -38,6 +45,9 @@ export interface CallAIOptions {
   geminiModel?: string;
   /** OpenAI fallback model — default 'gpt-4o-mini'. */
   fallbackModel?: string;
+  /** OpenRouter fallback model slug — default 'openai/gpt-4o-mini'. Any
+   *  OpenAI-compatible chat model OpenRouter routes to is fine. */
+  openRouterModel?: string;
   /** Default 1024. */
   maxTokens?: number;
   /** Default 0. */
@@ -50,12 +60,13 @@ export interface CallAIOptions {
 export interface CallAIResult {
   text: string;
   /** Which provider actually produced the answer. */
-  via: "gemini" | "claude" | "openai";
+  via: "gemini" | "claude" | "openai" | "openrouter";
 }
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
@@ -167,6 +178,35 @@ async function tryOpenAI(opts: CallAIOptions): Promise<string> {
   return data.choices?.[0]?.message?.content || "";
 }
 
+async function tryOpenRouter(opts: CallAIOptions): Promise<string> {
+  const messages: any[] = [
+    { role: "system", content: opts.systemPrompt },
+    { role: "user", content: opts.userContent as string },
+  ];
+  const body: any = {
+    model: opts.openRouterModel || DEFAULT_OPENROUTER_MODEL,
+    temperature: opts.temperature ?? 0,
+    max_tokens: opts.maxTokens ?? 1024,
+    messages,
+  };
+  if (opts.jsonOutput) body.response_format = { type: "json_object" };
+
+  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${opts.openRouterKey!}`,
+      // Optional but recommended by OpenRouter for analytics + rate-limit grouping.
+      "HTTP-Referer": "https://www.sullyrecruit.app",
+      "X-Title": "Sully Recruit",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${await resp.text()}`);
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
 export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIResult> {
   const isText = userContentIsTextOnly(opts.userContent);
   let lastError: unknown = null;
@@ -199,6 +239,18 @@ export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIRes
     try {
       const text = await tryOpenAI(opts);
       return { text, via: "openai" };
+    } catch (err) {
+      lastError = err;
+      if (!isFallbackable(err)) throw err;
+    }
+  }
+
+  // ── Stage 4: OpenRouter (text-only — same caveat). Final escape hatch
+  //               when every other provider has fallen open.
+  if (opts.openRouterKey && isText) {
+    try {
+      const text = await tryOpenRouter(opts);
+      return { text, via: "openrouter" };
     } catch (err) {
       lastError = err;
       throw err;
