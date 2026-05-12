@@ -9,7 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import {
-  Loader2, ChevronRight, Users,
+  Loader2, Users, Briefcase, Building2, Calendar, Eye, Sparkles,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -25,13 +25,29 @@ interface AccountOption {
   ownerUserId: string | null;
 }
 
+interface JobPostingChannel {
+  id: string;
+  name?: string;
+  state?: string; // ACTIVE | CLOSED | DRAFT
+  job_posting_id?: string;
+}
+
 interface HiringProject {
   id: string;
   title: string;
   created_at?: string;
   updated_at?: string;
+  last_accessed_at?: string;
   applicant_count?: number;
+  pipeline_count?: number;
   status?: string;
+  visibility?: string;
+  owner_name?: string;
+  company_name?: string;
+  job_title?: string;
+  job_posting_id?: string;
+  job_posting?: JobPostingChannel | null;
+  has_recommended_matches?: boolean;
   account_id: string;
   recruiter: string;
   [key: string]: any;
@@ -56,17 +72,60 @@ async function callSourceApi(body: Record<string, any>, session: any) {
 }
 
 function normalizeProject(raw: any, accountId: string, recruiter: string): HiringProject {
+  // Sum candidates_count across pipeline stages — that's the "Pipeline: N candidates"
+  // figure LinkedIn shows on each project card.
+  const pipelineCount = Array.isArray(raw?.pipeline?.stages)
+    ? raw.pipeline.stages.reduce((n: number, s: any) => n + (Number(s?.candidates_count) || 0), 0)
+    : undefined;
+
+  const channels: any[] = Array.isArray(raw?.talent_pool?.channels) ? raw.talent_pool.channels : [];
+  const jobPostingChannel = channels.find((c) => c?.type === 'JOB_POSTING') || null;
+  const hasRecommendedMatches = channels.some(
+    (c) => c?.type === 'JOB_POSTING_RECOMMENDED_MATCHES' && c?.state === 'ACTIVE'
+  );
+
   return {
     ...raw,
     id: raw.id || raw.project_id || raw.urn || `proj-${Math.random()}`,
     title: raw.title || raw.name || raw.project_name || 'Untitled Project',
     created_at: raw.created_at || raw.createdAt || raw.creation_date || null,
-    updated_at: raw.updated_at || raw.updatedAt || raw.modified_date || null,
+    updated_at: raw.updated_at || raw.last_modified_at || raw.updatedAt || raw.modified_date || null,
+    last_accessed_at: raw.last_accessed_at || null,
     applicant_count: raw.applicant_count ?? raw.total_applicants ?? raw.num_applicants ?? null,
+    pipeline_count: pipelineCount,
     status: raw.status || null,
+    visibility: raw.visibility || null,
+    owner_name: raw?.owner?.name || null,
+    company_name: raw?.metadata?.company?.name || null,
+    job_title: raw?.metadata?.job_title || null,
+    job_posting_id: raw?.metadata?.job_posting_id || jobPostingChannel?.id || null,
+    job_posting: jobPostingChannel
+      ? {
+          id: jobPostingChannel.id,
+          name: jobPostingChannel.name,
+          state: jobPostingChannel.state,
+          job_posting_id: jobPostingChannel.id,
+        }
+      : null,
+    has_recommended_matches: hasRecommendedMatches,
     account_id: accountId,
     recruiter,
   };
+}
+
+function relativeTime(iso?: string | null): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return '';
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,11 +224,13 @@ export default function Source() {
         }
       }
 
-      merged.sort((a, b) => {
-        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return db - da;
-      });
+      // Match LinkedIn's "Last used by me" default: most-recently-accessed first,
+      // falling back to last-modified, then created.
+      const recencyKey = (p: HiringProject) => {
+        const v = p.last_accessed_at || p.updated_at || p.created_at;
+        return v ? new Date(v).getTime() : 0;
+      };
+      merged.sort((a, b) => recencyKey(b) - recencyKey(a));
 
       setProjects(merged);
     } catch (err: any) {
@@ -242,41 +303,102 @@ export default function Source() {
         </div>
       )}
 
-      {/* Projects list */}
-      <div className="space-y-2">
-        {projects.map((project) => (
-          <button
-            key={project.id}
-            onClick={() => openProject(project)}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-card border border-border rounded-lg hover:bg-accent/5 transition-colors text-left"
-          >
-            <Users className="h-5 w-5 text-muted-foreground shrink-0" />
+      {/* Projects list — rich cards modeled after LinkedIn Recruiter's project list */}
+      <div className="space-y-3">
+        {projects.map((project) => {
+          const jp = project.job_posting;
+          const jpState = jp?.state ? jp.state.toLowerCase() : null;
+          const createdDate = project.created_at
+            ? new Date(project.created_at).toLocaleDateString()
+            : null;
+          const viewedAgo = relativeTime(project.last_accessed_at);
+          return (
+            <button
+              key={project.id}
+              onClick={() => openProject(project)}
+              className="w-full text-left bg-card border border-border rounded-lg hover:border-foreground/20 hover:bg-accent/5 transition-colors p-4"
+            >
+              {/* Title row */}
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-base truncate">{project.title}</div>
+                  {(project.company_name || project.owner_name || createdDate) && (
+                    <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
+                      {project.company_name && (
+                        <span className="inline-flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          {project.company_name}
+                        </span>
+                      )}
+                      {project.owner_name && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>Owner: {project.owner_name}</span>
+                        </>
+                      )}
+                      {createdDate && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            Created {createdDate}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Badge variant="outline" className="text-[10px] shrink-0">{project.recruiter}</Badge>
+              </div>
 
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm truncate">{project.title}</div>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                <span>{project.recruiter}</span>
-                {project.applicant_count != null && (
-                  <>
-                    <span>·</span>
-                    <span>{project.applicant_count} applicant{project.applicant_count !== 1 ? 's' : ''}</span>
-                  </>
+              {/* Stats row: pipeline count + viewed */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                {project.pipeline_count != null && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <Users className="h-3 w-3" />
+                    Pipeline: {project.pipeline_count} candidate{project.pipeline_count === 1 ? '' : 's'}
+                  </span>
                 )}
-                {project.created_at && (
-                  <>
-                    <span>·</span>
-                    <span>{new Date(project.created_at).toLocaleDateString()}</span>
-                  </>
+                {viewedAgo && (
+                  <span className="inline-flex items-center gap-1">
+                    <Eye className="h-3 w-3" />
+                    Viewed {viewedAgo}
+                  </span>
                 )}
-                {project.status && (
-                  <Badge variant="outline" className="text-[10px]">{project.status}</Badge>
+                {project.has_recommended_matches && (
+                  <span className="inline-flex items-center gap-1 text-emerald-500">
+                    <Sparkles className="h-3 w-3" />
+                    Recommended matches active
+                  </span>
                 )}
               </div>
-            </div>
 
-            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-          </button>
-        ))}
+              {/* Tagged job posting (if linked on LinkedIn) */}
+              {jp && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-muted-foreground">Job</span>
+                  {jp.id && <span className="text-muted-foreground">({jp.id}):</span>}
+                  <span className="font-medium truncate">{jp.name || project.job_title || 'Untitled'}</span>
+                  {jpState && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        jpState === 'active'
+                          ? 'text-[10px] border-emerald-500/30 text-emerald-500'
+                          : jpState === 'closed'
+                          ? 'text-[10px] border-red-500/30 text-red-500'
+                          : 'text-[10px]'
+                      }
+                    >
+                      {jpState}
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </MainLayout>
   );
