@@ -6,6 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJobs } from '@/hooks/useData';
@@ -249,6 +252,96 @@ export default function SourceProject() {
 
   useEffect(() => { fetchPipeline(); }, [fetchPipeline]);
 
+  // ---- Save-to-Pipeline orchestration ----
+  // The project may already be linked to an internal job (via
+  // jobs.linkedin_project_id). When linked, Save is one click. When not,
+  // the first Save opens a job picker that persists the link for future
+  // applicants on this project.
+  const [linkedJobId, setLinkedJobId] = useState<string | null>(null);
+  const [linkedJobChecked, setLinkedJobChecked] = useState(false);
+  const [savingApplicantId, setSavingApplicantId] = useState<string | null>(null);
+  const [linkDialogApplicant, setLinkDialogApplicant] = useState<Applicant | null>(null);
+  const [linkDialogJobId, setLinkDialogJobId] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!id || !accountId) return;
+      const { data } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('linkedin_project_id', id)
+        .eq('linkedin_project_account_id', accountId)
+        .maybeSingle();
+      if (cancelled) return;
+      setLinkedJobId(data?.id || null);
+      setLinkedJobChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, [id, accountId]);
+
+  const callSaveToPipeline = useCallback(async (a: Applicant, jobIdOverride?: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not authenticated'); return null; }
+    const resp = await fetch('/api/save-to-pipeline', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        account_id: accountId,
+        project_id: id,
+        applicant_id: a.id,
+        applicant: a,
+        has_resume: !!a.has_resume,
+        ...(jobIdOverride ? { job_id: jobIdOverride } : {}),
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (data?.code === 'PROJECT_NOT_LINKED') return { needsLink: true };
+      throw new Error(data?.error || `Save failed (${resp.status})`);
+    }
+    return data;
+  }, [id, accountId]);
+
+  const handleSaveApplicant = useCallback(async (a: Applicant) => {
+    setSavingApplicantId(a.id);
+    try {
+      const result = await callSaveToPipeline(a);
+      if (result && (result as any).needsLink) {
+        setLinkDialogApplicant(a);
+        return;
+      }
+      toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
+      queryClient.invalidateQueries({ queryKey: ['candidates'] });
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed');
+    } finally {
+      setSavingApplicantId(null);
+    }
+  }, [callSaveToPipeline, queryClient]);
+
+  const confirmLinkJob = useCallback(async () => {
+    if (!linkDialogApplicant || !linkDialogJobId) return;
+    setSavingApplicantId(linkDialogApplicant.id);
+    try {
+      const result = await callSaveToPipeline(linkDialogApplicant, linkDialogJobId);
+      if (result && !(result as any).needsLink) {
+        setLinkedJobId(linkDialogJobId);
+        toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
+        queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        setLinkDialogApplicant(null);
+        setLinkDialogJobId('');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed');
+    } finally {
+      setSavingApplicantId(null);
+    }
+  }, [linkDialogApplicant, linkDialogJobId, callSaveToPipeline, queryClient]);
+
   // Lazy-load applicants the first time the user opens that tab.
   useEffect(() => {
     if (tab === 'applicants' && !applicantsLoaded && !applicantsLoading) {
@@ -386,6 +479,31 @@ export default function SourceProject() {
             {jobApplicants.length > 0 && ` · ${jobApplicants.length} applicant${jobApplicants.length === 1 ? '' : 's'}`}
           </p>
         </div>
+        {linkedJobChecked && (
+          linkedJobId
+            ? (() => {
+                const linked = openJobs.find((j: any) => j.id === linkedJobId);
+                return (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-emerald-500/30 text-emerald-500 shrink-0"
+                    title={linked?.title ? `Linked to ${linked.title}` : 'Linked to internal job'}
+                  >
+                    <Briefcase className="h-3 w-3 mr-1" />
+                    Linked
+                  </Badge>
+                );
+              })()
+            : (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-muted-foreground shrink-0"
+                title="First Save will prompt you to pick a job"
+              >
+                Unlinked
+              </Badge>
+            )
+        )}
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ProjectTab)} className="mb-4">
@@ -651,6 +769,8 @@ export default function SourceProject() {
             loading={applicantsLoading}
             applicants={jobApplicants}
             onDownloadResume={handleDownloadResume}
+            onSave={handleSaveApplicant}
+            savingId={savingApplicantId}
           />
         </TabsContent>
 
@@ -669,6 +789,8 @@ export default function SourceProject() {
             searching={searching}
             results={searchResults}
             total={searchTotal}
+            onSave={handleSaveApplicant}
+            savingId={savingApplicantId}
           />
         </TabsContent>
       </Tabs>
@@ -688,6 +810,21 @@ export default function SourceProject() {
         applicants={selectedApplicants}
         project={project}
       />
+
+      {/* Link-job dialog — shown the first time you Save on a project that
+          isn't yet linked to an internal job. Persists the linkedin_project_id
+          on the chosen job so future Saves are one-click. */}
+      <LinkJobDialog
+        open={!!linkDialogApplicant}
+        applicantName={linkDialogApplicant ? `${linkDialogApplicant.first_name} ${linkDialogApplicant.last_name}`.trim() : ''}
+        projectTitle={projectTitle}
+        openJobs={openJobs}
+        selectedJobId={linkDialogJobId}
+        onSelectJob={setLinkDialogJobId}
+        onCancel={() => { setLinkDialogApplicant(null); setLinkDialogJobId(''); }}
+        onConfirm={confirmLinkJob}
+        saving={savingApplicantId === linkDialogApplicant?.id}
+      />
     </MainLayout>
   );
 }
@@ -700,9 +837,11 @@ interface ApplicantsTabProps {
   loading: boolean;
   applicants: Applicant[];
   onDownloadResume: (a: Applicant) => void;
+  onSave: (a: Applicant) => void;
+  savingId: string | null;
 }
 
-function ApplicantsTab({ loading, applicants, onDownloadResume }: ApplicantsTabProps) {
+function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId }: ApplicantsTabProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
@@ -721,7 +860,13 @@ function ApplicantsTab({ loading, applicants, onDownloadResume }: ApplicantsTabP
   return (
     <div className="space-y-2">
       {applicants.map((a) => (
-        <ApplicantCard key={a.id} applicant={a} onDownloadResume={onDownloadResume} />
+        <ApplicantCard
+          key={a.id}
+          applicant={a}
+          onDownloadResume={onDownloadResume}
+          onSave={onSave}
+          saving={savingId === a.id}
+        />
       ))}
     </div>
   );
@@ -730,9 +875,11 @@ function ApplicantsTab({ loading, applicants, onDownloadResume }: ApplicantsTabP
 interface ApplicantCardProps {
   applicant: Applicant;
   onDownloadResume: (a: Applicant) => void;
+  onSave?: (a: Applicant) => void;
+  saving?: boolean;
 }
 
-function ApplicantCard({ applicant: a, onDownloadResume }: ApplicantCardProps) {
+function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving }: ApplicantCardProps) {
   const appliedRaw = a.applied_at || a.appliedAt || a.application_date;
   const appliedAt = appliedRaw ? new Date(appliedRaw) : null;
   const appliedStr = appliedAt && !Number.isNaN(appliedAt.getTime())
@@ -809,10 +956,20 @@ function ApplicantCard({ applicant: a, onDownloadResume }: ApplicantCardProps) {
               Resume
             </Button>
           )}
-          <Button size="sm" variant="gold" disabled title="Wires Unipile save_candidate + Supabase upsert (phase 2c)">
-            <Bookmark className="h-3.5 w-3.5 mr-1" />
-            Save
-          </Button>
+          {onSave && (
+            <Button
+              size="sm"
+              variant="gold"
+              disabled={saving}
+              onClick={() => onSave(a)}
+              title="Save to LinkedIn pipeline + Sully Recruit"
+            >
+              {saving
+                ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                : <Bookmark className="h-3.5 w-3.5 mr-1" />}
+              Save
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -836,12 +993,15 @@ interface SearchTabProps {
   searching: boolean;
   results: Applicant[];
   total: number | null;
+  onSave: (a: Applicant) => void;
+  savingId: string | null;
 }
 
 function SearchTab({
   keywords, title, company, location,
   onKeywordsChange, onTitleChange, onCompanyChange, onLocationChange,
   onSubmit, searching, results, total,
+  onSave, savingId,
 }: SearchTabProps) {
   return (
     <div className="space-y-4">
@@ -891,10 +1051,85 @@ function SearchTab({
       ) : (
         <div className="space-y-2">
           {results.map((a) => (
-            <ApplicantCard key={a.id} applicant={a} onDownloadResume={() => { /* search results have no resume */ }} />
+            <ApplicantCard
+              key={a.id}
+              applicant={a}
+              onDownloadResume={() => { /* search results have no resume */ }}
+              onSave={onSave}
+              saving={savingId === a.id}
+            />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  LinkJobDialog — one-time project ↔ job mapping prompt              */
+/* ------------------------------------------------------------------ */
+
+interface LinkJobDialogProps {
+  open: boolean;
+  applicantName: string;
+  projectTitle: string;
+  openJobs: any[];
+  selectedJobId: string;
+  onSelectJob: (id: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  saving: boolean;
+}
+
+function LinkJobDialog({
+  open, applicantName, projectTitle, openJobs,
+  selectedJobId, onSelectJob, onCancel, onConfirm, saving,
+}: LinkJobDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onCancel(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Link project to a job</DialogTitle>
+          <DialogDescription>
+            This LinkedIn project (<span className="font-medium">{projectTitle}</span>) isn't linked
+            to a job in Sully Recruit yet. Pick one — future Saves on this project will tag candidates
+            automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-2">
+          <Select value={selectedJobId} onValueChange={onSelectJob}>
+            <SelectTrigger>
+              <div className="flex items-center gap-1.5 truncate">
+                <Briefcase className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="Choose a job…" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              {openJobs.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">No open jobs</div>
+              )}
+              {openJobs.map((job: any) => (
+                <SelectItem key={job.id} value={job.id}>
+                  <span className="truncate">{job.title} — {job.company_name || job.company}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+          <Button
+            variant="gold"
+            onClick={onConfirm}
+            disabled={!selectedJobId || saving}
+          >
+            {saving && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+            Link &amp; save {applicantName ? `(${applicantName})` : ''}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
