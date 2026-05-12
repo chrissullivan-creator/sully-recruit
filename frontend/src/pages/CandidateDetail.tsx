@@ -26,8 +26,9 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge, CalendarPlus, StickyNote,
+  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox,
 } from 'lucide-react';
+import { CandidateSourceTab } from '@/components/source/SourceTabs';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
@@ -1366,6 +1367,7 @@ const CandidateDetail = () => {
                 <TabsTrigger value="meeting-recaps" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
+                <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
@@ -2025,6 +2027,11 @@ const CandidateDetail = () => {
                     )}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ── Source Tab (pre-pitch funnel) ─────────────────────────── */}
+              <TabsContent value="source" className="mt-0">
+                {id && <CandidateSourceTab candidateId={id} />}
               </TabsContent>
 
               {/* ── Send Outs Tab ─────────────────────────────────────────── */}
