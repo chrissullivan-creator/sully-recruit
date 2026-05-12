@@ -246,7 +246,7 @@ export const fetchEntityHistory = inngest.createFunction(
               }
             }
 
-            if (!conversationUuid) break;
+            if (!conversationUuid) throw new Error("LinkedIn history: no conversation UUID resolved");
 
             try {
               const data: any = await unipileFetch(
