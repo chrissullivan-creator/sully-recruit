@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJobs } from '@/hooks/useData';
@@ -16,7 +17,8 @@ import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll
 import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
+  Bookmark,
 } from 'lucide-react';
 
 const PAGE_SIZE = 25;
@@ -61,34 +63,60 @@ async function callSourceApi(body: Record<string, any>, session: any) {
 }
 
 function normalizeApplicant(raw: any): Applicant {
-  // v2 talent-pool applicant shape mostly mirrors v1 but renames a few
-  // fields. Read both so we keep working if Unipile flips the response
-  // shape mid-deploy or one stage of the pipeline still returns the
-  // legacy keys.
+  // Unipile v2 returns several shapes depending on the endpoint:
+  // - list_pipeline:        { object: 'PipelineCandidate', profile: {...} }
+  // - list_job_applicants:  { object: 'JobApplicant', id, applied_at, has_resume, profile: {...} }
+  // - search_people:        { object: 'PeopleSearchResult', ...profile fields at top level }
+  // Collapse all three into one flat shape so the UI doesn't care.
+  const profile = (raw && typeof raw === 'object' && raw.profile && typeof raw.profile === 'object')
+    ? raw.profile
+    : raw;
+
   const display =
-    raw.display_name ||
-    [raw.first_name || raw.firstName, raw.last_name || raw.lastName].filter(Boolean).join(" ");
-  const [firstFromDisplay, ...restFromDisplay] = (display || "").split(/\s+/);
-  const work = (raw.work_experience && raw.work_experience[0]) || raw.work_experience || {};
+    profile.display_name ||
+    [profile.first_name || profile.firstName, profile.last_name || profile.lastName].filter(Boolean).join(' ');
+  const [firstFromDisplay, ...restFromDisplay] = (display || '').split(/\s+/);
+  const work = (profile.work_experience && profile.work_experience[0]) || profile.work_experience || {};
+
+  // Stage normalisation: backend may have set a canonical .stage on the
+  // outer object (pipeline route does this). Otherwise pull pipeline_stage
+  // off the hiring_project nested object that LinkedIn returns.
+  const rawStage = String(
+    raw.stage
+      ?? raw.pipeline_stage
+      ?? raw.hiring_project?.pipeline_stage
+      ?? profile.hiring_project?.pipeline_stage
+      ?? 'unknown'
+  ).toLowerCase().replace(/_/g, ' ');
+  let stage = 'unknown';
+  if (rawStage.includes('applied') || rawStage.includes('new') || rawStage.includes('uncontact')) stage = 'uncontacted';
+  else if (rawStage.includes('contact') || rawStage.includes('reach') || rawStage.includes('sent') || rawStage.includes('inmail')) stage = 'contacted';
+  else if (rawStage.includes('reply') || rawStage.includes('respond') || rawStage.includes('interest')) stage = 'replied';
+  else if (rawStage.includes('screen') || rawStage.includes('interview') || rawStage.includes('review')) stage = 'in_review';
+  else if (rawStage.includes('offer')) stage = 'offer';
+  else if (rawStage.includes('hired') || rawStage.includes('place')) stage = 'hired';
+  else if (rawStage.includes('reject') || rawStage.includes('decline') || rawStage.includes('withdrawn')) stage = 'rejected';
 
   return {
-    ...raw,
-    id: raw.candidate_id || raw.applicant_id || raw.id || raw.urn || `app-${Math.random()}`,
-    first_name: raw.first_name || raw.firstName || firstFromDisplay || '',
-    last_name: raw.last_name || raw.lastName || restFromDisplay.join(' ') || '',
-    headline: raw.headline || '',
+    ...profile,
+    // Job-applicant top-level fields the UI also wants:
+    applied_at: raw.applied_at || raw.appliedAt || undefined,
+    has_resume: raw.has_resume ?? profile.has_resume ?? false,
+
+    id: profile.candidate_id || profile.applicant_id || raw.id || profile.id || profile.urn || `app-${Math.random()}`,
+    first_name: profile.first_name || profile.firstName || firstFromDisplay || '',
+    last_name: profile.last_name || profile.lastName || restFromDisplay.join(' ') || '',
+    headline: profile.headline || '',
     current_title:
-      raw.current_title || raw.title || work?.job_title || work?.role || raw.headline || '',
+      profile.current_title || profile.title || work?.job_title || work?.role || profile.headline || '',
     current_company:
-      raw.current_company || raw.company || work?.company?.name || work?.company || raw.company_name || '',
-    location: raw.location || raw.region || '',
-    linkedin_url: raw.profile_url || raw.linkedin_url || raw.public_profile_url || raw.url || '',
+      profile.current_company || profile.company || work?.company?.name || work?.company || profile.company_name || '',
+    location: profile.location || profile.region || '',
+    linkedin_url: profile.profile_url || profile.linkedin_url || profile.public_profile_url || profile.url || '',
     profile_picture_url:
-      raw.public_picture_url || raw.profile_picture_url || raw.picture_url || raw.avatar_url || '',
-    // Backend already canonicalised stage; keep that. pipeline_stage is
-    // the v2 raw column name, kept as a passthrough fallback.
-    stage: (raw.stage || raw.pipeline_stage || 'unknown').toLowerCase(),
-    has_resume: raw.has_resume ?? raw.resume_available ?? false,
+      profile.public_picture_url || profile.profile_picture_url || profile.picture_url || profile.avatar_url || '',
+    network_distance: profile.network_distance,
+    stage,
   };
 }
 
@@ -122,11 +150,35 @@ export default function SourceProject() {
   const projectTitle = decodeURIComponent(params.get('title') || 'Project');
   const recruiterName = decodeURIComponent(params.get('recruiter') || '');
 
-  // ---- State ----
-  const [applicants, setApplicants] = useState<Applicant[]>([]);
+  // ---- Tab state ----
+  type ProjectTab = 'pipeline' | 'applicants' | 'search';
+  const [tab, setTab] = useState<ProjectTab>('pipeline');
+
+  // ---- State (pipeline) ----
+  // Pipeline = recruiter-curated saved candidates with stage info.
+  const [pipelineCandidates, setPipelineCandidates] = useState<Applicant[]>([]);
+  const [pipelineLoading, setPipelineLoading] = useState(true);
+
+  // ---- State (job applicants) ----
+  // Applicants = people who applied to the linked job posting, newest first.
+  const [jobApplicants, setJobApplicants] = useState<Applicant[]>([]);
+  const [applicantsLoading, setApplicantsLoading] = useState(false);
+  const [applicantsLoaded, setApplicantsLoaded] = useState(false);
+
+  // ---- State (project header + diagnostics) ----
   const [projectData, setProjectData] = useState<any>(null);
   const [debug, setDebug] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+
+  // ---- State (search tab) ----
+  const [searchKeywords, setSearchKeywords] = useState('');
+  const [searchTitle, setSearchTitle] = useState('');
+  const [searchCompany, setSearchCompany] = useState('');
+  const [searchLocation, setSearchLocation] = useState('');
+  const [searchResults, setSearchResults] = useState<Applicant[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchTotal, setSearchTotal] = useState<number | null>(null);
+
+  // ---- Selection (pipeline view) ----
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [label, setLabel] = useState<ProjectLabel>('candidate');
   const [jobId, setJobId] = useState('');
@@ -141,40 +193,115 @@ export default function SourceProject() {
   const setPageOf = (stage: string, page: number) =>
     setStagePages((prev) => ({ ...prev, [stage]: page }));
 
-  // ---- Load project detail + applicants ----
-  const fetchProject = useCallback(async () => {
-    // Guards: if id or account_id are missing, surface that instead of hanging
-    // on the loading spinner forever. Both come from the URL — if the user
-    // navigated here without query params we want them to see why.
+  // ---- Load pipeline (curated candidates) ----
+  const fetchPipeline = useCallback(async () => {
     if (!id || !accountId) {
-      setLoading(false);
+      setPipelineLoading(false);
       if (!accountId) toast.error('Missing account_id in URL — open this project from the Source list.');
       return;
     }
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { setLoading(false); return; }
+    if (!session) { setPipelineLoading(false); return; }
 
-    setLoading(true);
+    setPipelineLoading(true);
     try {
       const data = await callSourceApi({
-        action: 'list_applicants',
+        action: 'list_pipeline',
         account_id: accountId,
         job_id: id,
       }, session);
-
       setProjectData(data.project || null);
       setDebug(data.debug || null);
       const items = data.items || [];
-      setApplicants((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      setPipelineCandidates((Array.isArray(items) ? items : []).map(normalizeApplicant));
     } catch (err: any) {
-      console.error('Failed to load project', err);
-      toast.error(err.message || 'Failed to load project');
+      console.error('Failed to load pipeline', err);
+      toast.error(err.message || 'Failed to load pipeline');
     } finally {
-      setLoading(false);
+      setPipelineLoading(false);
     }
   }, [id, accountId]);
 
-  useEffect(() => { fetchProject(); }, [fetchProject]);
+  // ---- Load job applicants (lazy on tab activation) ----
+  const fetchJobApplicants = useCallback(async () => {
+    if (!id || !accountId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    setApplicantsLoading(true);
+    try {
+      const data = await callSourceApi({
+        action: 'list_job_applicants',
+        account_id: accountId,
+        job_id: id,
+      }, session);
+      if (!projectData && data.project) setProjectData(data.project);
+      const items = data.items || [];
+      setJobApplicants((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      setApplicantsLoaded(true);
+    } catch (err: any) {
+      console.error('Failed to load applicants', err);
+      toast.error(err.message || 'Failed to load applicants');
+    } finally {
+      setApplicantsLoading(false);
+    }
+  }, [id, accountId, projectData]);
+
+  useEffect(() => { fetchPipeline(); }, [fetchPipeline]);
+
+  // Lazy-load applicants the first time the user opens that tab.
+  useEffect(() => {
+    if (tab === 'applicants' && !applicantsLoaded && !applicantsLoading) {
+      fetchJobApplicants();
+    }
+  }, [tab, applicantsLoaded, applicantsLoading, fetchJobApplicants]);
+
+  // ---- Search (lazy, on submit only) ----
+  const runSearch = async () => {
+    if (!accountId) { toast.error('Missing account_id'); return; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const body: Record<string, any> = {};
+    if (searchKeywords.trim()) body.keywords = searchKeywords.trim();
+    if (searchTitle.trim()) body.job_title = [{ name: searchTitle.trim() }];
+    if (searchCompany.trim()) {
+      body.company = searchCompany
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean)
+        .map((name) => ({ name }));
+    }
+    // Locations need parameter IDs from search_parameters — name-only is
+    // not accepted by the people search. Surface a hint if user tries it.
+    if (searchLocation.trim()) {
+      toast.message('Location filter requires resolving a parameter ID — skipping for now.');
+    }
+
+    setSearching(true);
+    setSearchResults([]);
+    setSearchTotal(null);
+    try {
+      const data = await callSourceApi({
+        action: 'search_people',
+        account_id: accountId,
+        search: body,
+        limit: 25,
+      }, session);
+      const items = data.items || [];
+      setSearchResults((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      setSearchTotal(typeof data.total_count === 'number' ? data.total_count : null);
+    } catch (err: any) {
+      console.error('Search failed', err);
+      toast.error(err.message || 'Search failed');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Alias so the existing pipeline view code below keeps working unchanged.
+  const applicants = pipelineCandidates;
+  const loading = pipelineLoading;
 
   // ---- Resume download ----
   const handleDownloadResume = async (applicant: Applicant) => {
@@ -254,10 +381,26 @@ export default function SourceProject() {
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-semibold truncate">{projectTitle}</h1>
           <p className="text-sm text-muted-foreground">
-            {recruiterName}{applicants.length > 0 ? ` · ${applicants.length} applicant${applicants.length !== 1 ? 's' : ''}` : ''}
+            {recruiterName}
+            {applicants.length > 0 && ` · ${applicants.length} in pipeline`}
+            {jobApplicants.length > 0 && ` · ${jobApplicants.length} applicant${jobApplicants.length === 1 ? '' : 's'}`}
           </p>
         </div>
       </div>
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ProjectTab)} className="mb-4">
+        <TabsList>
+          <TabsTrigger value="pipeline">
+            Pipeline{applicants.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">({applicants.length})</span>}
+          </TabsTrigger>
+          <TabsTrigger value="applicants">
+            Applicants{applicantsLoaded && jobApplicants.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">({jobApplicants.length})</span>}
+          </TabsTrigger>
+          <TabsTrigger value="search">Search</TabsTrigger>
+        </TabsList>
+
+        {/* ─── Pipeline tab ───────────────────────────────────────── */}
+        <TabsContent value="pipeline" className="mt-4 space-y-4">
 
       {/* Controls bar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -500,6 +643,35 @@ export default function SourceProject() {
           })}
         </div>
       )}
+        </TabsContent>
+
+        {/* ─── Applicants tab ────────────────────────────────────── */}
+        <TabsContent value="applicants" className="mt-4">
+          <ApplicantsTab
+            loading={applicantsLoading}
+            applicants={jobApplicants}
+            onDownloadResume={handleDownloadResume}
+          />
+        </TabsContent>
+
+        {/* ─── Search tab ────────────────────────────────────────── */}
+        <TabsContent value="search" className="mt-4">
+          <SearchTab
+            keywords={searchKeywords}
+            title={searchTitle}
+            company={searchCompany}
+            location={searchLocation}
+            onKeywordsChange={setSearchKeywords}
+            onTitleChange={setSearchTitle}
+            onCompanyChange={setSearchCompany}
+            onLocationChange={setSearchLocation}
+            onSubmit={runSearch}
+            searching={searching}
+            results={searchResults}
+            total={searchTotal}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Dialogs */}
       <BulkAddCandidatesDialog
@@ -517,5 +689,212 @@ export default function SourceProject() {
         project={project}
       />
     </MainLayout>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ApplicantsTab — flat newest-first profile-card list                */
+/* ------------------------------------------------------------------ */
+
+interface ApplicantsTabProps {
+  loading: boolean;
+  applicants: Applicant[];
+  onDownloadResume: (a: Applicant) => void;
+}
+
+function ApplicantsTab({ loading, applicants, onDownloadResume }: ApplicantsTabProps) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin mr-2" />
+        Loading applicants…
+      </div>
+    );
+  }
+  if (applicants.length === 0) {
+    return (
+      <div className="text-center py-20 text-muted-foreground">
+        No job posting applicants on this project yet.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {applicants.map((a) => (
+        <ApplicantCard key={a.id} applicant={a} onDownloadResume={onDownloadResume} />
+      ))}
+    </div>
+  );
+}
+
+interface ApplicantCardProps {
+  applicant: Applicant;
+  onDownloadResume: (a: Applicant) => void;
+}
+
+function ApplicantCard({ applicant: a, onDownloadResume }: ApplicantCardProps) {
+  const appliedRaw = a.applied_at || a.appliedAt || a.application_date;
+  const appliedAt = appliedRaw ? new Date(appliedRaw) : null;
+  const appliedStr = appliedAt && !Number.isNaN(appliedAt.getTime())
+    ? appliedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+  const networkDist: string | undefined = a.network_distance;
+  const networkLabel = networkDist === 'SECOND_DEGREE' ? '2nd'
+    : networkDist === 'THIRD_DEGREE' ? '3rd+'
+    : networkDist === 'FIRST_DEGREE' ? '1st'
+    : undefined;
+
+  return (
+    <div className="bg-card border border-border rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        {a.profile_picture_url ? (
+          <img
+            src={a.profile_picture_url}
+            alt=""
+            className="h-12 w-12 rounded-full object-cover shrink-0"
+          />
+        ) : (
+          <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
+            {(a.first_name?.[0] || '') + (a.last_name?.[0] || '')}
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <a
+              href={a.linkedin_url || undefined}
+              target={a.linkedin_url ? '_blank' : undefined}
+              rel="noreferrer"
+              className="font-semibold text-base hover:underline"
+            >
+              {a.first_name} {a.last_name}
+            </a>
+            {networkLabel && (
+              <span className="text-xs text-muted-foreground">· {networkLabel}</span>
+            )}
+            {a.has_resume && (
+              <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">
+                Resume
+              </Badge>
+            )}
+          </div>
+          {a.headline && (
+            <div className="text-sm text-muted-foreground mt-0.5">{a.headline}</div>
+          )}
+          {(a.current_company || a.location) && (
+            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+              {a.current_company && (
+                <span className="inline-flex items-center gap-1">
+                  <Briefcase className="h-3 w-3" />
+                  {a.current_company}
+                </span>
+              )}
+              {a.location && (
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  {a.location}
+                </span>
+              )}
+            </div>
+          )}
+          {appliedStr && (
+            <div className="text-xs text-muted-foreground mt-1">Applied {appliedStr}</div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {a.has_resume && (
+            <Button size="sm" variant="outline" onClick={() => onDownloadResume(a)}>
+              <FileText className="h-3.5 w-3.5 mr-1" />
+              Resume
+            </Button>
+          )}
+          <Button size="sm" variant="gold" disabled title="Wires Unipile save_candidate + Supabase upsert (phase 2c)">
+            <Bookmark className="h-3.5 w-3.5 mr-1" />
+            Save
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  SearchTab — inline Unipile recruiter people search                 */
+/* ------------------------------------------------------------------ */
+
+interface SearchTabProps {
+  keywords: string;
+  title: string;
+  company: string;
+  location: string;
+  onKeywordsChange: (v: string) => void;
+  onTitleChange: (v: string) => void;
+  onCompanyChange: (v: string) => void;
+  onLocationChange: (v: string) => void;
+  onSubmit: () => void;
+  searching: boolean;
+  results: Applicant[];
+  total: number | null;
+}
+
+function SearchTab({
+  keywords, title, company, location,
+  onKeywordsChange, onTitleChange, onCompanyChange, onLocationChange,
+  onSubmit, searching, results, total,
+}: SearchTabProps) {
+  return (
+    <div className="space-y-4">
+      <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Input
+            placeholder="Keywords (e.g. 'machine learning')"
+            value={keywords}
+            onChange={(e) => onKeywordsChange(e.target.value)}
+          />
+          <Input
+            placeholder="Job title (e.g. 'Software Engineer')"
+            value={title}
+            onChange={(e) => onTitleChange(e.target.value)}
+          />
+          <Input
+            placeholder="Companies (comma-separated)"
+            value={company}
+            onChange={(e) => onCompanyChange(e.target.value)}
+          />
+          <Input
+            placeholder="Location (resolves to parameter — coming soon)"
+            value={location}
+            onChange={(e) => onLocationChange(e.target.value)}
+            disabled
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={onSubmit} disabled={searching}>
+            {searching
+              ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              : <SearchIcon className="h-3.5 w-3.5 mr-1" />}
+            Search LinkedIn
+          </Button>
+          {total != null && (
+            <span className="text-xs text-muted-foreground">
+              {total.toLocaleString()} result{total === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {results.length === 0 && !searching ? (
+        <div className="text-center py-10 text-muted-foreground text-sm">
+          Enter keywords/title/company and run a search.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {results.map((a) => (
+            <ApplicantCard key={a.id} applicant={a} onDownloadResume={() => { /* search results have no resume */ }} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
