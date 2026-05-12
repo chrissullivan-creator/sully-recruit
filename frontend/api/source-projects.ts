@@ -22,11 +22,15 @@ import { createClient } from "@supabase/supabase-js";
  *   - Applicant resume: GET …/talent-pool/applicants/{applicant_id}/resume
  *
  * Body: { action, account_id, ...params }
- *   action: "list_projects" | "list_applicants" | "download_resume" | "list_accounts"
+ *   action: "list_projects" | "list_applicants" | "download_resume"
+ *         | "list_accounts" | "create_project" | "get_applicant"
+ *         | "save_candidate"
  *   account_id: Unipile account ID (required)
- *   job_id: project_id for list_applicants & download_resume
- *   applicant_id: required for download_resume
+ *   job_id: project_id for list_applicants, download_resume, get_applicant, save_candidate
+ *   applicant_id: required for download_resume, get_applicant
  *   cursor: optional offset (number) — name kept for back-compat
+ *   create_project: { name, visibility ("PRIVATE"|"PUBLIC"), description?, company?, job_title?, location?, seniority_level? }
+ *   save_candidate: { stage_id, candidate_id }
  *
  * Auth: Supabase JWT
  */
@@ -44,7 +48,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { action, account_id, job_id, applicant_id, cursor } = req.body || {};
+  const {
+    action,
+    account_id,
+    job_id,
+    applicant_id,
+    cursor,
+    // create_project
+    name,
+    visibility,
+    description,
+    company,
+    job_title,
+    location,
+    seniority_level,
+    // save_candidate
+    stage_id,
+    candidate_id,
+  } = req.body || {};
   if (!action) return res.status(400).json({ error: "Missing action" });
   if (!account_id) return res.status(400).json({ error: "Missing account_id" });
 
@@ -117,8 +138,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
           if (resp.ok) {
             const data = await resp.json();
-            const items = data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
-            return res.status(200).json({ items, raw: data, used_path: path, used_url: url });
+            // Unipile v2 wraps lists in `data`. Keep the legacy keys as
+            // fallbacks so a v1 leak (or a future rename) doesn't break us.
+            const items = data.data ?? data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
+            return res.status(200).json({
+              items,
+              raw: data,
+              used_path: path,
+              used_url: url,
+              next_cursor: data.next_cursor ?? null,
+              total_count: data.total_count ?? null,
+            });
           }
           tries.push({ url, status: resp.status, ok: false, bodyPrefix: (await resp.text()).slice(0, 200) });
         }
@@ -220,7 +250,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
               if (r.ok) {
                 const d = await r.json();
-                applicants = d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
+                applicants = d.data ?? d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
                 t.count = applicants.length;
                 workingBase = base;
                 tries.push(t);
@@ -298,6 +328,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: `Unipile ${last?.status}: resume endpoint not found`,
         detail: tries,
       });
+    }
+
+    // ── create_project ──────────────────────────────────────────
+    // POST /linkedin/recruiter/projects — body must include name + visibility.
+    if (action === "create_project") {
+      if (!name) return res.status(400).json({ error: "Missing name" });
+      if (!visibility) return res.status(400).json({ error: "Missing visibility" });
+      if (visibility !== "PRIVATE" && visibility !== "PUBLIC") {
+        return res.status(400).json({ error: "visibility must be PRIVATE or PUBLIC" });
+      }
+      const body: Record<string, any> = { name, visibility };
+      if (description) body.description = description;
+      if (company) body.company = company;
+      if (job_title) body.job_title = job_title;
+      if (location) body.location = location;
+      if (seniority_level) body.seniority_level = seniority_level;
+      const url = `${v2Base}/${acct}/linkedin/recruiter/projects`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: failed to create project`,
+          detail: data ?? text.slice(0, 500),
+        });
+      }
+      return res.status(201).json(data);
+    }
+
+    // ── get_applicant ───────────────────────────────────────────
+    // GET /linkedin/recruiter/projects/{id}/talent-pool/applicants/{aid}
+    if (action === "get_applicant") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id" });
+      const url = `${v2Base}/${acct}/linkedin/recruiter/projects/`
+        + `${encodeURIComponent(job_id)}/talent-pool/applicants/`
+        + `${encodeURIComponent(applicant_id)}`;
+      const resp = await fetch(url, { headers });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: failed to get applicant`,
+          detail: data ?? text.slice(0, 500),
+        });
+      }
+      return res.status(200).json(data);
+    }
+
+    // ── save_candidate ──────────────────────────────────────────
+    // POST /linkedin/recruiter/projects/{id}/pipeline/candidate/save
+    if (action === "save_candidate") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      if (!stage_id) return res.status(400).json({ error: "Missing stage_id" });
+      if (!candidate_id) return res.status(400).json({ error: "Missing candidate_id" });
+      const url = `${v2Base}/${acct}/linkedin/recruiter/projects/`
+        + `${encodeURIComponent(job_id)}/pipeline/candidate/save`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ stage_id, candidate_id }),
+      });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: failed to save candidate`,
+          detail: data ?? text.slice(0, 500),
+        });
+      }
+      return res.status(200).json(data);
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
