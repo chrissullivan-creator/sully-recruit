@@ -24,13 +24,14 @@ import { createClient } from "@supabase/supabase-js";
  * Body: { action, account_id, ...params }
  *   action: "list_projects" | "list_applicants" | "download_resume"
  *         | "list_accounts" | "create_project" | "get_applicant"
- *         | "save_candidate"
+ *         | "save_candidate" | "search_parameters" | "search_people"
  *   account_id: Unipile account ID (required)
  *   job_id: project_id for list_applicants, download_resume, get_applicant, save_candidate
  *   applicant_id: required for download_resume, get_applicant
- *   cursor: optional offset (number) — name kept for back-compat
+ *   cursor: pagination cursor (or numeric offset for legacy list endpoints)
  *   create_project: { name, visibility ("PRIVATE"|"PUBLIC"), description?, company?, job_title?, location?, seniority_level? }
  *   save_candidate: { stage_id, candidate_id }
+ *   search_parameters / search_people: { search: <Unipile body>, limit?, cursor? }
  *
  * Auth: Supabase JWT
  */
@@ -65,6 +66,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // save_candidate
     stage_id,
     candidate_id,
+    // search_parameters / search_people
+    search,        // body for /search/parameters OR /search/people
+    limit,         // optional, both endpoints
   } = req.body || {};
   if (!action) return res.status(400).json({ error: "Missing action" });
   if (!account_id) return res.status(400).json({ error: "Missing account_id" });
@@ -406,6 +410,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(200).json(data);
+    }
+
+    // ── search_parameters ───────────────────────────────────────
+    // POST /linkedin/recruiter/search/parameters — pass through the
+    // caller-supplied body (source/type/keywords/project_id/etc).
+    if (action === "search_parameters") {
+      if (!search || typeof search !== "object") {
+        return res.status(400).json({ error: "Missing search body" });
+      }
+      const url = `${v2Base}/${acct}/linkedin/recruiter/search/parameters`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(search),
+      });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: search/parameters failed`,
+          detail: data ?? text.slice(0, 500),
+        });
+      }
+      return res.status(200).json({
+        items: data?.data ?? [],
+        next_cursor: data?.next_cursor ?? null,
+        total_count: data?.total_count ?? null,
+        raw: data,
+      });
+    }
+
+    // ── search_people ───────────────────────────────────────────
+    // POST /linkedin/recruiter/search/people — filters in body.
+    // Supports cursor pagination via ?cursor=… and ?limit=…
+    if (action === "search_people") {
+      if (!search || typeof search !== "object") {
+        return res.status(400).json({ error: "Missing search body" });
+      }
+      const qs = new URLSearchParams();
+      if (cursor) qs.set("cursor", String(cursor));
+      if (limit) qs.set("limit", String(limit));
+      const qsStr = qs.toString();
+      const url =
+        `${v2Base}/${acct}/linkedin/recruiter/search/people` +
+        (qsStr ? `?${qsStr}` : "");
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(search),
+      });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: search/people failed`,
+          detail: data ?? text.slice(0, 500),
+        });
+      }
+      return res.status(200).json({
+        items: data?.data ?? [],
+        next_cursor: data?.next_cursor ?? null,
+        total_count: data?.total_count ?? null,
+        raw: data,
+      });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
