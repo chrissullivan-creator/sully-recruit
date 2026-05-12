@@ -24,7 +24,9 @@ import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
+  Mailbox,
 } from 'lucide-react';
+import { JobSourceTab } from '@/components/source/SourceTabs';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -1175,6 +1177,7 @@ const JobDetail = () => {
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
+                <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><FileTextIcon className="h-3.5 w-3.5" /> Notes</TabsTrigger>
                 <TabsTrigger value="sizzles" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
@@ -1491,6 +1494,11 @@ const JobDetail = () => {
                     </div>
                   );
                 })()}
+              </TabsContent>
+
+              {/* ── Source Tab (pre-pitch funnel) ─────────── */}
+              <TabsContent value="source" className="mt-0">
+                {id && <JobSourceTab jobId={id} />}
               </TabsContent>
 
               {/* ── Send Outs Tab ──────────────────────────── */}
