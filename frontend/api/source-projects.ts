@@ -22,9 +22,15 @@ import { createClient } from "@supabase/supabase-js";
  *   - Applicant resume: GET …/talent-pool/applicants/{applicant_id}/resume
  *
  * Body: { action, account_id, ...params }
- *   action: "list_projects" | "list_applicants" | "download_resume"
- *         | "list_accounts" | "create_project" | "get_applicant"
- *         | "save_candidate" | "search_parameters" | "search_people"
+ *   action: "list_projects" | "list_applicants" | "list_pipeline"
+ *         | "list_job_applicants" | "download_resume" | "list_accounts"
+ *         | "create_project" | "get_applicant" | "save_candidate"
+ *         | "search_parameters" | "search_people"
+ *
+ *   NOTE on list actions: legacy `list_applicants` probes several Unipile
+ *   path shapes and returns whichever data layer responded first (usually
+ *   pipeline-candidates). New code should call `list_pipeline` (curated
+ *   pipeline) or `list_job_applicants` (job posting applicants) explicitly.
  *   account_id: Unipile account ID (required)
  *   job_id: project_id for list_applicants, download_resume, get_applicant, save_candidate
  *   applicant_id: required for download_resume, get_applicant
@@ -410,6 +416,119 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(200).json(data);
+    }
+
+    // ── list_pipeline ───────────────────────────────────────────
+    // POST /linkedin/recruiter/projects/{id}/pipeline — returns the
+    // saved pipeline candidates (curated by the recruiter), grouped by
+    // stage. Distinct from talent-pool/applicants (job posting applicants).
+    if (action === "list_pipeline") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const projectId = encodeURIComponent(job_id);
+
+      // Project detail first so the UI has header info + the pipeline
+      // stage definitions.
+      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
+      const projResp = await fetch(projUrl, { headers });
+      if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      let projectData: any = null;
+      if (projResp.ok) projectData = await projResp.json();
+
+      const qs = new URLSearchParams();
+      if (cursor) qs.set("cursor", String(cursor));
+      if (limit) qs.set("limit", String(limit));
+      const qsStr = qs.toString();
+      const pipeUrl =
+        `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}/pipeline` +
+        (qsStr ? `?${qsStr}` : "");
+      const pipeBody: Record<string, any> = {};
+      if (search && typeof search === "object") Object.assign(pipeBody, search);
+      const pipeResp = await fetch(pipeUrl, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(pipeBody),
+      });
+      if (pipeResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const pipeText = await pipeResp.text();
+      const pipeData = pipeText ? JSON.parse(pipeText) : null;
+      if (!pipeResp.ok) {
+        return res.status(pipeResp.status).json({
+          error: `Unipile ${pipeResp.status}: pipeline fetch failed`,
+          detail: pipeData ?? pipeText.slice(0, 500),
+        });
+      }
+      return res.status(200).json({
+        items: pipeData?.data ?? [],
+        next_cursor: pipeData?.next_cursor ?? null,
+        total_count: pipeData?.total_count ?? null,
+        project: projectData,
+      });
+    }
+
+    // ── list_job_applicants ─────────────────────────────────────
+    // POST /linkedin/recruiter/projects/{id}/talent-pool/applicants
+    // Requires the JOB_POSTING channel_id (resolved from project detail).
+    // Defaults to NEWEST_FIRST so the UI can render an "applied today / yesterday" feed.
+    if (action === "list_job_applicants") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const projectId = encodeURIComponent(job_id);
+
+      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
+      const projResp = await fetch(projUrl, { headers });
+      if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      if (!projResp.ok) {
+        return res.status(projResp.status).json({
+          error: `Unipile ${projResp.status}: project fetch failed`,
+          detail: (await projResp.text()).slice(0, 500),
+        });
+      }
+      const projectData = await projResp.json();
+      const channels: any[] = projectData?.talent_pool?.channels || [];
+      const jobChannel = channels.find((c) => c?.type === "JOB_POSTING");
+      if (!jobChannel?.id) {
+        // No linked job posting — return empty applicants instead of an error.
+        return res.status(200).json({
+          items: [],
+          project: projectData,
+          next_cursor: null,
+          total_count: 0,
+          note: "No JOB_POSTING channel on this project",
+        });
+      }
+
+      const qs = new URLSearchParams();
+      if (cursor) qs.set("cursor", String(cursor));
+      if (limit) qs.set("limit", String(limit));
+      const qsStr = qs.toString();
+      const appUrl =
+        `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}/talent-pool/applicants` +
+        (qsStr ? `?${qsStr}` : "");
+      const appBody: Record<string, any> = {
+        channel_id: jobChannel.id,
+        sort_by: "NEWEST_FIRST",
+      };
+      if (search && typeof search === "object") Object.assign(appBody, search);
+      const appResp = await fetch(appUrl, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(appBody),
+      });
+      if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const appText = await appResp.text();
+      const appData = appText ? JSON.parse(appText) : null;
+      if (!appResp.ok) {
+        return res.status(appResp.status).json({
+          error: `Unipile ${appResp.status}: applicants fetch failed`,
+          detail: appData ?? appText.slice(0, 500),
+        });
+      }
+      return res.status(200).json({
+        items: appData?.data ?? [],
+        next_cursor: appData?.next_cursor ?? null,
+        total_count: appData?.total_count ?? null,
+        project: projectData,
+        channel_id: jobChannel.id,
+      });
     }
 
     // ── search_parameters ───────────────────────────────────────
