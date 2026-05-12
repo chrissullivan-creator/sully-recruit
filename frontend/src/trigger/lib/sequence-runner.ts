@@ -279,6 +279,7 @@ export async function runSequenceAction(
         sendResult = await sendLinkedIn(
           supabase, to, messageBody, senderUserId, payload.accountId, "recruiter_inmail",
           inmailAttachments,
+          action.subject_line || undefined,
         );
         break;
       }

@@ -390,6 +390,145 @@ async function getUnipileApiKey(
 }
 
 /**
+ * Read the kill-switch for the inbox-scoped LinkedIn send path.
+ *
+ * When `app_settings.USE_LINKEDIN_INBOX_API` is "true"/"1", new chats
+ * route through `POST /v2/{account_id}/inboxes/{inbox_id}/chats/send`
+ * (the current Unipile v2 docs shape). On any error we fall back to
+ * the legacy `/v2/{account_id}/chats` path so a misconfigured rollout
+ * never blocks a live sequence step.
+ */
+async function shouldUseLinkedInInboxApi(): Promise<boolean> {
+  try {
+    const v = await getAppSetting("USE_LINKEDIN_INBOX_API");
+    return String(v || "").toLowerCase() === "true" || v === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the recruiter's display name from profiles. Used as the
+ * `signature` field on LinkedIn Recruiter sends — Unipile rejects
+ * RECRUITER_PRIMARY sends with no signature.
+ */
+async function getLinkedInSenderName(supabase: any, userId?: string): Promise<string> {
+  if (!userId) return "";
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .maybeSingle();
+    return profile?.display_name || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch attachment URLs and return Unipile's base64-in-JSON shape
+ * used by the inbox-scoped send endpoint. Per-file capped at 20 MB
+ * (LinkedIn's combined-attachment ceiling); over-size files are
+ * dropped with a warning so the text still goes out.
+ */
+async function buildInboxAttachments(
+  urls: string[],
+): Promise<{ content: string; content_type: string; filename: string }[]> {
+  if (!urls.length) return [];
+  const PER_FILE_MAX = 20 * 1024 * 1024;
+  const out: { content: string; content_type: string; filename: string }[] = [];
+  for (const url of urls) {
+    try {
+      const fileResp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      if (!fileResp.ok) throw new Error(`fetch ${fileResp.status}`);
+      const buf = await fileResp.arrayBuffer();
+      if (buf.byteLength > PER_FILE_MAX) {
+        logger.warn("Skipping LinkedIn attachment — over 20MB", { url, bytes: buf.byteLength });
+        continue;
+      }
+      const content_type = fileResp.headers.get("content-type") || "application/octet-stream";
+      let filename = "attachment";
+      try {
+        const u = new URL(url);
+        const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+        if (last) filename = last.replace(/^\d+_/, "");
+      } catch { /* keep default */ }
+      out.push({
+        content: Buffer.from(buf).toString("base64"),
+        content_type,
+        filename,
+      });
+    } catch (err: any) {
+      logger.warn("LinkedIn attachment fetch failed — skipping that file", { url, error: err.message });
+    }
+  }
+  return out;
+}
+
+/**
+ * Send a LinkedIn message through the v2 inbox-scoped endpoint:
+ *   POST /v2/{account_id}/inboxes/{inbox_id}/chats/send
+ *
+ * Classic DMs use CLASSIC_PRIMARY; Recruiter InMails use
+ * RECRUITER_PRIMARY (project-scoped sends — RECRUITER_{project_id}_PRIMARY
+ * with channel_type=JOB_POSTING — are a follow-up, not wired here).
+ *
+ * Recruiter sends require both `subject` and `signature` per Unipile
+ * docs. We surface a clear error rather than silently dropping them.
+ *
+ * Throws on any send error so the caller can fall back to the legacy
+ * `/v2/{account_id}/chats` path.
+ */
+async function sendViaInboxEndpoint(
+  supabase: any,
+  resolvedAccountId: string,
+  providerId: string,
+  text: string,
+  opts: {
+    isInMail: boolean;
+    subject?: string;
+    signature?: string;
+    attachments?: { content: string; content_type: string; filename: string }[];
+  },
+): Promise<{ message_id: string; conversation_id: string }> {
+  const inboxId = opts.isInMail ? "RECRUITER_PRIMARY" : "CLASSIC_PRIMARY";
+
+  const payload: any = {
+    users_ids: [providerId],
+    text,
+  };
+
+  if (opts.isInMail) {
+    const subject = opts.subject?.trim();
+    const signature = opts.signature?.trim();
+    if (!subject) {
+      throw new Error("Recruiter InMail requires a subject — set sequence step subject_line");
+    }
+    if (!signature) {
+      throw new Error("Recruiter InMail requires a signature — set profiles.display_name for the sender");
+    }
+    payload.options = { linkedin: { recruiter: { subject, signature } } };
+  }
+
+  if (opts.attachments?.length) {
+    payload.attachments = opts.attachments;
+  }
+
+  const data: any = await unipileFetch(
+    supabase,
+    resolvedAccountId,
+    `inboxes/${encodeURIComponent(inboxId)}/chats/send`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+
+  return {
+    message_id: data.id || data.message_id || `msg_${Date.now()}`,
+    conversation_id: data.chat_id || data.conversation_id || "",
+  };
+}
+
+/**
  * Verify that the Unipile account is still connected and healthy.
  * Throws if the account is disconnected or the API is unreachable.
  *
@@ -447,6 +586,12 @@ export async function sendLinkedIn(
    * String form is accepted for back-compat with old call sites.
    */
   attachmentUrls?: string | string[],
+  /**
+   * Subject line. Required for Recruiter InMail when the new
+   * inbox-scoped endpoint is in use (USE_LINKEDIN_INBOX_API=true);
+   * ignored on Classic DMs and on the legacy `/chats` fallback path.
+   */
+  subject?: string,
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
 
@@ -536,6 +681,39 @@ export async function sendLinkedIn(
     : Array.isArray(attachmentUrls)
       ? attachmentUrls.filter(Boolean)
       : [attachmentUrls];
+
+  // ── Phase 2 migration: inbox-scoped endpoint ────────────────────
+  // When the kill-switch is on, route through
+  //   POST /v2/{account_id}/inboxes/{inbox_id}/chats/send
+  // which is the shape current Unipile docs describe. Recruiter
+  // sends pick up `subject` + `signature` here (LinkedIn requires
+  // both). Any failure falls through to the legacy `/chats` path
+  // below so a misconfigured rollout never blocks a live sequence
+  // step.
+  if (await shouldUseLinkedInInboxApi()) {
+    try {
+      const signature = isInMailChannel
+        ? await getLinkedInSenderName(supabase, userId)
+        : undefined;
+      const inboxAttachments = await buildInboxAttachments(linkedinUrls);
+      const result = await sendViaInboxEndpoint(
+        supabase, resolvedAccountId, providerId, body,
+        { isInMail: isInMailChannel, subject, signature, attachments: inboxAttachments },
+      );
+      if (isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
+      logger.info("LinkedIn sent via inbox endpoint", {
+        inbox: isInMailChannel ? "RECRUITER_PRIMARY" : "CLASSIC_PRIMARY",
+        hasAttachments: inboxAttachments.length > 0,
+      });
+      return result;
+    } catch (err: any) {
+      logger.warn("sendLinkedIn: inbox endpoint failed, falling back to /chats", {
+        channel: stepChannel,
+        error: err.message,
+      });
+      // Fall through to legacy path.
+    }
+  }
 
   if (linkedinUrls.length) {
     const blobs: { blob: Blob; name: string }[] = [];
