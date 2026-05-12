@@ -1,8 +1,99 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Briefcase, User, Sparkles, MessageSquare, PhoneCall, Mailbox } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  Loader2, Briefcase, User, Sparkles, MessageSquare, PhoneCall, Mailbox, MoreHorizontal,
+  Send, FileText as FileTextIcon, XCircle,
+} from 'lucide-react';
+
+async function transitionSourcing(payload: { sourcing_id: string; action: 'withdraw' | 'promote_to_pitch' | 'promote_to_send_out'; reason?: string; notes?: string }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
+  const resp = await fetch('/api/sourcing-transition', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || `Transition failed (${resp.status})`);
+  return data;
+}
+
+interface RowActionsProps {
+  row: { id: string; stage: string };
+  onChanged: () => void;
+}
+
+function RowActions({ row, onChanged }: RowActionsProps) {
+  const [busy, setBusy] = useState(false);
+  const canWithdraw = row.stage === 'replied' || row.stage === 'back_of_resume';
+  const canPromote = row.stage === 'back_of_resume';
+
+  const run = async (action: 'withdraw' | 'promote_to_pitch' | 'promote_to_send_out') => {
+    setBusy(true);
+    try {
+      let reason: string | undefined;
+      if (action === 'withdraw') {
+        const r = window.prompt('Withdrawal reason (optional)') ?? undefined;
+        reason = r || undefined;
+      }
+      await transitionSourcing({ sourcing_id: row.id, action, reason });
+      toast.success(
+        action === 'withdraw' ? 'Withdrawn from sourcing'
+        : action === 'promote_to_pitch' ? 'Moved to pitch'
+        : 'Moved to send-out'
+      );
+      onChanged();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!canWithdraw && !canPromote) {
+    // Nothing actionable yet — keep the menu hidden so the row stays clean.
+    return null;
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost" disabled={busy} className="h-7 w-7 p-0">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MoreHorizontal className="h-3.5 w-3.5" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {canPromote && (
+          <>
+            <DropdownMenuItem onClick={() => run('promote_to_pitch')}>
+              <FileTextIcon className="h-3.5 w-3.5 mr-2" />
+              Move to pitch
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => run('promote_to_send_out')}>
+              <Send className="h-3.5 w-3.5 mr-2" />
+              Move to send-out
+            </DropdownMenuItem>
+          </>
+        )}
+        {canPromote && canWithdraw && <DropdownMenuSeparator />}
+        {canWithdraw && (
+          <DropdownMenuItem onClick={() => run('withdraw')} className="text-red-500">
+            <XCircle className="h-3.5 w-3.5 mr-2" />
+            Withdraw
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared stage definitions                                           */
@@ -60,37 +151,41 @@ interface SourcingRow {
 export function JobSourceTab({ jobId }: { jobId: string }) {
   const [rows, setRows] = useState<SourcingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('sourcing')
-        .select(`
-          id, candidate_id, job_id, stage,
-          uncontacted_at, contacted_at, replied_at, back_of_resume_at,
-          withdrawn_at, promoted_at, promoted_to,
-          candidate:people!sourcing_candidate_id_fkey (
-            first_name, last_name, full_name, linkedin_url, avatar_url,
-            current_title, current_company
-          )
-        `)
-        .eq('job_id', jobId)
-        .is('withdrawn_at', null)
-        .order('updated_at', { ascending: false });
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('sourcing')
+      .select(`
+        id, candidate_id, job_id, stage,
+        uncontacted_at, contacted_at, replied_at, back_of_resume_at,
+        withdrawn_at, promoted_at, promoted_to,
+        candidate:people!sourcing_candidate_id_fkey (
+          first_name, last_name, full_name, linkedin_url, avatar_url,
+          current_title, current_company
+        )
+      `)
+      .eq('job_id', jobId)
+      .is('withdrawn_at', null)
+      .order('updated_at', { ascending: false });
 
-      if (cancelled) return;
-      if (error) {
-        console.error('Failed to load sourcing for job', error);
-        setRows([]);
-      } else {
-        setRows((data || []) as any);
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
+    if (error) {
+      console.error('Failed to load sourcing for job', error);
+      setRows([]);
+    } else {
+      setRows((data || []) as any);
+    }
+    setLoading(false);
   }, [jobId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const onChanged = useCallback(() => {
+    load();
+    queryClient.invalidateQueries({ queryKey: ['send-outs'] });
+    queryClient.invalidateQueries({ queryKey: ['pitches'] });
+  }, [load, queryClient]);
 
   if (loading) {
     return (
@@ -147,6 +242,7 @@ export function JobSourceTab({ jobId }: { jobId: string }) {
                   <th className="px-3 py-2 text-left">Title</th>
                   <th className="px-3 py-2 text-left">Company</th>
                   <th className="px-3 py-2 text-left">Entered stage</th>
+                  <th className="px-3 py-2 w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -166,6 +262,9 @@ export function JobSourceTab({ jobId }: { jobId: string }) {
                       <td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{c.current_title || '—'}</td>
                       <td className="px-3 py-2 text-muted-foreground truncate max-w-[180px]">{c.current_company || '—'}</td>
                       <td className="px-3 py-2 text-muted-foreground text-xs">{fmtRel(stageEnteredAt(r, stage))}</td>
+                      <td className="px-2 py-2 text-right">
+                        <RowActions row={{ id: r.id, stage: r.stage }} onChanged={onChanged} />
+                      </td>
                     </tr>
                   );
                 })}
@@ -185,35 +284,39 @@ export function JobSourceTab({ jobId }: { jobId: string }) {
 export function CandidateSourceTab({ candidateId }: { candidateId: string }) {
   const [rows, setRows] = useState<SourcingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('sourcing')
-        .select(`
-          id, candidate_id, job_id, stage,
-          uncontacted_at, contacted_at, replied_at, back_of_resume_at,
-          withdrawn_at, promoted_at, promoted_to,
-          job:jobs!sourcing_job_id_fkey (
-            title, company_name, company
-          )
-        `)
-        .eq('candidate_id', candidateId)
-        .order('updated_at', { ascending: false });
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('sourcing')
+      .select(`
+        id, candidate_id, job_id, stage,
+        uncontacted_at, contacted_at, replied_at, back_of_resume_at,
+        withdrawn_at, promoted_at, promoted_to,
+        job:jobs!sourcing_job_id_fkey (
+          title, company_name, company
+        )
+      `)
+      .eq('candidate_id', candidateId)
+      .order('updated_at', { ascending: false });
 
-      if (cancelled) return;
-      if (error) {
-        console.error('Failed to load sourcing for candidate', error);
-        setRows([]);
-      } else {
-        setRows((data || []) as any);
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
+    if (error) {
+      console.error('Failed to load sourcing for candidate', error);
+      setRows([]);
+    } else {
+      setRows((data || []) as any);
+    }
+    setLoading(false);
   }, [candidateId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const onChanged = useCallback(() => {
+    load();
+    queryClient.invalidateQueries({ queryKey: ['send-outs'] });
+    queryClient.invalidateQueries({ queryKey: ['pitches'] });
+  }, [load, queryClient]);
 
   if (loading) {
     return (
@@ -263,6 +366,7 @@ export function CandidateSourceTab({ candidateId }: { candidateId: string }) {
                 → {r.promoted_to}
               </Badge>
             )}
+            <RowActions row={{ id: r.id, stage: r.stage }} onChanged={onChanged} />
           </div>
         );
       })}
