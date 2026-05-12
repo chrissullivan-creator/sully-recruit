@@ -172,10 +172,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
       const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
+      // Unipile v2 reference name is `linkedincontroller_gethiringprojects`,
+      // so we probe both the underscored and dashed slugs plus the
+      // shorter `linkedin/projects` form the v1 docs use. The wider list
+      // exists because Unipile has renamed this endpoint at least once
+      // between docs revisions and the public refs don't quote the path.
       const candidatePaths = [
+        `linkedin/recruiter/hiring_projects`,
         `linkedin/recruiter/hiring-projects`,
-        `linkedin/hiring-projects`,
         `linkedin/recruiter/projects`,
+        `linkedin/hiring_projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/projects`,
       ];
       const tries: Array<{ url: string; status: number; ok: boolean; bodyPrefix?: string }> = [];
       // Per Unipile v2 docs every endpoint puts account_id in the path.
@@ -203,7 +211,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               total_count: data.total_count ?? null,
             });
           }
-          tries.push({ url, status: resp.status, ok: false, bodyPrefix: (await resp.text()).slice(0, 200) });
+          const body = (await resp.text()).slice(0, 500);
+          console.error("[source-projects][list_projects] probe failed", { url, status: resp.status, body });
+          tries.push({ url, status: resp.status, ok: false, bodyPrefix: body.slice(0, 200) });
         }
       }
       // None worked — return the LAST status so the UI surfaces a real error.
@@ -222,10 +232,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "list_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
+      // Mirror list_projects' expanded probe — Unipile renamed this
+      // endpoint at least once and the public docs don't quote the
+      // path. `linkedin/recruiter/projects` is the form confirmed by
+      // save-to-pipeline.ts; the rest are kept as safety nets.
       const projectBases = [
+        `linkedin/recruiter/hiring_projects`,
         `linkedin/recruiter/hiring-projects`,
-        `linkedin/hiring-projects`,
         `linkedin/recruiter/projects`,
+        `linkedin/hiring_projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/projects`,
       ];
       const tries: { url: string; method: string; status?: number; ok: boolean; count?: number; error?: string; keys?: string[] }[] = [];
 
@@ -259,6 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               break outerProj;
             } else {
               t.error = (await r.text()).slice(0, 500);
+              console.error("[source-projects][list_applicants] project probe failed", { url: projectUrl, status: r.status, body: t.error });
             }
             tries.push(t);
           } catch (err: any) {
@@ -351,9 +369,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: "Missing job_id or applicant_id" });
       }
       const projectBases = [
+        `linkedin/recruiter/hiring_projects`,
         `linkedin/recruiter/hiring-projects`,
-        `linkedin/hiring-projects`,
         `linkedin/recruiter/projects`,
+        `linkedin/hiring_projects`,
+        `linkedin/hiring-projects`,
+        `linkedin/projects`,
       ];
       const tries: Array<{ url: string; status: number; bodyPrefix?: string }> = [];
       for (const base of projectBases) {
