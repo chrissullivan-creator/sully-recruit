@@ -22,20 +22,16 @@ on:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps --no-audit --no-fund
+        working-directory: frontend
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Typecheck api/ (Vercel serverless functions)
         # Catches the bug class that took prod down on 2026-05-12:
@@ -43,4 +39,5 @@ jobs:
         # so an illegal top-level `break` (TS1116) shipped to prod and
         # killed every Inngest invocation. tsconfig.api.json covers this
         # tree explicitly.
+        working-directory: frontend
         run: npx tsc --noEmit -p tsconfig.api.json
