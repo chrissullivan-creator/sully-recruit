@@ -1,5 +1,48 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
+
+// Map a LinkedIn recruiter pipeline stage name → our 4-stage sourcing
+// funnel. LinkedIn lets recruiters customise stage labels, so the match
+// is keyword-based rather than exact. Unmatched stages default to
+// uncontacted (the safest starting point — auto-transitions will bump
+// them as activity arrives).
+function mapPipelineStage(rawStage?: string | null): 'uncontacted' | 'contacted' | 'replied' | 'back_of_resume' {
+  const s = String(rawStage || '').toLowerCase();
+  if (/phone|interview|screen|meeting|on[- ]?site|back[- ]?of[- ]?resume|hired|placed/.test(s)) return 'back_of_resume';
+  if (/repl(y|ied)|respond|engaged|interest|accept/.test(s)) return 'replied';
+  if (/contact|inmail|sent|outreach|reach|message/.test(s)) return 'contacted';
+  return 'uncontacted';
+}
+
+// Pull a profile out of any of the three Unipile shapes (PipelineCandidate,
+// JobApplicant, PeopleSearchResult) into a flat object the upsert below
+// can consume directly.
+function flattenProfile(raw: any) {
+  const profile = raw?.profile && typeof raw.profile === 'object' ? raw.profile : raw;
+  const work = (profile?.work_experience && profile.work_experience[0]) || {};
+  const display: string = profile?.display_name
+    || [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
+    || '';
+  const [firstFromDisplay, ...restFromDisplay] = display.split(/\s+/);
+  return {
+    raw,
+    profile,
+    candidate_id: profile?.candidate_id || profile?.id || raw?.id || null,
+    first_name: profile?.first_name || firstFromDisplay || '',
+    last_name: profile?.last_name || restFromDisplay.join(' ') || '',
+    headline: profile?.headline || null,
+    current_title: profile?.current_title || work?.job_title || profile?.headline || null,
+    current_company: profile?.current_company || work?.company?.name || work?.company || null,
+    location: profile?.location || null,
+    linkedin_url: profile?.profile_url || profile?.linkedin_url || null,
+    avatar_url: profile?.public_picture_url || profile?.profile_picture_url || null,
+    email: Array.isArray(profile?.emails) ? profile.emails[0] : profile?.email || null,
+    phone: Array.isArray(profile?.phone_numbers) ? profile.phone_numbers[0] : profile?.phone || null,
+    pipeline_stage: raw?.hiring_project?.pipeline_stage || profile?.hiring_project?.pipeline_stage || null,
+    has_resume: raw?.has_resume === true,
+  };
+}
 
 // Bumped 2026-05-08 to force Vercel to rebuild this serverless function.
 // Production was returning 404 even though the file was on main; build
@@ -594,6 +637,244 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         next_cursor: data?.next_cursor ?? null,
         total_count: data?.total_count ?? null,
         raw: data,
+      });
+    }
+
+    // ── backfill_project ────────────────────────────────────────
+    // Imports one batch of candidates from a LinkedIn project into our
+    // DB: upserts people + sourcing rows. The Unipile pipeline call
+    // already happened (these candidates ARE in the LinkedIn pipeline);
+    // we just mirror them locally.
+    //
+    // Body: { account_id, job_id (= project_id), source ('pipeline' | 'applicants'),
+    //         cursor?, limit? (default 25), internal_job_id? }
+    // Returns: { processed, created, updated, errors[], next_cursor, total_count }
+    //
+    // Caller loops while next_cursor is non-null to process the whole project.
+    if (action === "backfill_project") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const source = (req.body?.source || 'pipeline') as 'pipeline' | 'applicants';
+      const batchLimit = Number(req.body?.limit) || 25;
+      const internalJobIdOverride = req.body?.internal_job_id || null;
+
+      // Resolve internal job from the link columns (or use override).
+      let internalJobId: string | null = internalJobIdOverride;
+      if (!internalJobId) {
+        const { data: linked } = await supabase
+          .from("jobs")
+          .select("id")
+          .eq("linkedin_project_id", job_id)
+          .eq("linkedin_project_account_id", account_id)
+          .maybeSingle();
+        if (!linked?.id) {
+          return res.status(409).json({
+            error: "No internal job linked to this LinkedIn project. Link first.",
+            code: "PROJECT_NOT_LINKED",
+          });
+        }
+        internalJobId = linked.id;
+      }
+
+      // Fetch the batch.
+      const projId = encodeURIComponent(job_id);
+      let unipileUrl: string;
+      let unipileBody: Record<string, any>;
+      if (source === 'pipeline') {
+        const qs = new URLSearchParams();
+        if (cursor) qs.set('cursor', String(cursor));
+        qs.set('limit', String(batchLimit));
+        unipileUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projId}/pipeline?${qs}`;
+        unipileBody = {};
+      } else {
+        // talent-pool/applicants requires JOB_POSTING channel_id — fetch
+        // project detail first to pick it up.
+        const projResp = await fetch(`${v2Base}/${acct}/linkedin/recruiter/projects/${projId}`, { headers });
+        if (!projResp.ok) {
+          return res.status(projResp.status).json({
+            error: `Unipile ${projResp.status}: project fetch failed`,
+            detail: (await projResp.text()).slice(0, 500),
+          });
+        }
+        const projData = await projResp.json();
+        const ch = (projData?.talent_pool?.channels || []).find((c: any) => c?.type === 'JOB_POSTING');
+        if (!ch?.id) {
+          // No applicants channel — nothing to do for this source.
+          return res.status(200).json({
+            processed: 0, created: 0, updated: 0, errors: [],
+            next_cursor: null, total_count: 0,
+            note: 'No JOB_POSTING channel on this project',
+          });
+        }
+        const qs = new URLSearchParams();
+        if (cursor) qs.set('cursor', String(cursor));
+        qs.set('limit', String(batchLimit));
+        unipileUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projId}/talent-pool/applicants?${qs}`;
+        unipileBody = { channel_id: ch.id, sort_by: 'NEWEST_FIRST' };
+      }
+
+      const batchResp = await fetch(unipileUrl, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(unipileBody),
+      });
+      if (batchResp.status === 429) return res.status(429).json({ error: 'Unipile rate limit reached.' });
+      if (!batchResp.ok) {
+        return res.status(batchResp.status).json({
+          error: `Unipile ${batchResp.status}: batch fetch failed`,
+          detail: (await batchResp.text()).slice(0, 500),
+        });
+      }
+      const batchData = await batchResp.json();
+      const items: any[] = batchData?.data ?? [];
+
+      let created = 0;
+      let updated = 0;
+      const errors: any[] = [];
+
+      for (const raw of items) {
+        try {
+          const p = flattenProfile(raw);
+          const incomingEmail = normalizeEmail(p.email);
+          const incomingPhone = p.phone || null;
+          const stage = source === 'pipeline'
+            ? mapPipelineStage(p.pipeline_stage)
+            : 'uncontacted'; // applicants are pre-outreach by definition
+
+          // Dedupe (mirrors save-to-pipeline policy).
+          let existing: any = null;
+          if (p.linkedin_url) {
+            const { data } = await supabase
+              .from('people')
+              .select('id, personal_email, work_email, primary_email, phone, mobile_phone')
+              .eq('linkedin_url', p.linkedin_url)
+              .maybeSingle();
+            if (data?.id) existing = data;
+          }
+          if (!existing && incomingEmail) {
+            const { data } = await supabase
+              .from('people')
+              .select('id, personal_email, work_email, primary_email, phone, mobile_phone')
+              .or(
+                `personal_email.ilike.${incomingEmail},work_email.ilike.${incomingEmail},primary_email.ilike.${incomingEmail}`,
+              )
+              .limit(1)
+              .maybeSingle();
+            if (data?.id) existing = data;
+          }
+
+          let personId: string;
+          if (existing?.id) {
+            personId = existing.id;
+            const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || null;
+            const updates: Record<string, any> = {
+              first_name: p.first_name || undefined,
+              last_name: p.last_name || undefined,
+              full_name: fullName || undefined,
+              linkedin_url: p.linkedin_url || undefined,
+              linkedin_headline: p.headline,
+              linkedin_current_title: p.current_title,
+              linkedin_current_company: p.current_company,
+              linkedin_location: p.location,
+              linkedin_last_synced_at: new Date().toISOString(),
+              current_title: p.current_title || undefined,
+              current_company: p.current_company || undefined,
+              location_text: p.location || undefined,
+              avatar_url: p.avatar_url || undefined,
+              updated_at: new Date().toISOString(),
+            };
+            Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
+            if (incomingEmail && !existing.personal_email && !existing.work_email && !existing.primary_email) {
+              Object.assign(updates, classifyEmail(incomingEmail));
+            }
+            if (incomingPhone && !existing.phone && !existing.mobile_phone) {
+              updates.phone = incomingPhone;
+              updates.mobile_phone = incomingPhone;
+            }
+            await supabase.from('people').update(updates as any).eq('id', personId);
+            updated += 1;
+          } else {
+            const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || null;
+            const payload: Record<string, any> = {
+              first_name: p.first_name || null,
+              last_name: p.last_name || null,
+              full_name: fullName,
+              linkedin_url: p.linkedin_url,
+              linkedin_headline: p.headline,
+              linkedin_current_title: p.current_title,
+              linkedin_current_company: p.current_company,
+              linkedin_location: p.location,
+              linkedin_last_synced_at: new Date().toISOString(),
+              current_title: p.current_title,
+              current_company: p.current_company,
+              location_text: p.location,
+              avatar_url: p.avatar_url,
+              type: 'candidate',
+              roles: ['candidate'],
+              status: 'new',
+              is_stub: false,
+              source: source === 'pipeline' ? 'linkedin_hiring_project_backfill' : 'linkedin_job_applicant_backfill',
+              source_detail: job_id,
+              owner_user_id: user.id,
+              created_by_user_id: user.id,
+              unipile_resolve_status: p.linkedin_url ? 'pending' : null,
+            };
+            if (incomingEmail) Object.assign(payload, classifyEmail(incomingEmail));
+            if (incomingPhone) {
+              payload.phone = incomingPhone;
+              payload.mobile_phone = incomingPhone;
+            }
+            const { data: row, error: insErr } = await supabase
+              .from('people')
+              .insert(payload as any)
+              .select('id')
+              .single();
+            if (insErr || !row) throw insErr || new Error('insert returned no row');
+            personId = row.id;
+            created += 1;
+          }
+
+          // Upsert sourcing row at the mapped stage. The stage timestamp
+          // is set to the project's last_modified_at if available so
+          // backfilled rows look chronologically reasonable.
+          const stageColumn = `${stage}_at`;
+          const stampAt = batchData?.last_modified_at || new Date().toISOString();
+          const sourcingPayload: Record<string, any> = {
+            candidate_id: personId,
+            job_id: internalJobId,
+            stage,
+            linkedin_project_id: job_id,
+            linkedin_project_account_id: account_id,
+            created_by: user.id,
+            [stageColumn]: stampAt,
+          };
+          // For non-uncontacted stages, backfill the earlier timestamps so
+          // the funnel reads forward (uncontacted_at <= contacted_at <= …).
+          if (stage === 'contacted' || stage === 'replied' || stage === 'back_of_resume') {
+            sourcingPayload.uncontacted_at = sourcingPayload.uncontacted_at ?? stampAt;
+          }
+          if (stage === 'replied' || stage === 'back_of_resume') {
+            sourcingPayload.contacted_at = sourcingPayload.contacted_at ?? stampAt;
+          }
+          if (stage === 'back_of_resume') {
+            sourcingPayload.replied_at = sourcingPayload.replied_at ?? stampAt;
+          }
+          await supabase.from('sourcing').upsert(
+            sourcingPayload as any,
+            { onConflict: 'candidate_id,job_id', ignoreDuplicates: false },
+          );
+        } catch (err: any) {
+          errors.push({ id: raw?.id || raw?.profile?.id, message: err?.message || String(err) });
+        }
+      }
+
+      return res.status(200).json({
+        processed: items.length,
+        created,
+        updated,
+        errors,
+        next_cursor: batchData?.next_cursor ?? null,
+        total_count: batchData?.total_count ?? null,
+        source,
       });
     }
 

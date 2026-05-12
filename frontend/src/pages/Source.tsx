@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import {
   Loader2, Users, Briefcase, Building2, Calendar, Eye, Sparkles,
+  Download,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -144,6 +145,83 @@ export default function Source() {
   // ---- Projects state ----
   const [projects, setProjects] = useState<HiringProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
+
+  // ---- Linked-jobs lookup ----
+  // Map of (account_id|project_id) → internal job_id, used to gate the
+  // Backfill button and show the "Linked" badge.
+  const [linkedJobs, setLinkedJobs] = useState<Record<string, string>>({});
+
+  // ---- Backfill progress ----
+  // Keyed by project id; null = idle, object = in-flight summary.
+  const [backfillStatus, setBackfillStatus] = useState<Record<string, { processed: number; created: number; updated: number; total: number | null; done?: boolean }>>({});
+
+  const refreshLinkedJobs = useCallback(async () => {
+    const { data } = await supabase
+      .from('jobs')
+      .select('id, linkedin_project_id, linkedin_project_account_id')
+      .not('linkedin_project_id', 'is', null);
+    const map: Record<string, string> = {};
+    for (const row of data || []) {
+      if (row.linkedin_project_account_id && row.linkedin_project_id) {
+        map[`${row.linkedin_project_account_id}|${row.linkedin_project_id}`] = row.id as string;
+      }
+    }
+    setLinkedJobs(map);
+  }, []);
+
+  useEffect(() => { refreshLinkedJobs(); }, [refreshLinkedJobs]);
+
+  // Iterative backfill: walks pipeline candidates then talent-pool
+  // applicants in 25-row batches until next_cursor is null. Each
+  // iteration upserts people + sourcing rows server-side.
+  const runBackfill = useCallback(async (project: HiringProject) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not authenticated'); return; }
+
+    const key = project.id;
+    setBackfillStatus((s) => ({ ...s, [key]: { processed: 0, created: 0, updated: 0, total: null } }));
+
+    let totalCreated = 0;
+    let totalUpdated = 0;
+    let totalProcessed = 0;
+    let totalCount: number | null = null;
+
+    for (const src of ['pipeline', 'applicants'] as const) {
+      let cursor: string | null = null;
+      // Safety cap so a runaway cursor doesn't loop forever.
+      for (let iter = 0; iter < 80; iter++) {
+        try {
+          const data = await callSourceApi({
+            action: 'backfill_project',
+            account_id: project.account_id,
+            job_id: project.id,
+            source: src,
+            cursor,
+            limit: 25,
+          }, session);
+          totalProcessed += data.processed || 0;
+          totalCreated += data.created || 0;
+          totalUpdated += data.updated || 0;
+          if (typeof data.total_count === 'number') totalCount = data.total_count;
+          setBackfillStatus((s) => ({
+            ...s,
+            [key]: { processed: totalProcessed, created: totalCreated, updated: totalUpdated, total: totalCount },
+          }));
+          cursor = data.next_cursor || null;
+          if (!cursor) break;
+        } catch (err: any) {
+          toast.error(`Backfill ${src}: ${err.message || 'failed'}`);
+          break;
+        }
+      }
+    }
+
+    setBackfillStatus((s) => ({
+      ...s,
+      [key]: { processed: totalProcessed, created: totalCreated, updated: totalUpdated, total: totalCount, done: true },
+    }));
+    toast.success(`Backfilled ${totalCreated} new + ${totalUpdated} updated from "${project.title}"`);
+  }, []);
 
   // ---- Load accounts on mount ----
   useEffect(() => {
@@ -312,11 +390,18 @@ export default function Source() {
             ? new Date(project.created_at).toLocaleDateString()
             : null;
           const viewedAgo = relativeTime(project.last_accessed_at);
+          const linkKey = `${project.account_id}|${project.id}`;
+          const isLinked = !!linkedJobs[linkKey];
+          const backfill = backfillStatus[project.id];
+          const backfillInFlight = backfill && !backfill.done;
           return (
-            <button
+            <div
               key={project.id}
+              className="bg-card border border-border rounded-lg hover:border-foreground/20 transition-colors"
+            >
+            <button
               onClick={() => openProject(project)}
-              className="w-full text-left bg-card border border-border rounded-lg hover:border-foreground/20 hover:bg-accent/5 transition-colors p-4"
+              className="w-full text-left p-4 hover:bg-accent/5"
             >
               {/* Title row */}
               <div className="flex items-start justify-between gap-3 mb-2">
@@ -397,6 +482,39 @@ export default function Source() {
                 </div>
               )}
             </button>
+
+            {/* Action row — Backfill button (only when linked) + status */}
+            {(isLinked || backfill) && (
+              <div className="px-4 py-2 border-t border-border flex items-center gap-3 text-xs">
+                {isLinked && (
+                  <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">
+                    Linked
+                  </Badge>
+                )}
+                {backfill && (
+                  <span className="text-muted-foreground">
+                    {backfill.done ? 'Backfilled' : 'Backfilling…'} {backfill.created} new + {backfill.updated} updated
+                    {backfill.total != null && !backfill.done ? ` (${backfill.processed} of ~${backfill.total})` : ''}
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                  {isLinked && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!!backfillInFlight}
+                      onClick={(e) => { e.stopPropagation(); runBackfill(project); }}
+                    >
+                      {backfillInFlight
+                        ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        : <Download className="h-3.5 w-3.5 mr-1" />}
+                      {backfill?.done ? 'Re-import' : 'Backfill'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            </div>
           );
         })}
       </div>
