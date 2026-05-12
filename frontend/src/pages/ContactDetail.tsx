@@ -28,6 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { MeetingRecapsTab } from '@/components/shared/MeetingRecapsTab';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
@@ -727,6 +728,9 @@ const ContactDetail = () => {
                 <TabsTrigger value="communications" className="gap-1.5">
                   <MessageSquare className="h-3.5 w-3.5" /> Communications ({(conversations as any[]).length})
                 </TabsTrigger>
+                <TabsTrigger value="meeting-recaps" className="gap-1.5">
+                  <PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps
+                </TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5">
                   <History className="h-3.5 w-3.5" /> Activity
                 </TabsTrigger>
@@ -1081,6 +1085,15 @@ const ContactDetail = () => {
                     })}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ---------- MEETING RECAPS TAB ---------- */}
+              <TabsContent value="meeting-recaps" className="px-8 py-5 mt-0">
+                <MeetingRecapsTab
+                  entityId={id!}
+                  entityType="contact"
+                  personName={c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || null}
+                />
               </TabsContent>
 
               {/* ---------- ACTIVITY TAB ---------- */}
