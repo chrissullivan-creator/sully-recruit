@@ -43,6 +43,7 @@ import { cn } from '@/lib/utils';
 import { CANONICAL_PIPELINE, canonicalConfig, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
 import { CallDetailModal } from '@/components/shared/CallDetailModal';
+import { MeetingRecapsTab } from '@/components/shared/MeetingRecapsTab';
 import { MergeCandidateDialog } from '@/components/candidates/MergeCandidateDialog';
 import { ensureInterviewArtifacts } from '@/lib/interviewWorkflow';
 import {
@@ -1362,6 +1363,7 @@ const CandidateDetail = () => {
                 <TabsTrigger value="joe" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
                 <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
+                <TabsTrigger value="meeting-recaps" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
@@ -1695,6 +1697,14 @@ const CandidateDetail = () => {
                     })}
                   </div>
                 )}
+              </TabsContent>
+
+              <TabsContent value="meeting-recaps" className="px-8 py-5 mt-0">
+                <MeetingRecapsTab
+                  entityId={id!}
+                  entityType="candidate"
+                  personName={c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || null}
+                />
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-4">
