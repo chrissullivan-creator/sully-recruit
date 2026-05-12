@@ -78,6 +78,14 @@ async function handleAuthorize(
   // State parameter encodes the user ID so callback can associate the tokens
   const state = btoa(JSON.stringify({ uid: userId }));
 
+  // .Shared scopes added 2026-05-12 so users can connect shared M365
+  // mailboxes (e.g. sullivan@bd.emeraldrecruit.com) as senders. With
+  // delegated Mail.Send.Shared + Mail.ReadWrite.Shared, Chris's token
+  // can POST to /users/{shared-mailbox-email}/sendMail and read its
+  // messages without a separate OAuth flow per mailbox.
+  // Users who already connected must "Reconnect Microsoft" to pick
+  // these up — the new scopes are additive, but the existing token
+  // doesn't carry them.
   const scopes = [
     "openid",
     "profile",
@@ -86,7 +94,10 @@ async function handleAuthorize(
     "Calendars.Read",
     "Calendars.ReadWrite",
     "Mail.Read",
+    "Mail.Read.Shared",
+    "Mail.ReadWrite.Shared",
     "Mail.Send",
+    "Mail.Send.Shared",
     "User.Read",
   ].join(" ");
 
@@ -160,7 +171,7 @@ async function handleCallback(
       code,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
-      scope: "openid profile email offline_access Calendars.Read Calendars.ReadWrite Mail.Read Mail.Send User.Read",
+      scope: "openid profile email offline_access Calendars.Read Calendars.ReadWrite Mail.Read Mail.Read.Shared Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared User.Read",
     }),
   });
 

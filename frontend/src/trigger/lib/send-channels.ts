@@ -41,6 +41,32 @@ async function resolveSenderEmail(supabase: any, userId: string): Promise<string
   throw new Error(`No email found in profiles table for user ${userId}. Ensure the user has an email set.`);
 }
 
+/**
+ * Resolve the send-from email by integration_account id. Used when a
+ * sequence step picks a specific mailbox (shared mailbox, secondary
+ * mailbox, etc.) rather than defaulting to the enrollment owner's
+ * primary `profiles.email`. The row's `email_address` becomes the
+ * `users/{addr}/sendMail` path — Graph honors that with delegated
+ * Mail.Send.Shared so shared mailboxes work without a separate token.
+ */
+async function resolveSenderFromAccount(
+  supabase: any,
+  accountId: string,
+): Promise<string> {
+  const { data: account } = await supabase
+    .from("integration_accounts")
+    .select("email_address, is_active, account_type, provider")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (!account?.email_address) {
+    throw new Error(`integration_account ${accountId} has no email_address`);
+  }
+  if (account.is_active === false) {
+    throw new Error(`integration_account ${accountId} is not active`);
+  }
+  return account.email_address;
+}
+
 export async function sendEmail(
   supabase: any,
   to: string,
@@ -68,9 +94,19 @@ export async function sendEmail(
    * a single URL.
    */
   attachmentUrls?: string | string[],
+  /**
+   * Optional integration_accounts.id to send from. When provided, that
+   * row's `email_address` is used as the `From` / Graph send path —
+   * works for shared mailboxes via Chris's delegated Mail.Send.Shared
+   * scope. Falls back to profiles.email of `userId` when omitted, which
+   * preserves the legacy single-mailbox behaviour.
+   */
+  fromAccountId?: string,
 ): Promise<{ messageId: string; sender: string; internetMessageId?: string }> {
   const accessToken = await getMicrosoftAccessToken();
-  const fromEmail = await resolveSenderEmail(supabase, userId);
+  const fromEmail = fromAccountId
+    ? await resolveSenderFromAccount(supabase, fromAccountId)
+    : await resolveSenderEmail(supabase, userId);
 
   // Append email signature if enabled
   if (useSignature) {
@@ -177,7 +213,12 @@ export async function sendEmail(
   // tracking pixel appended, so we just hand it across.
   // Failure falls back to Graph so a misconfigured Unipile account
   // never blocks a live sequence step.
-  if (await shouldUseUnipileEmail()) {
+  //
+  // Shared mailboxes (fromAccountId set) bypass Unipile entirely —
+  // Unipile's Outlook integration is per-user-inbox and doesn't model
+  // shared mailboxes cleanly. Graph's /users/{shared}/sendMail with
+  // delegated Mail.Send.Shared is the right path for those.
+  if (!fromAccountId && await shouldUseUnipileEmail()) {
     try {
       const result = await unipileSendEmail(supabase, {
         fromEmail,

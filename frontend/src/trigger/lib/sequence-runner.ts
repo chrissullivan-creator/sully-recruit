@@ -245,10 +245,17 @@ export async function runSequenceAction(
           Array.isArray(action.attachment_urls) && action.attachment_urls.length
             ? action.attachment_urls
             : (action.attachment_url ? [action.attachment_url] : undefined);
+        // Stage-1 of the shared-mailbox / multi-sender work. When a
+        // step row carries `from_integration_account_id`, sendEmail
+        // resolves the send-from address from that row instead of the
+        // enrollment owner's profiles.email — works for shared
+        // mailboxes via delegated Mail.Send.Shared. The column is
+        // optional and nullable; legacy rows fall back to the default.
         sendResult = await sendEmail(
           supabase, to, subject || undefined, formatEmailBody(messageBody), senderUserId,
           threadingOptions, action.use_signature !== false, payload.stepLogId,
           emailAttachments,
+          action.from_integration_account_id || undefined,
         );
         break;
       }
