@@ -17,7 +17,11 @@ import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
  *      row exists, UPDATEs profile/headline/title/company/location and
  *      avatar from the Unipile payload while preserving any email/phone
  *      already present locally. Otherwise INSERTs a fresh candidate.
- *   4) If has_resume is set, downloads the resume from Unipile, uploads
+ *   4) Upserts a row into `sourcing` at the uncontacted stage so the
+ *      candidate enters the pre-pitch funnel for this job. From there
+ *      DB triggers on messages / call_logs / meeting_attendees handle
+ *      stage progression (contacted / replied / back_of_resume).
+ *   5) If has_resume is set, downloads the resume from Unipile, uploads
  *      to the `resumes` bucket, creates a resumes row, and fires the
  *      ingestion task.
  *
@@ -278,7 +282,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       candidateId = row.id;
     }
 
-    // ── 7. Resume download + ingestion ──────────────────────────
+    // ── 7. Sourcing pipeline row ────────────────────────────────
+    // Idempotent: re-Saving the same person to the same job is a no-op
+    // on the row's stage (we only fill linkedin_pipeline_stage_id if it
+    // wasn't set). Auto-transition triggers on messages/call_logs/
+    // meeting_attendees handle stage progression from here on.
+    if (candidateId && jobId) {
+      const { error: srcErr } = await supabase
+        .from("sourcing")
+        .upsert(
+          {
+            candidate_id: candidateId,
+            job_id: jobId,
+            linkedin_project_id: project_id,
+            linkedin_project_account_id: account_id,
+            linkedin_pipeline_stage_id: entryStage.id,
+            created_by: user.id,
+          } as any,
+          { onConflict: "candidate_id,job_id", ignoreDuplicates: false },
+        );
+      // Surface as a warning rather than failing the whole Save — the
+      // person is already in LinkedIn + people; sourcing is downstream.
+      if (srcErr) console.warn("sourcing upsert failed:", srcErr.message);
+    }
+
+    // ── 8. Resume download + ingestion ──────────────────────────
     let resumeQueued = false;
     if (has_resume && candidateId) {
       try {
