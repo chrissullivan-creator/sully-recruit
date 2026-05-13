@@ -26,8 +26,11 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox,
+  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { CandidateSourceTab } from '@/components/source/SourceTabs';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
@@ -1044,16 +1047,17 @@ const CandidateDetail = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {resumeUrl && (
-            <Button variant="outline" size="sm" onClick={() => setShowResume(!showResume)}>
-              <FileText className="h-3.5 w-3.5 mr-1" />{showResume ? 'Hide Resume' : 'View Resume'}
-            </Button>
-          )}
+          {/* Primary actions inline. Everything else lives behind the
+              "More" dropdown to keep the header from overflowing on
+              narrower screens. */}
+          <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
+            <FileText className="h-3.5 w-3.5 mr-1" />Send Out
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setScheduleMeetingOpen(true)}>
             <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Schedule
           </Button>
-          <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
-            <FileText className="h-3.5 w-3.5 mr-1" />Send Out
+          <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
+            <Play className="h-3.5 w-3.5 mr-1" />Enroll
           </Button>
           {id && (
             <EnrichButton
@@ -1062,33 +1066,45 @@ const CandidateDetail = () => {
               invalidateKeys={[['candidate', id], ['candidates']]}
             />
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              if (!id) return;
-              const currentRoles: string[] = c.roles ?? ['candidate'];
-              const newRoles = currentRoles.includes('client')
-                ? currentRoles.filter(r => r !== 'client')
-                : [...currentRoles, 'client'];
-              await supabase.from('people').update({ roles: newRoles } as any).eq('id', id);
-              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-              queryClient.invalidateQueries({ queryKey: ['candidates'] });
-              toast.success(newRoles.includes('client') ? 'Tagged as Client' : 'Client tag removed');
-            }}
-            title={((c.roles ?? ['candidate']) as string[]).includes('client') ? 'Remove Client tag' : 'Tag as Client'}
-          >
-            {((c.roles ?? ['candidate']) as string[]).includes('client') ? '− Client' : '+ Client'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-            <Play className="h-3.5 w-3.5 mr-1" />Enroll in Sequence
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setActiveTab('joe')}>
-            <Sparkles className="h-3.5 w-3.5 mr-1" />Ask Joe
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setMergeOpen(true)} title="Merge with another candidate">
-            <Merge className="h-3.5 w-3.5 mr-1" />Merge
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" title="More actions">
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {resumeUrl && (
+                <DropdownMenuItem onClick={() => setShowResume(!showResume)}>
+                  <FileText className="h-3.5 w-3.5 mr-2" />
+                  {showResume ? 'Hide Resume' : 'View Resume'}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setActiveTab('joe')}>
+                <Sparkles className="h-3.5 w-3.5 mr-2" /> Ask Joe
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setMergeOpen(true)}>
+                <Merge className="h-3.5 w-3.5 mr-2" /> Merge with another candidate
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={async () => {
+                  if (!id) return;
+                  const currentRoles: string[] = c.roles ?? ['candidate'];
+                  const newRoles = currentRoles.includes('client')
+                    ? currentRoles.filter(r => r !== 'client')
+                    : [...currentRoles, 'client'];
+                  await supabase.from('people').update({ roles: newRoles } as any).eq('id', id);
+                  queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                  queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                  toast.success(newRoles.includes('client') ? 'Tagged as Client' : 'Client tag removed');
+                }}
+              >
+                {((c.roles ?? ['candidate']) as string[]).includes('client') ? '− Remove Client tag' : '+ Tag as Client'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {id && (
             <PersonRolesMenu
               personId={id}
