@@ -321,6 +321,28 @@ const Settings = () => {
     }
   };
 
+  const [liConnecting, setLiConnecting] = useState(false);
+  const connectLinkedInRecruiter = async (accountId?: string) => {
+    setLiConnecting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/connect-linkedin', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(accountId ? { account_id: accountId } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.body || `API ${res.status}`);
+      window.location.href = data.url;
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start LinkedIn auth');
+      setLiConnecting(false);
+    }
+  };
+
   const disconnectMicrosoft = async () => {
     setMsDisconnecting(true);
     try {
@@ -1087,6 +1109,33 @@ Senior Recruiter | Your Company
                           </Button>
                         </div>
                       )}
+                    </div>
+
+                    {/* LinkedIn (Recruiter) Connect — uses Unipile hosted
+                       auth with products=["classic","recruiter"] so the
+                       resulting account has Recruiter scope. The Unipile
+                       dashboard's Quick-Add UI only links as Classic, so
+                       this is the only way to get Hiring Projects access. */}
+                    <div className="rounded-lg border border-border bg-card p-5">
+                      <div className="mb-4">
+                        <h3 className="text-base font-semibold text-foreground">LinkedIn (Recruiter)</h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Connect your LinkedIn account with Recruiter scope enabled. Required for Source / Hiring Projects access. Use the cookies method (li_at + li_a) — credentials login often can't reach the Recruiter session.
+                        </p>
+                      </div>
+                      <Button
+                        variant="gold"
+                        size="sm"
+                        onClick={() => connectLinkedInRecruiter()}
+                        disabled={liConnecting}
+                        className="w-fit"
+                      >
+                        {liConnecting ? (
+                          <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Connecting...</>
+                        ) : (
+                          'Connect LinkedIn (Recruiter)'
+                        )}
+                      </Button>
                     </div>
                   </div>
                 )}
