@@ -417,6 +417,11 @@ export default function SequenceBuilder() {
             // Subject + threading are email-only.
             subject_line: action.channel === "email" ? (action.subjectLine || null) : null,
             reply_to_previous: action.channel === "email" ? (action.replyToPrevious === true) : false,
+            // Per-step sender override — null inherits sequence.sender_user_id.
+            // The runner (sequence-runner.ts) checks action.sender_user_id
+            // first, falling back to sequence.sender_user_id, so leaving
+            // this null is equivalent to "Sequence sender (default)".
+            sender_user_id: action.senderUserId || null,
           };
 
           if (existingActionIds.has(action.id)) {
