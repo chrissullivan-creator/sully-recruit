@@ -19,8 +19,12 @@ import {
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
   Sparkles, RefreshCw, Martini, Send as SendIcon,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play, MoreHorizontal,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { EnrichButton } from '@/components/shared/EnrichButton';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import {
@@ -553,6 +557,9 @@ const ContactDetail = () => {
               <Linkedin className="h-4 w-4" />
             </a>
           )}
+          {/* Primary actions kept inline; everything else moved into
+              the "More" dropdown so the header stays readable on
+              narrower viewports. */}
           <button
             onClick={() => setScheduleMeetingOpen(true)}
             className="p-2 rounded-lg hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
@@ -568,6 +575,34 @@ const ContactDetail = () => {
             <Play className="h-4 w-4" />
           </button>
           {id && (
+            <EnrichButton
+              peopleIds={[id]}
+              disabled={!contact.linkedin_url}
+              variant="ghost"
+              invalidateKeys={[['contact', id], ['contacts']]}
+            />
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="More actions"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onClick={() => setConfirmDelete(true)}
+                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete contact
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {id && (
             <PersonRolesMenu
               personId={id}
               roles={(contact as any)?.roles}
@@ -575,13 +610,6 @@ const ContactDetail = () => {
               variant="ghost"
             />
           )}
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
-            title="Delete contact"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
         </div>
       </div>
 

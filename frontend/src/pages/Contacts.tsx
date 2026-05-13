@@ -10,6 +10,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
 import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
+import { EnrichButton } from '@/components/shared/EnrichButton';
 import { useContacts, useJobs } from '@/hooks/useData';
 import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -235,6 +236,10 @@ const Contacts = () => {
                   <Play className="h-3.5 w-3.5" />
                   Enroll in Sequence ({selectedIds.length})
                 </Button>
+                <EnrichButton
+                  peopleIds={selectedIds}
+                  invalidateKeys={[['contacts']]}
+                />
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" size="sm" disabled={bulkDeleting}>
