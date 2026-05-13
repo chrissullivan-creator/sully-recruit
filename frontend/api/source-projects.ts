@@ -195,11 +195,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           total_count: data.total_count ?? null,
         });
       }
-      // Log the full Unipile response as a single stringified line so
-      // Vercel's runtime log preview shows the actual error, not a
-      // truncated "[object]". The OpenAPI path is correct, so a 400
-      // here usually means a missing scope or invalid account state.
+      // Persist the latest 4xx body to app_settings so it survives
+      // Vercel's log preview truncation — query via the Supabase MCP
+      // to read the full Unipile rejection text.
       console.error(`[source-projects][list_projects] Unipile ${resp.status} ${url} :: ${body.slice(0, 600)}`);
+      await supabase.from("app_settings").upsert(
+        { key: "DEBUG_UNIPILE_LIST_PROJECTS_LAST", value: JSON.stringify({ status: resp.status, url, body: body.slice(0, 2000), at: new Date().toISOString() }) },
+        { onConflict: "key" },
+      );
       return res.status(resp.status).json({
         error: `Unipile ${resp.status}`,
         url,
