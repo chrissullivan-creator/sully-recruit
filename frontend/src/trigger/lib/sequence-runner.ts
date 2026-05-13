@@ -19,6 +19,7 @@ import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./send-chann
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./merge-tags.js";
 import { calculateSendTime, incrementDailySend } from "./send-time-calculator.js";
 import { canonicalChannel } from "./unipile-v2.js";
+import { notifyError } from "./alerting.js";
 
 export interface Logger {
   info: (msg: string, meta?: any) => void;
@@ -103,7 +104,15 @@ export async function runSequenceAction(
   }
 
   const sequence = enrollment.sequences;
-  const senderUserId = sequence.sender_user_id || sequence.created_by || payload.enrolledBy;
+  // Per-step sender override (PR #234) takes priority over the
+  // sequence-level sender. Falls back to sequence.sender_user_id, then
+  // sequence.created_by, then the enroller — so existing sequences
+  // without overrides keep their current behaviour.
+  const senderUserId =
+    action.sender_user_id ||
+    sequence.sender_user_id ||
+    sequence.created_by ||
+    payload.enrolledBy;
   const entityId = payload.candidateId || payload.contactId;
   const entityType = payload.candidateId ? "candidate" : "contact";
 
@@ -521,6 +530,15 @@ export async function triggerSentimentAnalysis(
     }
   } catch (err: any) {
     logger?.error("Sentiment analysis failed", { error: err.message });
+    // Sentiment classification gates do_not_contact / negative-reply
+    // detection — silent failure here means missed compliance signals.
+    // Dedup'd to one email/hour per error signature by notifyError.
+    await notifyError({
+      taskId: "sequence-runner.sentiment",
+      severity: "WARN",
+      error: err,
+      context: { enrollmentId: enrollment?.id, sequenceId: sequence?.id },
+    });
   }
 }
 
@@ -561,9 +579,25 @@ export async function reanchorNextStep(
   if (!nextLog) return;
 
   const action = (nextLog as any).sequence_actions;
-  if (!action) return;
+  if (!action) {
+    // Step row exists but its sequence_actions row vanished — usually a
+    // sequence edit while an enrollment is mid-flight. Silent return
+    // would leave the next step at its original scheduled_at and fire
+    // too early. Surface it so we can decide whether to repair the
+    // step or stop the enrollment.
+    await notifyError({
+      taskId: "sequence-runner.reanchorNextStep",
+      severity: "WARN",
+      error: new Error(`Next step has no sequence_actions row (deleted mid-flight?)`),
+      context: { enrollmentId, currentStepLogId, nextStepLogId: (nextLog as any).id },
+    });
+    return;
+  }
 
-  const senderUserId = sequence.sender_user_id || sequence.created_by;
+  // Honour per-step sender override here too, otherwise re-anchored
+  // steps fall back to the sequence-level account when computing the
+  // next send window / daily cap.
+  const senderUserId = action.sender_user_id || sequence.sender_user_id || sequence.created_by;
   const newScheduledAt = await calculateSendTime(supabase, {
     startTime: actualSentAt,
     delayHours: Number(action.base_delay_hours) || 0,

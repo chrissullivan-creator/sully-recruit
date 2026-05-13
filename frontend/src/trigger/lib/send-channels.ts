@@ -4,6 +4,7 @@ import { getMicrosoftAccessToken } from "./microsoft-graph.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
 import { unipileFetch } from "./unipile-v2.js";
+import { notifyError } from "./alerting.js";
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -345,16 +346,31 @@ async function getUnipileApiKey(
 ): Promise<{ apiKey: string; accountId: string }> {
   const apiKey = await getAppSetting("UNIPILE_API_KEY");
 
-  // 1. Try explicit accountId
+  // 1. Try explicit accountId. Filter for active + non-null
+  //    unipile_account_id — without these, a stale or unconfigured row
+  //    falls back to `account.id` (a Supabase UUID), which Unipile 404s
+  //    on. Alert when a caller asks for a specific account we can't
+  //    use, so the misconfiguration surfaces instead of silently
+  //    dropping the send.
   if (accountId) {
     const { data: account } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id")
+      .select("id, unipile_account_id, is_active, account_type")
       .eq("id", accountId)
-      .single();
-    if (account) {
-      return { apiKey, accountId: account.unipile_account_id || account.id };
+      .eq("is_active", true)
+      .not("unipile_account_id", "is", null)
+      .maybeSingle();
+    if (account?.unipile_account_id) {
+      return { apiKey, accountId: account.unipile_account_id };
     }
+    await notifyError({
+      taskId: "send-channels.getUnipileApiKey",
+      severity: "WARN",
+      error: new Error(`Explicit integration_account ${accountId} is inactive or has no unipile_account_id`),
+      context: { requestedAccountId: accountId, ownerUserId: userId },
+    });
+    // Intentional fall-through to paths 2/3 — better to send via a
+    // valid account than to fail closed.
   }
 
   // 2. Try by owner_user_id
