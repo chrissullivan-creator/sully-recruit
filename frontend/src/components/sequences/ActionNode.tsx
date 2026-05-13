@@ -24,6 +24,11 @@ export interface ActionData {
    *  email step in the same enrollment (In-Reply-To + References).
    *  Default off for the first step, on for follow-ups. */
   replyToPrevious?: boolean;
+  /** Per-step sender override. When set, the runner uses this user's
+   *  integration accounts for this step instead of the parent
+   *  sequence's sender_user_id. NULL/undefined inherits from the
+   *  sequence-level "Send As" picker. */
+  senderUserId?: string | null;
 }
 
 // xyflow v12 requires the NodeProps generic to extend

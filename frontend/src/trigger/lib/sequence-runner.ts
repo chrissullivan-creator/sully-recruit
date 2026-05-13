@@ -103,7 +103,11 @@ export async function runSequenceAction(
   }
 
   const sequence = enrollment.sequences;
-  const senderUserId = sequence.sender_user_id || sequence.created_by || payload.enrolledBy;
+  // Per-step sender override (sequence_actions.sender_user_id) wins over
+  // the sequence-level default. Lets a single sequence mix senders —
+  // e.g. an Emerald-branded email step followed by Chris's LinkedIn
+  // Recruiter InMail, because the Emerald user has no LinkedIn seat.
+  const senderUserId = action.sender_user_id || sequence.sender_user_id || sequence.created_by || payload.enrolledBy;
   const entityId = payload.candidateId || payload.contactId;
   const entityType = payload.candidateId ? "candidate" : "contact";
 
@@ -563,7 +567,7 @@ export async function reanchorNextStep(
   const action = (nextLog as any).sequence_actions;
   if (!action) return;
 
-  const senderUserId = sequence.sender_user_id || sequence.created_by;
+  const senderUserId = action.sender_user_id || sequence.sender_user_id || sequence.created_by;
   const newScheduledAt = await calculateSendTime(supabase, {
     startTime: actualSentAt,
     delayHours: Number(action.base_delay_hours) || 0,

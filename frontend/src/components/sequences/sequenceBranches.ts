@@ -101,6 +101,7 @@ function mapActionRow(action: Record<string, unknown>): ActionData {
       : (typeof action.attachment_url === "string" ? [action.attachment_url] : []),
     subjectLine: typeof action.subject_line === "string" ? action.subject_line : undefined,
     replyToPrevious: action.reply_to_previous === true,
+    senderUserId: typeof action.sender_user_id === "string" ? action.sender_user_id : null,
   };
 }
 
