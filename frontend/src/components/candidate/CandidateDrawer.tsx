@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -19,7 +20,7 @@ import {
   stageToCanonical, daysSince, type CanonicalStage,
 } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
-import { type SendOutRow, formatComp, lastTouchAt } from '@/lib/queries/send-outs';
+import { type SendOutRow, formatComp, formatCompRange, lastTouchAt } from '@/lib/queries/send-outs';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
@@ -47,6 +48,84 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
   const next = stage ? nextStage(stage) : null;
   const prev = stage ? prevStage(stage) : null;
   const name = c?.full_name || `${c?.first_name ?? ''} ${c?.last_name ?? ''}`.trim() || '—';
+
+  // Editable comp + right-to-work state. Seeds from the send_out row on
+  // open; writes back via Save. We snapshot per send-out so the record
+  // of what was sent stays accurate even if the candidate's profile
+  // target_comp changes later.
+  const [baseMin, setBaseMin] = useState<string>('');
+  const [baseMax, setBaseMax] = useState<string>('');
+  const [bonusMin, setBonusMin] = useState<string>('');
+  const [bonusMax, setBonusMax] = useState<string>('');
+  const [rtw, setRtw] = useState<string>('');
+  const [savingComp, setSavingComp] = useState(false);
+
+  useEffect(() => {
+    setBaseMin(row?.base_comp_min != null ? String(row.base_comp_min) : '');
+    setBaseMax(row?.base_comp_max != null ? String(row.base_comp_max) : '');
+    setBonusMin(row?.bonus_comp_min != null ? String(row.bonus_comp_min) : '');
+    setBonusMax(row?.bonus_comp_max != null ? String(row.bonus_comp_max) : '');
+    setRtw(row?.right_to_work ?? '');
+  }, [row?.id, row?.base_comp_min, row?.base_comp_max, row?.bonus_comp_min, row?.bonus_comp_max, row?.right_to_work]);
+
+  const parseNum = (s: string): number | null => {
+    const trimmed = s.trim();
+    if (!trimmed) return null;
+    // Accept "120k", "120000", "120,000", "$120k", "1.2M"
+    const cleaned = trimmed.replace(/[$,\s]/g, '');
+    const m = cleaned.match(/^([0-9]*\.?[0-9]+)\s*([kKmM]?)$/);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    const suffix = m[2].toLowerCase();
+    if (suffix === 'k') return Math.round(n * 1_000);
+    if (suffix === 'm') return Math.round(n * 1_000_000);
+    return Math.round(n);
+  };
+
+  const dirty =
+    !!row &&
+    (String(row.base_comp_min ?? '') !== baseMin.trim() ||
+      String(row.base_comp_max ?? '') !== baseMax.trim() ||
+      String(row.bonus_comp_min ?? '') !== bonusMin.trim() ||
+      String(row.bonus_comp_max ?? '') !== bonusMax.trim() ||
+      (row.right_to_work ?? '') !== rtw.trim());
+
+  const saveComp = async () => {
+    if (!row) return;
+    const baseMinN = parseNum(baseMin);
+    const baseMaxN = parseNum(baseMax);
+    const bonusMinN = parseNum(bonusMin);
+    const bonusMaxN = parseNum(bonusMax);
+
+    if (baseMin.trim() && baseMinN == null) { toast.error('Invalid base min (try 120k or 120000)'); return; }
+    if (baseMax.trim() && baseMaxN == null) { toast.error('Invalid base max'); return; }
+    if (bonusMin.trim() && bonusMinN == null) { toast.error('Invalid bonus min'); return; }
+    if (bonusMax.trim() && bonusMaxN == null) { toast.error('Invalid bonus max'); return; }
+    if (baseMinN != null && baseMaxN != null && baseMinN > baseMaxN) { toast.error('Base min must be ≤ max'); return; }
+    if (bonusMinN != null && bonusMaxN != null && bonusMinN > bonusMaxN) { toast.error('Bonus min must be ≤ max'); return; }
+
+    setSavingComp(true);
+    try {
+      const { error } = await supabase
+        .from('send_outs')
+        .update({
+          base_comp_min: baseMinN,
+          base_comp_max: baseMaxN,
+          bonus_comp_min: bonusMinN,
+          bonus_comp_max: bonusMaxN,
+          right_to_work: rtw.trim() || null,
+        })
+        .eq('id', row.id);
+      if (error) throw new Error(error.message);
+      toast.success('Submission details saved');
+      invalidateSendOutScope(queryClient);
+      invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed');
+    } finally {
+      setSavingComp(false);
+    }
+  };
 
   const move = async (target: CanonicalStage, source: string) => {
     if (!row) return;
@@ -170,7 +249,7 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                 </div>
               </div>
 
-              {/* Job + comp + last touch */}
+              {/* Job + candidate-target comp + last touch */}
               <div className="rounded-lg border border-card-border bg-white p-3 space-y-2 text-sm">
                 {j?.title && (
                   <div className="flex items-start gap-2">
@@ -184,7 +263,7 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                 <div className="flex items-center gap-2">
                   <DollarSign className="h-3.5 w-3.5 text-gold-deep shrink-0" />
                   <p className="text-gold-deep font-semibold">{targetComp}</p>
-                  <span className="text-xs text-muted-foreground">target</span>
+                  <span className="text-xs text-muted-foreground">candidate target</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -192,6 +271,75 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                     Last touch: {last ? format(new Date(last), 'MMM d, yyyy') : '—'}
                   </p>
                 </div>
+              </div>
+
+              {/* Editable per-submission comp + right-to-work. Snapshotted
+                  on this send_out so the record of what was sent to the
+                  client stays correct even if the candidate's profile
+                  changes later. */}
+              <div className="rounded-lg border border-card-border bg-white p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Submitted to client
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/70">
+                    {formatCompRange(row.base_comp_min, row.base_comp_max) !== '—' || formatCompRange(row.bonus_comp_min, row.bonus_comp_max) !== '—'
+                      ? 'On record'
+                      : 'Not yet recorded'}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1">Base comp range</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text" inputMode="decimal" placeholder="Min (e.g. 120k)"
+                      value={baseMin} onChange={(e) => setBaseMin(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                    <span className="text-muted-foreground text-xs">–</span>
+                    <Input
+                      type="text" inputMode="decimal" placeholder="Max (e.g. 140k)"
+                      value={baseMax} onChange={(e) => setBaseMax(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1">Bonus comp range</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text" inputMode="decimal" placeholder="Min"
+                      value={bonusMin} onChange={(e) => setBonusMin(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                    <span className="text-muted-foreground text-xs">–</span>
+                    <Input
+                      type="text" inputMode="decimal" placeholder="Max"
+                      value={bonusMax} onChange={(e) => setBonusMax(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1">Right to work here</p>
+                  <Input
+                    type="text" placeholder="e.g. US Citizen, H1B, Sponsorship required"
+                    value={rtw} onChange={(e) => setRtw(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+
+                <Button
+                  variant="gold" size="sm"
+                  className="w-full"
+                  disabled={!dirty || savingComp}
+                  onClick={saveComp}
+                >
+                  {savingComp ? 'Saving…' : dirty ? 'Save submission details' : 'Saved'}
+                </Button>
               </div>
 
               {row.submittal_notes && (
