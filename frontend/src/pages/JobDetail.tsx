@@ -52,6 +52,7 @@ import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPEL
 import { moveStage } from '@/lib/mutations/move-stage';
 import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
+import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
@@ -391,6 +392,11 @@ const JobDetail = () => {
   const [overStage, setOverStage] = useState<CanonicalStage | null>(null);
   const [pendingMove, setPendingMove] = useState<{ row: KanbanRow; target: CanonicalStage; initialNote?: string | null } | null>(null);
   const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
+  // Withdrawal interception — mirror the SendOuts page so dragging a
+  // card into the Withdrawn column on Job Detail also captures the
+  // reason instead of silently stamping it.
+  const [pendingWithdrawal, setPendingWithdrawal] = useState<{ row: KanbanRow } | null>(null);
+  const [withdrawnReasonOpen, setWithdrawnReasonOpen] = useState(false);
   const [savingMove, setSavingMove] = useState(false);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const { data: kanbanRows = [] } = useJobKanbanRows(id ?? '');
@@ -407,7 +413,19 @@ const JobDetail = () => {
     }
   };
 
-  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage, note?: string) => {
+  const handleWithdrawnConfirm = async (reason: string) => {
+    if (!pendingWithdrawal) return;
+    setSavingMove(true);
+    try {
+      await commitKanbanMove(pendingWithdrawal.row, 'withdrawn', undefined, reason);
+    } finally {
+      setSavingMove(false);
+      setWithdrawnReasonOpen(false);
+      setPendingWithdrawal(null);
+    }
+  };
+
+  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage, note?: string, withdrawnReason?: string) => {
     queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
       prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
     );
@@ -421,6 +439,7 @@ const JobDetail = () => {
           entityId: row.candidate_id,
           entityType: 'candidate_job',
           note,
+          withdrawnReason,
         })
       : await (async () => {
           const { error } = await supabase
@@ -508,6 +527,15 @@ const JobDetail = () => {
         : await fetchLatestStageMoveNote(row.send_out_id);
       setPendingMove({ row, target, initialNote: prior });
       setSendOutNotesOpen(true);
+      return;
+    }
+    // Withdrawn (and the 'rejected' synonym handled by stageToCanonical
+    // upstream) captures the withdrawal reason — mirrors the SendOuts
+    // page so the reason lands on send_outs.withdrawn_reason rather
+    // than silently going null.
+    if (target === 'withdrawn') {
+      setPendingWithdrawal({ row });
+      setWithdrawnReasonOpen(true);
       return;
     }
     await commitKanbanMove(row, target);
@@ -1852,6 +1880,19 @@ const JobDetail = () => {
         }
         confirmLabel={pendingMove?.target === 'submitted' ? 'Save & Send' : 'Save & Move'}
         initialNote={pendingMove?.initialNote}
+      />
+
+      <WithdrawnReasonDialog
+        open={withdrawnReasonOpen}
+        onOpenChange={(v) => {
+          if (!savingMove) {
+            setWithdrawnReasonOpen(v);
+            if (!v) setPendingWithdrawal(null);
+          }
+        }}
+        onConfirm={handleWithdrawnConfirm}
+        candidateName={pendingWithdrawal?.row.candidate?.full_name ?? undefined}
+        jobTitle={job?.title ?? undefined}
       />
     </MainLayout>
   );
