@@ -62,11 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // `name` becomes the account_label fallback in our integration_accounts
     // row when our webhook inserts it.
     name: user.email || user.id,
-    linkedin: {
-      // Cookies are docs-recommended for Recruiter — credentials sometimes
-      // can't reach the Recruiter session even when the seat exists.
-      allow_methods: ["credentials", "cookies"],
-      products: ["classic", "recruiter"],
+    // Per Unipile docs the provider-specific block lives under config.<provider>.
+    config: {
+      linkedin: {
+        // Cookies are docs-recommended for Recruiter — credentials sometimes
+        // can't reach the Recruiter session even when the seat exists.
+        allow_methods: ["credentials", "cookies"],
+        products: ["classic", "recruiter"],
+      },
     },
   };
   if (account_id) body.reconnect_account = account_id;
@@ -83,8 +86,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const text = await resp.text();
   if (!resp.ok) {
     console.error(`[connect-linkedin] Unipile ${resp.status} :: ${text.slice(0, 500)}`);
+    // Persist for post-hoc debug via Supabase MCP (Vercel log preview truncates).
+    await supabase.from("app_settings").upsert(
+      { key: "DEBUG_CONNECT_LINKEDIN_LAST", value: JSON.stringify({ status: resp.status, body: text.slice(0, 2000), sent: body, at: new Date().toISOString() }) },
+      { onConflict: "key" },
+    );
     return res.status(resp.status).json({
-      error: `Unipile ${resp.status}`,
+      error: `Unipile ${resp.status}: ${text.slice(0, 400)}`,
       body: text.slice(0, 500),
     });
   }
