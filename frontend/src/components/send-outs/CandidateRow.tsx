@@ -6,7 +6,7 @@ import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripV
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { type SendOutRow, formatComp, lastTouchAt } from '@/lib/queries/send-outs';
+import { type SendOutRow, formatComp, formatCompRange, lastTouchAt } from '@/lib/queries/send-outs';
 import { daysSince, type CanonicalStage, nextStage, canonicalConfig } from '@/lib/pipeline';
 import { EditSendOutNotesDialog } from './EditSendOutNotesDialog';
 
@@ -33,7 +33,11 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
   const initials = ((c?.first_name?.[0] ?? '') + (c?.last_name?.[0] ?? '')).toUpperCase() || (name[0] ?? '?').toUpperCase();
   // Avatar tone alternates emerald / gold per spec.
   const goldTone = index % 2 === 1;
-  const targetComp = formatComp(c?.target_total_comp ?? c?.target_base_comp ?? null);
+  const hasSendOutBase = row.base_comp_min != null || row.base_comp_max != null;
+  const hasSendOutBonus = row.bonus_comp_min != null || row.bonus_comp_max != null;
+  const baseRange = formatCompRange(row.base_comp_min, row.base_comp_max);
+  const bonusRange = formatCompRange(row.bonus_comp_min, row.bonus_comp_max);
+  const fallbackTargetComp = formatComp(c?.target_total_comp ?? c?.target_base_comp ?? null);
   const lastTouch = lastTouchAt(row);
   const daysInStage = daysSince(row.updated_at);
   const next = nextStage(stage);
@@ -95,8 +99,31 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
         {c?.current_company && <p className="text-[11px] truncate text-muted-foreground/70">{c.current_company}</p>}
       </td>
 
-      <td className="px-3 py-2.5 text-sm font-semibold text-gold-deep tabular-nums min-w-[80px]">
-        {targetComp}
+      <td className="px-3 py-2.5 text-sm text-gold-deep tabular-nums min-w-[110px] leading-tight">
+        {hasSendOutBase || hasSendOutBonus ? (
+          <>
+            <div className="font-semibold">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium mr-1">Base</span>
+              {baseRange}
+            </div>
+            <div className="text-xs">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium mr-1">Bonus</span>
+              {bonusRange}
+            </div>
+          </>
+        ) : (
+          <span className="font-semibold">{fallbackTargetComp}</span>
+        )}
+      </td>
+
+      <td className="hidden md:table-cell px-3 py-2.5 text-xs text-foreground min-w-[90px]">
+        {row.right_to_work ? (
+          <span className="truncate inline-block max-w-[140px]" title={row.right_to_work}>
+            {row.right_to_work}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/50 italic">—</span>
+        )}
       </td>
 
       <td className="hidden lg:table-cell px-3 py-2.5 text-xs text-muted-foreground min-w-[110px]">

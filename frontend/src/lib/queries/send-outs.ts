@@ -17,6 +17,11 @@ export interface SendOutRow {
   updated_at: string | null;
   submittal_notes: string | null;
   resume_url: string | null;
+  base_comp_min: number | null;
+  base_comp_max: number | null;
+  bonus_comp_min: number | null;
+  bonus_comp_max: number | null;
+  right_to_work: string | null;
   candidate: {
     id: string;
     full_name: string | null;
@@ -48,6 +53,7 @@ export function useSendOuts() {
           id, candidate_id, job_id, recruiter_id, stage, outcome,
           sent_to_client_at, interview_at, offer_at, placed_at,
           created_at, updated_at, submittal_notes, resume_url,
+          base_comp_min, base_comp_max, bonus_comp_min, bonus_comp_max, right_to_work,
           candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, target_total_comp, target_base_comp, avatar_url, last_contacted_at, owner_user_id, type),
           job:jobs(id, title, company_name)
         `)
@@ -66,6 +72,19 @@ export function formatComp(amt: number | null | undefined): string {
   if (amt >= 1_000_000) return `$${(amt / 1_000_000).toFixed(1)}M`;
   if (amt >= 1_000) return `$${Math.round(amt / 1_000)}k`;
   return `$${amt.toLocaleString()}`;
+}
+
+/** Format a min/max comp pair like "$120k-$140k". Returns "—" when both
+ *  are missing; renders the single side when only one is set. */
+export function formatCompRange(
+  min: number | null | undefined,
+  max: number | null | undefined,
+): string {
+  const hasMin = !!min && min > 0;
+  const hasMax = !!max && max > 0;
+  if (!hasMin && !hasMax) return '—';
+  if (hasMin && hasMax) return `${formatComp(min)}-${formatComp(max)}`;
+  return formatComp(hasMin ? min : max);
 }
 
 /** Last-touch timestamp for a row — most recent of stage-specific timestamps + updated_at. */
