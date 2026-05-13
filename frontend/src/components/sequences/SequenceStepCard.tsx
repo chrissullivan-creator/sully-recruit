@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,6 +55,20 @@ export function SequenceStepCard({
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editorDraft, setEditorDraft] = useState("");
+
+  // Sender options for the per-step "Send as" override. Same query as
+  // SequenceSetup so the shared "The Emerald Recruiting Group" inbox
+  // and every recruiter profile show up. Null choice ("Sequence sender
+  // (default)") leaves sender_user_id NULL on the action row → runner
+  // falls back to sequence.sender_user_id.
+  const [senderProfiles, setSenderProfiles] = useState<{ id: string; full_name: string | null; email: string | null }[]>([]);
+  useEffect(() => {
+    supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .order("full_name", { ascending: true })
+      .then(({ data }) => { if (data) setSenderProfiles(data as any); });
+  }, []);
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: ActionData[keyof ActionData]) => {
@@ -259,6 +273,26 @@ export function SequenceStepCard({
                   </div>
                 </>
               )}
+
+              <div>
+                <Label className="text-[10px]" title="Override the sequence-level Send As for this step only. Defaults to the sequence sender. Use this when, e.g., one step should go from emeraldrecruit@theemeraldrecruitinggroup.com instead of a personal mailbox.">Send as</Label>
+                <Select
+                  value={action.senderUserId ?? "__inherit__"}
+                  onValueChange={(v) => updateAction(i, "senderUserId", v === "__inherit__" ? null : v)}
+                >
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue placeholder="Sequence sender (default)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__inherit__">Sequence sender (default)</SelectItem>
+                    {senderProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name || p.email || p.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
