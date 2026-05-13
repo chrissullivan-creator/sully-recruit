@@ -1,23 +1,24 @@
 import { inngest } from "../client.js";
-import {
-  getSupabaseAdmin,
-  getAppSetting,
-  getMicrosoftGraphCredentials,
-} from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 import { normalizeEmail } from "../../../../src/trigger/lib/resume-parsing.js";
 import { isMarketingEmail } from "../../../../src/trigger/lib/marketing-blocklist.js";
+import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import { notifyError } from "../../../../src/trigger/lib/alerting.js";
 
 /**
- * Backfill emails from Microsoft Graph (Inbox + SentItems) every 5
- * minutes. Syncs ALL emails (matched + unmatched), so unmatched ones
- * still appear in the Inbox UI with candidate_id/contact_id null.
+ * Backfill emails from Unipile every 5 minutes — safety net for missed
+ * Unipile webhooks (process-unipile-event handles real-time delivery).
  *
- * Looks back 3 days each run — that buffer covers brief outages /
- * missed runs without blowing up the API budget. Dedup by
- * external_message_id prevents double-inserts.
+ * Iterates every active integration_accounts row with
+ * account_type='email' and a unipile_account_id, pulls the last 3 days
+ * of email from `{account_id}/emails`, dedups by external_message_id,
+ * and matches each email to a candidate/contact for the Inbox UI.
  *
- * Ported from `src/trigger/backfill-emails.ts` — Inngest is the only
- * scheduler now.
+ * Previously hit Microsoft Graph /me/mailFolders/{Inbox,SentItems}/messages
+ * with a refresh-token rotation. The mailboxes themselves moved to
+ * Unipile-hosted Outlook a while back (USE_UNIPILE_EMAIL=true) and the
+ * Graph creds path lingered — this aligns inbound backfill with the
+ * outbound send path that already runs through Unipile.
  */
 
 function stripHtml(html: string | null | undefined): string {
@@ -36,69 +37,12 @@ function stripHtml(html: string | null | undefined): string {
     .trim();
 }
 
-async function refreshToken(
-  supabase: any,
-  account: any,
-  tenantId: string,
-  clientId: string,
-  clientSecret: string,
-): Promise<string> {
-  const resp = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: "refresh_token",
-        refresh_token: account.refresh_token,
-        scope: "offline_access Mail.Read Mail.Send User.Read openid profile",
-      }),
-    },
-  );
-  const data: any = await resp.json();
-  if (!resp.ok) throw new Error(`Token refresh: ${data?.error_description}`);
-
-  await supabase
-    .from("integration_accounts")
-    .update({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token ?? account.refresh_token,
-      token_expires_at: new Date(Date.now() + Number(data.expires_in ?? 3600) * 1000).toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", account.id);
-
-  return data.access_token;
-}
-
-async function getToken(
-  supabase: any,
-  account: any,
-  tenantId: string,
-  clientId: string,
-  clientSecret: string,
-): Promise<string> {
-  if (
-    account.access_token &&
-    account.token_expires_at &&
-    new Date(account.token_expires_at).getTime() - Date.now() > 300_000
-  ) {
-    return account.access_token;
-  }
-  return refreshToken(supabase, account, tenantId, clientId, clientSecret);
-}
-
-async function buildEmailLookup(
-  supabase: any,
-): Promise<Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>> {
+/** Build email → entity map for matching inbound senders / outbound
+ *  recipients to candidate or contact rows. */
+async function buildEmailLookup(supabase: any) {
   const map = new Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>();
-
-  // Supabase's default range is 1000 rows. With ~6k people in the firm,
-  // an unpaginated query silently dropped everyone past the first page.
   const PAGE = 1000;
-  const loadAll = async (table: "people" | "contacts", as: "candidate" | "contact") => {
+  const loadAll = async (table: "people" | "contacts") => {
     let from = 0;
     while (true) {
       const { data } = await supabase
@@ -122,226 +66,262 @@ async function buildEmailLookup(
       from += PAGE;
     }
   };
-
-  await loadAll("people", "candidate");
-  await loadAll("contacts", "contact");
-
+  await loadAll("people");
+  await loadAll("contacts");
   return map;
+}
+
+/** Pick the first non-empty value across a list of candidate fields.
+ *  Unipile email payload shapes vary a bit by provider (Outlook vs
+ *  Gmail vs IMAP) and version — be tolerant of all of them. */
+function pickStr(...vals: any[]): string | null {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+interface UnipileAttendee {
+  identifier?: string;
+  display_name?: string;
+  email?: string;
+}
+
+interface UnipileEmail {
+  id?: string;
+  message_id?: string;
+  provider_id?: string;
+  internet_message_id?: string;
+  subject?: string | null;
+  body?: string | null;
+  body_html?: string | null;
+  body_preview?: string | null;
+  is_outbound?: boolean;
+  date?: string | null;
+  timestamp?: string | null;
+  sent_date?: string | null;
+  received_date?: string | null;
+  thread_id?: string | null;
+  conversation_id?: string | null;
+  from_attendee?: UnipileAttendee | null;
+  to_attendees?: UnipileAttendee[] | null;
 }
 
 async function processAccount(
   supabase: any,
   account: any,
-  emailLookup: Map<string, any>,
+  emailLookup: Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>,
   dateFrom: string,
   dateTo: string,
-  maxPages: number,
-  token: string,
+  pageLimit: number,
   logger: any,
-): Promise<{ inserted: number; skipped: number; unmatched: number; errors: number; hit_limit: boolean }> {
+): Promise<{ inserted: number; skipped: number; unmatched: number; errors: number; pages: number }> {
   let inserted = 0,
     skipped = 0,
     unmatched = 0,
     errors = 0,
-    hit_limit = false;
+    pages = 0;
   const accountEmail = normalizeEmail(account.email_address);
-  const folders = ["Inbox", "SentItems"];
+  if (!accountEmail) return { inserted, skipped, unmatched, errors, pages };
 
-  for (const folder of folders) {
-    const select =
-      "id,conversationId,subject,body,bodyPreview,from,toRecipients,sentDateTime,receivedDateTime";
-    let url =
-      `https://graph.microsoft.com/v1.0/me/mailFolders/${folder}/messages` +
-      `?$select=${select}&$filter=receivedDateTime ge ${dateFrom} and receivedDateTime le ${dateTo}` +
-      `&$top=50&$orderby=receivedDateTime desc`;
-    let pageCount = 0;
-
-    while (url && pageCount < maxPages) {
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!resp.ok) {
-        logger.error(`${folder} page ${pageCount} failed`, { status: resp.status });
-        break;
-      }
-      const data = await resp.json();
-      const messages = data.value ?? [];
-      pageCount++;
-      if (pageCount >= maxPages && data["@odata.nextLink"]) hit_limit = true;
-
-      const pageMessageIds = messages.map((m: any) => m.id).filter(Boolean);
-      const existingIds = new Set<string>();
-      if (pageMessageIds.length > 0) {
-        const { data: existing } = await supabase
-          .from("messages")
-          .select("external_message_id")
-          .in("external_message_id", pageMessageIds);
-        for (const row of existing ?? []) {
-          if (row.external_message_id) existingIds.add(row.external_message_id);
-        }
-      }
-
-      for (const msg of messages) {
-        try {
-          const externalMessageId = msg.id as string;
-          if (existingIds.has(externalMessageId)) {
-            skipped++;
-            continue;
-          }
-
-          const externalConversationId = msg.conversationId as string;
-          const subject = msg.subject ?? null;
-          const senderEmail = normalizeEmail(msg.from?.emailAddress?.address);
-          const senderName = msg.from?.emailAddress?.name ?? null;
-          const sentAt = msg.sentDateTime ?? null;
-          const receivedAt = msg.receivedDateTime ?? null;
-          const bodyText = stripHtml(msg.body?.content ?? msg.bodyPreview ?? "");
-          const preview = (msg.bodyPreview ?? bodyText ?? "").slice(0, 500);
-          const toEmails = (msg.toRecipients ?? [])
-            .map((r: any) => normalizeEmail(r?.emailAddress?.address))
-            .filter(Boolean);
-          const isOutbound = folder === "SentItems" || normalizeEmail(senderEmail) === accountEmail;
-          const matchEmail = isOutbound ? toEmails[0] : senderEmail;
-
-          if (!matchEmail) {
-            skipped++;
-            continue;
-          }
-
-          // Outlook ingestion ALWAYS produces channel='email'. Unipile is
-          // the only source for channel='linkedin'/'linkedin_recruiter'.
-          // Drop pure LinkedIn marketing/notification noise from
-          // messages-noreply@.
-          if (!isOutbound && senderEmail === "messages-noreply@linkedin.com") {
-            skipped++;
-            continue;
-          }
-
-          if (isMarketingEmail(isOutbound ? null : senderEmail)) {
-            skipped++;
-            continue;
-          }
-
-          // Match to entity but do NOT skip if no match found — unmatched
-          // emails still surface in the Inbox UI.
-          const entity = emailLookup.get(matchEmail);
-          const candidateId = entity?.type === "candidate" ? entity.id : null;
-          const contactId = entity?.type === "contact" ? entity.id : null;
-
-          if (!entity) unmatched++;
-
-          let { data: conversation } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("external_conversation_id", externalConversationId)
-            .eq("integration_account_id", account.id)
-            .maybeSingle();
-
-          if (!conversation) {
-            const { data: created } = await supabase
-              .from("conversations")
-              .insert({
-                candidate_id: candidateId,
-                contact_id: contactId,
-                channel: "email",
-                integration_account_id: account.id,
-                external_conversation_id: externalConversationId,
-                subject,
-                last_message_preview: preview,
-                last_message_at: receivedAt ?? sentAt,
-                is_read: true,
-                is_archived: false,
-                assigned_user_id: entity?.owner_user_id ?? account.owner_user_id,
-              })
-              .select("id")
-              .single();
-            conversation = created;
-          }
-
-          if (!conversation) {
-            errors++;
-            continue;
-          }
-
-          const { error: msgErr } = await supabase.from("messages").insert({
-            conversation_id: conversation.id,
-            candidate_id: candidateId,
-            contact_id: contactId,
-            channel: "email",
-            direction: isOutbound ? "outbound" : "inbound",
-            message_type: "email",
-            external_message_id: externalMessageId,
-            external_conversation_id: externalConversationId,
-            subject,
-            body: bodyText,
-            sender_name: senderName,
-            sender_address: isOutbound ? accountEmail : senderEmail,
-            recipient_address: isOutbound ? matchEmail : accountEmail,
-            sent_at: sentAt,
-            received_at: receivedAt,
-            integration_account_id: account.id,
-            provider: "microsoft",
-            is_read: true,
-          });
-
-          if (msgErr) {
-            errors++;
-            continue;
-          }
-          inserted++;
-        } catch (err: any) {
-          logger.error("Message processing error", { error: err.message });
-          errors++;
-        }
-      }
-      url = data["@odata.nextLink"] ?? "";
+  // Unipile v2 emails endpoint paginates with `cursor`; we cap at
+  // pageLimit pages to bound runtime per cron tick.
+  let cursor: string | undefined;
+  while (pages < pageLimit) {
+    let payload: any;
+    try {
+      payload = await unipileFetch(supabase, account.unipile_account_id, "emails", {
+        method: "GET",
+        query: {
+          limit: 50,
+          date_from: dateFrom,
+          date_to: dateTo,
+          ...(cursor ? { cursor } : {}),
+        },
+      });
+    } catch (err: any) {
+      logger.error(`Unipile emails fetch failed for ${account.email_address}`, { error: err.message });
+      await notifyError({
+        taskId: "backfill-emails",
+        severity: "ERROR",
+        error: err,
+        context: { accountId: account.id, email: account.email_address },
+      });
+      break;
     }
+    pages++;
+    const items: UnipileEmail[] = Array.isArray(payload)
+      ? payload
+      : (payload.items ?? payload.emails ?? payload.data ?? []);
+    if (items.length === 0) break;
+
+    const pageMessageIds = items
+      .map((m) => m.id || m.message_id || m.provider_id || m.internet_message_id)
+      .filter(Boolean) as string[];
+    const existingIds = new Set<string>();
+    if (pageMessageIds.length > 0) {
+      const { data: existing } = await supabase
+        .from("messages")
+        .select("external_message_id")
+        .in("external_message_id", pageMessageIds);
+      for (const row of existing ?? []) {
+        if (row.external_message_id) existingIds.add(row.external_message_id);
+      }
+    }
+
+    for (const msg of items) {
+      try {
+        const externalMessageId = msg.id || msg.message_id || msg.provider_id || msg.internet_message_id;
+        if (!externalMessageId) {
+          skipped++;
+          continue;
+        }
+        if (existingIds.has(externalMessageId)) {
+          skipped++;
+          continue;
+        }
+
+        const externalConversationId = pickStr(msg.thread_id, msg.conversation_id, externalMessageId) || externalMessageId;
+        const subject = msg.subject ?? null;
+        const fromAttendee = msg.from_attendee ?? null;
+        const senderEmail = normalizeEmail(fromAttendee?.identifier ?? fromAttendee?.email ?? "");
+        const senderName = pickStr(fromAttendee?.display_name);
+        const toEmails = (msg.to_attendees ?? [])
+          .map((r) => normalizeEmail(r?.identifier ?? r?.email ?? ""))
+          .filter(Boolean) as string[];
+
+        const isOutbound =
+          typeof msg.is_outbound === "boolean"
+            ? msg.is_outbound
+            : (senderEmail === accountEmail);
+
+        const matchEmail = isOutbound ? toEmails[0] : senderEmail;
+        if (!matchEmail) {
+          skipped++;
+          continue;
+        }
+
+        if (!isOutbound && senderEmail === "messages-noreply@linkedin.com") {
+          skipped++;
+          continue;
+        }
+        if (isMarketingEmail(isOutbound ? null : senderEmail)) {
+          skipped++;
+          continue;
+        }
+
+        const entity = emailLookup.get(matchEmail);
+        const candidateId = entity?.type === "candidate" ? entity.id : null;
+        const contactId = entity?.type === "contact" ? entity.id : null;
+        if (!entity) unmatched++;
+
+        const sentAt = pickStr(msg.date, msg.timestamp, msg.sent_date);
+        const receivedAt = pickStr(msg.received_date) ?? sentAt;
+        const bodyText = stripHtml(msg.body_html ?? msg.body ?? msg.body_preview ?? "");
+        const preview = (msg.body_preview ?? bodyText ?? "").slice(0, 500);
+
+        let { data: conversation } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("external_conversation_id", externalConversationId)
+          .eq("integration_account_id", account.id)
+          .maybeSingle();
+        if (!conversation) {
+          const { data: created } = await supabase
+            .from("conversations")
+            .insert({
+              candidate_id: candidateId,
+              contact_id: contactId,
+              channel: "email",
+              integration_account_id: account.id,
+              external_conversation_id: externalConversationId,
+              subject,
+              last_message_preview: preview,
+              last_message_at: receivedAt ?? sentAt,
+              is_read: true,
+              is_archived: false,
+              assigned_user_id: entity?.owner_user_id ?? account.owner_user_id,
+            })
+            .select("id")
+            .single();
+          conversation = created;
+        }
+        if (!conversation) {
+          errors++;
+          continue;
+        }
+
+        const { error: msgErr } = await supabase.from("messages").insert({
+          conversation_id: conversation.id,
+          candidate_id: candidateId,
+          contact_id: contactId,
+          channel: "email",
+          direction: isOutbound ? "outbound" : "inbound",
+          message_type: "email",
+          external_message_id: externalMessageId,
+          external_conversation_id: externalConversationId,
+          subject,
+          body: bodyText,
+          sender_name: senderName,
+          sender_address: isOutbound ? accountEmail : (senderEmail || null),
+          recipient_address: isOutbound ? matchEmail : accountEmail,
+          sent_at: sentAt,
+          received_at: receivedAt,
+          integration_account_id: account.id,
+          provider: "unipile",
+          is_read: true,
+        });
+        if (msgErr) {
+          errors++;
+          continue;
+        }
+        inserted++;
+      } catch (err: any) {
+        logger.error("Message processing error", { error: err.message });
+        errors++;
+      }
+    }
+
+    cursor = payload.cursor || payload.next_cursor || payload.next || undefined;
+    if (!cursor) break;
   }
-  return { inserted, skipped, unmatched, errors, hit_limit };
+  return { inserted, skipped, unmatched, errors, pages };
 }
 
 export const backfillEmails = inngest.createFunction(
-  { id: "backfill-emails", name: "Backfill emails from Microsoft Graph (Inngest)" },
+  { id: "backfill-emails", name: "Backfill emails from Unipile (Inngest)" },
   { cron: "1-56/5 * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
-    const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
     const daysBack = 3;
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = new Date().toISOString();
-    const maxPages = 3;
-
-    logger.info("Starting email backfill", { dateFrom, dateTo });
+    const maxPages = 5; // hard cap per account per tick
 
     const emailLookup = await buildEmailLookup(supabase);
     logger.info(`Loaded ${emailLookup.size} known emails for matching`);
 
-    const graphEmailsSetting = await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS");
-    const graphEmails = new Set(
-      graphEmailsSetting
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
-    );
-
-    const { data: accounts } = await supabase
+    const { data: accounts, error: acctErr } = await supabase
       .from("integration_accounts")
-      .select("id, email_address, access_token, refresh_token, token_expires_at, owner_user_id")
+      .select("id, email_address, owner_user_id, unipile_account_id, unipile_provider")
+      .eq("account_type", "email")
       .eq("is_active", true)
-      .not("refresh_token", "is", null);
+      .not("unipile_account_id", "is", null);
 
-    const emailAccounts = (accounts ?? []).filter((a: any) =>
-      graphEmails.has((a.email_address ?? "").toLowerCase().trim()),
-    );
-
-    if (!emailAccounts.length) {
-      logger.warn("No Graph accounts found");
-      return { error: "No graph accounts found", results: [] };
+    if (acctErr) {
+      logger.error("Account lookup failed", { error: acctErr.message });
+      await notifyError({ taskId: "backfill-emails", error: acctErr, severity: "ERROR" });
+      return { error: acctErr.message };
+    }
+    if (!accounts?.length) {
+      logger.warn("No Unipile email accounts configured");
+      return { error: "no_unipile_email_accounts" };
     }
 
     const results = [];
-    for (const account of emailAccounts) {
+    for (const account of accounts) {
       try {
-        const token = await getToken(supabase, account, tenantId, clientId, clientSecret);
         const result = await processAccount(
           supabase,
           account,
@@ -349,7 +329,6 @@ export const backfillEmails = inngest.createFunction(
           dateFrom,
           dateTo,
           maxPages,
-          token,
           logger,
         );
         results.push({ email: account.email_address, ...result });
@@ -357,6 +336,12 @@ export const backfillEmails = inngest.createFunction(
       } catch (err: any) {
         logger.error("Account processing error", { email: account.email_address, error: err.message });
         results.push({ email: account.email_address, error: err.message });
+        await notifyError({
+          taskId: "backfill-emails",
+          severity: "WARN",
+          error: err,
+          context: { accountId: account.id, email: account.email_address },
+        });
       }
     }
 

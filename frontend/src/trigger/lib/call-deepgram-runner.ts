@@ -1,6 +1,7 @@
 import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./supabase.js";
 import { callAIWithFallback } from "../../lib/ai-fallback.js";
 import { sendInternalEmail } from "./microsoft-graph.js";
+import { notifyError } from "./alerting.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -488,14 +489,23 @@ Field rules:
 
 async function getRCToken(supabase: any, ownerId: string): Promise<string | null> {
   const { data } = await supabase.from("integration_accounts")
-    .select("access_token, token_expires_at, rc_jwt, metadata")
+    .select("id, account_label, access_token, token_expires_at, rc_jwt, metadata")
     .eq("owner_user_id", ownerId).eq("provider", "sms").eq("is_active", true).maybeSingle();
   if (!data) return null;
   if (data.access_token && new Date(data.token_expires_at) > new Date(Date.now() + 60000)) {
     return data.access_token;
   }
   const meta = data.metadata ?? {};
-  if (!data.rc_jwt || !meta.rc_client_id || !meta.rc_client_secret) return data.access_token ?? null;
+  const acctLabel = data.account_label || ownerId;
+  if (!data.rc_jwt || !meta.rc_client_id || !meta.rc_client_secret) {
+    await notifyError({
+      taskId: "process-call-deepgram",
+      severity: "ERROR",
+      error: new Error(`RC account ${acctLabel} is missing rc_client_id/secret or rc_jwt — re-auth required`),
+      context: { accountId: data.id, accountLabel: acctLabel },
+    });
+    return null;
+  }
   const r = await fetch(`${RC_SERVER}/restapi/oauth/token`, {
     method: "POST",
     headers: {
@@ -507,7 +517,19 @@ async function getRCToken(supabase: any, ownerId: string): Promise<string | null
       assertion: data.rc_jwt,
     }),
   });
-  if (!r.ok) return data.access_token ?? null;
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    // Don't fall back to the stale token — that just guarantees the
+    // next recording fetch 401s and the call silently goes
+    // un-transcribed. Surface the failure instead.
+    await notifyError({
+      taskId: "process-call-deepgram",
+      severity: "ERROR",
+      error: new Error(`RC token refresh ${r.status} for ${acctLabel} — re-auth required: ${body}`),
+      context: { accountId: data.id, accountLabel: acctLabel, status: r.status },
+    });
+    return null;
+  }
   const t = await r.json();
   await supabase.from("integration_accounts").update({
     access_token: t.access_token,
