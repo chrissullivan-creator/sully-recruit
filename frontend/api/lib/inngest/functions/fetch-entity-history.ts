@@ -83,38 +83,49 @@ export const fetchEntityHistory = inngest.createFunction(
       linkedin_history: { searched: false, inserted: 0 },
     };
 
-    // ── Email history via Microsoft Graph ───────────────────────────
+    // ── Email history via Unipile v2 ────────────────────────────────
+    // Previously hit Microsoft Graph /me/messages, but we never store
+    // Graph access tokens on integration_accounts anymore (all mailboxes
+    // run through Unipile-hosted Outlook). The Graph branch was a
+    // permanent no-op since the rename of `provider='microsoft'` →
+    // `provider='email'`, which is why email history stopped
+    // populating around 5/7.
     if (personEmail) {
       try {
-        const { data: msAccounts } = await supabase
+        const { data: emailAccounts } = await supabase
           .from("integration_accounts")
-          .select("id, owner_user_id, access_token")
-          .eq("provider", "microsoft")
-          .eq("is_active", true);
+          .select("id, owner_user_id, unipile_account_id, account_type, email_address")
+          .eq("account_type", "email")
+          .eq("is_active", true)
+          .not("unipile_account_id", "is", null);
 
-        for (const acct of msAccounts || []) {
-          if (!acct.access_token) continue;
+        const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
+        const lowerEmail = personEmail.toLowerCase();
 
-          const searchResp = await fetch(
-            `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${personEmail}' or toRecipients/any(r:r/emailAddress/address eq '${personEmail}')&$select=subject,bodyPreview,from,toRecipients,sentDateTime,receivedDateTime&$top=50&$orderby=receivedDateTime desc`,
-            { headers: { Authorization: `Bearer ${acct.access_token}` } },
-          );
-
-          if (!searchResp.ok) {
-            if (searchResp.status === 401) {
-              logger.info(`Token expired for account ${acct.id}`);
-            }
+        for (const acct of emailAccounts || []) {
+          let emails: any[] = [];
+          try {
+            const data: any = await unipileFetch(
+              supabase,
+              acct.unipile_account_id,
+              "emails",
+              { method: "GET", query: { any_email: lowerEmail, limit: 50 } },
+            );
+            emails = Array.isArray(data) ? data : (data.items ?? data.emails ?? data.data ?? []);
+          } catch (err: any) {
+            logger.warn("Unipile email history fetch failed", {
+              accountId: acct.id,
+              account: acct.email_address,
+              error: err.message,
+            });
             continue;
           }
-
-          const emails = ((await searchResp.json()) as any).value || [];
+          if (emails.length === 0) continue;
           results.email_history.searched = true;
 
-          // Find or create the synthetic "email history" conversation for this
-          // person. Previous code used .eq("id", "email_history_<uuid>") which
-          // never matched (id is UUID), then tried to INSERT id: "<text>" which
-          // failed silently — so messages.conversation_id stayed dangling.
-          const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
+          // Synthetic "email history" conversation, one per (entity,
+          // mailbox), so threads from each recruiter mailbox land in
+          // their own conversation row.
           const historySubject = `Email history: ${person.full_name || personEmail}`;
           let convUuid: string | null = null;
           const { data: foundConv } = await supabase
@@ -123,6 +134,7 @@ export const fetchEntityHistory = inngest.createFunction(
             .eq(entityColumn, entityId)
             .eq("channel", "email")
             .eq("subject", historySubject)
+            .eq("integration_account_id", acct.id)
             .order("created_at", { ascending: true })
             .limit(1);
           if (foundConv && foundConv.length > 0) {
@@ -134,48 +146,68 @@ export const fetchEntityHistory = inngest.createFunction(
                 [entityColumn]: entityId,
                 channel: "email",
                 subject: historySubject,
-                account_id: acct.id,
+                integration_account_id: acct.id,
               } as any)
               .select("id")
               .single();
             if (convErr || !created) {
               logger.warn("Email history conversation create failed", { error: convErr?.message });
-              break;
+              continue;
             }
             convUuid = created.id;
           }
 
           for (const email of emails) {
-            const fromAddr = email.from?.emailAddress?.address?.toLowerCase();
-            const direction = fromAddr === personEmail.toLowerCase() ? "inbound" : "outbound";
-            const externalId = email.id;
+            const externalId = email.id || email.message_id || email.provider_id;
+            if (!externalId) continue;
 
             const { data: existing } = await supabase
               .from("messages")
               .select("id")
               .eq("external_message_id", externalId)
               .maybeSingle();
-
             if (existing) continue;
+
+            // Unipile email shape (best-effort, tolerant of field names):
+            //   from_attendee: { identifier, display_name }
+            //   to_attendees:  [{ identifier, display_name }, …]
+            //   is_outbound:   bool
+            //   date / timestamp / sent_date: ISO timestamp
+            //   subject, body / body_html / body_preview
+            const fromAttendee = email.from_attendee ?? email.from ?? {};
+            const fromAddr = (
+              fromAttendee.identifier
+                ?? fromAttendee.email
+                ?? fromAttendee.emailAddress?.address
+                ?? ""
+            ).toLowerCase();
+            const senderName = fromAttendee.display_name ?? fromAttendee.name ?? fromAttendee.emailAddress?.name ?? null;
+            const direction =
+              typeof email.is_outbound === "boolean"
+                ? (email.is_outbound ? "outbound" : "inbound")
+                : (fromAddr === lowerEmail ? "inbound" : "outbound");
+            const sentAt = email.date || email.timestamp || email.sent_date || email.sentDateTime || null;
+            const receivedAt = email.received_date || email.receivedDateTime || sentAt;
+            const body = email.body_preview || email.bodyPreview || email.body || email.body_html || "";
 
             await supabase.from("messages").insert({
               conversation_id: convUuid,
               [entityColumn]: entityId,
               channel: "email",
               direction,
-              subject: email.subject,
-              body: email.bodyPreview,
-              sender_name: email.from?.emailAddress?.name,
-              sender_address: fromAddr,
-              sent_at: email.sentDateTime,
-              received_at: email.receivedDateTime,
+              subject: email.subject ?? null,
+              body,
+              sender_name: senderName,
+              sender_address: fromAddr || null,
+              sent_at: sentAt,
+              received_at: receivedAt,
               external_message_id: externalId,
-              provider: "microsoft_graph",
+              provider: "unipile",
+              integration_account_id: acct.id,
             } as any);
 
             results.email_history.inserted++;
           }
-          break;
         }
       } catch (err: any) {
         logger.warn(`Email history fetch failed: ${err.message}`);

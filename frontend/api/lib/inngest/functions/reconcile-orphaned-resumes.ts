@@ -103,6 +103,31 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
+/**
+ * Best-effort name derivation from an upload filename, used when
+ * extractResumeText returns no readable text (image-only PDF, exotic
+ * DOCX, etc) so the resume still gets attached to *some* candidate row
+ * rather than rotting in 'failed' purgatory. The bulk-uploader prefixes
+ * files with `<timestamp>_<4char>_` — strip that and common
+ * resume-noise tokens, then split on the remaining separators.
+ */
+function deriveNameFromFileName(fileName: string): { first_name: string | null; last_name: string | null } {
+  const stem = (fileName || "")
+    .replace(/^[0-9]{8,}_[A-Za-z0-9]{2,8}_/, "") // uploader prefix
+    .replace(/\.[A-Za-z0-9]+$/, "")               // extension
+    .replace(/__+\d+_+$/, "")                      // trailing `__2_` etc
+    .replace(/\(\d+\)$/, "")
+    .replace(/\b(resume|cv|curriculum[_\s-]?vitae|new|updated|final|v?\d+(?:\.\d+)*|march|april|may|june|july|august|september|october|november|december|january|february|20\d{2})\b/gi, " ")
+    .replace(/[_\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!stem) return { first_name: null, last_name: null };
+  const tokens = stem.split(" ").filter((t) => /^[A-Za-z][A-Za-z.'-]*$/.test(t));
+  if (tokens.length === 0) return { first_name: null, last_name: null };
+  if (tokens.length === 1) return { first_name: tokens[0], last_name: null };
+  return { first_name: tokens[0], last_name: tokens[tokens.length - 1] };
+}
+
 async function isBlacklisted(supabase: any, parsed: any, fileName: string): Promise<boolean> {
   const email = normalizeEmail(parsed.email);
   const fullName = [parsed.first_name, parsed.last_name].filter(Boolean).join(" ").toLowerCase();
@@ -129,8 +154,12 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   const li = normalizeLinkedIn(parsed.linkedin_url);
 
   if (email) {
+    // The unified `people` table has a UNIQUE constraint on
+    // normalized_email — so any match (candidate or client) means we
+    // must link to that row rather than insert. The caller below adds
+    // the `candidate` role to client rows so they show up correctly.
     const m = await matchPersonByEmail(supabase, email);
-    if (m && m.entityType !== "contact") return m.entityId;
+    if (m) return m.entityId;
   }
   if (li) {
     const { data } = await supabase.from("people").select("id").ilike("linkedin_url", `%${li}%`).maybeSingle();
@@ -253,24 +282,40 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         let parsed: any;
         let rawText: string | null = null;
 
-        if (resume.hasData) {
-          parsed = resume.parsed_json ?? {};
-          rawText = resume.raw_text ?? null;
-          if (!parsed.first_name && rawText) {
-            const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-            const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
-              r.arrayBuffer(),
-            );
-            const result = await parseResume(buf, resume.fileName, parseOpts);
-            parsed = result.parsed;
-            rawText = result.rawText;
-          }
-        } else {
+        // Falls back to a filename-derived stub when extractResumeText
+        // yields no readable text, so the candidate + resume still land
+        // in the system rather than dying in 'failed'.
+        const runParse = async (): Promise<{ parsed: any; rawText: string | null }> => {
           const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
           const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
             r.arrayBuffer(),
           );
-          const result = await parseResume(buf, resume.fileName, parseOpts);
+          try {
+            const r2 = await parseResume(buf, resume.fileName, parseOpts);
+            return { parsed: r2.parsed, rawText: r2.rawText };
+          } catch (err: any) {
+            const msg = String(err?.message || "");
+            if (!/empty or unreadable/i.test(msg)) throw err;
+            const derived = deriveNameFromFileName(resume.fileName);
+            if (!derived.first_name) throw err;
+            logger.warn("parseResume empty — falling back to filename-derived stub", {
+              fileName: resume.fileName,
+              derived,
+            });
+            return { parsed: derived, rawText: null };
+          }
+        };
+
+        if (resume.hasData) {
+          parsed = resume.parsed_json ?? {};
+          rawText = resume.raw_text ?? null;
+          if (!parsed.first_name && rawText) {
+            const result = await runParse();
+            parsed = result.parsed;
+            rawText = result.rawText;
+          }
+        } else {
+          const result = await runParse();
           parsed = result.parsed;
           rawText = result.rawText;
         }
@@ -312,7 +357,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         if (candidateId) {
           const { data: existing } = await supabase
             .from("people")
-            .select("current_title, current_company, location_text, skills, resume_url")
+            .select("current_title, current_company, location_text, skills, resume_url, roles")
             .eq("id", candidateId)
             .maybeSingle();
 
@@ -329,6 +374,10 @@ export const reconcileOrphanedResumes = inngest.createFunction(
             if (!existing.resume_url) {
               const { data: pub } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
               updates.resume_url = pub.publicUrl;
+            }
+            const currentRoles: string[] = Array.isArray(existing.roles) ? existing.roles : [];
+            if (!currentRoles.includes("candidate")) {
+              updates.roles = [...currentRoles, "candidate"];
             }
             if (Object.keys(updates).length > 1) {
               await supabase.from("people").update(updates).eq("id", candidateId);

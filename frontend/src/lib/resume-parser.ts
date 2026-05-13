@@ -172,10 +172,30 @@ export async function extractResumeText(
   }
 
   if (lower.endsWith(".docx")) {
+    // extractRawText is the happy path, but it silently drops content
+    // that lives in text-boxes, fields, drawings, or SDT controls. Fall
+    // through to convertToHtml (a different code path inside mammoth
+    // that walks the full document tree) and strip the resulting HTML.
     try {
       const mammoth = await import("mammoth");
-      const result = await mammoth.default.extractRawText({ buffer });
-      return (result.value || "").trim().slice(0, 16_000);
+      const raw = await mammoth.default.extractRawText({ buffer });
+      const rawText = (raw.value || "").trim();
+      if (rawText.length >= 30) return rawText.slice(0, 16_000);
+
+      const html = await mammoth.default.convertToHtml({ buffer });
+      const stripped = (html.value || "")
+        .replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/[\t ]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      return stripped.slice(0, 16_000);
     } catch {
       return "";
     }

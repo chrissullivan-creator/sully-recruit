@@ -1,7 +1,112 @@
 import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./supabase.js";
 import { callAIWithFallback } from "../../lib/ai-fallback.js";
+import { sendInternalEmail } from "./microsoft-graph.js";
+import { notifyError } from "./alerting.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+/**
+ * Fire a post-call summary email to the team after Claude has finished
+ * analyzing the transcript. Driven by two app_settings keys (with
+ * ALERT_SENDER / ALERT_RECIPIENTS as fallbacks):
+ *   CALL_REPORT_SENDER     — Microsoft Graph mailbox to send from
+ *   CALL_REPORT_RECIPIENTS — comma-separated To: list
+ * Never throws — alerting on a failed alert just hides the original.
+ */
+async function sendCallSummaryEmail(args: {
+  entityName: string;
+  entityType: string | null;
+  entityId: string | null;
+  ownerLabel: string;
+  durationFormatted: string;
+  direction: string;
+  phoneNumber: string | null;
+  startedAt: string | null;
+  intel: any;
+  callLogId: string;
+  logger: any;
+}): Promise<void> {
+  try {
+    let sender = "";
+    let recipientsRaw = "";
+    try { sender = (await getAppSetting("CALL_REPORT_SENDER")) || (await getAppSetting("ALERT_SENDER")) || ""; } catch { /* unset */ }
+    try { recipientsRaw = (await getAppSetting("CALL_REPORT_RECIPIENTS")) || (await getAppSetting("ALERT_RECIPIENTS")) || ""; } catch { /* unset */ }
+    const recipients = recipientsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!sender || recipients.length === 0) {
+      args.logger.info("Call summary email skipped — CALL_REPORT_SENDER/RECIPIENTS not set");
+      return;
+    }
+
+    const intel = args.intel || {};
+    const summary = typeof intel.summary === "string" ? intel.summary : "";
+    const actionItems = typeof intel.action_items === "string" ? intel.action_items : "";
+
+    const fmtUsd = (v: any): string | null => {
+      const n = typeof v === "number" ? v : (typeof v === "string" ? parseInt(v.replace(/[^\d]/g, ""), 10) : NaN);
+      return Number.isFinite(n) && n > 0 ? `$${n.toLocaleString("en-US")}` : null;
+    };
+    const compRows: Array<[string, string]> = [];
+    const curBase = fmtUsd(intel.current_base);
+    const curBonus = fmtUsd(intel.current_bonus);
+    const tgtBase = fmtUsd(intel.target_base);
+    const tgtBonus = fmtUsd(intel.target_bonus);
+    if (curBase) compRows.push(["Current base", curBase]);
+    if (curBonus) compRows.push(["Current bonus", curBonus]);
+    if (tgtBase) compRows.push(["Target base", tgtBase]);
+    if (tgtBonus) compRows.push(["Target bonus", tgtBonus]);
+
+    const otherFields: Array<[string, string]> = [];
+    const addIfStr = (label: string, v: any) => {
+      if (typeof v === "string" && v.trim()) otherFields.push([label, v.trim()]);
+    };
+    addIfStr("Reason for leaving", intel.reason_for_leaving);
+    addIfStr("Current title", intel.current_title);
+    addIfStr("Current company", intel.current_company);
+    addIfStr("Looking to do next", intel.looking_to_do_next);
+    addIfStr("Notice period", intel.notice_period);
+    addIfStr("Work authorization", intel.work_authorization);
+    addIfStr("Relocation", intel.relocation_preference);
+
+    const actionItemsHtml = actionItems
+      ? actionItems
+          .split("\n")
+          .map((l) => l.replace(/^[-*]\s*/, "").trim())
+          .filter(Boolean)
+          .map((l) => `<li>${escapeHtml(l)}</li>`)
+          .join("")
+      : "";
+
+    const candidateLink = args.entityType === "candidate" && args.entityId
+      ? `<p style="margin:0 0 16px"><a href="https://app.sullyrecruit.com/candidates/${args.entityId}" style="color:#0ea5e9;text-decoration:none">Open ${escapeHtml(args.entityName)} →</a></p>`
+      : "";
+
+    const startedLine = args.startedAt
+      ? new Date(args.startedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" })
+      : "";
+
+    const html = `
+      <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:680px;color:#111">
+        <p style="color:#666;margin:0 0 4px;font-size:13px">${escapeHtml(args.ownerLabel)} • ${escapeHtml(args.direction)} • ${escapeHtml(args.durationFormatted)}${startedLine ? ` • ${escapeHtml(startedLine)} ET` : ""}${args.phoneNumber ? ` • ${escapeHtml(args.phoneNumber)}` : ""}</p>
+        <h2 style="margin:0 0 12px;font-size:20px">Call with ${escapeHtml(args.entityName)}</h2>
+        ${candidateLink}
+        ${summary ? `<h3 style="margin:0 0 6px;font-size:14px;color:#444">Summary</h3><p style="margin:0 0 16px;white-space:pre-wrap">${escapeHtml(summary)}</p>` : ""}
+        ${actionItemsHtml ? `<h3 style="margin:0 0 6px;font-size:14px;color:#444">Action items</h3><ul style="margin:0 0 16px;padding-left:20px">${actionItemsHtml}</ul>` : ""}
+        ${compRows.length ? `<h3 style="margin:0 0 6px;font-size:14px;color:#444">Comp intel</h3><table style="border-collapse:collapse;margin:0 0 16px;font-size:14px">${compRows.map(([k,v]) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${escapeHtml(k)}</td><td style="padding:4px 0;font-weight:600">${escapeHtml(v)}</td></tr>`).join("")}</table>` : ""}
+        ${otherFields.length ? `<h3 style="margin:0 0 6px;font-size:14px;color:#444">Notes</h3><table style="border-collapse:collapse;margin:0 0 16px;font-size:14px">${otherFields.map(([k,v]) => `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">${escapeHtml(k)}</td><td style="padding:4px 0">${escapeHtml(v)}</td></tr>`).join("")}</table>` : ""}
+        <p style="color:#999;margin:24px 0 0;font-size:12px">Auto-sent by Sully Recruit after Joe finished analyzing the recording. call_log_id: ${escapeHtml(args.callLogId)}</p>
+      </div>`;
+
+    const subject = `📞 Call with ${args.entityName} — ${args.durationFormatted}`;
+    await sendInternalEmail(sender, recipients, subject, html);
+    args.logger.info("Call summary email sent", { recipients, callLogId: args.callLogId });
+  } catch (err: any) {
+    args.logger.warn("Call summary email failed", { error: err?.message });
+  }
+}
 
 /**
  * Engine-neutral body for the call-deepgram pipeline:
@@ -65,9 +170,15 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
 
   const owners = [...new Set(toProcess.map((c: any) => c.owner_id))];
   const tokens: Record<string, string> = {};
+  const ownerLabels: Record<string, string> = {};
   for (const ownerId of owners) {
     const t = await getRCToken(supabase, ownerId);
     if (t) tokens[ownerId] = t;
+    const { data: acct } = await supabase
+      .from("integration_accounts")
+      .select("account_label")
+      .eq("owner_user_id", ownerId).eq("provider", "sms").maybeSingle();
+    ownerLabels[ownerId] = acct?.account_label || "Sully Recruit";
   }
 
   const lookups: Record<string, Map<string, any>> = {};
@@ -345,6 +456,24 @@ Field rules:
       logger.info("Updated candidate", { name: entityName, duration: cl.duration_seconds, statusFlip: (cl.duration_seconds ?? 0) >= 60 });
     }
 
+    // Post-call summary email to the team. Only fires for completed
+    // calls ≥60s — short hangups / wrong-numbers stay out of the inbox.
+    if ((cl.duration_seconds ?? 0) >= 60) {
+      await sendCallSummaryEmail({
+        entityName,
+        entityType,
+        entityId,
+        ownerLabel: ownerLabels[cl.owner_id] || "Sully Recruit",
+        durationFormatted: duration,
+        direction: cl.direction ?? "outbound",
+        phoneNumber: cl.phone_number,
+        startedAt: cl.started_at,
+        intel,
+        callLogId: cl.id,
+        logger,
+      });
+    }
+
     logger.info("Processed", {
       call: cl.external_call_id,
       candidate: entityName,
@@ -360,14 +489,23 @@ Field rules:
 
 async function getRCToken(supabase: any, ownerId: string): Promise<string | null> {
   const { data } = await supabase.from("integration_accounts")
-    .select("access_token, token_expires_at, rc_jwt, metadata")
+    .select("id, account_label, access_token, token_expires_at, rc_jwt, metadata")
     .eq("owner_user_id", ownerId).eq("provider", "sms").eq("is_active", true).maybeSingle();
   if (!data) return null;
   if (data.access_token && new Date(data.token_expires_at) > new Date(Date.now() + 60000)) {
     return data.access_token;
   }
   const meta = data.metadata ?? {};
-  if (!data.rc_jwt || !meta.rc_client_id || !meta.rc_client_secret) return data.access_token ?? null;
+  const acctLabel = data.account_label || ownerId;
+  if (!data.rc_jwt || !meta.rc_client_id || !meta.rc_client_secret) {
+    await notifyError({
+      taskId: "process-call-deepgram",
+      severity: "ERROR",
+      error: new Error(`RC account ${acctLabel} is missing rc_client_id/secret or rc_jwt — re-auth required`),
+      context: { accountId: data.id, accountLabel: acctLabel },
+    });
+    return null;
+  }
   const r = await fetch(`${RC_SERVER}/restapi/oauth/token`, {
     method: "POST",
     headers: {
@@ -379,7 +517,19 @@ async function getRCToken(supabase: any, ownerId: string): Promise<string | null
       assertion: data.rc_jwt,
     }),
   });
-  if (!r.ok) return data.access_token ?? null;
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    // Don't fall back to the stale token — that just guarantees the
+    // next recording fetch 401s and the call silently goes
+    // un-transcribed. Surface the failure instead.
+    await notifyError({
+      taskId: "process-call-deepgram",
+      severity: "ERROR",
+      error: new Error(`RC token refresh ${r.status} for ${acctLabel} — re-auth required: ${body}`),
+      context: { accountId: data.id, accountLabel: acctLabel, status: r.status },
+    });
+    return null;
+  }
   const t = await r.json();
   await supabase.from("integration_accounts").update({
     access_token: t.access_token,

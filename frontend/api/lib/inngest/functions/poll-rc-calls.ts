@@ -1,5 +1,6 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { notifyError } from "../../../../src/trigger/lib/alerting.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -43,7 +44,7 @@ async function findEntityByPhone(
   return null;
 }
 
-async function getToken(acct: any): Promise<string | null> {
+async function getToken(supabase: any, acct: any, logger: any): Promise<string | null> {
   if (acct.access_token && acct.token_expires_at) {
     if (new Date(acct.token_expires_at) > new Date(Date.now() + 60_000)) return acct.access_token;
   }
@@ -51,7 +52,15 @@ async function getToken(acct: any): Promise<string | null> {
   const clientId = meta.rc_client_id;
   const clientSecret = meta.rc_client_secret;
   const jwt = acct.rc_jwt;
-  if (!clientId || !clientSecret || !jwt) return acct.access_token ?? null;
+  if (!clientId || !clientSecret || !jwt) {
+    await notifyError({
+      taskId: "poll-rc-calls",
+      severity: "ERROR",
+      error: new Error(`RC account ${acct.account_label} is missing rc_client_id/secret or rc_jwt — re-auth required`),
+      context: { accountId: acct.id, accountLabel: acct.account_label },
+    });
+    return null;
+  }
 
   const res = await fetch(`${RC_SERVER}/restapi/oauth/token`, {
     method: "POST",
@@ -64,8 +73,33 @@ async function getToken(acct: any): Promise<string | null> {
       assertion: jwt,
     }),
   });
-  if (!res.ok) return acct.access_token ?? null;
-  return (await res.json()).access_token;
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 300);
+    logger.error("RC token refresh failed", { account: acct.account_label, status: res.status, body });
+    // Don't fall back to the stale token — that just guarantees the next
+    // call-log fetch 401s and the loop silently breaks. Skip the account
+    // and alert so the user knows re-auth is needed.
+    await notifyError({
+      taskId: "poll-rc-calls",
+      severity: "ERROR",
+      error: new Error(`RC token refresh ${res.status} for ${acct.account_label} — re-auth required: ${body}`),
+      context: { accountId: acct.id, accountLabel: acct.account_label, status: res.status },
+    });
+    return null;
+  }
+  const tok = await res.json();
+  // Persist the refreshed token so subsequent polls reuse it instead of
+  // hammering RC's token endpoint every cron tick (and so the
+  // `updated_at` timestamp accurately reflects activity).
+  await supabase
+    .from("integration_accounts")
+    .update({
+      access_token: tok.access_token,
+      token_expires_at: new Date(Date.now() + (tok.expires_in ?? 3600) * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", acct.id);
+  return tok.access_token as string;
 }
 
 async function runPoll(lookbackMinutes: number, logger: any) {
@@ -92,7 +126,7 @@ async function runPoll(lookbackMinutes: number, logger: any) {
   const transcribeEvents: Array<{ name: "call/transcribe.requested"; data: { call_log_id: string } }> = [];
 
   for (const acct of accounts) {
-    const token = await getToken(acct);
+    const token = await getToken(supabase, acct, logger);
     if (!token) {
       logger.warn(`No token for ${acct.account_label}`);
       continue;
@@ -114,7 +148,19 @@ async function runPoll(lookbackMinutes: number, logger: any) {
       );
 
       if (!logRes.ok) {
-        logger.warn(`Call-log error ${logRes.status} for ${acct.account_label}`);
+        const body = (await logRes.text()).slice(0, 300);
+        logger.error(`Call-log error ${logRes.status} for ${acct.account_label}`, { body });
+        // 401/403 means our token is rejected — almost always re-auth.
+        // Surface it so the user actually sees the breakage instead of
+        // calls quietly disappearing for days.
+        if (logRes.status === 401 || logRes.status === 403) {
+          await notifyError({
+            taskId: "poll-rc-calls",
+            severity: "ERROR",
+            error: new Error(`RC call-log ${logRes.status} for ${acct.account_label} — re-auth required: ${body}`),
+            context: { accountId: acct.id, accountLabel: acct.account_label, status: logRes.status },
+          });
+        }
         break;
       }
 

@@ -30,7 +30,7 @@ export function classifyEmail(email: string | null | undefined): {
 /**
  * One source of truth for matching an inbound email address back to a
  * person. Searches across all three address columns —
- *   people.email
+ *   people.primary_email
  *   people.personal_email
  *   people.work_email
  * — so a candidate stored under their work address still matches when
@@ -53,7 +53,7 @@ export interface PersonMatch {
   /** All roles this person carries — possibly both candidate + client. */
   roles: string[];
   /** Which column did we match on? Useful for logs. */
-  matchedColumn: "email" | "personal_email" | "work_email";
+  matchedColumn: "primary_email" | "personal_email" | "work_email";
 }
 
 export async function matchPersonByEmail(
@@ -68,19 +68,23 @@ export async function matchPersonByEmail(
   // refuse pathological inputs (which can't be valid email anyway).
   if (/[(),]/.test(normalized)) return null;
 
-  const { data: peopleRows } = await supabase
+  // `normalized_email` is the unique-constraint column kept in sync with
+  // primary_email by a trigger — match it first so we catch the row even
+  // when the address sits in a non-primary column.
+  const { data: peopleRows, error: peopleErr } = await supabase
     .from("people")
-    .select("id, type, roles, email, personal_email, work_email")
+    .select("id, type, roles, primary_email, personal_email, work_email, normalized_email")
     .or(
-      `email.ilike.${normalized},personal_email.ilike.${normalized},work_email.ilike.${normalized}`,
+      `normalized_email.eq.${normalized},primary_email.ilike.${normalized},personal_email.ilike.${normalized},work_email.ilike.${normalized}`,
     )
     .limit(1);
+  if (peopleErr) throw new Error(`matchPersonByEmail: ${peopleErr.message}`);
 
   if (peopleRows?.[0]) {
     const r = peopleRows[0];
-    const matchedColumn: "email" | "personal_email" | "work_email" =
-      (r.email || "").toLowerCase() === normalized
-        ? "email"
+    const matchedColumn: "primary_email" | "personal_email" | "work_email" =
+      (r.primary_email || "").toLowerCase() === normalized
+        ? "primary_email"
         : (r.personal_email || "").toLowerCase() === normalized
           ? "personal_email"
           : "work_email";
@@ -100,7 +104,7 @@ export async function matchPersonByEmail(
 
   // Legacy fallback — the contacts VIEW still sees rows where type='client'.
   // This keeps any caller that doesn't know about the unified people
-  // table happy.
+  // table happy. The view exposes the address as `email`.
   const { data: contactRows } = await supabase
     .from("contacts")
     .select("id")
@@ -114,7 +118,7 @@ export async function matchPersonByEmail(
       entityType: "contact",
       entityColumn: "contact_id",
       roles: ["client"],
-      matchedColumn: "email", // can't know exactly, log generic
+      matchedColumn: "primary_email", // can't know exactly, log generic
     };
   }
 
