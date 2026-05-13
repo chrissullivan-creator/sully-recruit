@@ -92,21 +92,27 @@ export default function LinkedInSearch() {
           .from('integration_accounts')
           .select('unipile_account_id, owner_user_id')
           .ilike('account_label', '%Ashley%')
+          .eq('account_type', 'linkedin_recruiter')
           .eq('is_active', true)
+          .not('unipile_account_id', 'is', null)
           .maybeSingle();
 
         const { data: nancyRow } = await supabase
           .from('integration_accounts')
           .select('unipile_account_id, owner_user_id')
           .ilike('account_label', '%Nancy%')
+          .eq('account_type', 'linkedin_recruiter')
           .eq('is_active', true)
+          .not('unipile_account_id', 'is', null)
           .maybeSingle();
 
         const { data: chrisRow } = await supabase
           .from('integration_accounts')
           .select('unipile_account_id, owner_user_id')
           .ilike('account_label', '%Chris Sullivan%')
+          .eq('account_type', 'linkedin_recruiter')
           .eq('is_active', true)
+          .not('unipile_account_id', 'is', null)
           .maybeSingle();
 
         setAccounts([

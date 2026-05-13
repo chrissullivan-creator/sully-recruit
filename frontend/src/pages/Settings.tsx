@@ -50,6 +50,20 @@ interface IntegrationRow {
   is_active: boolean;
 }
 
+interface LinkedinSeat {
+  account_label: string | null;
+  account_type: string;
+  email_address: string | null;
+  id: string;
+  is_active: boolean;
+  linkedin_capabilities: string[] | null;
+  linkedin_capability: string | null;
+  metadata: Record<string, any> | null;
+  owner_user_id: string | null;
+  unipile_account_id: string | null;
+  updated_at: string;
+}
+
 // ---- component ----
 const Settings = () => {
   const { user } = useAuth();
@@ -210,6 +224,26 @@ const Settings = () => {
   const [msConnecting, setMsConnecting] = useState(false);
   const [msDisconnecting, setMsDisconnecting] = useState(false);
 
+  const ADMIN_EMAILS = [
+    'chris.sullivan@emeraldrecruit.com',
+    'emeraldrecruit@theemeraldrecruitinggroup.com',
+  ];
+  const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
+
+  // LinkedIn Recruiter connection state
+  const [linkedinSeats, setLinkedinSeats] = useState<LinkedinSeat[]>([]);
+  const [linkedinSeatsLoading, setLinkedinSeatsLoading] = useState(false);
+  const [selectedLinkedinSeatId, setSelectedLinkedinSeatId] = useState('');
+  const [liHostedConnectingId, setLiHostedConnectingId] = useState<string | null>(null);
+  const [liCookieConnecting, setLiCookieConnecting] = useState(false);
+  const [liCookieForm, setLiCookieForm] = useState({
+    contract_name: '',
+    li_a: '',
+    li_at: '',
+    proxy_country: 'US',
+    user_agent: typeof window !== 'undefined' ? navigator.userAgent : '',
+  });
+
   // Password visibility
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
 
@@ -304,6 +338,63 @@ const Settings = () => {
     }
   }, [loadMsStatus]);
 
+  const loadLinkedInSeats = useCallback(async () => {
+    if (!user) {
+      setLinkedinSeats([]);
+      setSelectedLinkedinSeatId('');
+      return;
+    }
+
+    setLinkedinSeatsLoading(true);
+    try {
+      let query = supabase
+        .from('integration_accounts')
+        .select('id, account_label, account_type, email_address, is_active, linkedin_capabilities, linkedin_capability, metadata, owner_user_id, unipile_account_id, updated_at')
+        .eq('provider', 'linkedin')
+        .in('account_type', ['linkedin', 'linkedin_classic', 'linkedin_recruiter'])
+        .order('account_label', { ascending: true });
+
+      if (!isAdmin) {
+        query = query.eq('owner_user_id', user.id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const seats = ((data ?? []) as any[]).map((row) => ({
+        ...row,
+        linkedin_capabilities: Array.isArray(row.linkedin_capabilities) ? row.linkedin_capabilities : [],
+      })) as LinkedinSeat[];
+
+      setLinkedinSeats(seats);
+      setSelectedLinkedinSeatId((prev) => {
+        if (prev && seats.some((seat) => seat.id === prev)) return prev;
+        const preferred = seats.find((seat) => seat.owner_user_id === user.id) ?? seats[0];
+        return preferred?.id ?? '';
+      });
+    } catch (err) {
+      console.error('Failed to load LinkedIn seats', err);
+    } finally {
+      setLinkedinSeatsLoading(false);
+    }
+  }, [isAdmin, user]);
+
+  useEffect(() => {
+    loadLinkedInSeats();
+  }, [loadLinkedInSeats]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('linkedin_connected')) {
+      toast.success('LinkedIn auth completed. Syncing the Recruiter account now.');
+      loadLinkedInSeats();
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('linkedin_error')) {
+      toast.error(`LinkedIn connection failed: ${params.get('linkedin_error')}`);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [loadLinkedInSeats]);
+
   const connectMicrosoft = async () => {
     setMsConnecting(true);
     try {
@@ -321,9 +412,11 @@ const Settings = () => {
     }
   };
 
-  const [liConnecting, setLiConnecting] = useState(false);
-  const connectLinkedInRecruiter = async (accountId?: string) => {
-    setLiConnecting(true);
+  const selectedLinkedinSeat = linkedinSeats.find((seat) => seat.id === selectedLinkedinSeatId) || null;
+
+  const connectLinkedInRecruiter = async () => {
+    const fallbackLabel = user?.email || 'LinkedIn Recruiter';
+    setLiHostedConnectingId(selectedLinkedinSeat?.id || 'new');
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch('/api/connect-linkedin', {
@@ -332,14 +425,80 @@ const Settings = () => {
           Authorization: `Bearer ${session?.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(accountId ? { account_id: accountId } : {}),
+        body: JSON.stringify({
+          account_id: selectedLinkedinSeat?.unipile_account_id || undefined,
+          account_label: selectedLinkedinSeat?.account_label || fallbackLabel,
+          contract_name: liCookieForm.contract_name.trim() || undefined,
+          integration_account_id: selectedLinkedinSeat?.id || undefined,
+          owner_user_id: selectedLinkedinSeat?.owner_user_id || user?.id,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.body || `API ${res.status}`);
       window.location.href = data.url;
     } catch (err: any) {
       toast.error(err.message || 'Failed to start LinkedIn auth');
-      setLiConnecting(false);
+      setLiHostedConnectingId(null);
+    }
+  };
+
+  const connectLinkedInWithCookies = async () => {
+    if (!liCookieForm.li_at.trim()) {
+      toast.error('Paste the li_at cookie first.');
+      return;
+    }
+    if (!liCookieForm.user_agent.trim()) {
+      toast.error('Paste the browser user agent first.');
+      return;
+    }
+
+    const fallbackLabel = user?.email || 'LinkedIn Recruiter';
+    setLiCookieConnecting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/connect-linkedin-cookies', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: selectedLinkedinSeat?.unipile_account_id || undefined,
+          account_label: selectedLinkedinSeat?.account_label || fallbackLabel,
+          contract_name: liCookieForm.contract_name.trim() || undefined,
+          integration_account_id: selectedLinkedinSeat?.id || undefined,
+          li_a: liCookieForm.li_a.trim() || undefined,
+          li_at: liCookieForm.li_at.trim(),
+          owner_user_id: selectedLinkedinSeat?.owner_user_id || user?.id,
+          proxy_country: liCookieForm.proxy_country.trim() || 'US',
+          user_agent: liCookieForm.user_agent.trim(),
+        }),
+      });
+      const data = await res.json();
+
+      if (res.status === 202 || data.requires_action) {
+        throw new Error('LinkedIn requested an extra checkpoint. Use the hosted auth option or refresh the cookies and try again.');
+      }
+      if (!res.ok) throw new Error(data.error || `API ${res.status}`);
+
+      if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+        toast.warning(data.warnings[0]);
+      }
+      toast.success(
+        data.recruiter_enabled
+          ? 'LinkedIn Recruiter connected.'
+          : 'LinkedIn connected, but Recruiter access is not verified yet.',
+      );
+      setLiCookieForm((current) => ({
+        ...current,
+        li_a: '',
+        li_at: '',
+      }));
+      loadLinkedInSeats();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to connect LinkedIn with cookies');
+    } finally {
+      setLiCookieConnecting(false);
     }
   };
 
@@ -453,12 +612,6 @@ Senior Recruiter | Your Company
     if (signatureConfig.signature_mode === 'html') return signatureConfig.signature_html;
     return textToHtml(signatureConfig.signature_text);
   };
-
-  const ADMIN_EMAILS = [
-    'chris.sullivan@emeraldrecruit.com',
-    'emeraldrecruit@theemeraldrecruitinggroup.com',
-  ];
-  const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
 
   const tabs = [
     { id: 'integrations', label: 'Integrations', icon: Link2 },
@@ -1111,31 +1264,156 @@ Senior Recruiter | Your Company
                       )}
                     </div>
 
-                    {/* LinkedIn (Recruiter) Connect — uses Unipile hosted
-                       auth with products=["classic","recruiter"] so the
-                       resulting account has Recruiter scope. The Unipile
-                       dashboard's Quick-Add UI only links as Classic, so
-                       this is the only way to get Hiring Projects access. */}
-                    <div className="rounded-lg border border-border bg-card p-5">
-                      <div className="mb-4">
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-5">
+                      <div>
                         <h3 className="text-base font-semibold text-foreground">LinkedIn (Recruiter)</h3>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Connect your LinkedIn account with Recruiter scope enabled. Required for Source / Hiring Projects access. Use the cookies method (li_at + li_a) — credentials login often can't reach the Recruiter session.
+                          This flow is wired for Unipile Recruiter access. Hosted auth now posts back into Sully Recruit, and the cookie option lets us connect directly with `li_at` + `li_a` for Recruiter-safe auth.
                         </p>
                       </div>
-                      <Button
-                        variant="gold"
-                        size="sm"
-                        onClick={() => connectLinkedInRecruiter()}
-                        disabled={liConnecting}
-                        className="w-fit"
-                      >
-                        {liConnecting ? (
-                          <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Connecting...</>
-                        ) : (
-                          'Connect LinkedIn (Recruiter)'
-                        )}
-                      </Button>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Recruiter Seat</Label>
+                          <Select
+                            value={selectedLinkedinSeatId}
+                            onValueChange={setSelectedLinkedinSeatId}
+                            disabled={linkedinSeatsLoading || linkedinSeats.length === 0}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={linkedinSeatsLoading ? 'Loading seats...' : 'Select a recruiter seat'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {linkedinSeats.map((seat) => (
+                                <SelectItem key={seat.id} value={seat.id}>
+                                  {seat.account_label || seat.email_address || seat.id}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Recruiter Contract</Label>
+                          <Input
+                            placeholder="RECRUITER-International Market Recruiters LLC"
+                            value={liCookieForm.contract_name}
+                            onChange={(e) => setLiCookieForm((c) => ({ ...c, contract_name: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+
+                      {selectedLinkedinSeat && (
+                        <div className="rounded-md border border-border bg-muted/30 px-4 py-3 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-foreground">
+                              {selectedLinkedinSeat.account_label || selectedLinkedinSeat.email_address || 'LinkedIn seat'}
+                            </span>
+                            <Badge variant={selectedLinkedinSeat.account_type === 'linkedin_recruiter' ? 'default' : 'secondary'}>
+                              {selectedLinkedinSeat.account_type === 'linkedin_recruiter' ? 'Recruiter' : 'Classic'}
+                            </Badge>
+                            <Badge variant={selectedLinkedinSeat.is_active ? 'default' : 'secondary'}>
+                              {selectedLinkedinSeat.is_active ? 'Active' : 'Disconnected'}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {selectedLinkedinSeat.email_address || 'No email on file'}
+                            {selectedLinkedinSeat.unipile_account_id ? ` • ${selectedLinkedinSeat.unipile_account_id}` : ''}
+                          </p>
+                          {Array.isArray(selectedLinkedinSeat.linkedin_capabilities) && selectedLinkedinSeat.linkedin_capabilities.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {selectedLinkedinSeat.linkedin_capabilities.map((capability) => (
+                                <Badge key={capability} variant="outline" className="text-[10px] uppercase tracking-wide">
+                                  {capability.replace(/_/g, ' ')}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          variant="gold"
+                          size="sm"
+                          onClick={connectLinkedInRecruiter}
+                          disabled={!!liHostedConnectingId}
+                        >
+                          {liHostedConnectingId ? (
+                            <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Opening Hosted Auth...</>
+                          ) : (
+                            'Reconnect via Hosted Auth'
+                          )}
+                        </Button>
+                        <p className="text-xs text-muted-foreground self-center">
+                          Use this when you want Unipile’s own auth page. The callback now syncs the connected Recruiter seat back into `integration_accounts`.
+                        </p>
+                      </div>
+
+                      <div className="border-t border-border pt-5 space-y-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground">Direct Cookie Connection</h4>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Recommended for LinkedIn Recruiter. These cookie values are used for this request only; Sully Recruit does not store them in the database.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Proxy Country</Label>
+                            <Input
+                              placeholder="US"
+                              value={liCookieForm.proxy_country}
+                              onChange={(e) => setLiCookieForm((c) => ({ ...c, proxy_country: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label className="text-xs">User Agent</Label>
+                            <Textarea
+                              rows={3}
+                              placeholder="Mozilla/5.0 ..."
+                              value={liCookieForm.user_agent}
+                              onChange={(e) => setLiCookieForm((c) => ({ ...c, user_agent: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label className="text-xs">`li_at` Cookie</Label>
+                            <Textarea
+                              rows={4}
+                              placeholder="Paste the main LinkedIn cookie"
+                              value={liCookieForm.li_at}
+                              onChange={(e) => setLiCookieForm((c) => ({ ...c, li_at: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label className="text-xs">`li_a` Cookie</Label>
+                            <Textarea
+                              rows={3}
+                              placeholder="Paste the premium Recruiter cookie"
+                              value={liCookieForm.li_a}
+                              onChange={(e) => setLiCookieForm((c) => ({ ...c, li_a: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                          <Button
+                            variant="gold"
+                            size="sm"
+                            onClick={connectLinkedInWithCookies}
+                            disabled={liCookieConnecting}
+                          >
+                            {liCookieConnecting ? (
+                              <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Connecting...</>
+                            ) : (
+                              'Connect With Cookies'
+                            )}
+                          </Button>
+                          <p className="text-xs text-muted-foreground self-center">
+                            Use both cookies for Recruiter. If Unipile still asks for a checkpoint, fall back to Hosted Auth.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

@@ -8,6 +8,8 @@ import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
 import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
 import { canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
 import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-email.js";
+import { normalizeLinkedIn } from "../../../../src/trigger/lib/resume-parsing.js";
+import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
 
 /**
  * Process Unipile webhook events (LinkedIn messages, connection updates,
@@ -37,6 +39,7 @@ interface UnipileWebhookPayload {
     account_name?: string;
     account_provider?: string;
     payload?: any;
+    AccountStatus?: any;
     // v1 / legacy fallbacks
     event?: string;
     data?: any;
@@ -48,9 +51,172 @@ interface UnipileWebhookPayload {
   verified?: boolean;
 }
 
+type LinkedinEntityMatch = {
+  entityId: string;
+  entityType: "candidate" | "contact";
+  entityColumn: "candidate_id" | "contact_id";
+};
+
 // v2 event types we deliberately ignore — they fire frequently and
 // don't represent inbound communication we need to log.
 const IGNORED_V2_TYPES = /^(email\.folder\.|email\.account\.|account\.|users\.profile\.|message\.read|chat\.read)/i;
+
+function getLinkedinSenderProviderId(messageData: any): string | null {
+  return messageData.sender_id
+    || messageData.sender?.attendee_provider_id
+    || messageData.sender?.provider_id
+    || messageData.provider_id
+    || messageData.from?.provider_id
+    || null;
+}
+
+function getLinkedinSenderProfileUrl(messageData: any): string | null {
+  return messageData.sender?.attendee_profile_url
+    || messageData.sender?.profile_url
+    || messageData.from?.profile_url
+    || null;
+}
+
+function classifyLinkedinChannel(messageData: any) {
+  const contentType = String(
+    messageData.content_type
+      ?? messageData.chat?.content_type
+      ?? "",
+  ).toLowerCase();
+  const folders: string[] = []
+    .concat(messageData.folder ?? [])
+    .concat(messageData.chat?.folder ?? [])
+    .map((f: any) => String(f).toUpperCase());
+
+  // Unipile's webhook docs expose account_info.feature, but a Recruiter seat
+  // can still exchange Classic DMs. Keep content_type / folder as the source
+  // of truth for bucketing InMail vs Classic traffic.
+  const isInMail =
+    contentType === "inmail" ||
+    folders.includes("INBOX_LINKEDIN_RECRUITER");
+
+  return {
+    channel: canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin"),
+    contentType,
+  };
+}
+
+function detectLinkedinDirection(eventBody: any, messageData: any, senderProviderId: string | null) {
+  if (messageData.is_sender === true || messageData.is_sender === 1) return "outbound" as const;
+
+  // Per Unipile's new-messages webhook docs, sent messages are included and
+  // can be detected by comparing account_info.user_id with the sender's
+  // provider ID.
+  const ownerProviderId =
+    eventBody.account_info?.user_id
+    || messageData.account_info?.user_id
+    || null;
+
+  if (ownerProviderId && senderProviderId && ownerProviderId === senderProviderId) {
+    return "outbound" as const;
+  }
+
+  return "inbound" as const;
+}
+
+async function matchLinkedinEntity(
+  supabase: any,
+  providerId: string | null,
+  linkedinUrl: string | null,
+): Promise<LinkedinEntityMatch | null> {
+  if (providerId) {
+    const { data: peopleMatches } = await supabase
+      .from("people")
+      .select("id")
+      .or(
+        `unipile_recruiter_id.eq.${providerId},unipile_classic_id.eq.${providerId},unipile_provider_id.eq.${providerId}`,
+      )
+      .limit(1);
+    if (peopleMatches?.[0]?.id) {
+      return {
+        entityId: peopleMatches[0].id,
+        entityType: "candidate",
+        entityColumn: "candidate_id",
+      };
+    }
+
+    const { data: contactMatches } = await supabase
+      .from("contacts")
+      .select("id")
+      .or(
+        `unipile_recruiter_id.eq.${providerId},unipile_classic_id.eq.${providerId},unipile_provider_id.eq.${providerId}`,
+      )
+      .limit(1);
+    if (contactMatches?.[0]?.id) {
+      return {
+        entityId: contactMatches[0].id,
+        entityType: "contact",
+        entityColumn: "contact_id",
+      };
+    }
+  }
+
+  const slug = normalizeLinkedIn(linkedinUrl);
+  if (slug) {
+    const { data: peopleMatches } = await supabase
+      .from("people")
+      .select("id")
+      .ilike("linkedin_url", `%${slug}%`)
+      .limit(1);
+    if (peopleMatches?.[0]?.id) {
+      return {
+        entityId: peopleMatches[0].id,
+        entityType: "candidate",
+        entityColumn: "candidate_id",
+      };
+    }
+
+    const { data: contactMatches } = await supabase
+      .from("contacts")
+      .select("id")
+      .ilike("linkedin_url", `%${slug}%`)
+      .limit(1);
+    if (contactMatches?.[0]?.id) {
+      return {
+        entityId: contactMatches[0].id,
+        entityType: "contact",
+        entityColumn: "contact_id",
+      };
+    }
+  }
+
+  if (providerId) {
+    const { data: candidateChannelMatches } = await supabase
+      .from("candidate_channels")
+      .select("candidate_id")
+      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
+      .eq("channel", "linkedin")
+      .limit(1);
+    if (candidateChannelMatches?.[0]?.candidate_id) {
+      return {
+        entityId: candidateChannelMatches[0].candidate_id,
+        entityType: "candidate",
+        entityColumn: "candidate_id",
+      };
+    }
+
+    const { data: contactChannelMatches } = await supabase
+      .from("contact_channels")
+      .select("contact_id")
+      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
+      .eq("channel", "linkedin")
+      .limit(1);
+    if (contactChannelMatches?.[0]?.contact_id) {
+      return {
+        entityId: contactChannelMatches[0].contact_id,
+        entityType: "contact",
+        entityColumn: "contact_id",
+      };
+    }
+  }
+
+  return null;
+}
 
 export const processUnipileEvent = inngest.createFunction(
   {
@@ -63,14 +229,36 @@ export const processUnipileEvent = inngest.createFunction(
     const payload = event.data as UnipileWebhookPayload;
     const supabase = getSupabaseAdmin();
     const body = payload.body;
+    const accountStatus =
+      body.AccountStatus
+      || body.payload?.AccountStatus
+      || body.data?.AccountStatus
+      || null;
     const eventType = body.type || body.event || "";
     const provider = String(body.account_provider || "").toLowerCase();
 
     logger.info("Processing Unipile event", {
       eventType,
       provider,
-      account_id: body.account_id,
+      account_id: body.account_id || accountStatus?.account_id,
     });
+
+    if (accountStatus?.account_id && accountStatus?.message) {
+      await updateLinkedinAccountStatus(
+        supabase,
+        accountStatus.account_id,
+        accountStatus.message,
+        {
+          account_type: accountStatus.account_type || null,
+          last_account_status_message: accountStatus.message,
+        },
+      );
+      return {
+        action: "account_status_updated",
+        account_id: accountStatus.account_id,
+        status: accountStatus.message,
+      };
+    }
 
     if (eventType && IGNORED_V2_TYPES.test(eventType)) {
       return { action: "skipped", reason: "non_actionable_event", type: eventType };
@@ -265,9 +453,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   // v2 envelope wraps the message in `payload`; older variants use
   // `data` / `message` / the event itself.
   const messageData = event.payload || event.data || event.message || event;
-  const senderId = messageData.sender_id || messageData.provider_id || messageData.from?.provider_id;
+  const senderId = getLinkedinSenderProviderId(messageData);
+  const senderProfileUrl = getLinkedinSenderProfileUrl(messageData);
   const messageBody = messageData.text || messageData.body || "";
-  const externalMessageId = messageData.id || messageData.message_id;
+  const unipileMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
   // Resolve Unipile account_id → our internal integration_accounts.id.
@@ -284,71 +473,29 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     integrationAccountId = ia?.id ?? null;
   }
 
-  // Detect Recruiter InMail vs Classic DM via the canonical Unipile v2
-  // signals on the chat object (per unipile-node-sdk types):
-  //   chat.content_type === 'inmail'                  → InMail
-  //   chat.folder includes 'INBOX_LINKEDIN_RECRUITER' → InMail
-  // Don't fall back to subject (Classic DMs can have subjects, InMails
-  // sometimes don't surface one in the webhook). Don't fall back to
-  // integration_account.account_type either: a Recruiter seat handles
-  // BOTH InMails AND Classic DMs.
-  const chat = messageData.chat ?? {};
-  const contentType = String(
-    messageData.content_type ?? chat.content_type ?? "",
-  ).toLowerCase();
-  const folders: string[] = []
-    .concat(messageData.folder ?? [])
-    .concat(chat.folder ?? [])
-    .map((f: any) => String(f).toUpperCase());
-
-  const isInMail =
-    contentType === "inmail" ||
-    folders.includes("INBOX_LINKEDIN_RECRUITER");
-
-  const rawChannel = isInMail ? "linkedin_recruiter" : "linkedin";
-  const channel = canonicalChannel(rawChannel);
+  const { channel, contentType } = classifyLinkedinChannel(messageData);
+  const direction = detectLinkedinDirection(event, messageData, senderId);
 
   if (!senderId) {
     logger.info("No sender ID in message event");
     return { action: "skipped", reason: "no_sender_id" };
   }
 
-  if (externalMessageId) {
+  if (unipileMessageId) {
     const { data: existing } = await supabase
       .from("messages")
       .select("id")
-      .eq("external_message_id", externalMessageId)
+      .or(`unipile_message_id.eq.${unipileMessageId},external_message_id.eq.${unipileMessageId}`)
       .limit(1);
     if (existing && existing.length > 0) {
       return { action: "skipped", reason: "duplicate" };
     }
   }
 
-  let entityId: string | null = null;
-  let entityType: "candidate" | "contact" = "candidate";
-  let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
-
-  const { data: candMatch } = await supabase
-    .from("people")
-    .select("id")
-    .eq("unipile_id", senderId)
-    .maybeSingle();
-
-  if (candMatch) {
-    entityId = candMatch.id;
-  } else {
-    const { data: contactMatch } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("unipile_id", senderId)
-      .maybeSingle();
-
-    if (contactMatch) {
-      entityId = contactMatch.id;
-      entityType = "contact";
-      entityColumn = "contact_id";
-    }
-  }
+  const entityMatch = await matchLinkedinEntity(supabase, senderId, senderProfileUrl);
+  let entityId: string | null = entityMatch?.entityId ?? null;
+  let entityType: "candidate" | "contact" = entityMatch?.entityType ?? "candidate";
+  let entityColumn: "candidate_id" | "contact_id" = entityMatch?.entityColumn ?? "candidate_id";
 
   // Find-or-create the conversation row. The lookup MUST match the unique
   // index (integration_account_id, channel, external_conversation_id) so
@@ -405,7 +552,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
 
     const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
-    const senderAddress = messageData.sender_address || messageData.from?.identifier || messageData.from?.profile_url || senderId;
+    const senderAddress =
+      messageData.sender_address
+      || messageData.sender?.attendee_profile_url
+      || messageData.from?.identifier
+      || messageData.from?.profile_url
+      || senderId;
 
     const conversationId = await findOrCreateConversation(null, null);
     if (!conversationId) {
@@ -416,28 +568,35 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       conversation_id: conversationId,
       candidate_id: null,
       contact_id: null,
+      integration_account_id: integrationAccountId,
       channel,
-      direction: "inbound",
+      direction,
       body: messageBody,
       sent_at: messageData.created_at || receivedAt,
+      received_at: direction === "inbound" ? (messageData.created_at || receivedAt) : null,
       provider: "unipile",
-      external_message_id: externalMessageId,
+      external_message_id: unipileMessageId,
       external_conversation_id: externalConversationId,
+      unipile_message_id: unipileMessageId,
+      unipile_chat_id: externalConversationId,
       sender_name: senderName,
       sender_address: senderAddress,
-      is_read: false,
+      raw_payload: messageData,
+      is_read: direction === "outbound",
     } as any);
+
+    const conversationUpdate: Record<string, any> = {
+      last_message_at: receivedAt,
+      last_message_preview: messageBody.substring(0, 100),
+    };
+    if (direction === "inbound") conversationUpdate.is_read = false;
 
     await supabase
       .from("conversations")
-      .update({
-        last_message_at: receivedAt,
-        last_message_preview: messageBody.substring(0, 100),
-        is_read: false,
-      })
+      .update(conversationUpdate)
       .eq("id", conversationId);
 
-    return { action: "logged_unlinked", senderId, senderName, type: "linkedin_message" };
+    return { action: "logged_unlinked", senderId, senderName, direction, type: "linkedin_message" };
   }
 
   const conversationId = await findOrCreateConversation(entityColumn, entityId);
@@ -448,23 +607,32 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
+    integration_account_id: integrationAccountId,
     channel,
-    direction: "inbound",
+    direction,
     body: messageBody,
     sent_at: messageData.created_at || receivedAt,
+    received_at: direction === "inbound" ? (messageData.created_at || receivedAt) : null,
     provider: "unipile",
-    external_message_id: externalMessageId,
+    external_message_id: unipileMessageId,
     external_conversation_id: externalConversationId,
-    is_read: false,
+    unipile_message_id: unipileMessageId,
+    unipile_chat_id: externalConversationId,
+    sender_name: messageData.sender?.attendee_name || messageData.sender_name || null,
+    sender_address: senderProfileUrl || senderId,
+    raw_payload: messageData,
+    is_read: direction === "outbound",
   } as any);
+
+  const conversationUpdate: Record<string, any> = {
+    last_message_at: receivedAt,
+    last_message_preview: messageBody.substring(0, 100),
+  };
+  if (direction === "inbound") conversationUpdate.is_read = false;
 
   await supabase
     .from("conversations")
-    .update({
-      last_message_at: receivedAt,
-      last_message_preview: messageBody.substring(0, 100),
-      is_read: false,
-    })
+    .update(conversationUpdate)
     .eq("id", conversationId);
 
   const table = entityType === "candidate" ? "candidates" : "contacts";
@@ -472,11 +640,11 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     .from(table)
     .update({
       last_responded_at: receivedAt,
-      last_comm_channel: "linkedin",
+      last_comm_channel: channel,
     } as any)
     .eq("id", entityId);
 
-  if (messageBody.length > 10) {
+  if (direction === "inbound" && messageBody.length > 10) {
     const intel = await extractMessageIntel(messageBody);
     if (intel) {
       const { data: enrollment } = await supabase
@@ -493,26 +661,28 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
         entityId,
         entityType as "candidate" | "contact",
         intel,
-        "linkedin",
+        channel,
         enrollment?.id,
       );
     }
   }
 
-  const { data: activeEnrollments } = await supabase
-    .from("sequence_enrollments")
-    .select("*, sequences!inner(*)")
-    .eq(entityColumn, entityId)
-    .eq("status", "active");
+  if (direction === "inbound") {
+    const { data: activeEnrollments } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(entityColumn, entityId)
+      .eq("status", "active");
 
-  if (activeEnrollments && activeEnrollments.length > 0) {
-    for (const enrollment of activeEnrollments) {
-      await stopEnrollment(supabase, enrollment, "reply_received", messageBody);
+    if (activeEnrollments && activeEnrollments.length > 0) {
+      for (const enrollment of activeEnrollments) {
+        await stopEnrollment(supabase, enrollment, "reply_received", messageBody);
+      }
+      logger.info("Stopped enrollments on LinkedIn reply", { entityId, count: activeEnrollments.length });
     }
-    logger.info("Stopped enrollments on LinkedIn reply", { entityId, count: activeEnrollments.length });
   }
 
-  logger.info("LinkedIn message logged", { entityId, entityType });
+  logger.info("LinkedIn message logged", { entityId, entityType, channel, direction });
 
   await inngest.send({
     name: "ai/joe-says.requested",
@@ -522,72 +692,31 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     },
   });
 
-  return { action: "logged", entityId, entityType, type: "linkedin_message" };
+  return { action: "logged", entityId, entityType, channel, direction, type: "linkedin_message" };
 }
 
 async function processConnectionUpdate(supabase: any, event: any, receivedAt: string, logger: any) {
   // v2 envelope wraps the connection update in `payload`; older
   // variants use `data` / `connection` / the event itself.
   const connectionData = event.payload || event.data || event.connection || event;
-  const providerId = connectionData.provider_id || connectionData.attendee_provider_id;
+  const providerId =
+    connectionData.provider_id
+    || connectionData.attendee_provider_id
+    || connectionData.sender?.attendee_provider_id;
   const status = connectionData.status || connectionData.state || "";
 
   if (!providerId) {
     return { action: "skipped", reason: "no_provider_id" };
   }
 
-  let entityId: string | null = null;
-  let entityType: "candidate" | "contact" = "candidate";
-  let entityColumn: "candidate_id" | "contact_id" = "candidate_id";
-
-  const { data: candMatch } = await supabase
-    .from("people")
-    .select("id")
-    .eq("unipile_id", providerId)
-    .maybeSingle();
-
-  if (candMatch) {
-    entityId = candMatch.id;
-  } else {
-    const { data: contactMatch } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("unipile_id", providerId)
-      .maybeSingle();
-
-    if (contactMatch) {
-      entityId = contactMatch.id;
-      entityType = "contact";
-      entityColumn = "contact_id";
-    }
-  }
-
-  if (!entityId) {
-    const { data: channelMatch } = await supabase
-      .from("candidate_channels")
-      .select("candidate_id")
-      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-      .eq("channel", "linkedin")
-      .limit(1)
-      .maybeSingle();
-
-    if (channelMatch) {
-      entityId = channelMatch.candidate_id;
-    } else {
-      const { data: contactChannelMatch } = await supabase
-        .from("contact_channels")
-        .select("contact_id")
-        .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-        .eq("channel", "linkedin")
-        .maybeSingle();
-
-      if (contactChannelMatch) {
-        entityId = contactChannelMatch.contact_id;
-        entityType = "contact";
-        entityColumn = "contact_id";
-      }
-    }
-  }
+  const entityMatch = await matchLinkedinEntity(
+    supabase,
+    providerId,
+    connectionData.profile_url || connectionData.public_profile_url || null,
+  );
+  const entityId: string | null = entityMatch?.entityId ?? null;
+  const entityType: "candidate" | "contact" = entityMatch?.entityType ?? "candidate";
+  const entityColumn: "candidate_id" | "contact_id" = entityMatch?.entityColumn ?? "candidate_id";
 
   if (!entityId) {
     return { action: "no_match", providerId };
@@ -685,4 +814,3 @@ async function advanceOnConnectionAccepted(
     });
   }
 }
-

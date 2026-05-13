@@ -6,7 +6,13 @@
  * (and the Hiring Projects scope) instead of falling back to
  * `sales_nav_inmail` / `classic_message`.
  *
- * Body: { account_id?: string }  // pass to reconnect an existing row
+ * Body: {
+ *   account_id?: string,            // pass to reconnect an existing row
+ *   integration_account_id?: string,
+ *   owner_user_id?: string,
+ *   account_label?: string,
+ *   contract_name?: string,
+ * }
  * Returns: { url: string }       // open this in a tab; Unipile redirects
  *                                 // back to /settings?linkedin_connected=1
  *
@@ -17,6 +23,10 @@
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import {
+  encodeLinkedinConnectState,
+  loadUnipileConfig,
+} from "./lib/unipile-linkedin.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -35,33 +45,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (userErr || !userData.user) return res.status(401).json({ error: "Invalid auth" });
   const user = userData.user;
 
-  const [{ data: v1Row }, { data: keyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
-  ]);
-  // Hosted-auth lives on the v1 DSN; the v2 host doesn't expose it.
-  const v1Base = (v1Row?.value || "https://api19.unipile.com:14926/api/v1").replace(/\/+$/, "");
-  const apiKey = keyRow?.value;
-  if (!apiKey) return res.status(500).json({ error: "UNIPILE_API_KEY missing" });
+  const {
+    account_id,
+    account_label,
+    contract_name,
+    integration_account_id,
+    owner_user_id,
+  } = (req.body || {}) as {
+    account_id?: string;
+    account_label?: string;
+    contract_name?: string;
+    integration_account_id?: string;
+    owner_user_id?: string;
+  };
 
-  const { account_id } = (req.body || {}) as { account_id?: string };
+  const config = await loadUnipileConfig(supabase);
   const origin = (req.headers.origin as string) || `https://${req.headers.host}` || "https://sullyrecruit.app";
 
   // 10-minute expiry per Unipile's hosted-auth example.
   const expires_on = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const connectState = encodeLinkedinConnectState({
+    accountLabel: account_label || null,
+    contractName: contract_name || null,
+    integrationAccountId: integration_account_id || null,
+    ownerUserId: owner_user_id || user.id,
+    reconnectAccountId: account_id || null,
+    requestedByUserId: user.id,
+  });
+  const notifyUrl = new URL(`${origin}/api/connect-linkedin-notify`);
+  notifyUrl.searchParams.set("state", connectState);
+  notifyUrl.searchParams.set("token", config.notifyToken);
 
   const body: Record<string, any> = {
     // "reconnect" preserves the existing account_id when the user
     // re-authenticates; "create" provisions a new account.
     type: account_id ? "reconnect" : "create",
     providers: "LINKEDIN",
-    api_url: v1Base.replace(/\/api\/v1$/, ""),
+    api_url: config.v1Base.replace(/\/api\/v1$/, ""),
     expires_on,
     success_redirect_url: `${origin}/settings?linkedin_connected=1`,
     failure_redirect_url: `${origin}/settings?linkedin_error=1`,
-    // `name` becomes the account_label fallback in our integration_accounts
-    // row when our webhook inserts it.
-    name: user.email || user.id,
+    notify_url: notifyUrl.toString(),
+    // Unipile returns `name` to notify_url. We use the owner_user_id as
+    // the fallback matcher if the query-string state is absent.
+    name: owner_user_id || user.id,
     // Per Unipile docs the provider-specific block lives under config.<provider>.
     config: {
       linkedin: {
@@ -74,10 +101,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   if (account_id) body.reconnect_account = account_id;
 
-  const resp = await fetch(`${v1Base}/hosted/accounts/link`, {
+  const resp = await fetch(`${config.v1Base}/hosted/accounts/link`, {
     method: "POST",
     headers: {
-      "X-API-KEY": apiKey,
+      "X-API-KEY": config.apiKey,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
