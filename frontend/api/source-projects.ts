@@ -171,56 +171,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // candidates under each project. We probe a few candidate paths
     // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
-      const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
-      // Unipile v2 reference name is `linkedincontroller_gethiringprojects`,
-      // so we probe both the underscored and dashed slugs plus the
-      // shorter `linkedin/projects` form the v1 docs use. The wider list
-      // exists because Unipile has renamed this endpoint at least once
-      // between docs revisions and the public refs don't quote the path.
-      const candidatePaths = [
-        `linkedin/recruiter/hiring_projects`,
-        `linkedin/recruiter/hiring-projects`,
-        `linkedin/recruiter/projects`,
-        `linkedin/hiring_projects`,
-        `linkedin/hiring-projects`,
-        `linkedin/projects`,
-      ];
-      const tries: Array<{ url: string; status: number; ok: boolean; bodyPrefix?: string }> = [];
-      // Per Unipile v2 docs every endpoint puts account_id in the path.
-      // Top-level (?account_id=…) kept as a fallback for builds where
-      // hiring projects surface under a different shape.
-      for (const path of candidatePaths) {
-        const variants = [
-          `${v2Base}/${acct}/${path}?limit=100&offset=${offset}`,
-          `${v2Base}/${path}?account_id=${acct}&limit=100&offset=${offset}`,
-        ];
-        for (const url of variants) {
-          const resp = await fetch(url, { headers });
-          if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-          if (resp.ok) {
-            const data = await resp.json();
-            // Unipile v2 wraps lists in `data`. Keep the legacy keys as
-            // fallbacks so a v1 leak (or a future rename) doesn't break us.
-            const items = data.data ?? data.items ?? data.results ?? data.projects ?? (Array.isArray(data) ? data : []);
-            return res.status(200).json({
-              items,
-              raw: data,
-              used_path: path,
-              used_url: url,
-              next_cursor: data.next_cursor ?? null,
-              total_count: data.total_count ?? null,
-            });
-          }
-          const body = (await resp.text()).slice(0, 500);
-          console.error("[source-projects][list_projects] probe failed", { url, status: resp.status, body });
-          tries.push({ url, status: resp.status, ok: false, bodyPrefix: body.slice(0, 200) });
-        }
+      // Canonical Unipile v2 endpoint per the OpenAPI spec:
+      //   GET /v2/{account_id}/linkedin/recruiter/projects
+      //     query: status[], sort_by, keywords, offset, limit (default 20)
+      // No probing — the path is fixed. We use cursor-only pagination
+      // (the schema description says offset is a fallback "if cursor
+      // is not supported"). limit defaults to the schema's 20.
+      const qs = new URLSearchParams();
+      qs.set("sort_by", "LAST_USED_BY_ME");
+      if (cursor) qs.set("cursor", String(cursor));
+      if (limit) qs.set("limit", String(limit));
+      const url = `${v2Base}/${acct}/linkedin/recruiter/projects?${qs.toString()}`;
+      const resp = await fetch(url, { headers });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const body = await resp.text();
+      if (resp.ok) {
+        const data = JSON.parse(body);
+        return res.status(200).json({
+          items: data.data ?? data.items ?? [],
+          raw: data,
+          used_url: url,
+          next_cursor: data.next_cursor ?? null,
+          total_count: data.total_count ?? null,
+        });
       }
-      // None worked — return the LAST status so the UI surfaces a real error.
-      const last = tries[tries.length - 1];
-      return res.status(last?.status || 500).json({
-        error: `Unipile ${last?.status}: hiring projects endpoint not found`,
-        detail: tries,
+      // Log the full Unipile response as a single stringified line so
+      // Vercel's runtime log preview shows the actual error, not a
+      // truncated "[object]". The OpenAPI path is correct, so a 400
+      // here usually means a missing scope or invalid account state.
+      console.error(`[source-projects][list_projects] Unipile ${resp.status} ${url} :: ${body.slice(0, 600)}`);
+      return res.status(resp.status).json({
+        error: `Unipile ${resp.status}`,
+        url,
+        body: body.slice(0, 1000),
       });
     }
 
