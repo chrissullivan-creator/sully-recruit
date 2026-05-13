@@ -12,6 +12,10 @@ const VOYAGE_MODEL = "voyage-finance-2";
  * normalisers.
  */
 
+// Anchored against the full filename so we only catch purely-numeric
+// IDs like `1234567890_42.pdf` — not uploader-prefixed legitimate names
+// like `1778645907582_7sud_Kevin_Dwyernewresume.pdf` where `7sud` is a
+// random 4-char suffix that happens to start with a digit.
 const JUNK_PATTERNS = [
   /invoice/i, /receipt/i, /confirmation/i, /waiver/i,
   /order[_\s-]?id/i, /\bform\b/i, /\bsigned\b/i,
@@ -20,7 +24,7 @@ const JUNK_PATTERNS = [
   /\bdegree\b/i, /\bcertif/i, /\blicense\b/i,
   /emerald.recruiting/i, /fiera/i, /\bpitch\b/i,
   /\bproposal\b/i, /\bpresentation\b/i, /\bmarketing\b/i,
-  /^\d{8,}_\d+/, /^[a-f0-9-]{32,}\.pdf$/i,
+  /^\d{8,}_\d+\.(pdf|docx?|txt)$/i, /^[a-f0-9-]{32,}\.pdf$/i,
 ];
 
 export function looksLikeResume(fileName: string): boolean {

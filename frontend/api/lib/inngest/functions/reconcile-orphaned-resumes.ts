@@ -129,8 +129,12 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
   const li = normalizeLinkedIn(parsed.linkedin_url);
 
   if (email) {
+    // The unified `people` table has a UNIQUE constraint on
+    // normalized_email — so any match (candidate or client) means we
+    // must link to that row rather than insert. The caller below adds
+    // the `candidate` role to client rows so they show up correctly.
     const m = await matchPersonByEmail(supabase, email);
-    if (m && m.entityType !== "contact") return m.entityId;
+    if (m) return m.entityId;
   }
   if (li) {
     const { data } = await supabase.from("people").select("id").ilike("linkedin_url", `%${li}%`).maybeSingle();
@@ -312,7 +316,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         if (candidateId) {
           const { data: existing } = await supabase
             .from("people")
-            .select("current_title, current_company, location_text, skills, resume_url")
+            .select("current_title, current_company, location_text, skills, resume_url, roles")
             .eq("id", candidateId)
             .maybeSingle();
 
@@ -329,6 +333,10 @@ export const reconcileOrphanedResumes = inngest.createFunction(
             if (!existing.resume_url) {
               const { data: pub } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
               updates.resume_url = pub.publicUrl;
+            }
+            const currentRoles: string[] = Array.isArray(existing.roles) ? existing.roles : [];
+            if (!currentRoles.includes("candidate")) {
+              updates.roles = [...currentRoles, "candidate"];
             }
             if (Object.keys(updates).length > 1) {
               await supabase.from("people").update(updates).eq("id", candidateId);
