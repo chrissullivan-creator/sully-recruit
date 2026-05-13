@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +25,27 @@ const CHANNELS = [
 ];
 
 const DELAY_OPTIONS = Array.from({ length: 13 }, (_, i) => i * 10);
+
+// Module-level cache so each rendered step doesn't re-fetch the profiles
+// list. SequenceBuilder can mount many SequenceStepCards (one per step
+// per branch), and the picker is identical across all of them.
+type SenderProfile = { id: string; full_name: string | null; email: string | null };
+let cachedSenders: SenderProfile[] | null = null;
+let inflightSenders: Promise<SenderProfile[]> | null = null;
+async function loadSenders(): Promise<SenderProfile[]> {
+  if (cachedSenders) return cachedSenders;
+  if (inflightSenders) return inflightSenders;
+  inflightSenders = supabase
+    .from("profiles")
+    .select("id, full_name, email")
+    .order("full_name", { ascending: true })
+    .then(({ data }) => {
+      cachedSenders = (data as SenderProfile[]) || [];
+      inflightSenders = null;
+      return cachedSenders;
+    });
+  return inflightSenders;
+}
 
 const MERGE_TAGS = [
   "{{first_name}}", "{{last_name}}", "{{company}}", "{{title}}", "{{job_name}}", "{{sender_name}}",
@@ -55,6 +76,16 @@ export function SequenceStepCard({
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editorDraft, setEditorDraft] = useState("");
+  const [senders, setSenders] = useState<SenderProfile[]>(() => cachedSenders ?? []);
+
+  useEffect(() => {
+    if (cachedSenders) return;
+    let cancelled = false;
+    loadSenders().then((rows) => {
+      if (!cancelled) setSenders(rows);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const updateAction = useCallback(
     (index: number, field: keyof ActionData, value: ActionData[keyof ActionData]) => {
@@ -217,6 +248,28 @@ export function SequenceStepCard({
                     </Button>
                   )}
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Label className="text-[10px] shrink-0" title="Override which recruiter this step sends from. Leave on 'Sequence sender' to use the sequence-level Send As setting.">
+                  Send as
+                </Label>
+                <Select
+                  value={action.senderUserId ?? "__inherit__"}
+                  onValueChange={(v) => updateAction(i, "senderUserId", v === "__inherit__" ? null : v)}
+                >
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue placeholder="Sequence sender" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__inherit__">Sequence sender (default)</SelectItem>
+                    {senders.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name || p.email || p.id.slice(0, 8)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {action.channel !== "manual_call" && (
