@@ -141,12 +141,24 @@ async function processAccount(
       });
     } catch (err: any) {
       logger.error(`Unipile emails fetch failed for ${account.email_address}`, { error: err.message });
-      await notifyError({
-        taskId: "backfill-emails",
-        severity: "ERROR",
-        error: err,
-        context: { accountId: account.id, email: account.email_address },
-      });
+      // Don't burn an email alert on Unipile-side 5xx internal errors —
+      // they're not actionable for the recruiter (no auth or config to
+      // fix), they self-heal, and the once-per-hour notifyError dedup
+      // can still spam over a multi-hour Unipile incident. 4xx (and
+      // any non-Unipile error shape) still alert at ERROR severity
+      // because those usually mean a real auth / account / config
+      // problem that needs fixing.
+      const m = String(err?.message || "").match(/^Unipile\s+(\d{3})\b/);
+      const status = m ? Number(m[1]) : null;
+      const is5xx = status !== null && status >= 500 && status <= 599;
+      if (!is5xx) {
+        await notifyError({
+          taskId: "backfill-emails",
+          severity: "ERROR",
+          error: err,
+          context: { accountId: account.id, email: account.email_address, status },
+        });
+      }
       break;
     }
     pages++;
