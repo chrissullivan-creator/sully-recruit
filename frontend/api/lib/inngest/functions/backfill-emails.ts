@@ -148,10 +148,17 @@ async function processAccount(
       // any non-Unipile error shape) still alert at ERROR severity
       // because those usually mean a real auth / account / config
       // problem that needs fixing.
+      //
+      // Special case: api/inactive_subscription is a 403 but it's a
+      // Unipile billing/seat state — fixed in their dashboard, not
+      // ours. Once the seat is reactivated the cron auto-resumes, so
+      // we don't need hourly emails reminding us. The error still
+      // shows in the Inngest run history.
       const m = String(err?.message || "").match(/^Unipile\s+(\d{3})\b/);
       const status = m ? Number(m[1]) : null;
       const is5xx = status !== null && status >= 500 && status <= 599;
-      if (!is5xx) {
+      const isInactiveSubscription = /api\/inactive_subscription/.test(String(err?.message || ""));
+      if (!is5xx && !isInactiveSubscription) {
         await notifyError({
           taskId: "backfill-emails",
           severity: "ERROR",
