@@ -1,5 +1,5 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
 import { normalizeEmail } from "../../../../src/trigger/lib/resume-parsing.js";
 import { isMarketingEmail } from "../../../../src/trigger/lib/marketing-blocklist.js";
 import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
@@ -312,6 +312,17 @@ export const backfillEmails = inngest.createFunction(
   { cron: "1-56/5 * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
+
+    // Kill switch — set app_settings.BACKFILL_EMAILS_PAUSED to "true"
+    // when something is wrong on the Unipile side (paused accounts,
+    // billing state, etc.) and you want this cron to no-op without
+    // a deploy. Cron resumes immediately on the next tick once the
+    // setting is flipped back.
+    const pausedSetting = (await getAppSetting("BACKFILL_EMAILS_PAUSED")).toLowerCase();
+    if (pausedSetting === "true" || pausedSetting === "1" || pausedSetting === "on") {
+      logger.info("backfill-emails paused via app_settings.BACKFILL_EMAILS_PAUSED");
+      return { paused: true };
+    }
 
     const daysBack = 3;
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
