@@ -24,7 +24,7 @@ export const backfillResumeEmbeddings = inngest.createFunction(
   { cron: "0 * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
-    const BATCH_SIZE = 25;
+    const BATCH_SIZE = 100;
 
     const { data: resumes, error } = await supabase
       .from("resumes")
