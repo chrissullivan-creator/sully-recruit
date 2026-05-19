@@ -2,8 +2,8 @@ import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
 
-const BATCH_SIZE = 50;
-const DELAY_MS = 350;
+const BATCH_SIZE = 200;
+const DELAY_MS = 250;
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_ELAPSED_MS = 240_000; // 4 min safety margin
 
@@ -13,12 +13,14 @@ const MAX_ELAPSED_MS = 240_000; // 4 min safety margin
  * Unipile's user-lookup API and stamps the IDs + headline + avatar +
  * current company/title back onto the candidate row.
  *
- * Every 2 hours. Ported from `src/trigger/unipile-resolve.ts` —
- * Inngest is the only scheduler now.
+ * Every 15 minutes. Ported from `src/trigger/unipile-resolve.ts` —
+ * Inngest is the only scheduler now. Tuned for a one-time drain of the
+ * ~11K pending backlog: 200 rows/run × 96 runs/day = ~19K/day ceiling
+ * (capped by the 4-min runtime budget at roughly 180 effective/run).
  */
 export const resolveUnipileIds = inngest.createFunction(
   { id: "resolve-unipile-ids", name: "Resolve Unipile IDs for candidates (Inngest)" },
-  { cron: "0 */2 * * *" },
+  { cron: "*/15 * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 

@@ -46,7 +46,15 @@ export const findLinkedinUrlByName = inngest.createFunction(
     id: "find-linkedin-url-by-name",
     name: "Find LinkedIn URL by name (Inngest)",
     retries: 1,
-    concurrency: [{ key: "event.data.person_id", limit: 1 }],
+    // Per-person: prevents duplicate sweeps for the same person from
+    // racing. Global: caps Unipile recruiter-search load — the sweep
+    // cron can fan out hundreds of events per tick, so without this
+    // we'd burn the rate limit instantly. 5 concurrent at ~3s/call
+    // is ~1.7 req/sec, well under Unipile's per-account ceiling.
+    concurrency: [
+      { key: "event.data.person_id", limit: 1 },
+      { limit: 5 },
+    ],
   },
   { event: "people/find-linkedin-url.requested" },
   async ({ event, logger }) => {
