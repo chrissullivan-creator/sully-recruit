@@ -5,6 +5,7 @@ import {
   getOpenAIKey,
   getGeminiKey,
   getOpenRouterKey,
+  getVoyageKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
@@ -182,6 +183,49 @@ export const generateJoeSays = inngest.createFunction(
     if (updateError) {
       logger.error("Failed to save Joe Says", { error: updateError.message });
       throw new Error(`DB update failed: ${updateError.message}`);
+    }
+
+    // Embed the brief so Ask Joe's contact/candidate RAG can vector-match
+    // on the full summary text (resume_embeddings covers candidate resumes
+    // but not the recruiter-edited brief and not contacts at all).
+    // Best-effort: a Voyage failure here doesn't block the brief save.
+    try {
+      const voyageKey = await getVoyageKey().catch(() => "");
+      if (voyageKey) {
+        const embedRes = await fetch("https://api.voyageai.com/v1/embeddings", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${voyageKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "voyage-finance-2",
+            input: [summary.slice(0, 8000)],
+            input_type: "document",
+          }),
+        });
+        if (embedRes.ok) {
+          const embedData = await embedRes.json();
+          const vec = embedData?.data?.[0]?.embedding;
+          if (Array.isArray(vec) && vec.length === 1024) {
+            const vecLit = `[${vec.join(",")}]`;
+            await supabase
+              .from("people")
+              .update({
+                joe_says_embedding: vecLit,
+                joe_says_embedded_at: new Date().toISOString(),
+              } as any)
+              .eq("id", entityId);
+          } else {
+            logger.warn("Voyage returned unexpected embedding shape", { entityId });
+          }
+        } else {
+          const errBody = (await embedRes.text()).slice(0, 200);
+          logger.warn("Voyage embed failed", { status: embedRes.status, body: errBody });
+        }
+      }
+    } catch (err: any) {
+      logger.warn("joe_says embedding step failed", { error: err?.message });
     }
 
     logger.info("Joe Says generated successfully", {

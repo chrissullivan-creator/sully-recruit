@@ -133,7 +133,40 @@ async function buildCandidateContext(supabase: any, query: string): Promise<stri
 }
 
 async function buildContactContext(supabase: any, query: string): Promise<string> {
-  // No vector index over contacts yet — fall back to keyword ilike.
+  // Try vector search over joe_says briefs first. Only briefed clients
+  // are searchable this way; the long tail still falls back to ilike.
+  const embedding = await embedQuery(query);
+  if (embedding) {
+    const { data: matches, error: matchErr } = await supabase.rpc("match_people_joe_says", {
+      query_embedding: embedding,
+      match_count: TOP_K,
+      min_similarity: 0.3,
+      role_filter: "client",
+    });
+    if (!matchErr && matches?.length) {
+      const ids = (matches as any[]).map((m: any) => m.person_id);
+      const { data: contacts } = await supabase
+        .from("candidates")
+        .select(
+          "id, full_name, current_title, current_company, location, primary_email, mobile_phone, linkedin_url, last_contacted_at, roles",
+        )
+        .in("id", ids)
+        .contains("roles", ["client"]);
+      if (contacts?.length) {
+        const byId = new Map((matches as any[]).map((m: any) => [m.person_id, m]));
+        const lines = (contacts as any[]).map((c) => {
+          const m: any = byId.get(c.id);
+          const sim = m?.similarity != null ? Number(m.similarity).toFixed(2) : "?";
+          const last = c.last_contacted_at ? `last reached ${c.last_contacted_at.slice(0, 10)}` : "no recent contact";
+          const excerpt = m?.joe_says_excerpt ? ` Brief: ${String(m.joe_says_excerpt).slice(0, 200)}` : "";
+          return `- ${c.full_name} — ${c.current_title || "?"} at ${c.current_company || "?"}, ${c.location || "?"}. Email: ${c.primary_email || "?"}. ID: ${c.id}. Match: ${sim}. ${last}.${excerpt}`;
+        });
+        return `\n\nRELEVANT CONTACTS from the database (top ${contacts.length}, brief-vector-matched):\n${lines.join("\n")}`;
+      }
+    }
+  }
+
+  // Keyword fallback for contacts that don't have a joe_says brief yet.
   const keywords = query
     .split(/\s+/)
     .filter((k) => k.length >= 3)
