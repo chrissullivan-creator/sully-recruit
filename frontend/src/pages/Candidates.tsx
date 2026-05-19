@@ -11,6 +11,7 @@ import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidat
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import {
   CandidateFilterSidebar,
   DEFAULT_FILTERS,
@@ -609,8 +610,12 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.current_title ?? '-'}</td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Building className="h-3 w-3" />
+                      <span className="text-sm text-muted-foreground flex items-center gap-2">
+                        {candidate.current_company ? (
+                          <CompanyLogo name={candidate.current_company} size="xs" />
+                        ) : (
+                          <Building className="h-3 w-3" />
+                        )}
                         {candidate.current_company ?? '-'}
                       </span>
                     </td>

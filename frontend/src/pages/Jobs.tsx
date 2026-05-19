@@ -161,9 +161,10 @@ const Jobs = () => {
                       {(() => {
                         const companyName = job.company_name ?? (job.companies as any)?.name ?? '-';
                         const companyDomain = (job.companies as any)?.domain ?? null;
+                        const companyLogoUrl = (job.companies as any)?.logo_url ?? null;
                         return (
                           <span className="flex items-center gap-2">
-                            <CompanyLogo name={companyName} domain={companyDomain} size="xs" />
+                            <CompanyLogo name={companyName} domain={companyDomain} logoUrl={companyLogoUrl} size="xs" />
                             {companyName}
                           </span>
                         );

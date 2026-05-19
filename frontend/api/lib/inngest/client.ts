@@ -236,6 +236,16 @@ export type FindLinkedinUrlRequested = {
   data: { person_id: string };
 };
 
+/**
+ * Enrich a single company via Apollo's /organizations/enrich and write
+ * missing fields (industry, size, description, logo, etc.). Fired by
+ * the enrich-companies-sweep cron and any on-demand caller.
+ */
+export type EnrichCompanyViaApolloRequested = {
+  name: "companies/enrich-via-apollo.requested";
+  data: { company_id: string };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -252,4 +262,5 @@ export type AllInngestEvents =
   | ExtractCallIntelRequested
   | FetchEntityHistoryRequested
   | RecoverOrphanResumesRequested
-  | FindLinkedinUrlRequested;
+  | FindLinkedinUrlRequested
+  | EnrichCompanyViaApolloRequested;

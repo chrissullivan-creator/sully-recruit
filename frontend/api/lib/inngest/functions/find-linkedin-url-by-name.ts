@@ -1,15 +1,20 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
 import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import {
+  getApolloConfig,
+  apolloMatchPerson,
+} from "../../integrations/apollo.js";
 
 /**
- * Search Unipile recruiter for a LinkedIn profile matching a person and
- * write the URL back. Wired into the onboarding chain so a candidate or
- * client added without a LinkedIn URL still gets one:
+ * Search for a LinkedIn profile matching a person and write the URL
+ * back. Wired into the onboarding chain so a candidate or client added
+ * without a LinkedIn URL still gets one:
  *
  *   resume parse / person insert
  *     → (no linkedin_url) people/find-linkedin-url.requested
- *     → search Unipile → write people.linkedin_url
+ *     → try Apollo, fall back to Unipile recruiter search
+ *     → write people.linkedin_url
  *     → BEFORE trigger sets unipile_resolve_status='pending'
  *     → resolve-unipile-ids cron resolves provider_id
  *     → fetch-entity-history pulls full LinkedIn message history
@@ -17,16 +22,20 @@ import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
  * Match policy (conservative — false positives are worse than misses,
  * since a wrong linkedin_url poisons every downstream message + send):
  *   - Required: full_name OR (first_name AND last_name)
- *   - Compare normalized name similarity (Levenshtein ratio) on the
- *     candidate's full name against each result. Best must be >= 0.92.
- *   - Tie-break: if a second result is >= 0.85, mark 'ambiguous' and
- *     skip the write — operator can resolve manually.
+ *   - Apollo: trust their match but verify with name-similarity >= 0.85.
+ *     Apollo's /people/match returns one best result; if name sanity
+ *     check fails, fall through to Unipile.
+ *   - Unipile: compare normalized name similarity (Levenshtein ratio)
+ *     against each result. Best must be >= 0.92; if a second result is
+ *     >= 0.85, mark 'ambiguous' and skip the write — operator can
+ *     resolve manually.
  *   - Company signal: if person has current_company, prefer results
- *     whose current_company contains or is contained by it (case-
- *     insensitive substring after stripping common suffixes).
+ *     whose current_company matches it (case-insensitive substring
+ *     after stripping common suffixes).
  *
  * Concurrency keyed on person_id prevents duplicate sweeps for the same
- * person from racing each other.
+ * person from racing each other. Global cap throttles Unipile +
+ * Apollo API load when the sweep cron fans out.
  */
 interface FindUrlPayload {
   person_id: string;
@@ -87,6 +96,66 @@ export const findLinkedinUrlByName = inngest.createFunction(
       return { skipped: true, reason: "no_name" };
     }
 
+    // ── Apollo primary path ──────────────────────────────────────────
+    // Try Apollo first when the key is configured. Apollo's
+    // /people/match returns one best-match person (or null). We still
+    // apply a name-similarity sanity check on top — Apollo can return
+    // a different person for common names if the company hint is weak.
+    const apolloConfig = await getApolloConfig(supabase);
+    if (apolloConfig) {
+      try {
+        const match = await apolloMatchPerson(apolloConfig, {
+          first_name: person.first_name || undefined,
+          last_name: person.last_name || undefined,
+          name: !person.first_name && !person.last_name ? fullName : undefined,
+          organization_name: person.current_company || undefined,
+          email: person.primary_email || person.work_email || person.personal_email || undefined,
+        });
+        if (match?.linkedin_url) {
+          const apolloName = match.name ?? `${match.first_name ?? ""} ${match.last_name ?? ""}`.trim();
+          const nameSim = nameSimilarity(fullName, apolloName);
+          if (nameSim >= 0.85) {
+            // IMPORTANT: only the URL is written from Apollo. Do not
+            // copy `match.email` / phone / title etc. onto the
+            // candidate — operator policy is that work emails for
+            // candidates come from the recruiter conversation, not
+            // from third-party enrichment.
+            const { error: updateErr } = await supabase
+              .from("people")
+              .update({
+                linkedin_url: match.linkedin_url,
+                linkedin_search_status: "found",
+                linkedin_search_attempted_at: new Date().toISOString(),
+              } as any)
+              .eq("id", person_id);
+            if (updateErr) {
+              logger.error("find-linkedin-url: apollo update failed", { person_id, error: updateErr.message });
+              return { error: updateErr.message };
+            }
+            return {
+              matched: true,
+              source: "apollo",
+              person_id,
+              linkedin_url: match.linkedin_url,
+              name_sim: nameSim,
+            };
+          }
+          logger.info("Apollo match below name threshold, falling back to Unipile", {
+            person_id,
+            apollo_name: apolloName,
+            name_sim: nameSim,
+          });
+        }
+      } catch (err: any) {
+        // Apollo errors are non-fatal — log and fall through to Unipile.
+        logger.warn("Apollo people/match threw, falling back to Unipile", {
+          person_id,
+          error: err?.message,
+        });
+      }
+    }
+
+    // ── Unipile fallback path ────────────────────────────────────────
     const account = await pickRecruiterAccount(supabase);
     if (!account) {
       logger.warn("find-linkedin-url: no active LinkedIn recruiter account");
@@ -171,6 +240,7 @@ export const findLinkedinUrlByName = inngest.createFunction(
 
     return {
       matched: true,
+      source: "unipile",
       person_id,
       linkedin_url: winnerUrl,
       score: best.score.total,

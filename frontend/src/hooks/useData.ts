@@ -143,7 +143,7 @@ export function useJobs(includesClosed = false) {
     queryFn: async () => {
       let query = supabase
         .from('jobs')
-        .select('*, companies(name, domain), job_functions(id, name, code, examples)')
+        .select('*, companies(name, domain, logo_url), job_functions(id, name, code, examples)')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (!includesClosed) {
@@ -164,7 +164,7 @@ export function useJob(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
-        .select('*, companies(name, domain, website), job_functions(id, name, code, examples)')
+        .select('*, companies(name, domain, website, logo_url), job_functions(id, name, code, examples)')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;
