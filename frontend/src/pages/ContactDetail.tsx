@@ -265,6 +265,25 @@ const ContactDetail = () => {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [fetchingHistory, setFetchingHistory] = useState(false);
+  const handleFetchHistory = async () => {
+    if (!id) return;
+    setFetchingHistory(true);
+    try {
+      const resp = await fetch('/api/trigger-fetch-history', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ entity_id: id, entity_type: 'contact' }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+      toast.success('History fetch triggered — messages will appear shortly');
+    } catch (err: any) {
+      toast.error(err?.message || 'History fetch failed');
+    } finally {
+      setFetchingHistory(false);
+    }
+  };
   const [deletingContact, setDeletingContact] = useState(false);
 
   const handleDeleteContact = async () => {
@@ -593,6 +612,14 @@ const ContactDetail = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={handleFetchHistory} disabled={fetchingHistory}>
+                {fetchingHistory ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                ) : (
+                  <History className="h-3.5 w-3.5 mr-2" />
+                )}
+                Fetch History
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setConfirmDelete(true)}
                 className="text-red-600 focus:text-red-600 focus:bg-red-50"

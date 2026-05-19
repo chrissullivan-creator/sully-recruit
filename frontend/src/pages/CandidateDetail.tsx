@@ -274,6 +274,26 @@ const CandidateDetail = () => {
   const [joeChatLoading, setJoeChatLoading] = useState(false);
   const joeChatScrollRef = useRef<HTMLDivElement>(null);
 
+  const [fetchingHistory, setFetchingHistory] = useState(false);
+  const handleFetchHistory = async () => {
+    if (!id) return;
+    setFetchingHistory(true);
+    try {
+      const resp = await fetch('/api/trigger-fetch-history', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ entity_id: id, entity_type: 'candidate' }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+      toast.success('History fetch triggered — messages will appear shortly');
+    } catch (err: any) {
+      toast.error(err?.message || 'History fetch failed');
+    } finally {
+      setFetchingHistory(false);
+    }
+  };
+
   const { data: workHistory = [] } = useQuery({
     queryKey: ['candidate_work_history', id],
     enabled: !!id,
@@ -1080,6 +1100,14 @@ const CandidateDetail = () => {
                   {showResume ? 'Hide Resume' : 'View Resume'}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuItem onClick={handleFetchHistory} disabled={fetchingHistory}>
+                {fetchingHistory ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                ) : (
+                  <History className="h-3.5 w-3.5 mr-2" />
+                )}
+                Fetch History
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setActiveTab('joe')}>
                 <Sparkles className="h-3.5 w-3.5 mr-2" /> Ask Joe
               </DropdownMenuItem>
