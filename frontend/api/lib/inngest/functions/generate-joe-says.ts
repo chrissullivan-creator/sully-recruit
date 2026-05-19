@@ -171,9 +171,14 @@ export const generateJoeSays = inngest.createFunction(
       throw new Error("Empty response from AI provider");
     }
 
-    const table = entityType === "candidate" ? "candidates" : "contacts";
+    // Write to the people base table directly. The candidates VIEW
+    // exposes joe_says (so legacy writes there worked) but the contacts
+    // VIEW doesn't — and as the unified person model has a single base
+    // table, hitting `people` is the source-of-truth path for both
+    // entity types. This silently fixed contact-mode joe_says, which
+    // had been failing every time the function fired for a contact.
     const { error: updateError } = await supabase
-      .from(table)
+      .from("people")
       .update({
         joe_says: summary,
         joe_says_updated_at: new Date().toISOString(),
