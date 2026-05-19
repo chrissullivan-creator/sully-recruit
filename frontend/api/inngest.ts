@@ -45,6 +45,7 @@ import { fetchEntityHistory } from "./lib/inngest/functions/fetch-entity-history
 import { recoverOrphanResumes } from "./lib/inngest/functions/recover-orphan-resumes.js";
 import { backfillEnrollmentInit } from "./lib/inngest/functions/backfill-enrollment-init.js";
 import { backfillEntityHistories } from "./lib/inngest/functions/backfill-entity-histories.js";
+import { findLinkedinUrlByName } from "./lib/inngest/functions/find-linkedin-url-by-name.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -102,5 +103,6 @@ export default serve({
     recoverOrphanResumes,
     backfillEnrollmentInit,
     backfillEntityHistories,
+    findLinkedinUrlByName,
   ],
 });

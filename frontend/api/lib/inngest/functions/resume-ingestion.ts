@@ -305,6 +305,26 @@ ${rawText.slice(0, 60000)}`;
         });
       }
 
+      // When the resume didn't yield a LinkedIn URL, queue a search by
+      // name + current_company. If find-linkedin-url-by-name lands a
+      // confident match it writes the URL back, which trips the BEFORE
+      // trigger that flips unipile_resolve_status='pending' and the
+      // AFTER trigger that fires the entity-history fetch. No-op if the
+      // parser already wrote a URL (function exits early on its own).
+      if (!parsedJson?.linkedin_url) {
+        try {
+          await inngest.send({
+            name: "people/find-linkedin-url.requested",
+            data: { person_id: workingCandidateId },
+          });
+        } catch (err: any) {
+          logger.warn("people/find-linkedin-url.requested send failed", {
+            candidateId: workingCandidateId,
+            error: err?.message,
+          });
+        }
+      }
+
       return { success: true, resumeId, candidateId: workingCandidateId };
     }
   },

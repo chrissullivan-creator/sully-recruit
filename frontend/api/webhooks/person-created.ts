@@ -73,11 +73,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const hasEmail = !!(record.primary_email || record.work_email || record.personal_email);
   const hasLinkedin = !!record.linkedin_url;
-  if (!hasEmail && !hasLinkedin) {
-    return res.status(200).json({ skipped: true, reason: "no email or linkedin" });
-  }
 
   const entityType: "candidate" | "contact" = record.type === "client" ? "contact" : "candidate";
+
+  // No LinkedIn URL? Queue a search by name + current_company. The
+  // find-linkedin-url-by-name function writes the URL back on a
+  // confident match, which re-fires this webhook via the
+  // linkedin_url-just-added branch of notify_person_created. Cheap to
+  // dispatch — function exits fast on already-has-url / no-name.
+  let searchDispatched = false;
+  if (!hasLinkedin) {
+    try {
+      await inngest.send({
+        name: "people/find-linkedin-url.requested",
+        data: { person_id: entityId },
+      });
+      searchDispatched = true;
+    } catch (err: any) {
+      console.warn("find-linkedin-url dispatch failed", err?.message);
+    }
+  }
+
+  // Need at least one of email or LinkedIn to do anything else; if we
+  // also have no name to search on, the row is unactionable for now.
+  if (!hasEmail && !hasLinkedin) {
+    return res.status(200).json({
+      skipped: true,
+      reason: "no email or linkedin",
+      search_dispatched: searchDispatched,
+    });
+  }
 
   // Eagerly resolve the person's Unipile provider_id when we have a
   // LinkedIn URL — without it, fetch-entity-history's LinkedIn leg has
@@ -122,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       eventId: ids[0],
       entity_type: entityType,
       resolve_dispatched: resolveDispatched,
+      search_dispatched: searchDispatched,
       op: body.type,
     });
   } catch (err: any) {
