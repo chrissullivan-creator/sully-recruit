@@ -3,6 +3,8 @@ import {
   getSupabaseAdmin,
   getAnthropicKey,
   getOpenAIKey,
+  getGeminiKey,
+  getOpenRouterKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
@@ -126,7 +128,12 @@ export const generateJoeSays = inngest.createFunction(
   async ({ event, logger }) => {
     const { entityId, entityType } = event.data as GenerateJoeSaysPayload;
     const supabase = getSupabaseAdmin();
-    const [anthropicKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    const [anthropicKey, openaiKey, geminiKey, openRouterKey] = await Promise.all([
+      getAnthropicKey().catch(() => ""),
+      getOpenAIKey().catch(() => ""),
+      getGeminiKey().catch(() => ""),
+      getOpenRouterKey().catch(() => ""),
+    ]);
 
     logger.info("Generating Joe Says", { entityId, entityType });
 
@@ -149,11 +156,13 @@ export const generateJoeSays = inngest.createFunction(
     }
 
     const { text: summary } = await callAIWithFallback({
-      anthropicKey,
+      anthropicKey: anthropicKey || undefined,
       openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
+      openRouterKey: openRouterKey || undefined,
       systemPrompt,
       userContent: `Generate a comprehensive brief for this ${entityType} based on all available data:\n\n${contextText.slice(0, 30000)}`,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       maxTokens: 3000,
     });
 

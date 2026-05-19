@@ -343,7 +343,7 @@ Field rules:
 - relo_details: more than just yes/no — willingness, family situation, blocked cities, preferred geos, timing — the conversational detail behind relocation_preference. Null if not discussed.
 - job_move_explanations: short prose explaining why they made each prior job change (especially short stints / gaps / lateral moves). Helps clients pre-empt questions. Null if not discussed.`,
         userContent: `Transcript:\n${transcript.slice(0, 30000)}`,
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         maxTokens: 2000,
         jsonOutput: true,
       });

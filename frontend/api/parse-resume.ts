@@ -289,7 +289,7 @@ async function callClaudeThenOpenAIThenGemini(opts: CallOpts): Promise<{ text: s
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: opts.maxTokens,
           temperature: 0,
           system: opts.systemPrompt,

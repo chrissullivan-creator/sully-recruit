@@ -105,7 +105,7 @@ export const extractManualCallIntel = inngest.createFunction(
         openaiKey: openaiKey || undefined,
         systemPrompt: SYSTEM_PROMPT,
         userContent: `Call with ${entityName} (${duration}).\n\nRecruiter notes:\n${notes.slice(0, 30_000)}`,
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         maxTokens: 2000,
         jsonOutput: true,
       });

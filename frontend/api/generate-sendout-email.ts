@@ -31,9 +31,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing required field: candidate_name" });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
+    const openaiKey = process.env.OPENAI_API_KEY || "";
+    const geminiKey = process.env.GEMINI_API_KEY || "";
+    const openRouterKey = process.env.OPENROUTER_API_KEY || "";
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+      return res.status(500).json({ error: "No AI keys configured (need ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY)" });
     }
 
     const contactList = contact_names?.length ? contact_names.join(", ") : "the hiring team";
@@ -60,11 +63,13 @@ Return ONLY valid JSON with two fields:
 }`;
 
     const { text } = await callAIWithFallback({
-      anthropicKey: apiKey,
-      openaiKey: process.env.OPENAI_API_KEY,
+      anthropicKey: anthropicKey || undefined,
+      openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
+      openRouterKey: openRouterKey || undefined,
       systemPrompt: "You write professional client-facing submission emails for a senior Wall Street recruiter.",
       userContent: userPrompt,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       maxTokens: 1024,
       jsonOutput: true,
     });
