@@ -43,6 +43,7 @@ export default function AskJoe() {
   const [messages, setMessages] = useState<Msg[]>(() => loadChat().messages);
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [statusLine, setStatusLine] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -102,9 +103,18 @@ export default function AskJoe() {
           if (json === '[DONE]') { done = true; break; }
           try {
             const parsed = JSON.parse(json);
-            // Handle both Claude shape ({content:'...'}) and OpenAI shape ({choices:[{delta:{content:'...'}}]}).
+            // Edge function may send three event shapes:
+            //   {content: "..."} — streamed text chunk (Anthropic + OpenAI native)
+            //   {choices: [{delta: {content: "..."}}]} — legacy OpenAI shape (compat)
+            //   {status: "..."} — ephemeral status while a tool runs
+            if (typeof parsed.status === 'string') {
+              setStatusLine(parsed.status);
+              continue;
+            }
             const content = parsed.content ?? parsed.choices?.[0]?.delta?.content;
             if (typeof content === 'string') {
+              // Real text arriving clears the status line.
+              setStatusLine('');
               assistantSoFar += content;
               const current = assistantSoFar;
               setMessages((prev) => {
@@ -130,6 +140,7 @@ export default function AskJoe() {
     } finally {
       clearTimeout(timeout);
       setIsLoading(false);
+      setStatusLine('');
       inputRef.current?.focus();
     }
   };
@@ -234,8 +245,9 @@ export default function AskJoe() {
               ))}
               {isLoading && messages[messages.length - 1]?.role === 'user' && (
                 <div className="flex justify-start">
-                  <div className="bg-white border border-card-border rounded-2xl rounded-bl-md px-4 py-2.5 text-sm text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2" /> Joe is thinking…
+                  <div className="bg-white border border-card-border rounded-2xl rounded-bl-md px-4 py-2.5 text-sm text-muted-foreground italic">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2 not-italic" />
+                    {statusLine || 'Joe is thinking…'}
                   </div>
                 </div>
               )}
