@@ -1,5 +1,5 @@
 /**
- * Unified AI cascade: Gemini → Claude → OpenAI → OpenRouter.
+ * Unified AI cascade: Claude → OpenAI → Gemini → OpenRouter.
  *
  * Drops in anywhere we call an LLM. Tries each provider whose key is
  * supplied, in the listed order. On a fallback-able failure (credit
@@ -7,36 +7,40 @@
  * the next provider; any other error is re-thrown so the caller's
  * retry policy still applies.
  *
- * Resume parsers pass `geminiKey + openaiKey + openRouterKey` (no Claude).
- * Drafting / chat / sentiment / matching pass `anthropicKey + openaiKey`.
+ * All AI surfaces (resume parsing, drafting, chat, sentiment, matching)
+ * pass all four keys — Claude leads because it's the strongest model
+ * for the recruiting-specific reasoning, structured-extraction, and
+ * tone-matching work, and because it natively handles PDF/image doc
+ * blocks the other providers can't accept.
  *
  * Usable from both Vercel serverless functions and Trigger.dev tasks —
  * both run Node 20 with global fetch.
  *
  * Limitations:
  *   - When `userContent` includes PDF/image document blocks (the
- *     Anthropic input shape), only Claude can be tried; Gemini and
- *     OpenAI stages are skipped.
+ *     Anthropic input shape), only Claude can be tried; Gemini, OpenAI,
+ *     and OpenRouter stages are skipped.
  *   - Each stage is opt-in by passing the corresponding key. If only
  *     one key is set, the helper effectively becomes a single-provider
  *     wrapper with no fallback.
  */
 
 export interface CallAIOptions {
-  /** Gemini API key. Tried first when set. */
-  geminiKey?: string;
-  /** Anthropic API key. Tried second (or first if no geminiKey). */
+  /** Anthropic API key. Tried first when set. */
   anthropicKey?: string;
-  /** OpenAI API key. Tried third. */
+  /** OpenAI API key. Tried second. */
   openaiKey?: string;
+  /** Gemini API key. Tried third. */
+  geminiKey?: string;
   /** OpenRouter API key. Tried last — gateway to many providers in one
-   *  account, used as the final escape hatch when both Gemini and OpenAI
-   *  fail open. */
+   *  account, used as the final escape hatch when every other provider
+   *  fails open. */
   openRouterKey?: string;
   systemPrompt: string;
   /**
    * Either a plain string (user message) or an array of Anthropic-shaped
-   * content blocks. Documents/images skip Gemini + OpenAI fallbacks.
+   * content blocks. Documents/images skip the OpenAI, Gemini, and
+   * OpenRouter fallbacks.
    */
   userContent: string | any[];
   /** Anthropic model — default 'claude-sonnet-4-20250514'. */
@@ -52,15 +56,16 @@ export interface CallAIOptions {
   maxTokens?: number;
   /** Default 0. */
   temperature?: number;
-  /** When true, JSON-shaped output is requested (Gemini + OpenAI honor
-   *  this directly; Anthropic relies on the system prompt). */
+  /** When true, JSON-shaped output is requested (Gemini + OpenAI +
+   *  OpenRouter honor this directly; Anthropic relies on the system
+   *  prompt). */
   jsonOutput?: boolean;
 }
 
 export interface CallAIResult {
   text: string;
   /** Which provider actually produced the answer. */
-  via: "gemini" | "claude" | "openai" | "openrouter";
+  via: "claude" | "openai" | "gemini" | "openrouter";
 }
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
@@ -211,19 +216,7 @@ export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIRes
   const isText = userContentIsTextOnly(opts.userContent);
   let lastError: unknown = null;
 
-  // ── Stage 1: Gemini (only when text-only — Gemini doesn't speak the
-  //               Anthropic doc-block shape we sometimes pass)
-  if (opts.geminiKey && isText) {
-    try {
-      const text = await tryGemini(opts);
-      return { text, via: "gemini" };
-    } catch (err) {
-      lastError = err;
-      if (!isFallbackable(err)) throw err;
-    }
-  }
-
-  // ── Stage 2: Claude
+  // ── Stage 1: Claude (handles both text and PDF/image doc blocks)
   if (opts.anthropicKey) {
     try {
       const text = await tryClaude(opts);
@@ -234,7 +227,7 @@ export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIRes
     }
   }
 
-  // ── Stage 3: OpenAI (text-only — same caveat as Gemini for docs)
+  // ── Stage 2: OpenAI (text-only — doc blocks skip)
   if (opts.openaiKey && isText) {
     try {
       const text = await tryOpenAI(opts);
@@ -245,8 +238,19 @@ export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIRes
     }
   }
 
-  // ── Stage 4: OpenRouter (text-only — same caveat). Final escape hatch
-  //               when every other provider has fallen open.
+  // ── Stage 3: Gemini (text-only — doc blocks skip)
+  if (opts.geminiKey && isText) {
+    try {
+      const text = await tryGemini(opts);
+      return { text, via: "gemini" };
+    } catch (err) {
+      lastError = err;
+      if (!isFallbackable(err)) throw err;
+    }
+  }
+
+  // ── Stage 4: OpenRouter (text-only). Final escape hatch when every
+  //               other provider has fallen open.
   if (opts.openRouterKey && isText) {
     try {
       const text = await tryOpenRouter(opts);

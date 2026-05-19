@@ -24,11 +24,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Pull keys from env first, falling back to app_settings so the
     // function works regardless of which deployment surface stored
-    // them. Gemini is the primary; OpenAI is the fallback.
-    let geminiKey = process.env.GEMINI_API_KEY || "";
+    // them. Cascade order is Claude → OpenAI → Gemini → OpenRouter
+    // (see ai-fallback.ts) so all four keys feed into the helper.
+    let anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
     let openaiKey = process.env.OPENAI_API_KEY || "";
+    let geminiKey = process.env.GEMINI_API_KEY || "";
     let openRouterKey = process.env.OPENROUTER_API_KEY || "";
-    if (!geminiKey || !openaiKey || !openRouterKey) {
+    if (!anthropicKey || !openaiKey || !geminiKey || !openRouterKey) {
       const supaUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
       const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (supaUrl && svc) {
@@ -36,16 +38,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data } = await admin
           .from("app_settings")
           .select("key, value")
-          .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
+          .in("key", ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]);
         for (const row of data ?? []) {
-          if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
+          if (row.key === "ANTHROPIC_API_KEY" && !anthropicKey) anthropicKey = row.value;
           if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+          if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
           if (row.key === "OPENROUTER_API_KEY" && !openRouterKey) openRouterKey = row.value;
         }
       }
     }
-    if (!geminiKey && !openaiKey && !openRouterKey) {
-      return res.status(500).json({ error: "Resume parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY configured" });
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+      return res.status(500).json({ error: "Resume parser: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY configured" });
     }
 
     const jobContext = job_title
@@ -78,8 +81,9 @@ Resume text:
 ${resume_text}`;
 
     const { text } = await callAIWithFallback({
-      geminiKey: geminiKey || undefined,
+      anthropicKey: anthropicKey || undefined,
       openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
       openRouterKey: openRouterKey || undefined,
       systemPrompt: "You parse resumes into structured JSON.",
       userContent: userPrompt,

@@ -2,6 +2,7 @@ import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
   getAppSetting,
+  getAnthropicKey,
   getGeminiKey,
   getOpenAIKey,
   getOpenRouterKey,
@@ -255,14 +256,15 @@ export const reconcileOrphanedResumes = inngest.createFunction(
     const errors: string[] = [];
     const outcomes: ResumeOutcome[] = [];
 
-    const [geminiKey, openaiKey, openRouterKey, mistralKey] = await Promise.all([
-      getGeminiKey().catch(() => ""),
+    const [anthropicKey, openaiKey, geminiKey, openRouterKey, mistralKey] = await Promise.all([
+      getAnthropicKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getGeminiKey().catch(() => ""),
       getOpenRouterKey().catch(() => ""),
       getMistralKey().catch(() => ""),
     ]);
-    if (!geminiKey && !openaiKey && !openRouterKey) {
-      logger.warn("Reconcile: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY — cannot parse");
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+      logger.warn("Reconcile: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY — cannot parse");
       return { skipped: true, reason: "no_ai_keys" };
     }
     const parseOpts = {
@@ -270,8 +272,9 @@ export const reconcileOrphanedResumes = inngest.createFunction(
       callAI: (req: any) =>
         callAIWithFallback({
           ...req,
-          geminiKey: geminiKey || undefined,
+          anthropicKey: anthropicKey || undefined,
           openaiKey: openaiKey || undefined,
+          geminiKey: geminiKey || undefined,
           openRouterKey: openRouterKey || undefined,
         }),
       log: logger,

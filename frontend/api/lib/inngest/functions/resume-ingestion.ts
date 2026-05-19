@@ -1,6 +1,7 @@
 import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
+  getAnthropicKey,
   getGeminiKey,
   getOpenAIKey,
   getOpenRouterKey,
@@ -100,13 +101,14 @@ export const resumeIngestion = inngest.createFunction(
       }
 
       const rawText = sniffText;
-      const [geminiKey, openaiKey, openRouterKey] = await Promise.all([
-        getGeminiKey(),
+      const [anthropicKey, openaiKey, geminiKey, openRouterKey] = await Promise.all([
+        getAnthropicKey().catch(() => ""),
         getOpenAIKey().catch(() => ""),
+        getGeminiKey().catch(() => ""),
         getOpenRouterKey().catch(() => ""),
       ]);
-      if (!geminiKey && !openaiKey && !openRouterKey) {
-        throw new Error("Resume parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY in app_settings");
+      if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+        throw new Error("Resume parser: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY in app_settings");
       }
 
       const userPrompt = `Parse this resume into structured JSON. Return ONLY valid JSON, no markdown.
@@ -128,8 +130,9 @@ Resume text:
 ${rawText.slice(0, 60000)}`;
 
       const { text, via } = await callAIWithFallback({
-        geminiKey: geminiKey || undefined,
+        anthropicKey: anthropicKey || undefined,
         openaiKey: openaiKey || undefined,
+        geminiKey: geminiKey || undefined,
         openRouterKey: openRouterKey || undefined,
         systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
         userContent: userPrompt,
