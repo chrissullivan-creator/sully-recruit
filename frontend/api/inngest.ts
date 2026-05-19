@@ -49,6 +49,7 @@ import { findLinkedinUrlByName } from "./lib/inngest/functions/find-linkedin-url
 import { findLinkedinUrlSweep } from "./lib/inngest/functions/find-linkedin-url-sweep.js";
 import { enrichCompanyViaApollo } from "./lib/inngest/functions/enrich-company-via-apollo.js";
 import { enrichCompaniesSweep } from "./lib/inngest/functions/enrich-companies-sweep.js";
+import { backfillJoeSaysEmbeddings } from "./lib/inngest/functions/backfill-joe-says-embeddings.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -110,5 +111,6 @@ export default serve({
     findLinkedinUrlSweep,
     enrichCompanyViaApollo,
     enrichCompaniesSweep,
+    backfillJoeSaysEmbeddings,
   ],
 });
