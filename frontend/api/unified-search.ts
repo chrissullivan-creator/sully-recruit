@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * POST /api/unified-search
@@ -10,6 +11,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!(await requireAuth(req, res))) return;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
@@ -64,11 +67,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .or(keywords.map((k: string) => `title.ilike.%${k}%,company_name.ilike.%${k}%`).join(","))
         .limit(10),
 
-      // Notes (search body text)
+      // Notes (search note text). Schema is { id, entity_id, entity_type,
+      // note, created_at } — previous code selected/filtered on a `body`
+      // column that doesn't exist, which silently dropped notes from the
+      // unified search context.
       supabase
         .from("notes")
-        .select("id, candidate_id, contact_id, body, created_at")
-        .or(keywords.map((k: string) => `body.ilike.%${k}%`).join(","))
+        .select("id, entity_id, entity_type, note, created_at")
+        .or(keywords.map((k: string) => `note.ilike.%${k}%`).join(","))
         .order("created_at", { ascending: false })
         .limit(10),
     ]);
@@ -107,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sections.push(
         `## Notes (${noteRes.data.length} found)\n` +
         noteRes.data
-          .map((n) => `- ${n.body?.slice(0, 200)}... (${n.created_at?.slice(0, 10)})`)
+          .map((n: any) => `- [${n.entity_type ?? "?"} ${n.entity_id ?? ""}] ${(n.note ?? "").slice(0, 200)}... (${n.created_at?.slice(0, 10)})`)
           .join("\n"),
       );
     }

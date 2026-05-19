@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Send, Loader2, Sparkles, Play, Building, Mail, Linkedin, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { authHeaders } from '@/lib/api-auth';
 
 interface ContactResult {
   id: string;
@@ -84,10 +85,7 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
     try {
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: await authHeaders(),
         body: JSON.stringify({
           messages: allMessages
             .filter((m) => m.role === 'user' || m.role === 'assistant')

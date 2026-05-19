@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Search, Send, Loader2, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { authHeaders } from '@/lib/api-auth';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -50,10 +51,7 @@ export function AskJoeCandidateSearch({ open, onOpenChange }: Props) {
     try {
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: await authHeaders(),
         body: JSON.stringify({
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
           mode: 'candidate_search',

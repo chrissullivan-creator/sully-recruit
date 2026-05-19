@@ -3,6 +3,8 @@ import {
   getSupabaseAdmin,
   getAnthropicKey,
   getOpenAIKey,
+  getGeminiKey,
+  getOpenRouterKey,
 } from "../../../../src/trigger/lib/supabase.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
@@ -89,11 +91,13 @@ export const extractManualCallIntel = inngest.createFunction(
       ? `${Math.floor(cl.duration_seconds / 60)}m ${cl.duration_seconds % 60}s`
       : "unspecified-length";
 
-    const [anthropicKey, openaiKey] = await Promise.all([
+    const [anthropicKey, openaiKey, geminiKey, openRouterKey] = await Promise.all([
       getAnthropicKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getGeminiKey().catch(() => ""),
+      getOpenRouterKey().catch(() => ""),
     ]);
-    if (!anthropicKey && !openaiKey) {
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
       logger.warn("No AI keys configured — skipping extraction");
       return { skipped: true, reason: "no_ai_keys" };
     }
@@ -103,6 +107,8 @@ export const extractManualCallIntel = inngest.createFunction(
       const { text } = await callAIWithFallback({
         anthropicKey: anthropicKey || undefined,
         openaiKey: openaiKey || undefined,
+        geminiKey: geminiKey || undefined,
+        openRouterKey: openRouterKey || undefined,
         systemPrompt: SYSTEM_PROMPT,
         userContent: `Call with ${entityName} (${duration}).\n\nRecruiter notes:\n${notes.slice(0, 30_000)}`,
         model: "claude-sonnet-4-6",
