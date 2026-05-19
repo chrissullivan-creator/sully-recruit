@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Search, Send, Loader2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { authHeaders } from '@/lib/api-auth';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -39,10 +40,7 @@ export function ResumeSearchDialog({ open, onOpenChange }: Props) {
     try {
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: await authHeaders(),
         body: JSON.stringify({
           messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
           mode: 'resume_search',
