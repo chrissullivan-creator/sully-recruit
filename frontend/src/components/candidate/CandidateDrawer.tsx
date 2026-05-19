@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -180,8 +181,15 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                 )}
                 <div className="min-w-0 flex-1">
                   <SheetTitle className="text-base font-display text-emerald-dark text-left truncate">{name}</SheetTitle>
-                  <p className="text-xs text-muted-foreground truncate text-left mt-0.5">
-                    {c.current_title ?? '—'}{c.current_company ? ` · ${c.current_company}` : ''}
+                  <p className="text-xs text-muted-foreground truncate text-left mt-0.5 flex items-center gap-1.5">
+                    <span className="truncate">{c.current_title ?? '—'}</span>
+                    {c.current_company && (
+                      <>
+                        <span>·</span>
+                        <CompanyLogo name={c.current_company} size="xs" />
+                        <span className="truncate">{c.current_company}</span>
+                      </>
+                    )}
                   </p>
                   {cfg && (
                     <div className="flex items-center gap-2 mt-2">
