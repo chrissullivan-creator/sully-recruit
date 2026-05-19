@@ -366,12 +366,11 @@ export const backfillEmails = inngest.createFunction(
       } catch (err: any) {
         logger.error("Account processing error", { email: account.email_address, error: err.message });
         results.push({ email: account.email_address, error: err.message });
-        await notifyError({
-          taskId: "backfill-emails",
-          severity: "WARN",
-          error: err,
-          context: { accountId: account.id, email: account.email_address },
-        });
+        // No notifyError here — the inner page-fetch catch already alerts
+        // on non-5xx Unipile errors at ERROR severity, and downstream
+        // failures (DB insert, cursor advance) are noisy on Unipile-side
+        // 5xx incidents without being independently actionable. The
+        // logger.error above keeps the row in Inngest run history.
       }
     }
 
