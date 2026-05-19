@@ -1,5 +1,5 @@
 import { useDroppable } from '@dnd-kit/core';
-import { ChevronDown, ChevronRight, Plus, Star, MoreHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CandidateRow } from './CandidateRow';
 import { type SendOutRow } from '@/lib/queries/send-outs';
@@ -69,13 +69,6 @@ export function StageTable({
         )}
 
         <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <button
-            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/40"
-            title="Bulk actions"
-            onClick={(e) => { e.stopPropagation(); /* TODO bulk */ }}
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
           {onAdd && (
             <button
               onClick={(e) => { e.stopPropagation(); onAdd(); }}
