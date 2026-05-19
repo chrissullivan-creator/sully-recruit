@@ -225,6 +225,27 @@ export type RecoverOrphanResumesRequested = {
   data: { limit?: number; since?: string };
 };
 
+/**
+ * Search Unipile for a LinkedIn profile by name + company and write the
+ * URL back to `people.linkedin_url`. Fired by resume-ingestion when the
+ * parsed resume had no URL, by the person-created webhook when a new
+ * row lands without one, and by the safety-net cron for retries.
+ */
+export type FindLinkedinUrlRequested = {
+  name: "people/find-linkedin-url.requested";
+  data: { person_id: string };
+};
+
+/**
+ * Enrich a single company via Apollo's /organizations/enrich and write
+ * missing fields (industry, size, description, logo, etc.). Fired by
+ * the enrich-companies-sweep cron and any on-demand caller.
+ */
+export type EnrichCompanyViaApolloRequested = {
+  name: "companies/enrich-via-apollo.requested";
+  data: { company_id: string };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -240,4 +261,6 @@ export type AllInngestEvents =
   | SendMessageRequested
   | ExtractCallIntelRequested
   | FetchEntityHistoryRequested
-  | RecoverOrphanResumesRequested;
+  | RecoverOrphanResumesRequested
+  | FindLinkedinUrlRequested
+  | EnrichCompanyViaApolloRequested;

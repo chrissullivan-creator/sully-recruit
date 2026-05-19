@@ -742,30 +742,33 @@ const ContactDetail = () => {
 
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-3 border-b border-border">
-              <TabsList className="bg-white border border-card-border">
-                <TabsTrigger value="joe" className="gap-1.5">
+            {/* Horizontally scrollable strip — same pattern as
+                CandidateDetail. Avoids the wrap/cut-off that 8 tabs
+                trigger on smaller viewports. */}
+            <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <TabsList className="bg-white border border-card-border inline-flex w-max">
+                <TabsTrigger value="joe" className="gap-1.5 snap-start">
                   <Sparkles className="h-3.5 w-3.5" /> Joe Says
                 </TabsTrigger>
-                <TabsTrigger value="jobs" className="gap-1.5">
+                <TabsTrigger value="jobs" className="gap-1.5 snap-start">
                   <Briefcase className="h-3.5 w-3.5" /> Jobs ({linkedJobs.length})
                 </TabsTrigger>
-                <TabsTrigger value="candidates" className="gap-1.5">
+                <TabsTrigger value="candidates" className="gap-1.5 snap-start">
                   <Users className="h-3.5 w-3.5" /> Send Outs ({sendOuts.length})
                 </TabsTrigger>
-                <TabsTrigger value="communications" className="gap-1.5">
+                <TabsTrigger value="communications" className="gap-1.5 snap-start">
                   <MessageSquare className="h-3.5 w-3.5" /> Communications ({(conversations as any[]).length})
                 </TabsTrigger>
-                <TabsTrigger value="meeting-recaps" className="gap-1.5">
+                <TabsTrigger value="meeting-recaps" className="gap-1.5 snap-start">
                   <PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps
                 </TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5">
+                <TabsTrigger value="activity" className="gap-1.5 snap-start">
                   <History className="h-3.5 w-3.5" /> Activity
                 </TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5">
+                <TabsTrigger value="notes" className="gap-1.5 snap-start">
                   <FileText className="h-3.5 w-3.5" /> Notes
                 </TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5">
+                <TabsTrigger value="sizzles" className="gap-1.5 snap-start">
                   <Sparkles className="h-3.5 w-3.5" /> Sizzles
                 </TabsTrigger>
               </TabsList>

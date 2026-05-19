@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Search, Users2, Briefcase, Building2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 
 interface SearchHit {
   type: 'person' | 'job' | 'company';
@@ -11,6 +12,12 @@ interface SearchHit {
   primary: string;
   secondary?: string;
   href: string;
+  /** Logo source — for company hits this is the company itself; for
+   *  person/job hits it's the associated company so we can render its
+   *  logo as the row glyph instead of a generic type icon. */
+  logoName?: string | null;
+  logoDomain?: string | null;
+  logoUrl?: string | null;
 }
 
 function useGlobalSearch(query: string) {
@@ -31,12 +38,12 @@ function useGlobalSearch(query: string) {
           .limit(8),
         supabase
           .from('jobs')
-          .select('id, title, company_name, status')
+          .select('id, title, company_name, status, companies(name, domain, logo_url)')
           .or(`title.ilike.${q},company_name.ilike.${q}`)
           .limit(6),
         supabase
           .from('companies')
-          .select('id, name, industry, company_type')
+          .select('id, name, industry, company_type, domain, logo_url')
           .or(`name.ilike.${q},industry.ilike.${q}`)
           .limit(6),
       ]);
@@ -54,15 +61,20 @@ function useGlobalSearch(query: string) {
           primary: name || (p as any).email || 'Unnamed',
           secondary: [title, company].filter(Boolean).join(' · '),
           href: isClient ? `/contacts/${(p as any).id}` : `/candidates/${(p as any).id}`,
+          logoName: company || null,
         });
       }
       for (const j of jobs.data ?? []) {
+        const jc = (j as any).companies;
         hits.push({
           type: 'job',
           id: j.id,
           primary: j.title || 'Untitled job',
           secondary: [j.company_name, j.status].filter(Boolean).join(' · '),
           href: `/jobs/${j.id}`,
+          logoName: jc?.name || j.company_name || null,
+          logoDomain: jc?.domain || null,
+          logoUrl: jc?.logo_url || null,
         });
       }
       for (const c of companies.data ?? []) {
@@ -72,6 +84,9 @@ function useGlobalSearch(query: string) {
           primary: c.name || 'Unnamed',
           secondary: [c.industry, c.company_type].filter(Boolean).join(' · '),
           href: `/companies/${c.id}`,
+          logoName: c.name || null,
+          logoDomain: (c as any).domain || null,
+          logoUrl: (c as any).logo_url || null,
         });
       }
       return hits;
@@ -163,6 +178,12 @@ export function GlobalSearch() {
                 const flatIndex = flatList.indexOf(hit);
                 const isActive = flatIndex === active;
                 const Icon = hit.type === 'person' ? Users2 : hit.type === 'job' ? Briefcase : Building2;
+                // Render a company logo as the row glyph whenever we
+                // know which company is at stake — for company hits
+                // (always), and for job/person hits whose row has a
+                // company name attached. Falls through to the type
+                // icon when there's no company context.
+                const showLogo = !!hit.logoName;
                 return (
                   <button
                     key={`${hit.type}:${hit.id}`}
@@ -173,10 +194,19 @@ export function GlobalSearch() {
                       isActive ? 'bg-emerald-light/50' : 'hover:bg-emerald-light/30',
                     )}
                   >
-                    <Icon className={cn(
-                      'h-4 w-4 shrink-0',
-                      isActive ? 'text-emerald-dark' : 'text-muted-foreground',
-                    )} />
+                    {showLogo ? (
+                      <CompanyLogo
+                        name={hit.logoName!}
+                        domain={hit.logoDomain}
+                        logoUrl={hit.logoUrl}
+                        size="xs"
+                      />
+                    ) : (
+                      <Icon className={cn(
+                        'h-4 w-4 shrink-0',
+                        isActive ? 'text-emerald-dark' : 'text-muted-foreground',
+                      )} />
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-emerald-dark truncate">{hit.primary}</p>
                       {hit.secondary && (

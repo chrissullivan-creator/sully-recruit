@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1498,8 +1499,15 @@ const JobDetail = () => {
                                     </Badge>
                                   )}
                                 </div>
-                                <p className="text-[11px] text-muted-foreground truncate">
-                                  {[c.current_title, c.current_company].filter(Boolean).join(' · ')}
+                                <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
+                                  {c.current_title && <span className="truncate">{c.current_title}</span>}
+                                  {c.current_title && c.current_company && <span>·</span>}
+                                  {c.current_company && (
+                                    <>
+                                      <CompanyLogo name={c.current_company} size="xs" />
+                                      <span className="truncate">{c.current_company}</span>
+                                    </>
+                                  )}
                                 </p>
                               </button>
                               <Button
@@ -1710,8 +1718,16 @@ const JobDetail = () => {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed'}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {c.current_title}{c.current_company ? ` @ ${c.current_company}` : ''}{!c.current_title && c.email ? c.email : ''}
+                      <p className="text-xs text-muted-foreground truncate flex items-center gap-1.5">
+                        {c.current_title && <span className="truncate">{c.current_title}</span>}
+                        {c.current_company && (
+                          <>
+                            {c.current_title && <span>@</span>}
+                            <CompanyLogo name={c.current_company} size="xs" />
+                            <span className="truncate">{c.current_company}</span>
+                          </>
+                        )}
+                        {!c.current_title && !c.current_company && c.email && <span className="truncate">{c.email}</span>}
                       </p>
                     </div>
                     {addingSendOut ? (

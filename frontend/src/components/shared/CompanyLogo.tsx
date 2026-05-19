@@ -4,6 +4,9 @@ import { cn } from '@/lib/utils';
 export type CompanyLogoSize = 'xs' | 'sm' | 'md' | 'lg';
 
 interface Props {
+  /** Direct logo URL — preferred when present (e.g. populated by
+   *  Apollo enrichment into `companies.logo_url`). */
+  logoUrl?: string | null;
   domain?: string | null;
   name: string;
   size?: CompanyLogoSize;
@@ -35,32 +38,50 @@ function normalizeDomain(d: string): string {
 }
 
 /**
- * Renders a company logo from Clearbit's free logo CDN, with a graceful
- * initials-avatar fallback when no domain is provided or when the image
- * fails to load. Pure client-side, no caching layer needed — the browser's
- * HTTP cache handles repeated requests.
+ * Renders a company logo with a three-tier fallback:
+ *   1. `logoUrl` if provided (e.g. populated by Apollo enrichment)
+ *   2. Clearbit CDN keyed on `domain`
+ *   3. Initials avatar
+ * Each tier falls through to the next on image-load error. Pure
+ * client-side; browser HTTP cache handles repeated requests.
  */
-export function CompanyLogo({ domain, name, size = 'sm', className, rounded = 'md' }: Props) {
+export function CompanyLogo({ logoUrl, domain, name, size = 'sm', className, rounded = 'md' }: Props) {
   const px = SIZE_PX[size];
   const cleanDomain = domain ? normalizeDomain(domain) : '';
-  const [failed, setFailed] = useState(false);
+  const [stage, setStage] = useState<'direct' | 'clearbit' | 'initials'>(
+    logoUrl ? 'direct' : cleanDomain ? 'clearbit' : 'initials',
+  );
 
-  // Reset error state when the domain changes so a new domain gets a fresh attempt
+  // Reset stage when sources change so a new logoUrl/domain gets a fresh attempt
   useEffect(() => {
-    setFailed(false);
-  }, [cleanDomain]);
+    if (logoUrl) setStage('direct');
+    else if (cleanDomain) setStage('clearbit');
+    else setStage('initials');
+  }, [logoUrl, cleanDomain]);
 
-  const showImage = !!cleanDomain && !failed;
   const initial = (name?.trim()?.[0] || '?').toUpperCase();
   const radiusClass = rounded === 'full' ? 'rounded-full' : 'rounded-md';
 
-  if (showImage) {
+  if (stage === 'direct' && logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={name}
+        loading="lazy"
+        onError={() => setStage(cleanDomain ? 'clearbit' : 'initials')}
+        style={{ width: px, height: px }}
+        className={cn(radiusClass, 'object-contain bg-white border border-border shrink-0', className)}
+      />
+    );
+  }
+
+  if (stage === 'clearbit' && cleanDomain) {
     return (
       <img
         src={`https://logo.clearbit.com/${cleanDomain}`}
         alt={name}
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={() => setStage('initials')}
         style={{ width: px, height: px }}
         className={cn(radiusClass, 'object-contain bg-white border border-border shrink-0', className)}
       />

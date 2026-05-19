@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Briefcase, Plus, StickyNote } from 'lucide-react';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import {
@@ -231,7 +232,8 @@ function KanbanCard({ row, onClick }: { row: KanbanRow; onClick?: (row: KanbanRo
           <p className="text-xs font-medium text-foreground truncate">{name}</p>
           {c?.current_company && (
             <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5">
-              <Briefcase className="h-2.5 w-2.5" /> {c.current_company}
+              <CompanyLogo name={c.current_company} size="xs" />
+              {c.current_company}
             </p>
           )}
           <div className="flex items-center justify-between gap-2 mt-1.5">

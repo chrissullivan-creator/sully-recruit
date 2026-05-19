@@ -1375,17 +1375,20 @@ const CandidateDetail = () => {
 
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-3 border-b border-border">
-              <TabsList className="bg-white border border-card-border">
-                <TabsTrigger value="joe" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
-                <TabsTrigger value="background" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
-                <TabsTrigger value="communications" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
-                <TabsTrigger value="meeting-recaps" className="gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps</TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
-                <TabsTrigger value="documents" className="gap-1.5"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
-                <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
-                <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+            {/* Horizontally scrollable strip — 9 tabs overflow on smaller
+                viewports; scroll-snap + hidden scrollbar give a clean
+                "swipeable" feel without breaking shadcn TabsList layout. */}
+            <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <TabsList className="bg-white border border-card-border inline-flex w-max">
+                <TabsTrigger value="joe" className="gap-1.5 snap-start"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
+                <TabsTrigger value="background" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
+                <TabsTrigger value="communications" className="gap-1.5 snap-start"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
+                <TabsTrigger value="meeting-recaps" className="gap-1.5 snap-start"><PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps</TabsTrigger>
+                <TabsTrigger value="activity" className="gap-1.5 snap-start"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+                <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
+                <TabsTrigger value="source" className="gap-1.5 snap-start"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
+                <TabsTrigger value="send-outs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5 snap-start"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
             </div>
 

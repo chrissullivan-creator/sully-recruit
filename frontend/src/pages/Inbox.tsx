@@ -620,6 +620,49 @@ async function uploadAttachment(
 }
 
 // ---------- Message Detail ----------
+// Drafts persist per-thread in localStorage so switching threads or
+// closing the tab doesn't blow away what the user typed. Key shape:
+// inbox_draft:<thread_id>. Stored as { html, text, updated_at } JSON.
+const DRAFT_KEY_PREFIX = 'inbox_draft:';
+
+function loadDraft(threadId: string | null): { html: string; text: string } | null {
+  if (!threadId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${DRAFT_KEY_PREFIX}${threadId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return { html: parsed.html ?? '', text: parsed.text ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(threadId: string, html: string, text: string): void {
+  if (typeof window === 'undefined') return;
+  if (!html.trim() && !text.trim()) {
+    window.localStorage.removeItem(`${DRAFT_KEY_PREFIX}${threadId}`);
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      `${DRAFT_KEY_PREFIX}${threadId}`,
+      JSON.stringify({ html, text, updated_at: Date.now() }),
+    );
+  } catch {
+    // Quota / disabled storage — silently ignore, draft just won't persist.
+  }
+}
+
+function clearDraft(threadId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(`${DRAFT_KEY_PREFIX}${threadId}`);
+  } catch {
+    // ignore
+  }
+}
+
 function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
@@ -627,6 +670,19 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
   const [deleting, setDeleting] = useState(false);
+
+  // Restore the persisted draft when the thread changes. Sets the
+  // contenteditable's innerHTML on the next tick so the React state +
+  // DOM stay in sync.
+  useEffect(() => {
+    const draft = loadDraft(threadId);
+    setReplyHtml(draft?.html ?? '');
+    setReplyText(draft?.text ?? '');
+    requestAnimationFrame(() => {
+      if (editorRef.current) editorRef.current.innerHTML = draft?.html ?? '';
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
   const handleDeleteThread = async () => {
     if (!threadId) return;
@@ -693,6 +749,19 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     await supabase.from('conversations').update({ is_read: true }).eq('id', threadId);
     invalidateCommsScope(queryClient);
   };
+
+  // Auto-mark-read shortly after a thread is opened. 600ms delay so a
+  // misclick during quick scanning doesn't flip the state — long
+  // enough to feel intentional, short enough to feel automatic.
+  // Skips if already read or still loading.
+  useEffect(() => {
+    if (!threadId || !thread || thread.is_read) return;
+    const t = window.setTimeout(() => {
+      handleMarkRead();
+    }, 600);
+    return () => window.clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, thread?.is_read]);
 
   const handlePickFiles = () => fileInputRef.current?.click();
 
@@ -849,6 +918,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
       setReplyHtml('');
       setPendingAttachments([]);
       if (editorRef.current) editorRef.current.innerHTML = '';
+      if (threadId) clearDraft(threadId);
       invalidateCommsScope(queryClient);
     } catch (err: any) {
       console.error('Send error:', err);
@@ -1165,7 +1235,9 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                     setReplyHtml(html);
                     const tmp = document.createElement('div');
                     tmp.innerHTML = html;
-                    setReplyText(tmp.textContent || '');
+                    const text = tmp.textContent || '';
+                    setReplyText(text);
+                    if (threadId) saveDraft(threadId, html, text);
                   }}
                   placeholder={`Reply via ${CHANNEL_LABELS[thread.channel] || thread.channel}...`}
                   minHeight="60px"
@@ -1178,7 +1250,10 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                     setReplyHtml(template.body);
                     const tmp = document.createElement('div');
                     tmp.innerHTML = template.body;
-                    setReplyText(tmp.textContent || '');
+                    const text = tmp.textContent || '';
+                    setReplyText(text);
+                    if (editorRef.current) editorRef.current.innerHTML = template.body;
+                    if (threadId) saveDraft(threadId, template.body, text);
                   }}
                 />
                 <input

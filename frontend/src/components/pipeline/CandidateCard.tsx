@@ -1,5 +1,6 @@
 import { Building, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import type { Candidate, CandidateStage } from '@/types';
 
 interface CandidateCardProps {
@@ -45,8 +46,12 @@ export function CandidateCard({ candidate, onClick }: CandidateCardProps) {
             {candidate.firstName} {candidate.lastName}
           </h4>
           <p className="text-xs text-muted-foreground truncate">{candidate.currentTitle}</p>
-          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-            <Building className="h-3 w-3" />
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+            {candidate.currentCompany ? (
+              <CompanyLogo name={candidate.currentCompany} size="xs" />
+            ) : (
+              <Building className="h-3 w-3" />
+            )}
             {candidate.currentCompany}
           </p>
         </div>
