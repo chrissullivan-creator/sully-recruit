@@ -43,7 +43,7 @@ export interface CallAIOptions {
    * OpenRouter fallbacks.
    */
   userContent: string | any[];
-  /** Anthropic model — default 'claude-sonnet-4-20250514'. */
+  /** Anthropic model — default 'claude-sonnet-4-6'. */
   model?: string;
   /** Gemini model — default 'gemini-2.5-flash'. */
   geminiModel?: string;
@@ -69,7 +69,7 @@ export interface CallAIResult {
 }
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
-const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 

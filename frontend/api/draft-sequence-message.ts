@@ -38,9 +38,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing required field: channel" });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
+    const openaiKey = process.env.OPENAI_API_KEY || "";
+    const geminiKey = process.env.GEMINI_API_KEY || "";
+    const openRouterKey = process.env.OPENROUTER_API_KEY || "";
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+      return res.status(500).json({ error: "No AI keys configured (need ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY)" });
     }
 
     // Channel-specific guidance
@@ -130,11 +133,13 @@ IMPORTANT:
 Write the message now:`;
 
     const { text } = await callAIWithFallback({
-      anthropicKey: apiKey,
-      openaiKey: process.env.OPENAI_API_KEY,
+      anthropicKey: anthropicKey || undefined,
+      openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
+      openRouterKey: openRouterKey || undefined,
       systemPrompt: "You are Joe, an outreach copywriter for Emerald Recruiting Group.",
       userContent: prompt,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       maxTokens: 800,
     });
 
