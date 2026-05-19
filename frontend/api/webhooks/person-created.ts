@@ -40,23 +40,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const body = req.body ?? {};
-  if (body.type !== "INSERT" || body.table !== "people") {
-    return res.status(200).json({ skipped: true, reason: "not a people INSERT" });
+  if ((body.type !== "INSERT" && body.type !== "UPDATE") || body.table !== "people") {
+    return res.status(200).json({ skipped: true, reason: "not a people INSERT/UPDATE" });
   }
 
   const record = body.record ?? {};
+  const oldRecord = body.old_record ?? null;
   const entityId = record.id as string | undefined;
   if (!entityId) {
     return res.status(200).json({ skipped: true, reason: "no record.id" });
   }
 
-  // Skip placeholder stubs — resume-ingestion fires its own event for
-  // the real candidate once the parse resolves identity.
+  // Skip placeholder stubs — resume-ingestion fires the UPDATE-side
+  // webhook itself once is_stub flips to false on parse completion.
   if (record.is_stub === true) {
     return res.status(200).json({ skipped: true, reason: "is_stub" });
   }
 
-  // Skip if there's no contact info to fetch against.
+  // On UPDATE, only proceed for the two meaningful transitions the
+  // Postgres trigger fires for — the DB side already filters, but
+  // double-check here so a webhook replay can't reprocess unchanged rows.
+  if (body.type === "UPDATE" && oldRecord) {
+    const stubResolved =
+      oldRecord.is_stub === true && record.is_stub === false;
+    const linkedinJustAdded =
+      (!oldRecord.linkedin_url || oldRecord.linkedin_url === "") &&
+      !!record.linkedin_url;
+    if (!stubResolved && !linkedinJustAdded) {
+      return res.status(200).json({ skipped: true, reason: "no relevant transition" });
+    }
+  }
+
   const hasEmail = !!(record.primary_email || record.work_email || record.personal_email);
   const hasLinkedin = !!record.linkedin_url;
   if (!hasEmail && !hasLinkedin) {
@@ -64,6 +78,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const entityType: "candidate" | "contact" = record.type === "client" ? "contact" : "candidate";
+
+  // Eagerly resolve the person's Unipile provider_id when we have a
+  // LinkedIn URL — without it, fetch-entity-history's LinkedIn leg has
+  // nothing to match against. Fire-and-forget on the same host so we
+  // don't block the trigger response. resolve-person-now is idempotent
+  // and 200s on every error, so a failure here just falls back to the
+  // every-2h cron sweep.
+  let resolveDispatched = false;
+  if (hasLinkedin) {
+    try {
+      const host = (req.headers["x-forwarded-host"] || req.headers.host) as string | undefined;
+      const proto = (req.headers["x-forwarded-proto"] as string) || "https";
+      const base = host ? `${proto}://${host}` : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+      if (base) {
+        // Don't await — resolve-person-now hits Unipile and can take a
+        // few seconds; the trigger doesn't need the result.
+        void fetch(`${base}/api/resolve-person-now`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ person_id: entityId }),
+        }).catch((err) => {
+          console.warn("resolve-person-now fire-and-forget failed", err?.message);
+        });
+        resolveDispatched = true;
+      }
+    } catch (err: any) {
+      console.warn("resolve-person-now dispatch threw", err?.message);
+    }
+  }
 
   try {
     const { ids } = await inngest.send({
@@ -74,7 +117,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: "messages/fetch-entity-history.requested",
       data: { entity_id: entityId, entity_type: entityType },
     });
-    return res.status(200).json({ dispatched: true, eventId: ids[0], entity_type: entityType });
+    return res.status(200).json({
+      dispatched: true,
+      eventId: ids[0],
+      entity_type: entityType,
+      resolve_dispatched: resolveDispatched,
+      op: body.type,
+    });
   } catch (err: any) {
     console.error("person-created webhook error", err?.message);
     return res.status(500).json({ error: err?.message || "unknown" });
