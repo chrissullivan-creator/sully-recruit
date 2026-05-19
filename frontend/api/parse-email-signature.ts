@@ -84,26 +84,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return res.status(500).json({ error: "Server misconfigured" });
 
-  // Gemini is the primary parser; OpenAI is the fallback. Pull both
-  // from env first, then app_settings. Either-or is enough — the
-  // helper handles a missing key gracefully.
-  let geminiKey = process.env.GEMINI_API_KEY || "";
+  // Cascade order Claude → OpenAI → Gemini → OpenRouter
+  // (see ai-fallback.ts). Pull each from env first, then app_settings.
+  let anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
   let openaiKey = process.env.OPENAI_API_KEY || "";
+  let geminiKey = process.env.GEMINI_API_KEY || "";
   let openRouterKey = process.env.OPENROUTER_API_KEY || "";
-  if (!geminiKey || !openaiKey || !openRouterKey) {
+  if (!anthropicKey || !openaiKey || !geminiKey || !openRouterKey) {
     const admin = createClient(supabaseUrl, serviceKey);
     const { data } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
+      .in("key", ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]);
     for (const row of data ?? []) {
-      if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
+      if (row.key === "ANTHROPIC_API_KEY" && !anthropicKey) anthropicKey = row.value;
       if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
+      if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
       if (row.key === "OPENROUTER_API_KEY" && !openRouterKey) openRouterKey = row.value;
     }
   }
-  if (!geminiKey && !openaiKey && !openRouterKey) {
-    return res.status(500).json({ error: "Email-signature parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY configured" });
+  if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+    return res.status(500).json({ error: "Email-signature parser: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY configured" });
   }
 
   // Auth
@@ -153,8 +154,9 @@ ${signatureBlock}
 JSON:`;
 
     const { text } = await callAIWithFallback({
-      geminiKey: geminiKey || undefined,
+      anthropicKey: anthropicKey || undefined,
       openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
       openRouterKey: openRouterKey || undefined,
       systemPrompt: "You extract contact info from email signatures and return JSON.",
       userContent: userPrompt,

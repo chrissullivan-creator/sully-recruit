@@ -52,23 +52,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // OCR FIRST (handles scanned/image-only PDFs); Gemini/OpenAI parse
     // the resulting text into structured JSON.
     let mistralKey = process.env.MISTRAL_API_KEY || "";
+    let anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
     let geminiKey = process.env.GEMINI_API_KEY || "";
     let openaiKey = process.env.OPENAI_API_KEY || "";
     let openRouterKey = process.env.OPENROUTER_API_KEY || "";
-    if (!mistralKey || !geminiKey || !openaiKey || !openRouterKey) {
+    if (!mistralKey || !anthropicKey || !geminiKey || !openaiKey || !openRouterKey) {
       const { data } = await admin
         .from("app_settings")
         .select("key, value")
-        .in("key", ["MISTRAL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
+        .in("key", ["MISTRAL_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
       for (const row of data ?? []) {
         if (row.key === "MISTRAL_API_KEY" && !mistralKey) mistralKey = row.value;
+        if (row.key === "ANTHROPIC_API_KEY" && !anthropicKey) anthropicKey = row.value;
         if (row.key === "GEMINI_API_KEY" && !geminiKey) geminiKey = row.value;
         if (row.key === "OPENAI_API_KEY" && !openaiKey) openaiKey = row.value;
         if (row.key === "OPENROUTER_API_KEY" && !openRouterKey) openRouterKey = row.value;
       }
     }
-    if (!geminiKey && !openaiKey && !openRouterKey) {
-      return res.status(500).json({ error: "Resume parser: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY configured" });
+    if (!anthropicKey && !geminiKey && !openaiKey && !openRouterKey) {
+      return res.status(500).json({ error: "Resume parser: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY configured" });
     }
 
     const { data: downloadData, error: downloadErr } = await admin.storage
@@ -120,8 +122,8 @@ ${rawText.slice(0, 60_000)}`;
     const systemPrompt =
       "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.";
 
-    const { text, via } = await callGeminiThenOpenAI({
-      geminiKey, openaiKey, openRouterKey,
+    const { text, via } = await callClaudeThenOpenAIThenGemini({
+      anthropicKey, openaiKey, geminiKey, openRouterKey,
       systemPrompt, userContent: userPrompt,
       maxTokens: 2048,
     });
@@ -262,8 +264,9 @@ async function extractResumeText(
 }
 
 interface CallOpts {
-  geminiKey: string;
+  anthropicKey: string;
   openaiKey: string;
+  geminiKey: string;
   openRouterKey: string;
   systemPrompt: string;
   userContent: string;
@@ -273,39 +276,39 @@ interface CallOpts {
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
 
-async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via: "gemini" | "openai" | "openrouter" }> {
-  // Gemini first. JSON-mode + low temperature for structured output.
-  if (opts.geminiKey) {
+async function callClaudeThenOpenAIThenGemini(opts: CallOpts): Promise<{ text: string; via: "claude" | "openai" | "gemini" | "openrouter" }> {
+  // Claude first — strongest reasoning + structured-extraction for the
+  // recruiting domain. JSON-mode is honored via the system prompt.
+  if (opts.anthropicKey) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
-      const resp = await fetch(url, {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": opts.anthropicKey,
+          "anthropic-version": "2023-06-01",
+        },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: opts.systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: opts.userContent }] }],
-          generationConfig: {
-            maxOutputTokens: opts.maxTokens,
-            temperature: 0,
-            responseMimeType: "application/json",
-          },
+          model: "claude-sonnet-4-20250514",
+          max_tokens: opts.maxTokens,
+          temperature: 0,
+          system: opts.systemPrompt,
+          messages: [{ role: "user", content: opts.userContent }],
         }),
       });
-      if (!resp.ok) {
-        const body = (await resp.text()).slice(0, 400);
-        throw new Error(`Gemini ${resp.status}: ${body}`);
-      }
+      if (!resp.ok) throw new Error(`Anthropic ${resp.status}: ${(await resp.text()).slice(0, 400)}`);
       const data = await resp.json();
       const text =
-        (data.candidates?.[0]?.content?.parts || [])
-          .map((p: any) => p.text || "")
+        (data.content || [])
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text)
           .join("") || "";
-      if (!text) throw new Error("Gemini returned no text content");
-      return { text, via: "gemini" };
+      if (!text) throw new Error("Anthropic returned no text content");
+      return { text, via: "claude" };
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      if (!FALLBACK_REGEX.test(msg) || (!opts.openaiKey && !opts.openRouterKey)) throw err;
-      console.warn("Gemini failed, falling back to OpenAI:", msg);
+      if (!FALLBACK_REGEX.test(msg) || (!opts.openaiKey && !opts.geminiKey && !opts.openRouterKey)) throw err;
+      console.warn("Claude failed, falling back to OpenAI:", msg);
     }
   }
 
@@ -336,8 +339,43 @@ async function callGeminiThenOpenAI(opts: CallOpts): Promise<{ text: string; via
       return { text, via: "openai" };
     } catch (err: any) {
       const msg = err?.message ?? String(err);
+      if (!FALLBACK_REGEX.test(msg) || (!opts.geminiKey && !opts.openRouterKey)) throw err;
+      console.warn("OpenAI failed, falling back to Gemini:", msg);
+    }
+  }
+
+  // Gemini fallback. JSON-mode + low temperature for structured output.
+  if (opts.geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: opts.userContent }] }],
+          generationConfig: {
+            maxOutputTokens: opts.maxTokens,
+            temperature: 0,
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+      if (!resp.ok) {
+        const body = (await resp.text()).slice(0, 400);
+        throw new Error(`Gemini ${resp.status}: ${body}`);
+      }
+      const data = await resp.json();
+      const text =
+        (data.candidates?.[0]?.content?.parts || [])
+          .map((p: any) => p.text || "")
+          .join("") || "";
+      if (!text) throw new Error("Gemini returned no text content");
+      return { text, via: "gemini" };
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
       if (!FALLBACK_REGEX.test(msg) || !opts.openRouterKey) throw err;
-      console.warn("OpenAI failed, falling back to OpenRouter:", msg);
+      console.warn("Gemini failed, falling back to OpenRouter:", msg);
     }
   }
 

@@ -1,6 +1,7 @@
 import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
+  getAnthropicKey,
   getGeminiKey,
   getOpenAIKey,
   getOpenRouterKey,
@@ -80,14 +81,15 @@ export const reparseResumes = inngest.createFunction(
       failedCount = 0;
     const errors: string[] = [];
 
-    const [geminiKey, openaiKey, openRouterKey, mistralKey] = await Promise.all([
-      getGeminiKey().catch(() => ""),
+    const [anthropicKey, openaiKey, geminiKey, openRouterKey, mistralKey] = await Promise.all([
+      getAnthropicKey().catch(() => ""),
       getOpenAIKey().catch(() => ""),
+      getGeminiKey().catch(() => ""),
       getOpenRouterKey().catch(() => ""),
       getMistralKey().catch(() => ""),
     ]);
-    if (!geminiKey && !openaiKey && !openRouterKey) {
-      logger.warn("Reparse: no GEMINI_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY — cannot run");
+    if (!anthropicKey && !openaiKey && !geminiKey && !openRouterKey) {
+      logger.warn("Reparse: no ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY — cannot run");
       return { skipped: true, reason: "no_ai_keys" };
     }
 
@@ -106,8 +108,9 @@ export const reparseResumes = inngest.createFunction(
           callAI: (req) =>
             callAIWithFallback({
               ...req,
-              geminiKey: geminiKey || undefined,
+              anthropicKey: anthropicKey || undefined,
               openaiKey: openaiKey || undefined,
+              geminiKey: geminiKey || undefined,
               openRouterKey: openRouterKey || undefined,
             }),
           log: logger,
