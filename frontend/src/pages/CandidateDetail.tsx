@@ -1342,50 +1342,6 @@ const CandidateDetail = () => {
                 />
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Active Job</Label>
-                <SearchableSelect
-                  options={(openJobs as any[]).map((j: any) => ({
-                    value: j.id,
-                    label: j.title,
-                    sublabel: j.companies?.name || j.company_name || undefined,
-                  }))}
-                  value={candidate.job_id ?? ''}
-                  onChange={async (val) => {
-                    const newJobId = val || null;
-                    try {
-                      const { error } = await supabase.from('people').update({ job_id: newJobId, job_status: newJobId ? 'new' : null }).eq('id', id!);
-                      if (error) { toast.error('Failed to update job assignment'); return; }
-                      queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                      queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                      toast.success(newJobId ? 'Job assigned' : 'Job removed');
-                    } catch (err: any) {
-                      toast.error(err?.message || 'Failed to update job assignment');
-                    }
-                  }}
-                  placeholder="Assign a job…"
-                  searchPlaceholder="Search jobs…"
-                  clearLabel="— None —"
-                  className="h-7 text-xs w-52"
-                />
-              </div>
-
-              {candidate.job_id && (
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Job Status</Label>
-                  <Select value={c.job_status ?? ''} onValueChange={updateJobStatus} disabled={updatingJobStatus}>
-                    <SelectTrigger className="h-7 text-xs w-36"><SelectValue placeholder="Set status…" /></SelectTrigger>
-                    <SelectContent>
-                      {SEND_OUT_STAGES.map(s => (
-                        <SelectItem key={s.value} value={s.value}>
-                          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
               {/* Match score badge */}
               {candidateJobMatch && (
                 <div className="flex items-center gap-2">
