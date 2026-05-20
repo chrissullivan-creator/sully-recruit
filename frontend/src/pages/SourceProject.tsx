@@ -16,6 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BulkAddCandidatesDialog } from '@/components/source/BulkAddCandidatesDialog';
 import { BulkAddContactsDialog } from '@/components/source/BulkAddContactsDialog';
+import { LocationCombobox, type LocationOption } from '@/components/source/LocationCombobox';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
@@ -176,7 +177,7 @@ export default function SourceProject() {
   const [searchKeywords, setSearchKeywords] = useState('');
   const [searchTitle, setSearchTitle] = useState('');
   const [searchCompany, setSearchCompany] = useState('');
-  const [searchLocation, setSearchLocation] = useState('');
+  const [searchLocation, setSearchLocation] = useState<LocationOption | null>(null);
   const [searchResults, setSearchResults] = useState<Applicant[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchTotal, setSearchTotal] = useState<number | null>(null);
@@ -366,31 +367,9 @@ export default function SourceProject() {
         .map((name) => ({ name }));
     }
 
-    // Location needs a parameter ID — resolve via /search/parameters
-    // (Unipile's autocomplete) and take the top match. If nothing
-    // resolves we drop the filter rather than 400ing the search.
-    if (searchLocation.trim()) {
-      try {
-        const paramsResp = await callSourceApi({
-          action: 'search_parameters',
-          account_id: accountId,
-          search: { type: 'LOCATION', keywords: searchLocation.trim() },
-          limit: 5,
-        }, session);
-        const items: any[] = Array.isArray(paramsResp.items) ? paramsResp.items : [];
-        const top = items[0];
-        if (top?.id) {
-          body.location = [{ id: top.id }];
-          const matchedName = top.title || top.name || top.label;
-          if (matchedName && matchedName.toLowerCase() !== searchLocation.trim().toLowerCase()) {
-            toast.message(`Location matched: ${matchedName}`);
-          }
-        } else {
-          toast.warning(`No LinkedIn location matched "${searchLocation.trim()}" — searching without location.`);
-        }
-      } catch (err: any) {
-        toast.warning(`Couldn't resolve location: ${err.message || 'unknown error'} — searching without it.`);
-      }
+    // Location was already resolved to an ID via the combobox.
+    if (searchLocation?.id) {
+      body.location = [{ id: searchLocation.id }];
     }
 
     setSearching(true);
@@ -807,6 +786,28 @@ export default function SourceProject() {
             onTitleChange={setSearchTitle}
             onCompanyChange={setSearchCompany}
             onLocationChange={setSearchLocation}
+            onLocationSearch={async (query) => {
+              if (!accountId) return [];
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session) return [];
+              try {
+                const resp = await callSourceApi({
+                  action: 'search_parameters',
+                  account_id: accountId,
+                  search: { type: 'LOCATION', keywords: query },
+                  limit: 8,
+                }, session);
+                const items: any[] = Array.isArray(resp.items) ? resp.items : [];
+                return items
+                  .map((it) => ({
+                    id: it.id,
+                    name: it.title || it.name || it.label || '',
+                  }))
+                  .filter((it) => it.id && it.name);
+              } catch {
+                return [];
+              }
+            }}
             onSubmit={runSearch}
             searching={searching}
             results={searchResults}
@@ -1006,11 +1007,12 @@ interface SearchTabProps {
   keywords: string;
   title: string;
   company: string;
-  location: string;
+  location: LocationOption | null;
   onKeywordsChange: (v: string) => void;
   onTitleChange: (v: string) => void;
   onCompanyChange: (v: string) => void;
-  onLocationChange: (v: string) => void;
+  onLocationChange: (v: LocationOption | null) => void;
+  onLocationSearch: (query: string) => Promise<LocationOption[]>;
   onSubmit: () => void;
   searching: boolean;
   results: Applicant[];
@@ -1022,6 +1024,7 @@ interface SearchTabProps {
 function SearchTab({
   keywords, title, company, location,
   onKeywordsChange, onTitleChange, onCompanyChange, onLocationChange,
+  onLocationSearch,
   onSubmit, searching, results, total,
   onSave, savingId,
 }: SearchTabProps) {
@@ -1044,10 +1047,10 @@ function SearchTab({
             value={company}
             onChange={(e) => onCompanyChange(e.target.value)}
           />
-          <Input
-            placeholder="Location (e.g. 'New York', 'San Francisco Bay Area')"
+          <LocationCombobox
             value={location}
-            onChange={(e) => onLocationChange(e.target.value)}
+            onChange={onLocationChange}
+            onSearch={onLocationSearch}
           />
         </div>
         <div className="flex items-center gap-2">
