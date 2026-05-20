@@ -22,8 +22,9 @@ import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
-  Bookmark,
+  Bookmark, Download,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const PAGE_SIZE = 25;
 
@@ -190,6 +191,15 @@ export default function SourceProject() {
   // ---- Dialogs ----
   const [candidateDialogOpen, setCandidateDialogOpen] = useState(false);
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
+
+  // ---- Resume viewer ----
+  const [resumeView, setResumeView] = useState<{
+    open: boolean;
+    blobUrl: string | null;
+    contentType: string;
+    applicantName: string;
+    loading: boolean;
+  }>({ open: false, blobUrl: null, contentType: '', applicantName: '', loading: false });
 
   // ---- Per-stage pagination (25/page so "select all on this page" stays sane) ----
   const [stagePages, setStagePages] = useState<Record<string, number>>({});
@@ -397,10 +407,21 @@ export default function SourceProject() {
   const applicants = pipelineCandidates;
   const loading = pipelineLoading;
 
-  // ---- Resume download ----
+  // ---- Resume viewer ----
   const handleDownloadResume = async (applicant: Applicant) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+    // Revoke any previous blob URL before fetching a new one to avoid leaks.
+    setResumeView((prev) => {
+      if (prev.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return {
+        open: true,
+        blobUrl: null,
+        contentType: '',
+        applicantName: applicant.name || 'Applicant',
+        loading: true,
+      };
+    });
     try {
       const data = await callSourceApi({
         action: 'download_resume',
@@ -408,18 +429,43 @@ export default function SourceProject() {
         job_id: id,
         applicant_id: applicant.id,
       }, session);
-      if (data.data_base64) {
-        const contentType = data.content_type || 'application/pdf';
-        const bytes = Uint8Array.from(atob(data.data_base64), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: contentType });
-        window.open(URL.createObjectURL(blob), '_blank');
-      } else {
+      if (!data.data_base64) {
+        setResumeView((prev) => ({ ...prev, loading: false }));
         toast.error('No resume data returned');
+        return;
       }
+      const contentType = data.content_type || 'application/pdf';
+      const bytes = Uint8Array.from(atob(data.data_base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: contentType });
+      const url = URL.createObjectURL(blob);
+      setResumeView({
+        open: true,
+        blobUrl: url,
+        contentType,
+        applicantName: applicant.name || 'Applicant',
+        loading: false,
+      });
     } catch (err: any) {
+      setResumeView((prev) => ({ ...prev, loading: false }));
       toast.error(err.message || 'Failed to download resume');
     }
   };
+
+  const closeResumeView = () => {
+    setResumeView((prev) => {
+      if (prev.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return { open: false, blobUrl: null, contentType: '', applicantName: '', loading: false };
+    });
+  };
+
+  // Free the blob URL on unmount so it doesn't leak.
+  useEffect(() => {
+    return () => {
+      if (resumeView.blobUrl) URL.revokeObjectURL(resumeView.blobUrl);
+    };
+    // Only on unmount — guarded by ref otherwise we'd revoke too eagerly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Selection helpers ----
   const toggleApplicant = (appId: string) => {
@@ -848,6 +894,52 @@ export default function SourceProject() {
         onConfirm={confirmLinkJob}
         saving={savingApplicantId === linkDialogApplicant?.id}
       />
+
+      {/* Resume viewer — renders the fetched blob in an iframe so users
+          don't have to round-trip through a new tab. Falls back to a
+          download link for non-PDF/non-image content types that browsers
+          won't render inline. */}
+      <Dialog open={resumeView.open} onOpenChange={(o) => { if (!o) closeResumeView(); }}>
+        <DialogContent className="max-w-5xl w-[90vw] h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 py-3 border-b border-border">
+            <DialogTitle className="text-base flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              {resumeView.applicantName} — Resume
+              {resumeView.blobUrl && (
+                <a
+                  href={resumeView.blobUrl}
+                  download={`${resumeView.applicantName.replace(/\s+/g, '_')}_resume${resumeView.contentType.includes('pdf') ? '.pdf' : ''}`}
+                  className="ml-auto text-xs text-emerald hover:underline inline-flex items-center gap-1"
+                >
+                  <Download className="h-3 w-3" />
+                  Download
+                </a>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 bg-muted/30 overflow-hidden">
+            {resumeView.loading && (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Loading resume…
+              </div>
+            )}
+            {!resumeView.loading && resumeView.blobUrl && (
+              resumeView.contentType.startsWith('image/') ? (
+                <div className="h-full overflow-auto flex items-start justify-center bg-white">
+                  <img src={resumeView.blobUrl} alt="Resume" className="max-w-full" />
+                </div>
+              ) : (
+                <iframe
+                  src={resumeView.blobUrl}
+                  title="Resume"
+                  className="w-full h-full bg-white"
+                />
+              )
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }
