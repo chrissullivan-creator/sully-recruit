@@ -96,6 +96,7 @@ const Settings = () => {
   // RingCentral state
   const [backfillingRc, setBackfillingRc] = useState(false);
   const [backfillRcLookback, setBackfillRcLookback] = useState<string>('180');
+  const [reextractingCalls, setReextractingCalls] = useState(false);
   const [ringcentralConfig, setRingcentralConfig] = useState<IntegrationConfig>({
     client_id: '',
     client_secret: '',
@@ -1134,6 +1135,43 @@ Senior Recruiter | Your Company
                               }}
                             >
                               {backfillingRc ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : 'Run backfill'}
+                            </Button>
+                          </div>
+
+                          {/* Re-extract candidate intel from stored
+                              call transcripts using the current
+                              prompt. Cheap (no Deepgram re-run) — fills
+                              in new fields like target_total_comp,
+                              urgency, deal_breakers on candidates whose
+                              calls predate the richer prompt. */}
+                          <div className="mt-4 pt-4 border-t border-border space-y-2">
+                            <Label className="text-xs font-medium">Re-extract intel from old calls</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Re-runs the current AI prompt on already-transcribed calls and refreshes candidate fields (target comp, urgency, deal-breakers, etc.). Skips Deepgram so it's fast and cheap. A cron also runs every 15 min — this button just kicks one off immediately.
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={reextractingCalls}
+                              onClick={async () => {
+                                setReextractingCalls(true);
+                                try {
+                                  const resp = await fetch('/api/trigger-reextract-call-intel', {
+                                    method: 'POST',
+                                    headers: await authHeaders(),
+                                    body: JSON.stringify({ batch: 50 }),
+                                  });
+                                  const data = await resp.json().catch(() => ({}));
+                                  if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                  toast.success('Re-extraction triggered (batch 50). Candidate fields will refresh as it runs.');
+                                } catch (err: any) {
+                                  toast.error(err?.message || 'Re-extraction failed');
+                                } finally {
+                                  setReextractingCalls(false);
+                                }
+                              }}
+                            >
+                              {reextractingCalls ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : 'Re-extract now'}
                             </Button>
                           </div>
                         </div>
