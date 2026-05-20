@@ -24,7 +24,6 @@ import {
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
   Bookmark, Download,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const PAGE_SIZE = 25;
 
