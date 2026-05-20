@@ -324,7 +324,14 @@ async function runPoll(lookbackMinutes: number, logger: any) {
 export const pollRcCalls = inngest.createFunction(
   { id: "poll-rc-calls", name: "Poll RingCentral call log (Inngest)" },
   { cron: "*/5 * * * *" },
-  async ({ logger }) => runPoll(10, logger),
+  // Lookback of 60 min, polled every 5 min, gives each call up to a
+  // dozen reconciliation chances before its startTime ages out of the
+  // RC query window. Calls longer than the lookback used to drop
+  // permanently because the webhook stamped a partial duration and
+  // the poll never saw them again. Combined with the duration-
+  // reconciliation fix in #261, a call of any length up to ~60 min
+  // now lands with its final duration.
+  async ({ logger }) => runPoll(60, logger),
 );
 
 /**
