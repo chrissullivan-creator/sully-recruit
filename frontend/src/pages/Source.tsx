@@ -147,9 +147,10 @@ export default function Source() {
   const [projectsLoading, setProjectsLoading] = useState(false);
 
   // ---- Linked-jobs lookup ----
-  // Map of (account_id|project_id) → internal job_id, used to gate the
-  // Backfill button and show the "Linked" badge.
-  const [linkedJobs, setLinkedJobs] = useState<Record<string, string>>({});
+  // Map of (account_id|project_id) → { jobId, lastSourcedAt }. Used to
+  // gate the Backfill button, show the "Linked" badge, and surface a
+  // per-card freshness timestamp.
+  const [linkedJobs, setLinkedJobs] = useState<Record<string, { jobId: string; lastSourcedAt: string | null }>>({});
 
   // ---- Backfill progress ----
   // Keyed by project id; null = idle, object = in-flight summary.
@@ -159,12 +160,15 @@ export default function Source() {
   const refreshLinkedJobs = useCallback(async () => {
     const { data } = await supabase
       .from('jobs')
-      .select('id, linkedin_project_id, linkedin_project_account_id')
+      .select('id, linkedin_project_id, linkedin_project_account_id, last_sourced_at')
       .not('linkedin_project_id', 'is', null);
-    const map: Record<string, string> = {};
+    const map: Record<string, { jobId: string; lastSourcedAt: string | null }> = {};
     for (const row of data || []) {
       if (row.linkedin_project_account_id && row.linkedin_project_id) {
-        map[`${row.linkedin_project_account_id}|${row.linkedin_project_id}`] = row.id as string;
+        map[`${row.linkedin_project_account_id}|${row.linkedin_project_id}`] = {
+          jobId: row.id as string,
+          lastSourcedAt: (row as any).last_sourced_at ?? null,
+        };
       }
     }
     setLinkedJobs(map);
@@ -221,9 +225,23 @@ export default function Source() {
       ...s,
       [key]: { processed: totalProcessed, created: totalCreated, updated: totalUpdated, total: totalCount, done: true },
     }));
+
+    // Stamp the linked job so the "Last synced …" badge stays accurate
+    // across reloads. Stale local state matters less than DB truth, so
+    // we re-fetch the linked-jobs map immediately after.
+    const linkKey = `${project.account_id}|${project.id}`;
+    const linked = linkedJobs[linkKey];
+    if (linked?.jobId) {
+      await supabase
+        .from('jobs')
+        .update({ last_sourced_at: new Date().toISOString() })
+        .eq('id', linked.jobId);
+      refreshLinkedJobs();
+    }
+
     toast.success(`Backfilled ${totalCreated} new + ${totalUpdated} updated from "${project.title}"`);
     return { created: totalCreated, updated: totalUpdated };
-  }, []);
+  }, [linkedJobs, refreshLinkedJobs]);
 
   // Sweep every linked project sequentially. Keeps Unipile happy by
   // not parallel-blasting and lets per-project progress render as it
@@ -434,7 +452,9 @@ export default function Source() {
             : null;
           const viewedAgo = relativeTime(project.last_accessed_at);
           const linkKey = `${project.account_id}|${project.id}`;
-          const isLinked = !!linkedJobs[linkKey];
+          const linkedJob = linkedJobs[linkKey];
+          const isLinked = !!linkedJob;
+          const lastSourcedAgo = relativeTime(linkedJob?.lastSourcedAt ?? null);
           const backfill = backfillStatus[project.id];
           const backfillInFlight = backfill && !backfill.done;
           return (
@@ -533,6 +553,14 @@ export default function Source() {
                   <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">
                     Linked
                   </Badge>
+                )}
+                {isLinked && lastSourcedAgo && !backfillInFlight && (
+                  <span className="text-muted-foreground">
+                    Synced {lastSourcedAgo}
+                  </span>
+                )}
+                {isLinked && !lastSourcedAgo && !backfill && (
+                  <span className="text-amber-500">Never synced</span>
                 )}
                 {backfill && (
                   <span className="text-muted-foreground">
