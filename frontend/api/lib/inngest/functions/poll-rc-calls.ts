@@ -176,17 +176,62 @@ async function runPoll(lookbackMinutes: number, logger: any) {
           continue;
         }
 
+        const duration = call.duration ?? 0;
+
+        // Reconciliation rule: the RC webhook fires while a call is
+        // still in progress (often `duration: 0` or a partial number),
+        // and call_logs gets stamped with that value. The poll runs
+        // later against the call-log REST API and has the *final*
+        // duration. We used to skip when a row already existed by
+        // external_call_id, which left every webhook-inserted call
+        // permanently stuck at its early-life duration — that's why
+        // every recent call was clustered under 120s.
+        //
+        // Now: if the existing row has a shorter duration than the
+        // polled one, update it (and stamp ended_at + status to match).
+        // Otherwise skip.
         const { data: existing } = await supabase
           .from("call_logs")
-          .select("id")
+          .select("id, duration_seconds, ended_at")
           .eq("external_call_id", callId)
           .maybeSingle();
         if (existing) {
-          totalSkipped++;
+          const existingDur = existing.duration_seconds ?? 0;
+          if (duration > existingDur || (!existing.ended_at && duration > 0)) {
+            const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
+            const endedAt =
+              startedAt && duration > 0
+                ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
+                : null;
+            let status = "completed";
+            if (call.result === "Missed") status = "missed";
+            else if (call.result === "Voicemail") status = "voicemail";
+            else if (duration === 0) status = "missed";
+            const { error: updateErr } = await supabase
+              .from("call_logs")
+              .update({
+                duration_seconds: duration,
+                ended_at: endedAt,
+                status,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existing.id);
+            if (updateErr) {
+              logger.error(`Update error for call ${callId}`, { error: updateErr.message });
+              totalSkipped++;
+            } else {
+              logger.info("Reconciled call duration", {
+                callId,
+                from: existingDur,
+                to: duration,
+              });
+              totalInserted++;
+            }
+          } else {
+            totalSkipped++;
+          }
           continue;
         }
-
-        const duration = call.duration ?? 0;
         const direction = (call.direction ?? "Outbound").toLowerCase();
         const otherParty = direction === "outbound" ? call.to : call.from;
         const otherPhone = otherParty?.phoneNumber ?? otherParty?.extensionNumber ?? null;
