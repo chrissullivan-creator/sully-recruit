@@ -1366,12 +1366,9 @@ const CandidateDetail = () => {
               <TabsList className="bg-white border border-card-border inline-flex w-max">
                 <TabsTrigger value="joe" className="gap-1.5 snap-start"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
                 <TabsTrigger value="background" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
-                <TabsTrigger value="communications" className="gap-1.5 snap-start"><MessageSquare className="h-3.5 w-3.5" /> Communications</TabsTrigger>
-                <TabsTrigger value="meeting-recaps" className="gap-1.5 snap-start"><PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5 snap-start"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
-                <TabsTrigger value="source" className="gap-1.5 snap-start"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
-                <TabsTrigger value="send-outs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
+                <TabsTrigger value="send-outs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5 snap-start"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
             </div>
@@ -1620,8 +1617,9 @@ const CandidateDetail = () => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="communications" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-5">
+              <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-6">
+                {/* Quick-action bar (was its own Communications tab — merged in) */}
+                <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => {
                     const to = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
                     if (to) { window.location.href = `mailto:${to}`; }
@@ -1640,80 +1638,8 @@ const CandidateDetail = () => {
                     else { toast.error('No phone number on file'); }
                   }}><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
                 </div>
-                {(conversations as any[]).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No communications yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {(conversations as any[]).map((conv) => {
-                      const messages = (conv.messages || []).sort(
-                        (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
-                      );
-                      const channelLabel = (conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin'))
-                        ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1);
-                      return (
-                        <Collapsible key={conv.id}>
-                          <div className="rounded-lg border border-border">
-                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
-                                  {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
-                                  {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
-                                  {!['email', 'sms'].includes(conv.channel) && !conv.channel?.startsWith('linkedin') && <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />}
-                                  <span className="text-sm font-medium">{channelLabel}</span>
-                                  <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
-                                </div>
-                                <span className="text-xs text-muted-foreground">
-                                  {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
-                                </span>
-                              </div>
-                              {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
-                              {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                              <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
-                                {messages.map((msg: any) => (
-                                  <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
-                                    <div className={cn(
-                                      'max-w-[80%] rounded-lg px-3 py-2 text-sm',
-                                      msg.direction === 'outbound'
-                                        ? 'bg-accent/15 text-foreground'
-                                        : 'bg-muted text-foreground'
-                                    )}>
-                                      {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
-                                      <p className="text-xs whitespace-pre-wrap break-words">{
-                                        (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
-                                      }</p>
-                                      <p className="text-[10px] text-muted-foreground mt-1">
-                                        {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
-                                        {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                ))}
-                                {messages.length === 0 && (
-                                  <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
-                                )}
-                              </div>
-                            </CollapsibleContent>
-                          </div>
-                        </Collapsible>
-                      );
-                    })}
-                  </div>
-                )}
-              </TabsContent>
 
-              <TabsContent value="meeting-recaps" className="px-8 py-5 mt-0">
-                <MeetingRecapsTab
-                  entityId={id!}
-                  entityType="candidate"
-                  personName={c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || null}
-                />
-              </TabsContent>
-
-              <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-2">
                   <History className="h-5 w-5 text-accent" />
                   <h2 className="text-base font-semibold">Activity Timeline</h2>
                 </div>
@@ -1795,6 +1721,86 @@ const CandidateDetail = () => {
                     </div>
                   );
                 })()}
+
+                {/* Meeting recaps — was its own tab, now lives under Activity */}
+                <div className="pt-2">
+                  <MeetingRecapsTab
+                    entityId={id!}
+                    entityType="candidate"
+                    personName={c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || null}
+                  />
+                </div>
+
+                {/* Conversation threads — was the body of the Communications
+                    tab. Keeps the inline-message drill-down on this page. */}
+                <div className="pt-2 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Conversations</h2>
+                  </div>
+                  {(conversations as any[]).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No conversations yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {(conversations as any[]).map((conv) => {
+                        const messages = (conv.messages || []).sort(
+                          (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
+                        );
+                        const channelLabel = (conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin'))
+                          ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1);
+                        return (
+                          <Collapsible key={conv.id}>
+                            <div className="rounded-lg border border-border">
+                              <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
+                                    {(conv.channel === 'linkedin' || conv.channel?.startsWith('linkedin')) && <Linkedin className="h-3.5 w-3.5 text-muted-foreground" />}
+                                    {conv.channel === 'sms' && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                                    {!['email', 'sms'].includes(conv.channel) && !conv.channel?.startsWith('linkedin') && <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />}
+                                    <span className="text-sm font-medium">{channelLabel}</span>
+                                    <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
+                                  </span>
+                                </div>
+                                {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
+                                {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
+                                  {messages.map((msg: any) => (
+                                    <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
+                                      <div className={cn(
+                                        'max-w-[80%] rounded-lg px-3 py-2 text-sm',
+                                        msg.direction === 'outbound'
+                                          ? 'bg-accent/15 text-foreground'
+                                          : 'bg-muted text-foreground'
+                                      )}>
+                                        {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
+                                        <p className="text-xs whitespace-pre-wrap break-words">{
+                                          (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
+                                        }</p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">
+                                          {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
+                                          {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {messages.length === 0 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
+                                  )}
+                                </div>
+                              </CollapsibleContent>
+                            </div>
+                          </Collapsible>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </TabsContent>
 
               {/* ── Documents Tab (Resumes / Formatted / Other) ────────── */}
@@ -2032,13 +2038,15 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              {/* ── Source Tab (pre-pitch funnel) ─────────────────────────── */}
-              <TabsContent value="source" className="mt-0">
-                {id && <CandidateSourceTab candidateId={id} />}
-              </TabsContent>
+              {/* ── Pipeline Tab (Source pre-funnel + Send Outs) ──────────── */}
+              <TabsContent value="send-outs" className="px-8 py-5 mt-0 space-y-6">
+                {/* Source funnel — was its own tab, merged in */}
+                {id && (
+                  <div>
+                    <CandidateSourceTab candidateId={id} />
+                  </div>
+                )}
 
-              {/* ── Send Outs Tab ─────────────────────────────────────────── */}
-              <TabsContent value="send-outs" className="px-8 py-5 mt-0 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Send className="h-5 w-5 text-accent" />
