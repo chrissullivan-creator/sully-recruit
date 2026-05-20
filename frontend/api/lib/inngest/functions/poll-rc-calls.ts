@@ -226,6 +226,26 @@ async function runPoll(lookbackMinutes: number, logger: any) {
                 to: duration,
               });
               totalInserted++;
+
+              // If the duration just crossed the transcription threshold
+              // (>=30s) AND the call is completed AND we haven't already
+              // produced ai_call_notes for it, dispatch transcription so
+              // the AI extraction + candidate auto-fill runs. Without
+              // this, webhook-inserted-then-reconciled long calls would
+              // sit forever with no summary / no field fills.
+              if (duration >= 30 && status === "completed" && existingDur < 30) {
+                const { data: existingNotes } = await supabase
+                  .from("ai_call_notes")
+                  .select("id")
+                  .eq("external_call_id", callId)
+                  .maybeSingle();
+                if (!existingNotes) {
+                  transcribeEvents.push({
+                    name: "call/transcribe.requested",
+                    data: { call_log_id: existing.id },
+                  });
+                }
+              }
             }
           } else {
             totalSkipped++;
