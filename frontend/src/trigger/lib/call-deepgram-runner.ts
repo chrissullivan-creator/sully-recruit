@@ -317,18 +317,21 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
       const { text } = await callAIWithFallback({
         anthropicKey,
         openaiKey: openaiKey || undefined,
-        systemPrompt: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough enough to be useful.
+        systemPrompt: `You are Joe — AI backbone of Sully Recruit. Extract recruiter intel from this ${duration} call with ${entityName}. Finance-aware, no fluff, but be thorough — recruiters use this as their working brief, so the more signal you pull, the better.
 
 Return ONLY valid JSON in this exact shape:
-{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"target_base":null,"target_bonus":null,"current_title":null,"current_company":null,"notes":null,"fun_facts":null,"visa_status":null,"work_authorization":null,"relocation_preference":null,"target_locations":null,"target_roles":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
+{"summary":"...","action_items":"...","reason_for_leaving":null,"current_base":null,"current_bonus":null,"current_total":null,"target_base":null,"target_bonus":null,"target_total":null,"comp_notes":null,"current_title":null,"current_company":null,"personal_email":null,"skills":null,"notes":null,"fun_facts":null,"visa_status":null,"work_authorization":null,"relocation_preference":null,"target_locations":null,"target_roles":null,"where_interviewed":null,"where_submitted":null,"notice_period":null,"desired_start":null,"urgency":null,"decision_timeline":null,"deal_breakers":null,"counter_offer_history":null,"manager_relationship":null,"looking_to_do_next":null,"dislikes_current_role":null,"relo_details":null,"job_move_explanations":null}
 
 Field rules:
-- summary: 4–8 sentences. Cover who they are, current situation, what they're looking for, and any notable signals (urgency, fit concerns, red flags). Strategic, not a transcript dump.
+- summary: 5–10 sentences. Cover who they are, current situation, what they're looking for, comp & timeline signals, fit concerns, red flags, and any commitments made. Strategic, not a transcript dump.
 - action_items: bulleted list of concrete next steps for the recruiter. Use "- " prefix on each line. If genuinely none, return "- None".
 - notes: detailed back-of-resume intel — products, business lines, divisions, function, motivations, verbatim quotes worth remembering, soft signals, personality observations, blockers. Different from summary. Null only if there is genuinely nothing to add.
 - reason_for_leaving: short phrase, null if not discussed.
 - current_title / current_company: short strings, null if not stated.
-- current_base, current_bonus, target_base, target_bonus: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given (e.g. "160-170k"), return the midpoint as an integer (165000). If only a vague signal (e.g. "comfortable in the 200s"), return your best single-integer estimate. Null if not discussed at all.
+- current_base, current_bonus, current_total, target_base, target_bonus, target_total: MUST be a single integer (annual USD, no commas, no currency symbol, no strings, no ranges). If a range is given ("160-170k"), return the midpoint (165000). If only a vague signal ("comfortable in the 200s"), return your best single-integer estimate. Null if not discussed.
+- comp_notes: anything compensation-related that doesn't fit the numeric fields — RSU vesting schedule, deferred comp, sign-on, retention bonus, carry, equity %, bonus targets, last-year actual vs. target. Null if no nuance beyond the numbers.
+- personal_email: their non-work email if they explicitly shared one ("send the deck to my gmail at..."). Null if not mentioned.
+- skills: short array of specific skills, products, technologies, certifications mentioned ("Python", "Bloomberg", "Series 7", "credit derivatives"). Empty array if none.
 - fun_facts: hobbies, interests, personal details, family, connection points — anything to build rapport later. Null if nothing personal came up.
 - visa_status: long-form sponsorship signal. "US Citizen", "Green Card", "H-1B (sponsorship needed)", "F-1/OPT (transfer required)", etc. Null if not discussed.
 - work_authorization: short status string for the candidate's right to work — e.g. "Citizen", "GC", "H-1B", "F-1/OPT", "TN". Distinct from visa_status; this is the form-field summary, not the conversational detail. Null if not discussed.
@@ -337,7 +340,13 @@ Field rules:
 - target_roles: short comma-separated list of role types they're targeting — "PM, Quant", "VP credit trading", "Recruiter Director". Null if not discussed.
 - where_interviewed: firms/companies they mentioned currently interviewing at (comma-separated or short prose). Null if not discussed.
 - where_submitted: firms/companies they mentioned being submitted to by other recruiters. Null if not discussed.
-- notice_period: e.g. "2 weeks", "30 days", "immediately". Null if not discussed.
+- notice_period: how soon they can hand in notice. "2 weeks", "30 days", "immediately". Null if not discussed.
+- desired_start: target start date or window separate from notice — "Sept 1", "after bonus payout in March", "Q4". Null if not discussed.
+- urgency: how actively they're moving — "actively interviewing now", "exploring quietly", "passive — only for the right seat", "needs to move by Q3 for visa". Null if no signal.
+- decision_timeline: how long they typically take to decide on an offer, or any deadline they've mentioned. "2 weeks once an offer lands", "needs to align with bonus", "no rush". Null if not discussed.
+- deal_breakers: anything they explicitly said they won't accept — "no commute over an hour", "no role under VP", "no IB hours", "no relocation". Null if no hard requirements stated.
+- counter_offer_history: whether they've been counter-offered before, what they did with it, or whether their current firm is likely to counter. Null if not discussed.
+- manager_relationship: signal of their relationship with current manager — "strained", "great mentor", "exit interview already booked", "neutral". Important sourcing signal. Null if not discussed.
 - looking_to_do_next: what kind of role / function / firm-type they actually want next — concrete signal of direction, not a wishlist. 1–2 sentences. Null if not discussed.
 - dislikes_current_role: specific complaints about the current seat (manager, comp, scope, hours, products, culture, growth path). Verbatim or close to it where useful. Null if not discussed.
 - relo_details: more than just yes/no — willingness, family situation, blocked cities, preferred geos, timing — the conversational detail behind relocation_preference. Null if not discussed.
@@ -369,8 +378,10 @@ Field rules:
     };
     intel.current_base = toInt(intel.current_base);
     intel.current_bonus = toInt(intel.current_bonus);
+    intel.current_total = toInt(intel.current_total);
     intel.target_base = toInt(intel.target_base);
     intel.target_bonus = toInt(intel.target_bonus);
+    intel.target_total = toInt(intel.target_total);
 
     const now = new Date().toISOString();
     const { error: upsertErr } = await supabase.from("ai_call_notes").upsert({
@@ -428,10 +439,40 @@ Field rules:
       if (intel.reason_for_leaving) updates.reason_for_leaving = intel.reason_for_leaving;
       if (intel.current_base) updates.current_base_comp = intel.current_base;
       if (intel.current_bonus) updates.current_bonus_comp = intel.current_bonus;
+      if (intel.current_total) updates.current_total_comp = intel.current_total;
       if (intel.target_base) updates.target_base_comp = intel.target_base;
       if (intel.target_bonus) updates.target_bonus_comp = intel.target_bonus;
+      if (intel.target_total) updates.target_total_comp = intel.target_total;
+      if (intel.comp_notes) updates.comp_notes = intel.comp_notes;
       if (intel.current_title) updates.current_title = intel.current_title;
       if (intel.current_company) updates.current_company = intel.current_company;
+      // personal_email: only fill when blank. Recruiters may have
+      // curated this manually and a misheard email on a call shouldn't
+      // overwrite a known good address.
+      if (intel.personal_email && typeof intel.personal_email === "string" && intel.personal_email.includes("@")) {
+        const { data: existingPe } = await supabase
+          .from("people")
+          .select("personal_email")
+          .eq("id", entityId)
+          .maybeSingle();
+        if (!existingPe?.personal_email) updates.personal_email = intel.personal_email.trim().toLowerCase();
+      }
+      // skills: merge with existing rather than overwrite. ARRAY-typed
+      // column; dedupe case-insensitively.
+      if (Array.isArray(intel.skills) && intel.skills.length) {
+        const fresh = intel.skills.filter((s: any): s is string => typeof s === "string" && s.trim().length > 0).map((s: string) => s.trim());
+        if (fresh.length) {
+          const { data: existingSkills } = await supabase
+            .from("people")
+            .select("skills")
+            .eq("id", entityId)
+            .maybeSingle();
+          const prior: string[] = Array.isArray(existingSkills?.skills) ? existingSkills.skills : [];
+          const seen = new Set(prior.map((s) => s.toLowerCase()));
+          for (const s of fresh) if (!seen.has(s.toLowerCase())) { prior.push(s); seen.add(s.toLowerCase()); }
+          updates.skills = prior.slice(0, 50);
+        }
+      }
       if (intel.notes) updates.back_of_resume_notes = intel.notes;
       if (intel.fun_facts) updates.fun_facts = intel.fun_facts;
       if (intel.visa_status) updates.visa_status = intel.visa_status;
@@ -443,7 +484,20 @@ Field rules:
       if (intel.where_submitted) updates.where_submitted = intel.where_submitted;
       if (intel.notice_period) updates.notice_period = intel.notice_period;
 
-      const structuredKeys = ["looking_to_do_next", "dislikes_current_role", "relo_details", "job_move_explanations"] as const;
+      // Rich qualitative signals live in call_structured_notes JSON
+      // (no column-per-field bloat). Joe Says + Ask Joe surface them.
+      const structuredKeys = [
+        "looking_to_do_next",
+        "dislikes_current_role",
+        "relo_details",
+        "job_move_explanations",
+        "desired_start",
+        "urgency",
+        "decision_timeline",
+        "deal_breakers",
+        "counter_offer_history",
+        "manager_relationship",
+      ] as const;
       const structuredAdds: Record<string, string> = {};
       for (const k of structuredKeys) {
         const v = (intel as any)[k];
