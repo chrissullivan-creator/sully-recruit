@@ -414,9 +414,16 @@ Field rules:
 
     if (entityType === "candidate" && entityId) {
       const updates: Record<string, any> = { updated_at: now };
+      // Status flip at ≥60s — a substantive call earns "engaged".
+      // Owner transfer waits until ≥120s — short calls (intro pings,
+      // voicemail callbacks) shouldn't shuffle account ownership; a
+      // 2-minute conversation is a real working session and the
+      // recruiter who took it becomes the owner.
       if ((cl.duration_seconds ?? 0) >= 60) {
         updates.status = "engaged";
-        if (cl.owner_id) updates.owner_user_id = cl.owner_id;
+      }
+      if ((cl.duration_seconds ?? 0) >= 120 && cl.owner_id) {
+        updates.owner_user_id = cl.owner_id;
       }
       if (intel.reason_for_leaving) updates.reason_for_leaving = intel.reason_for_leaving;
       if (intel.current_base) updates.current_base_comp = intel.current_base;
