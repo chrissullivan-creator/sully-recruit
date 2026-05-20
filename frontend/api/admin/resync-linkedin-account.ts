@@ -1,11 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { syncLinkedinIntegrationAccount } from "../lib/unipile-linkedin.js";
+import { requireAuth } from "../lib/auth.js";
 
 /**
- * One-shot admin endpoint to re-run the LinkedIn sync against a Unipile
- * account that was reconnected out-of-band (e.g. unipile_account_id was
- * swapped directly in the DB). Calls syncLinkedinIntegrationAccount which
+ * Admin endpoint to re-run the LinkedIn sync against a Unipile account
+ * that was reconnected out-of-band (e.g. unipile_account_id was swapped
+ * directly in the DB). Calls syncLinkedinIntegrationAccount which
  * re-fetches account details, re-runs the Recruiter projects probe, and
  * refreshes linkedin_capability/capabilities + metadata in place.
  *
@@ -13,6 +14,8 @@ import { syncLinkedinIntegrationAccount } from "../lib/unipile-linkedin.js";
  *     -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
  *     -H "Content-Type: application/json" \
  *     -d '{"integration_account_id": "662645a9-1f9b-4220-9933-56a75923016e"}'
+ *
+ * Auth: Supabase JWT (any signed-in user) OR SUPABASE_SERVICE_ROLE_KEY.
  *
  * Optional body fields:
  *   contract_name  — override the Recruiter contract to bind (default: reuse existing)
@@ -23,21 +26,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const expected = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!expected) {
-    return res.status(500).json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured" });
-  }
-  const got = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (got !== expected) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  if (!(await requireAuth(req, res))) return;
 
   const integrationAccountId = String(req.body?.integration_account_id || "").trim();
   if (!integrationAccountId) {
     return res.status(400).json({ error: "integration_account_id is required" });
   }
 
-  const supabase = createClient(process.env.SUPABASE_URL!, expected);
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
   const { data: row, error } = await supabase
     .from("integration_accounts")
