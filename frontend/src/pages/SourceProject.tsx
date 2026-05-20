@@ -365,10 +365,32 @@ export default function SourceProject() {
         .filter(Boolean)
         .map((name) => ({ name }));
     }
-    // Locations need parameter IDs from search_parameters — name-only is
-    // not accepted by the people search. Surface a hint if user tries it.
+
+    // Location needs a parameter ID — resolve via /search/parameters
+    // (Unipile's autocomplete) and take the top match. If nothing
+    // resolves we drop the filter rather than 400ing the search.
     if (searchLocation.trim()) {
-      toast.message('Location filter requires resolving a parameter ID — skipping for now.');
+      try {
+        const paramsResp = await callSourceApi({
+          action: 'search_parameters',
+          account_id: accountId,
+          search: { type: 'LOCATION', keywords: searchLocation.trim() },
+          limit: 5,
+        }, session);
+        const items: any[] = Array.isArray(paramsResp.items) ? paramsResp.items : [];
+        const top = items[0];
+        if (top?.id) {
+          body.location = [{ id: top.id }];
+          const matchedName = top.title || top.name || top.label;
+          if (matchedName && matchedName.toLowerCase() !== searchLocation.trim().toLowerCase()) {
+            toast.message(`Location matched: ${matchedName}`);
+          }
+        } else {
+          toast.warning(`No LinkedIn location matched "${searchLocation.trim()}" — searching without location.`);
+        }
+      } catch (err: any) {
+        toast.warning(`Couldn't resolve location: ${err.message || 'unknown error'} — searching without it.`);
+      }
     }
 
     setSearching(true);
@@ -1023,10 +1045,9 @@ function SearchTab({
             onChange={(e) => onCompanyChange(e.target.value)}
           />
           <Input
-            placeholder="Location (resolves to parameter — coming soon)"
+            placeholder="Location (e.g. 'New York', 'San Francisco Bay Area')"
             value={location}
             onChange={(e) => onLocationChange(e.target.value)}
-            disabled
           />
         </div>
         <div className="flex items-center gap-2">

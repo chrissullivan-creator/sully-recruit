@@ -154,6 +154,7 @@ export default function Source() {
   // ---- Backfill progress ----
   // Keyed by project id; null = idle, object = in-flight summary.
   const [backfillStatus, setBackfillStatus] = useState<Record<string, { processed: number; created: number; updated: number; total: number | null; done?: boolean }>>({});
+  const [backfillingAll, setBackfillingAll] = useState(false);
 
   const refreshLinkedJobs = useCallback(async () => {
     const { data } = await supabase
@@ -221,7 +222,34 @@ export default function Source() {
       [key]: { processed: totalProcessed, created: totalCreated, updated: totalUpdated, total: totalCount, done: true },
     }));
     toast.success(`Backfilled ${totalCreated} new + ${totalUpdated} updated from "${project.title}"`);
+    return { created: totalCreated, updated: totalUpdated };
   }, []);
+
+  // Sweep every linked project sequentially. Keeps Unipile happy by
+  // not parallel-blasting and lets per-project progress render as it
+  // walks.
+  const runBackfillAll = useCallback(async () => {
+    const linked = projects.filter((p) => linkedJobs[`${p.account_id}|${p.id}`]);
+    if (linked.length === 0) {
+      toast.info('No linked projects to backfill — link a project to a job first.');
+      return;
+    }
+    setBackfillingAll(true);
+    let totalNew = 0;
+    let totalUpdated = 0;
+    try {
+      for (const project of linked) {
+        const result = await runBackfill(project);
+        if (result) {
+          totalNew += result.created;
+          totalUpdated += result.updated;
+        }
+      }
+      toast.success(`Backfilled ${linked.length} projects: ${totalNew} new + ${totalUpdated} updated total.`);
+    } finally {
+      setBackfillingAll(false);
+    }
+  }, [projects, linkedJobs, runBackfill]);
 
   // ---- Load accounts on mount ----
   useEffect(() => {
@@ -364,6 +392,21 @@ export default function Source() {
           {projectsLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
           Refresh
         </Button>
+
+        {Object.keys(linkedJobs).length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={runBackfillAll}
+            disabled={backfillingAll || projectsLoading}
+            title="Backfill applicants from every project that's linked to a job"
+          >
+            {backfillingAll
+              ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              : <Download className="h-4 w-4 mr-1" />}
+            Backfill all linked
+          </Button>
+        )}
       </div>
 
       {/* Loading */}
