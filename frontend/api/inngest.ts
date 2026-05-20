@@ -54,6 +54,10 @@ import {
   dispatchMissingTranscriptsCron,
   dispatchMissingTranscripts,
 } from "./lib/inngest/functions/dispatch-missing-transcripts.js";
+import {
+  reextractCallIntelCron,
+  reextractCallIntel,
+} from "./lib/inngest/functions/reextract-call-intel.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -118,5 +122,7 @@ export default serve({
     backfillJoeSaysEmbeddings,
     dispatchMissingTranscriptsCron,
     dispatchMissingTranscripts,
+    reextractCallIntelCron,
+    reextractCallIntel,
   ],
 });
