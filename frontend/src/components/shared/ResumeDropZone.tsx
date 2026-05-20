@@ -28,6 +28,7 @@ interface ParsedData {
   current_title: string;
   location: string;
   linkedin_url: string;
+  skills: string[];
   file_name: string;
   file_path: string;
   candidate_id: string | null;
@@ -73,6 +74,7 @@ async function parseFile(file_path: string, file_name: string, session: any): Pr
     current_title:   p.current_title || '',
     location:        p.location || '',
     linkedin_url:    p.linkedin_url || '',
+    skills:          Array.isArray(p.skills) ? p.skills.filter((s: any) => typeof s === 'string' && s.trim()) : [],
     _candidate_id:   null, // No DB writes during parse — candidate created on save
   };
 }
@@ -148,6 +150,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           current_title:   data?.current_title || '',
           location:        data?.location || '',
           linkedin_url:    data?.linkedin_url || '',
+          skills:          Array.isArray(data?.skills) ? data.skills : [],
           file_name,
           file_path,
           candidate_id:    data?._candidate_id ?? null,
@@ -159,6 +162,7 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
         parsed.push({
           first_name: '', last_name: '', email: '', phone: '',
           current_company: '', current_title: '', location: '', linkedin_url: '',
+          skills: [],
           file_name: file.name, file_path: '',
           candidate_id: null, match_label: null,
           error: err.message,
@@ -308,10 +312,12 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           // address lands in personal_email or work_email by domain.
           ...(entry.email.trim() ? classifyEmail(normalizeEmail(entry.email.trim())) : {}),
           phone:           entry.phone.trim() || undefined,
+          mobile_phone:    entry.phone.trim() || undefined,
           current_company: entry.current_company.trim() || undefined,
           current_title:   entry.current_title.trim() || undefined,
           location_text:   entry.location.trim() || undefined,
           linkedin_url:    entry.linkedin_url.trim() || undefined,
+          ...(entry.skills.length ? { skills: entry.skills } : {}),
           updated_at:      new Date().toISOString(),
         } as any)
         .eq('id', entry.candidate_id);
@@ -337,11 +343,14 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           first_name:      entry.first_name.trim() || undefined,
           last_name:       entry.last_name.trim() || undefined,
           full_name:       `${entry.first_name.trim()} ${entry.last_name.trim()}`.trim() || undefined,
+          ...(entry.email.trim() ? classifyEmail(normalizeEmail(entry.email.trim())) : {}),
           phone:           entry.phone.trim() || undefined,
+          mobile_phone:    entry.phone.trim() || undefined,
           current_company: entry.current_company.trim() || undefined,
           current_title:   entry.current_title.trim() || undefined,
           location_text:   entry.location.trim() || undefined,
           linkedin_url:    entry.linkedin_url.trim() || undefined,
+          ...(entry.skills.length ? { skills: entry.skills } : {}),
           updated_at:      new Date().toISOString(),
         } as any).eq('id', existing.id);
         if (error) throw error;
@@ -355,10 +364,12 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
           // Plain `email` retired — split into personal/work via classifier.
           ...classifyEmail(normalizeEmail(entry.email.trim())),
           phone:           entry.phone.trim() || null,
+          mobile_phone:    entry.phone.trim() || null,
           current_company: entry.current_company.trim() || null,
           current_title:   entry.current_title.trim() || null,
           location_text:   entry.location.trim() || null,
           linkedin_url:    entry.linkedin_url.trim() || null,
+          skills:          entry.skills.length ? entry.skills : null,
           status:          'new',
         } as any).select('id').single();
         if (error) throw error;
