@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import { useJobFunctions } from '@/hooks/useData';
 import { useQueryClient } from '@tanstack/react-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -92,6 +93,8 @@ const Settings = () => {
   const [unipileActive, setUnipileActive] = useState(false);
 
   // RingCentral state
+  const [backfillingRc, setBackfillingRc] = useState(false);
+  const [backfillRcLookback, setBackfillRcLookback] = useState<string>('180');
   const [ringcentralConfig, setRingcentralConfig] = useState<IntegrationConfig>({
     client_id: '',
     client_secret: '',
@@ -1079,6 +1082,60 @@ Senior Recruiter | Your Company
                             'Save RingCentral Settings'
                           )}
                         </Button>
+
+                        {/* Backfill historical RC calls — fires the
+                            Inngest backfill function with a custom
+                            lookback. Pairs with the duration-recon
+                            (#261) and 60-min poll lookback (#263)
+                            shipped earlier so historical long calls
+                            land with correct durations. */}
+                        <div className="mt-4 pt-4 border-t border-border space-y-2">
+                          <Label className="text-xs font-medium">Backfill historical RC calls</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Re-fetch your RingCentral call history. Useful when long calls were stranded by the old 10-min poll window. RingCentral retains ~6 months effectively.
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Select value={backfillRcLookback} onValueChange={setBackfillRcLookback}>
+                              <SelectTrigger className="h-9 w-40 text-xs">
+                                <SelectValue placeholder="Lookback" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="1">Last 24 hours</SelectItem>
+                                <SelectItem value="7">Last 7 days</SelectItem>
+                                <SelectItem value="30">Last 30 days</SelectItem>
+                                <SelectItem value="90">Last 90 days</SelectItem>
+                                <SelectItem value="180">Last 6 months</SelectItem>
+                                <SelectItem value="365">Last 365 days</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={backfillingRc}
+                              onClick={async () => {
+                                const days = Number(backfillRcLookback) || 180;
+                                const minutes = days * 24 * 60;
+                                setBackfillingRc(true);
+                                try {
+                                  const resp = await fetch('/api/trigger-backfill-rc-calls', {
+                                    method: 'POST',
+                                    headers: await authHeaders(),
+                                    body: JSON.stringify({ lookback_minutes: minutes }),
+                                  });
+                                  const data = await resp.json().catch(() => ({}));
+                                  if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                  toast.success(`Backfill triggered (${days} days). Watch Inngest dashboard for the run.`);
+                                } catch (err: any) {
+                                  toast.error(err?.message || 'Backfill failed');
+                                } finally {
+                                  setBackfillingRc(false);
+                                }
+                              }}
+                            >
+                              {backfillingRc ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : 'Run backfill'}
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
