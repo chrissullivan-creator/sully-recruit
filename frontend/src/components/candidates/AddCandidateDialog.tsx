@@ -158,16 +158,26 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
       }
 
       if (inserted && resumeStoragePath && resumeFile) {
-        await supabase.from('resumes').insert({
-          candidate_id: inserted.id,
-          file_path: resumeStoragePath,
-          file_name: resumeFile.name,
-          mime_type: resumeFile.type || 'application/pdf',
-          file_size: resumeFile.size,
-          storage_bucket: 'resumes',
-          source: 'upload',
-          parsing_status: 'completed',
-        } as any);
+        // Skip if this candidate already has a resume with the same
+        // file_name — UNIQUE(candidate_id, file_name) would block it.
+        const { data: existingResume } = await supabase
+          .from('resumes')
+          .select('id')
+          .eq('candidate_id', inserted.id)
+          .eq('file_name', resumeFile.name)
+          .maybeSingle();
+        if (!existingResume) {
+          await supabase.from('resumes').insert({
+            candidate_id: inserted.id,
+            file_path: resumeStoragePath,
+            file_name: resumeFile.name,
+            mime_type: resumeFile.type || 'application/pdf',
+            file_size: resumeFile.size,
+            storage_bucket: 'resumes',
+            source: 'upload',
+            parsing_status: 'completed',
+          } as any);
+        }
 
         authHeaders().then(headers =>
           fetch('/api/trigger-resume-ingestion', {
