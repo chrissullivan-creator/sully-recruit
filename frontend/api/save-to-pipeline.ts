@@ -330,7 +330,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .upload(storagePath, buffer, { contentType, upsert: false });
 
             if (!uploadErr && uploaded?.path) {
-              const { data: resumeRow, error: resumeErr } = await supabase
+              // Skip if this candidate already has a resume with the same
+              // file_name — UNIQUE(candidate_id, file_name) would block it.
+              const { data: existingResume } = await supabase
+                .from("resumes")
+                .select("id")
+                .eq("candidate_id", candidateId)
+                .eq("file_name", safeName)
+                .maybeSingle();
+              const { data: resumeRow, error: resumeErr } = existingResume
+                ? { data: existingResume, error: null }
+                : await supabase
                 .from("resumes")
                 .insert({
                   candidate_id: candidateId,

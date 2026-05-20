@@ -706,17 +706,29 @@ const CandidateDetail = () => {
       const { error: upErr } = await supabase.storage.from('resumes').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { data: urlData } = await supabase.storage.from('resumes').createSignedUrl(path, 3600);
-      const { error: dbErr } = await supabase.from('resumes').insert({
-        candidate_id: id,
-        file_name: file.name,
-        file_path: path,
-        file_url: urlData?.signedUrl ?? '',
-        file_size: file.size,
-        mime_type: file.type,
-      } as any);
-      if (dbErr) throw dbErr;
-      queryClient.invalidateQueries({ queryKey: ['resumes', id] });
-      toast.success('File uploaded');
+      // Skip insert if this candidate already has a resume with the same
+      // file_name — UNIQUE(candidate_id, file_name) would block it.
+      const { data: existingResume } = await supabase
+        .from('resumes')
+        .select('id')
+        .eq('candidate_id', id)
+        .eq('file_name', file.name)
+        .maybeSingle();
+      if (existingResume) {
+        toast.info('A resume with that file name already exists for this candidate');
+      } else {
+        const { error: dbErr } = await supabase.from('resumes').insert({
+          candidate_id: id,
+          file_name: file.name,
+          file_path: path,
+          file_url: urlData?.signedUrl ?? '',
+          file_size: file.size,
+          mime_type: file.type,
+        } as any);
+        if (dbErr) throw dbErr;
+        queryClient.invalidateQueries({ queryKey: ['resumes', id] });
+        toast.success('File uploaded');
+      }
     } catch (e: any) {
       toast.error(e.message);
     } finally {

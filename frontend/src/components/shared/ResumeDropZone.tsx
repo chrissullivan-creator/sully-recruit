@@ -235,12 +235,14 @@ export function ResumeDropZone({ entityType, open, onOpenChange }: Props) {
   // ── Trigger resume ingestion (embedding + vector storage) in background ────
   const triggerResumeIngestion = async (candidateId: string, filePath: string, fileName: string) => {
     try {
-      // Find or create the resume record for this candidate/file
+      // Find or create the resume record for this candidate/file.
+      // Dedup on file_name (not file_path) since uploaders prefix paths
+      // with timestamps — same file re-uploaded would get a new path.
       let { data: resume } = await supabase
         .from('resumes')
         .select('id')
         .eq('candidate_id', candidateId)
-        .eq('file_path', filePath)
+        .eq('file_name', fileName)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

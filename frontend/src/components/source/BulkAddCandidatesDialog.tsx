@@ -77,11 +77,13 @@ async function callSourceApi(body: Record<string, any>, session: any) {
 
 async function triggerResumeIngestion(candidateId: string, filePath: string, fileName: string) {
   try {
+    // Dedup on file_name (not file_path): file_paths get a timestamp
+    // prefix per upload, so identical resumes would slip through.
     let { data: resume } = await supabase
       .from('resumes')
       .select('id')
       .eq('candidate_id', candidateId)
-      .eq('file_path', filePath)
+      .eq('file_name', fileName)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
