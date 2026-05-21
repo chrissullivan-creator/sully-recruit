@@ -9,8 +9,12 @@ const corsHeaders = {
  * resolve-unipile-id
  *
  * Given a LinkedIn slug, resolves the Unipile provider_id for that profile.
- * POST { linkedin_slug: "john-doe-123abc" }
+ * POST { linkedin_slug: "john-doe-123abc", account_id: "..." }
  * Returns { unipile_id: "...", provider_id: "..." }
+ *
+ * Uses the v1 tenant DSN: GET /api/v1/users/{slug}?account_id=X
+ * Our v2 app key returns 403 on the v2 equivalent
+ * (/v2/{acct}/linkedin/users/{slug}), so v1 is the only working path.
  */
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -46,15 +50,13 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Prefer v2 credentials; fall back to v1 for orgs that haven't migrated.
-    // The v1 endpoint /api/v1/users/{slug} started returning 404 for slugs
-    // v2 still resolves, so default to v2 whenever it's configured.
-    const v2ApiKey = Deno.env.get("UNIPILE_API_KEY_V2") || Deno.env.get("UNIPILE_API_KEY");
-    const v2BaseUrl =
-      Deno.env.get("UNIPILE_BASE_V2_URL") ||
-      Deno.env.get("UNIPILE_BASE_URL")?.replace(/\/api\/v1\/?$/, "/api/v2");
+    // v1 tenant DSN — every LinkedIn / messaging endpoint lives here.
+    const apiKey = Deno.env.get("UNIPILE_API_KEY");
+    const baseUrl =
+      Deno.env.get("UNIPILE_BASE_URL")
+      || "https://api19.unipile.com:14926/api/v1";
 
-    if (!v2ApiKey || !v2BaseUrl) {
+    if (!apiKey || !baseUrl) {
       throw new Error("Unipile not configured");
     }
 
@@ -67,16 +69,18 @@ Deno.serve(async (req: Request) => {
     }
     if (!account_id) {
       return new Response(
-        JSON.stringify({ error: "account_id is required for v2 lookups" }),
+        JSON.stringify({ error: "account_id is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // v2 path: /api/v2/{account_id}/linkedin/users/{slug}
-    const base = v2BaseUrl.replace(/\/+$/, "");
-    const profileUrl = `${base}/${encodeURIComponent(account_id)}/linkedin/users/${encodeURIComponent(linkedin_slug)}`;
+    // v1 path: /api/v1/users/{slug}?account_id=X
+    const base = baseUrl.replace(/\/+$/, "");
+    const profileUrl =
+      `${base}/users/${encodeURIComponent(linkedin_slug)}`
+      + `?account_id=${encodeURIComponent(account_id)}`;
     const headers: Record<string, string> = {
-      "X-API-KEY": v2ApiKey,
+      "X-API-KEY": apiKey,
       "Accept": "application/json",
     };
 

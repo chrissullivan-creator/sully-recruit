@@ -1,11 +1,11 @@
 /**
- * Unipile v2 email send. Mirrors the shape we use for Microsoft Graph
+ * Unipile v1 email send. Mirrors the shape we use for Microsoft Graph
  * sendMail so the call sites can flip between providers via the
  * USE_UNIPILE_EMAIL flag in app_settings without changing their
  * argument order.
  *
- * Endpoint (per Unipile v2 migration: account_id moves into the path):
- *   POST {UNIPILE_BASE_V2_URL}/{account_id}/emails
+ * Endpoint (v1 tenant DSN, account_id as query parameter):
+ *   POST {UNIPILE_BASE_URL}/emails?account_id={account_id}
  *
  * Body shape (multipart when there are attachments, JSON otherwise):
  *   - subject          string
@@ -15,7 +15,8 @@
  *   - reply_to         email message id of the previous send (threading)
  *   - attachments      file fields (multipart only)
  *
- * Auth: Bearer UNIPILE_API_KEY_V2 (falling back to UNIPILE_API_KEY).
+ * Auth: X-API-KEY = UNIPILE_API_KEY (v1 key). Our v2 app key returns
+ * 403 on /emails because emails aren't in its scope set.
  *
  * The Unipile account_id for the sender mailbox lives on
  * integration_accounts.unipile_account_id, looked up by the sender's
@@ -46,17 +47,15 @@ export interface UnipileSendResult {
 }
 
 async function resolveBaseAndKey(supabase: any) {
-  const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
-  const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-    || "https://api.unipile.com/v2";
-  const apiKey = v2KeyRow?.value || v1KeyRow?.value;
-  if (!v2Base || !apiKey) throw new Error("Unipile config missing");
-  return { v2Base, apiKey };
+  const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
+    || "https://api19.unipile.com:14926/api/v1";
+  const apiKey = v1KeyRow?.value;
+  if (!v1Base || !apiKey) throw new Error("Unipile config missing");
+  return { v1Base, apiKey };
 }
 
 async function resolveUnipileAccountId(supabase: any, fromEmail: string): Promise<string | null> {
@@ -101,11 +100,11 @@ export async function unipileSendEmail(
   supabase: any,
   input: UnipileSendInput,
 ): Promise<UnipileSendResult> {
-  const { v2Base, apiKey } = await resolveBaseAndKey(supabase);
+  const { v1Base, apiKey } = await resolveBaseAndKey(supabase);
   const acct = await resolveUnipileAccountId(supabase, input.fromEmail);
   if (!acct) throw new Error(`No Unipile account for ${input.fromEmail}`);
 
-  const url = `${v2Base}/${encodeURIComponent(acct)}/emails`;
+  const url = `${v1Base}/emails?account_id=${encodeURIComponent(acct)}`;
   const headers: Record<string, string> = {
     "X-API-KEY": apiKey,
     Accept: "application/json",

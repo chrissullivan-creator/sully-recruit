@@ -9,10 +9,10 @@ import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
  * candidate when no match is found so the recruiter sees a warm lead in
  * the inbox without manual entry.
  *
- * v2 path: GET /api/v2/{account_id}/users/invitations/received
- *   (Some Unipile builds expose this as
- *    /api/v2/{account_id}/linkedin/users/invitations/received — the
- *    function tries both.)
+ * v1 path: GET /api/v1/users/invite/received?account_id=X
+ * (unipileFetch translates `linkedin/users/invitations/received` →
+ * `users/invite/received` on v1; the `linkedin/` prefix and the
+ * pluralised `invitations` are v2-only.)
  *
  * 30-minute cadence — recruiters check inbound throughout the day;
  * faster than that risks Unipile rate limits.
@@ -52,25 +52,13 @@ export const syncLinkedinInvitations = inngest.createFunction(
 
     for (const acct of accounts) {
       try {
-        // Per Unipile v2 docs, LinkedIn-specific endpoints sit under
-        // /linkedin/. Try that path first; older builds may still expose
-        // the legacy unprefixed shape, hence the fallback.
-        let data: any;
-        try {
-          data = await unipileFetch(
-            supabase,
-            acct.unipile_account_id!,
-            `linkedin/users/invitations/received`,
-            { method: "GET", query: { limit: 50 } },
-          );
-        } catch {
-          data = await unipileFetch(
-            supabase,
-            acct.unipile_account_id!,
-            `users/invitations/received`,
-            { method: "GET", query: { limit: 50 } },
-          );
-        }
+        // v1: GET /api/v1/users/invite/received?account_id=X
+        const data: any = await unipileFetch(
+          supabase,
+          acct.unipile_account_id!,
+          `users/invite/received`,
+          { method: "GET", query: { limit: 50 } },
+        );
 
         const invites = data.items ?? data.invitations ?? data ?? [];
         const pulled = invites.length;

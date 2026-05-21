@@ -299,25 +299,25 @@ export async function verifyRecruiterProjectsAccess(
 }
 
 export async function applyUnipileProxyCountry(
-  config: UnipileConfig,
+  _config: UnipileConfig,
   accountId: string,
   country: string,
 ): Promise<void> {
-  const url = `${config.v2Base}/${encodeURIComponent(accountId)}/proxy`;
-  const resp = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      "X-API-KEY": config.apiKey,
-    },
-    body: JSON.stringify({ country }),
-  });
-
-  const { text } = await parseUnipileResponse(resp);
-  if (!resp.ok) {
-    throw new Error(`Proxy update failed (${resp.status}): ${text.slice(0, 300)}`);
-  }
+  // Proxy-country override is a Unipile v2 feature
+  // (PATCH /v2/{account_id}/proxy). v1 has no equivalent — proxy
+  // configuration is a tenant-level concept on v1. Our v2 app key
+  // returns 403 Insufficient permissions on /proxy, so this call
+  // can't succeed either way. Skipping is fine: existing accounts
+  // already have a proxy attached at tenant-creation time.
+  void accountId;
+  void country;
+  // 501 — caller can surface this as a warning without failing the
+  // connect flow.
+  throw new Error(
+    "Unipile proxy-country override is not available — v2 endpoint "
+    + "is 403 for our app, v1 has no equivalent. Proxy is set at "
+    + "tenant level instead.",
+  );
 }
 
 export async function listLinkedinContracts(

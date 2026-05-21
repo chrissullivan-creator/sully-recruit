@@ -1,13 +1,13 @@
 /**
- * Unipile v2 calendar fetch — parallel path to MS Graph
+ * Unipile v1 calendar fetch — parallel path to MS Graph
  * sync-outlook-events. Behind the USE_UNIPILE_CALENDAR app_settings
  * flag: when on, sync-outlook-events ALSO fetches via Unipile and
  * inserts into the same `tasks` table. Dedup happens on
  * tasks.external_id (Outlook event id is the same coming from
  * either provider) so Graph + Unipile running side-by-side is safe.
  *
- * Endpoints used (v2 path with account_id in path segment):
- *   GET /api/v2/{account_id}/calendars/events?start=…&end=…
+ * Endpoint (v1 tenant DSN, account_id as query parameter):
+ *   GET /api/v1/calendars/events?account_id={account_id}&start=…&end=…
  *
  * Field shapes vary by provider — defensive readers below.
  */
@@ -28,17 +28,15 @@ export interface UnipileCalendarEvent {
 }
 
 async function resolveBaseAndKey(supabase: any) {
-  const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
-  const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-    || "https://api.unipile.com/v2";
-  const apiKey = v2KeyRow?.value || v1KeyRow?.value;
-  if (!v2Base || !apiKey) throw new Error("Unipile config missing");
-  return { v2Base, apiKey };
+  const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
+    || "https://api19.unipile.com:14926/api/v1";
+  const apiKey = v1KeyRow?.value;
+  if (!v1Base || !apiKey) throw new Error("Unipile config missing");
+  return { v1Base, apiKey };
 }
 
 function toEvent(raw: any): UnipileCalendarEvent | null {
@@ -76,10 +74,14 @@ export async function fetchUnipileEventsForAccount(
   startISO: string,
   endISO: string,
 ): Promise<UnipileCalendarEvent[]> {
-  const { v2Base, apiKey } = await resolveBaseAndKey(supabase);
-  const url =
-    `${v2Base}/${encodeURIComponent(unipileAccountId)}/calendars/events` +
-    `?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}&limit=100`;
+  const { v1Base, apiKey } = await resolveBaseAndKey(supabase);
+  const qs = new URLSearchParams({
+    account_id: unipileAccountId,
+    start: startISO,
+    end: endISO,
+    limit: "100",
+  });
+  const url = `${v1Base}/calendars/events?${qs.toString()}`;
   const resp = await fetch(url, {
     headers: { "X-API-KEY": apiKey, Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),

@@ -10,8 +10,12 @@ import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
  * Unipile picks a proxy near it for location-precise routing). Falls
  * back to `UNIPILE_AUTO_PROXY_COUNTRY` when no IP is set.
  *
- *   PATCH /api/v2/{account_id}/proxy
- *   body: { ip: "..." }   OR   { country: "US" }
+ * The proxy anchor endpoint is v2-only
+ * (PATCH /v2/{account_id}/proxy) and our v2 app key returns 403
+ * Insufficient permissions on it. v1 has no equivalent — proxy
+ * routing is set at tenant-creation time. Until Unipile widens our
+ * v2 scope this job is a no-op; left in place so the cron history /
+ * scheduling don't reset when the scope is finally granted.
  *
  * Outlook accounts are skipped — Unipile doesn't offer auto-proxy for
  * email providers.

@@ -294,7 +294,8 @@ async function runRecruiterSearch(
   fullName: string,
   currentCompany: string | null,
 ): Promise<SearchHit[]> {
-  // POST /api/v2/{account_id}/linkedin/recruiter/search/people
+  // v1 path: POST /api/v1/linkedin/search?account_id=X&limit=10
+  // body: { api: 'recruiter', category: 'people', keywords }
   // Keywords is the broadest filter and accepts free text. Append
   // company as a hint to bias ranking when we have it.
   const keywords = currentCompany
@@ -304,14 +305,15 @@ async function runRecruiterSearch(
   const body = await unipileFetch(
     supabase,
     unipileAccountId,
-    "linkedin/recruiter/search/people?limit=10",
+    "linkedin/search",
     {
       method: "POST",
+      query: { limit: 10 },
       headers: {
         "Content-Type": "application/json",
         "X-UNIPILE-CLIENT": "sully-recruit",
       },
-      body: JSON.stringify({ keywords }),
+      body: JSON.stringify({ api: "recruiter", category: "people", keywords }),
     },
   );
 

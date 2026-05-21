@@ -6,11 +6,21 @@ import { requireAuth } from "../lib/auth.js";
 /**
  * POST /api/admin/probe-unipile-recruiter
  *
- * Diagnostic only. Pings every URL combination we think Unipile might
- * use for the LinkedIn Recruiter hiring-projects endpoint and reports
- * back exactly which one returns 200 for a given account_id. Use this
- * to figure out the correct URL pattern when an account_id format
- * changes (Unipile rolled out a non-acc_xxx ID shape recently).
+ * Diagnostic only. Pings every LinkedIn / Recruiter endpoint we
+ * currently rely on against the supplied account_id(s) and reports
+ * back whether each one responds 200. Useful for verifying a freshly
+ * connected account or diagnosing why a recruiter's sends are
+ * dropping.
+ *
+ * The candidate URLs below are the *currently working* set: every
+ * LinkedIn / Recruiter / messaging endpoint lives on the tenant DSN
+ * at /api/v1, and account_id is a query parameter (not a path
+ * segment). The historical v2-on-public-host shapes
+ * (/v2/{acct}/linkedin/recruiter/...) are intentionally NOT probed
+ * here — they return 403 Insufficient permissions on our app and
+ * burn quota. If you need to re-verify whether v2 is enabled, run
+ * an ad-hoc curl with UNIPILE_API_KEY_V2; don't add it back to
+ * this probe.
  *
  * Body: { account_ids: string[] }
  * Auth: Supabase JWT (any signed-in user).
@@ -33,23 +43,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const config = await loadUnipileConfig(supabase);
 
-  const v1Host = config.v1Base.replace(/\/api\/v1\/?$/, "");
-  const candidates = (acct: string) => [
-    // v2 global, account in URL
-    { name: "v2-global-path",   url: `${config.v2Base}/${encodeURIComponent(acct)}/linkedin/recruiter/projects?limit=1` },
-    // v2 global, account as query
-    { name: "v2-global-query",  url: `${config.v2Base}/linkedin/recruiter/projects?account_id=${encodeURIComponent(acct)}&limit=1` },
-    // v2 on DSN, account in URL
-    { name: "v2-dsn-path",      url: `${v1Host}/api/v2/${encodeURIComponent(acct)}/linkedin/recruiter/projects?limit=1` },
-    // v2 on DSN, account as query
-    { name: "v2-dsn-query",     url: `${v1Host}/api/v2/linkedin/recruiter/projects?account_id=${encodeURIComponent(acct)}&limit=1` },
-    // v1 on DSN (per official docs), account as query
-    { name: "v1-dsn-projects",  url: `${v1Host}/api/v1/linkedin/projects?account_id=${encodeURIComponent(acct)}&limit=1` },
-    { name: "v1-dsn-hiring",    url: `${v1Host}/api/v1/linkedin/hiring/projects?account_id=${encodeURIComponent(acct)}&limit=1` },
-    { name: "v1-dsn-recruiter", url: `${v1Host}/api/v1/linkedin/recruiter/projects?account_id=${encodeURIComponent(acct)}&limit=1` },
-    // Account fetch — if THIS 404s, the account ID itself is dead
-    { name: "v1-account-get",   url: `${v1Host}/api/v1/accounts/${encodeURIComponent(acct)}` },
-  ];
+  const v1 = config.v1Base.replace(/\/+$/, "");
+  const candidates = (acct: string) => {
+    const a = encodeURIComponent(acct);
+    return [
+      // Meta: account is alive
+      { name: "v1-account-get",      url: `${v1}/accounts/${a}` },
+      // LinkedIn Recruiter contracts
+      { name: "v1-contracts",        url: `${v1}/linkedin/contracts?account_id=${a}` },
+      // Hiring projects (project list + first project detail can't be
+      // probed here without a project id, so just list)
+      { name: "v1-projects",         url: `${v1}/linkedin/projects?account_id=${a}&limit=1` },
+      // LinkedIn job postings (Talent Hub)
+      { name: "v1-jobs",             url: `${v1}/linkedin/jobs?account_id=${a}&limit=1` },
+      // InMail credits remaining
+      { name: "v1-inmail-credits",   url: `${v1}/linkedin/inmail-credits?account_id=${a}` },
+      // Inbound invitations
+      { name: "v1-invite-received",  url: `${v1}/users/invite/received?account_id=${a}&limit=1` },
+    ];
+  };
 
   const results: any[] = [];
   for (const acct of accountIds) {

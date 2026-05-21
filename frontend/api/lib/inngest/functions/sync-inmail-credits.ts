@@ -8,7 +8,10 @@ import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
  * left" badge and lets sendLinkedIn block InMail sends when the well is
  * dry instead of waiting for Unipile to 422.
  *
- * v2 path: GET /api/v2/{account_id}/linkedin/recruiter/inmail-credits
+ * v1 path: GET /api/v1/linkedin/inmail-credits?account_id=X
+ * (unipileFetch translates `linkedin/recruiter/inmail-credits` →
+ * `linkedin/inmail-credits` on v1 — the `recruiter/` segment is a
+ * v2-only flourish.)
  *
  * Response shape varies a little across Unipile builds, so we look at a
  * small list of common keys (remaining/credits/balance).

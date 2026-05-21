@@ -56,9 +56,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     .select("key, value")
     .in("key", [
       "UNIPILE_BASE_URL",
-      "UNIPILE_BASE_V2_URL",
       "UNIPILE_API_KEY",
-      "UNIPILE_API_KEY_V2",
       "MICROSOFT_GRAPH_CLIENT_ID",
       "MICROSOFT_GRAPH_CLIENT_SECRET",
       "MICROSOFT_GRAPH_TENANT_ID",
@@ -94,14 +92,17 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };
     }),
 
-    // Unipile v2 — accounts endpoint (cheapest authenticated call).
-    // Prefer the v2 settings, fall back to v1 settings (rewriting suffix).
+    // Unipile v1 — accounts endpoint (cheapest authenticated call) on
+    // the tenant DSN. We probe the v1 surface specifically because
+    // every LinkedIn / messaging / email call goes through v1; the
+    // public v2 host is healthy but our v2 app key returns 403 on
+    // every LinkedIn endpoint, so a v2 ping isn't a meaningful signal.
     check("Unipile", async () => {
-      const v2Base = (cfg.get("UNIPILE_BASE_V2_URL") || "").replace(/\/+$/, "")
-        || "https://api.unipile.com/v2";
-      const apiKey = cfg.get("UNIPILE_API_KEY_V2") || cfg.get("UNIPILE_API_KEY");
-      if (!v2Base || !apiKey) return { ok: false, detail: "credentials missing" };
-      const r = await fetch(`${v2Base}/accounts?limit=1`, {
+      const v1Base = (cfg.get("UNIPILE_BASE_URL") || "").replace(/\/+$/, "")
+        || "https://api19.unipile.com:14926/api/v1";
+      const apiKey = cfg.get("UNIPILE_API_KEY");
+      if (!v1Base || !apiKey) return { ok: false, detail: "credentials missing" };
+      const r = await fetch(`${v1Base}/accounts?limit=1`, {
         headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       });
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };

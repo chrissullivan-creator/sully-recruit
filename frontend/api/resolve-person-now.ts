@@ -3,8 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * Resolve one person's LinkedIn URL → Unipile provider_id immediately
- * after insert, instead of waiting for the every-2h cron. Same v2 path
- * the cron uses (/api/v2/{account_id}/linkedin/users/{slug}).
+ * after insert, instead of waiting for the every-2h cron. Uses the v1
+ * tenant DSN at /api/v1/users/{slug}?account_id=X — our v2 app key
+ * returns 403 on the v2 equivalent (/v2/{acct}/linkedin/users/{slug}).
  *
  * On success writes provider_id back to people.unipile_provider_id and
  * sets unipile_resolve_status='resolved'. On failure flips the status
@@ -26,8 +27,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
 
   try {
-    // 1. Fetch the person + a LinkedIn account to scope the v2 call.
-    const [{ data: person }, { data: accounts }, { data: v2BaseRow }, { data: v2KeyRow }] = await Promise.all([
+    // 1. Fetch the person + a LinkedIn account to scope the v1 call.
+    const [{ data: person }, { data: accounts }, { data: v1BaseRow }, { data: v1KeyRow }] = await Promise.all([
       supabase
         .from("people")
         .select("id, linkedin_url, unipile_resolve_status")
@@ -41,8 +42,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .not("unipile_account_id", "is", null)
         .order("account_type", { ascending: false })
         .limit(1),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
     ]);
 
     if (!person) return res.status(404).json({ error: "Person not found" });
@@ -53,13 +54,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!account?.unipile_account_id) {
       return res.status(200).json({ resolved: false, reason: "no_unipile_account" });
     }
-    const v2Base = (v2BaseRow?.value || "").replace(/\/+$/, "");
-    const v2Key = v2KeyRow?.value;
-    if (!v2Base || !v2Key) {
-      return res.status(200).json({ resolved: false, reason: "unipile_v2_not_configured" });
+    const v1Base = (v1BaseRow?.value || "").replace(/\/+$/, "")
+      || "https://api19.unipile.com:14926/api/v1";
+    const v1Key = v1KeyRow?.value;
+    if (!v1Base || !v1Key) {
+      return res.status(200).json({ resolved: false, reason: "unipile_not_configured" });
     }
 
-    // 2. Extract slug, hit Unipile v2.
+    // 2. Extract slug, hit Unipile v1.
     const match = person.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
     const slug = match ? match[1] : (/^[\w-]+$/.test(person.linkedin_url.trim()) ? person.linkedin_url.trim() : null);
     if (!slug) {
@@ -67,9 +69,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ resolved: false, reason: "invalid_url" });
     }
 
-    const url = `${v2Base}/${encodeURIComponent(account.unipile_account_id)}/linkedin/users/${encodeURIComponent(slug)}`;
+    const url = `${v1Base}/users/${encodeURIComponent(slug)}?account_id=${encodeURIComponent(account.unipile_account_id)}`;
     const resp = await fetch(url, {
-      headers: { "X-API-KEY": v2Key, Accept: "application/json", "X-UNIPILE-CLIENT": "sully-recruit" },
+      headers: { "X-API-KEY": v1Key, Accept: "application/json", "X-UNIPILE-CLIENT": "sully-recruit" },
     });
 
     if (!resp.ok) {

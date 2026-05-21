@@ -408,11 +408,11 @@ async function getUnipileApiKey(
 /**
  * Read the kill-switch for the inbox-scoped LinkedIn send path.
  *
- * When `app_settings.USE_LINKEDIN_INBOX_API` is "true"/"1", new chats
- * route through `POST /v2/{account_id}/inboxes/{inbox_id}/chats/send`
- * (the current Unipile v2 docs shape). On any error we fall back to
- * the legacy `/v2/{account_id}/chats` path so a misconfigured rollout
- * never blocks a live sequence step.
+ * Historically this routed sends to v2's inbox-scoped endpoint
+ * (`POST /v2/{account_id}/inboxes/{inbox_id}/chats/send`). v1 has no
+ * inbox concept, so when the flag is on `sendViaInboxEndpoint` now
+ * throws and we fall through to the legacy `POST /chats` path. Leave
+ * the flag OFF in production.
  */
 async function shouldUseLinkedInInboxApi(): Promise<boolean> {
   try {
@@ -483,86 +483,49 @@ async function buildInboxAttachments(
 }
 
 /**
- * Send a LinkedIn message through the v2 inbox-scoped endpoint:
- *   POST /v2/{account_id}/inboxes/{inbox_id}/chats/send
- *
- * Classic DMs use CLASSIC_PRIMARY; Recruiter InMails use
- * RECRUITER_PRIMARY (project-scoped sends — RECRUITER_{project_id}_PRIMARY
- * with channel_type=JOB_POSTING — are a follow-up, not wired here).
- *
- * Recruiter sends require both `subject` and `signature` per Unipile
- * docs. We surface a clear error rather than silently dropping them.
- *
- * Throws on any send error so the caller can fall back to the legacy
- * `/v2/{account_id}/chats` path.
+ * Inbox-scoped send was a v2-only shape
+ * (POST /v2/{account_id}/inboxes/{inbox_id}/chats/send). v1 has no
+ * inbox concept — all chats / messages live at the top level. We
+ * throw here so the caller falls through to the legacy /chats path
+ * (which IS the equivalent on v1: POST /chats?account_id=X with
+ * linkedin.api='recruiter' for InMail). The USE_LINKEDIN_INBOX_API
+ * kill switch should stay OFF in production.
  */
 async function sendViaInboxEndpoint(
-  supabase: any,
-  resolvedAccountId: string,
-  providerId: string,
-  text: string,
-  opts: {
+  _supabase: any,
+  _resolvedAccountId: string,
+  _providerId: string,
+  _text: string,
+  _opts: {
     isInMail: boolean;
     subject?: string;
     signature?: string;
     attachments?: { content: string; content_type: string; filename: string }[];
   },
 ): Promise<{ message_id: string; conversation_id: string }> {
-  const inboxId = opts.isInMail ? "RECRUITER_PRIMARY" : "CLASSIC_PRIMARY";
-
-  const payload: any = {
-    users_ids: [providerId],
-    text,
-  };
-
-  if (opts.isInMail) {
-    const subject = opts.subject?.trim();
-    const signature = opts.signature?.trim();
-    if (!subject) {
-      throw new Error("Recruiter InMail requires a subject — set sequence step subject_line");
-    }
-    if (!signature) {
-      throw new Error("Recruiter InMail requires a signature — set profiles.display_name for the sender");
-    }
-    payload.options = { linkedin: { recruiter: { subject, signature } } };
-  }
-
-  if (opts.attachments?.length) {
-    payload.attachments = opts.attachments;
-  }
-
-  const data: any = await unipileFetch(
-    supabase,
-    resolvedAccountId,
-    `inboxes/${encodeURIComponent(inboxId)}/chats/send`,
-    { method: "POST", body: JSON.stringify(payload) },
+  throw new Error(
+    "Inbox-scoped LinkedIn send is not available on v1. "
+    + "Turn off USE_LINKEDIN_INBOX_API so sends fall back to POST /chats.",
   );
-
-  return {
-    message_id: data.id || data.message_id || `msg_${Date.now()}`,
-    conversation_id: data.chat_id || data.conversation_id || "",
-  };
 }
 
 /**
  * Verify that the Unipile account is still connected and healthy.
  * Throws if the account is disconnected or the API is unreachable.
  *
- * v2 has no per-account endpoint at this position — account state
- * lives at /api/v2/accounts/{id} (still supported, no path-account-id
- * shape because this is a meta endpoint). Use it directly with the
- * v2 base URL + key.
+ * v1 route confirmed via probe:
+ *   GET /api/v1/accounts/{account_id}
+ * (account_id is in the path here because /accounts is a meta route
+ * scoped by id, not by query.)
  */
 async function verifyUnipileAccountHealth(supabase: any, accountId: string): Promise<void> {
-  const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
-  const base = (v2Row?.value || "").replace(/\/+$/, "")
-    || "https://api.unipile.com/v2";
-  const apiKey = v2KeyRow?.value || v1KeyRow?.value;
+  const base = (v1Row?.value || "").replace(/\/+$/, "")
+    || "https://api19.unipile.com:14926/api/v1";
+  const apiKey = v1KeyRow?.value;
   if (!base || !apiKey) throw new Error("Unipile config missing");
   try {
     const resp = await fetch(`${base}/accounts/${encodeURIComponent(accountId)}`, {
@@ -611,11 +574,12 @@ export async function sendLinkedIn(
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
 
-  // Health check uses v2 base — /accounts/{id} is unchanged across versions.
+  // Health check via v1: GET /api/v1/accounts/{id}.
   await verifyUnipileAccountHealth(supabase, resolvedAccountId);
 
-  // ── Resolve LinkedIn URL → provider_id via v2 ───────────────────
-  // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug}
+  // ── Resolve LinkedIn URL → provider_id via v1 ───────────────────
+  // unipileFetch translates `linkedin/users/{slug}` → v1 `users/{slug}`
+  // and adds account_id as a query parameter.
   let providerId = to;
   if (to.includes("linkedin.com/")) {
     const match = to.match(/linkedin\.com\/in\/([^/?#]+)/);
@@ -663,9 +627,9 @@ export async function sendLinkedIn(
     }
   }
 
-  // ── Connection request via v2 ───────────────────────────────────
-  // v2 path: POST /api/v2/{account_id}/linkedin/users/invite
-  // (account_id moves to path; body no longer needs it)
+  // ── Connection request via v1 ───────────────────────────────────
+  // unipileFetch translates `linkedin/users/invite` → v1 `users/invite`
+  // and adds account_id as a query parameter.
   if (isConnectionRequest) {
     const data: any = await unipileFetch(
       supabase,
@@ -682,11 +646,11 @@ export async function sendLinkedIn(
     };
   }
 
-  // ── Regular message + InMail via v2 ─────────────────────────────
-  // v2 path: POST /v2/{account_id}/chats
-  // Body: { attendees_ids: [providerId], text, message_type? }
-  //   - Classic message:  no message_type
-  //   - Recruiter InMail: message_type = "INMAIL"
+  // ── Regular message + InMail via v1 ─────────────────────────────
+  // v1 path: POST /api/v1/chats?account_id=X
+  // Body: { attendees_ids: [providerId], text, linkedin? }
+  //   - Classic message:  omit linkedin
+  //   - Recruiter InMail: linkedin = { api: "recruiter" }
   //
   // Use multipart when one or more attachments are present so Unipile
   // picks up each file via its `attachments` field. Attachments are
@@ -760,7 +724,7 @@ export async function sendLinkedIn(
       const fd = new FormData();
       fd.append("attendees_ids", providerId);
       fd.append("text", body);
-      // Per Unipile v2 SDK (chat-start.types.ts): use the `linkedin`
+      // Per Unipile SDK (chat-start.types.ts): use the `linkedin`
       // field, not a top-level message_type.
       //   InMail (Recruiter seat):  { linkedin: { api: 'recruiter' } }
       //   Classic DM:               omit linkedin (defaults to classic)
@@ -795,7 +759,7 @@ export async function sendLinkedIn(
   }
 
   const sendPayload: any = { attendees_ids: [providerId], text: body };
-  // Per Unipile v2 SDK: route InMail through linkedin.api='recruiter'.
+  // Per Unipile SDK: route InMail through linkedin.api='recruiter'.
   // Classic DMs need no extras (default).
   if (isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
 
@@ -889,9 +853,8 @@ export async function resolveRecipient(
   //   2. candidate_channels.provider_id  (legacy cache, candidate-only)
   //
   // Only hit Unipile's user-lookup endpoint as a last resort. The lookup
-  // moved to v2 (`/api/v2/{account_id}/users/{slug}`); the legacy v1 path
-  // returns 404 for many slugs and was the cause of this morning's 14
-  // InMail skips.
+  // uses v1 (`GET /api/v1/users/{slug}?account_id=X`) — our v2 app
+  // returns 403 Insufficient permissions on /linkedin/users/{slug}.
   const { data: peopleRow } = await supabase
     .from("people")
     .select("unipile_provider_id, unipile_classic_id, unipile_recruiter_id, linkedin_url")
@@ -925,8 +888,8 @@ export async function resolveRecipient(
   const match = peopleRow.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/);
   if (!match) throw new Error(`Invalid LinkedIn URL: ${peopleRow.linkedin_url}`);
 
-  // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug} via the
-  // shared unipileFetch helper that already handles base URL + API key.
+  // unipileFetch translates `linkedin/users/{slug}` → v1 `users/{slug}`
+  // and adds account_id as a query parameter.
   const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
   const userData: any = await unipileFetch(
     supabase,

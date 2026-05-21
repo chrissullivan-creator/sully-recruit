@@ -125,7 +125,8 @@ export const checkConnections = inngest.createFunction(
           continue;
         }
 
-        // v2: GET /api/v2/{account_id}/linkedin/users/{provider_id}
+        // v1: GET /api/v1/users/{provider_id}?account_id=X
+        // (unipileFetch translates `linkedin/users/...` → v1 `users/...`)
         let profile: any;
         try {
           profile = await unipileFetch(

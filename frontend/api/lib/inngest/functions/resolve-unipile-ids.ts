@@ -91,7 +91,8 @@ export const resolveUnipileIds = inngest.createFunction(
           continue;
         }
 
-        // v2 path: GET /api/v2/{account_id}/linkedin/users/{slug}
+        // v1 path: GET /api/v1/users/{slug}?account_id=X
+        // (unipileFetch translates `linkedin/users/...` → v1 `users/...`)
         let profile: any;
         try {
           profile = await Promise.race([

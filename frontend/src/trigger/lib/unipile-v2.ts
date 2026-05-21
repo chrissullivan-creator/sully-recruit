@@ -1,25 +1,29 @@
 /**
- * Central Unipile v2 client. Every server-side caller routes through
- * here so the URL shape (account_id-in-path) and key resolution are
- * defined in one place.
+ * Central Unipile client. Every server-side caller routes through here
+ * so the URL shape and key resolution are defined in one place.
  *
- * Key v2 facts (from
- *   https://developer.unipile.com/v2.0/docs/migration-linkedin-api ):
- *   - account_id is a path segment on every documented v2 endpoint.
- *     Per Unipile v2 docs:
- *       /v2/{account_id}/inboxes
- *       /v2/{account_id}/inboxes/{inbox_id}/chats        (list chats)
- *       /v2/{account_id}/chats/{chat_id}                 (single chat)
- *       /v2/{account_id}/chats/{chat_id}/messages        (messages)
- *       /v2/{account_id}/linkedin/users/...              (users + invite)
- *       /v2/{account_id}/linkedin/recruiter/...          (recruiter ops)
- *   - There is no top-level /v2/chats — to enumerate chats you list
- *     inboxes first, then chats per inbox. See helpers below.
- *   - The `topLevel` option on unipileFetch is reserved for a tiny
- *     handful of true-top-level routes (currently none in regular
- *     use); keep it for forward-compat.
+ * Why this file is still named "unipile-v2.ts": it used to target
+ * api.unipile.com/v2 (where account_id was a path segment). That host
+ * exists for our tenant but our v2 app key returns 403 Insufficient
+ * permissions on every LinkedIn/Recruiter/messaging call (Unipile-side
+ * scope gate), AND v2 requires `acc_xxx`-format account IDs that we
+ * don't store. Per Unipile's published v2 OpenAPI spec, the v2 host
+ * only exposes 8 endpoints anyway: /accounts, /auth/*, /webhooks/*.
+ * All LinkedIn / messaging / email endpoints live exclusively on
+ * /api/v1 on the tenant DSN, take account_id as a query parameter,
+ * and use the v1 API key.
  *
- * Auth: Bearer UNIPILE_API_KEY_V2 (falls back to UNIPILE_API_KEY).
+ * So we keep this module's NAME (too many imports to chase) but it now
+ * routes to v1. The path translation rules are below in
+ * `translatePathToV1`.
+ *
+ * Lifecycle endpoints (POST /v2/auth/link, POST /v2/auth/checkpoint,
+ * POST /v2/accounts) are intentionally NOT routed through here. They
+ * live in connect-linkedin*.ts and call api.unipile.com/v2 directly
+ * with UNIPILE_API_KEY_V2 — that surface is the only part of v2 that
+ * actually works for us.
+ *
+ * Auth: X-API-KEY = UNIPILE_API_KEY (v1 key).
  */
 import { logger } from "./logger.js";
 
@@ -36,30 +40,108 @@ async function resolveConfig(supabase: any): Promise<ResolvedConfig> {
   if (_cachedConfig && now - _cachedConfig.fetchedAt < CONFIG_TTL_MS) {
     return _cachedConfig.value;
   }
-  const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
   ]);
-  // Prefer the explicit v2 setting, then fall back to the public v2
-  // endpoint. We do NOT derive v2 from the v1 DSN — the dedicated DSN
-  // host (e.g. api19.unipile.com:14926) only serves v1; v2 lives at
-  // the public api.unipile.com/v2 endpoint.
-  const base = (v2Row?.value || "").replace(/\/+$/, "")
-    || "https://api.unipile.com/v2";
-  const apiKey = v2KeyRow?.value || v1KeyRow?.value;
-  if (!base || !apiKey) throw new Error("Unipile v2 config missing");
+  // The v1 DSN is the only Unipile host that serves LinkedIn /
+  // messaging / email endpoints for our tenant. Default to the known
+  // DSN value so callers without an explicit setting still work.
+  const base = (v1Row?.value || "").replace(/\/+$/, "")
+    || "https://api19.unipile.com:14926/api/v1";
+  const apiKey = v1KeyRow?.value;
+  if (!base || !apiKey) throw new Error("Unipile config missing (UNIPILE_BASE_URL or UNIPILE_API_KEY)");
   const value = { base, apiKey };
   _cachedConfig = { value, fetchedAt: now };
   return value;
 }
 
-/** Build a v2 URL with account_id in the path. `path` should not start
- *  with a slash AND should not include the leading account segment. */
-export function unipileV2Path(base: string, accountId: string, path: string) {
+/**
+ * Translate a path that was written for the old v2 shape
+ * (`linkedin/users/{slug}`, `chats`, `inboxes/{id}/chats/send` etc.)
+ * into the equivalent v1 path. Every v1 LinkedIn / messaging route
+ * takes account_id as a QUERY parameter, not a path segment, so the
+ * account_id is added by `unipileFetch` separately.
+ *
+ * Returns null when the caller hit a v2-only shape with no v1
+ * equivalent — caller should 501 or fall back gracefully.
+ */
+export function translatePathToV1(path: string): string | null {
   const clean = path.replace(/^\/+/, "");
-  return `${base}/${encodeURIComponent(accountId)}/${clean}`;
+
+  // ── LinkedIn user lookups ─────────────────────────────────────────
+  // v2: linkedin/users/{slug}      → v1: users/{slug}
+  // v2: linkedin/users/invite      → v1: users/invite
+  if (clean.startsWith("linkedin/users/invitations/")) {
+    // v2: linkedin/users/invitations/received → v1: users/invite/received
+    // Probed: v1 exposes /api/v1/users/invite/received (or sent).
+    const rest = clean.replace(/^linkedin\/users\/invitations\//, "");
+    return `users/invite/${rest}`;
+  }
+  if (clean.startsWith("linkedin/users/invite")) {
+    return clean.replace(/^linkedin\/users\/invite/, "users/invite");
+  }
+  if (clean.startsWith("linkedin/users/")) {
+    return clean.replace(/^linkedin\/users\//, "users/");
+  }
+  if (clean.startsWith("users/invitations/")) {
+    // legacy form some callers used (no `linkedin/` prefix)
+    const rest = clean.replace(/^users\/invitations\//, "");
+    return `users/invite/${rest}`;
+  }
+
+  // ── LinkedIn search ───────────────────────────────────────────────
+  // v2: linkedin/recruiter/search/people → v1: linkedin/search (body
+  //     selects api='recruiter')
+  if (clean === "linkedin/recruiter/search/people"
+    || clean.startsWith("linkedin/recruiter/search/people?")) {
+    return "linkedin/search";
+  }
+
+  // ── Inbox-scoped recruiter send (v2-only — no v1 equivalent) ─────
+  // v2: inboxes/{id}/chats/send → null (caller should fall back to /chats)
+  if (clean.startsWith("inboxes/")) {
+    // The /api/v1 surface has no inbox concept; v1 routes top-level
+    // /chats and /messages with account_id as query. Return null so
+    // the caller knows to use the legacy /chats path or 501 itself.
+    return null;
+  }
+
+  // ── Recruiter InMail credits ──────────────────────────────────────
+  // v2: linkedin/recruiter/inmail-credits → v1: linkedin/inmail-credits
+  if (clean === "linkedin/recruiter/inmail-credits") {
+    return "linkedin/inmail-credits";
+  }
+
+  // ── Recruiter projects/jobs (already v1-shaped) ──────────────────
+  if (clean.startsWith("linkedin/projects")
+    || clean.startsWith("linkedin/jobs")
+    || clean.startsWith("linkedin/contracts")
+    || clean.startsWith("linkedin/search")
+    || clean.startsWith("linkedin/inmail-credits")) {
+    return clean;
+  }
+
+  // ── Messaging (top-level on v1) ───────────────────────────────────
+  // v2: chats, chats/{id}, chats/{id}/messages → v1: same path
+  // v2: messages, messages/{id} → v1: same path
+  // v2: emails → v1: same path
+  if (clean.startsWith("chats")
+    || clean.startsWith("messages")
+    || clean.startsWith("emails")
+    || clean.startsWith("calendars/")) {
+    return clean;
+  }
+
+  // ── Proxy config ─────────────────────────────────────────────────
+  // v2: proxy → no v1 equivalent (proxy is a v2-only concept).
+  if (clean === "proxy") {
+    return null;
+  }
+
+  // Pass-through anything we don't recognise — caller will see the
+  // raw v1 URL and we'll fix the rule when we hit a 404.
+  return clean;
 }
 
 export interface UnipileFetchInit extends Omit<RequestInit, "headers"> {
@@ -67,25 +149,25 @@ export interface UnipileFetchInit extends Omit<RequestInit, "headers"> {
   /** Extra headers merged on top of auth/Accept defaults. */
   headers?: Record<string, string>;
   /**
-   * When true, build the URL as `${base}/${path}?account_id=…` instead
-   * of `${base}/${account_id}/${path}`. Use for endpoints that Unipile
-   * v2 keeps top-level (notably /chats and its children — the API
-   * returns 404 when account_id is in the path for these).
+   * Legacy v2-era flag. Ignored on v1 — every v1 LinkedIn / messaging
+   * route already takes account_id as a query parameter. Kept here so
+   * existing call sites don't have to be touched.
    */
   topLevel?: boolean;
 }
 
 /**
- * Fetch any Unipile v2 endpoint scoped to a single account_id.
- * Throws on non-2xx with the response body in the message.
+ * Fetch any Unipile endpoint scoped to a single account_id. Throws on
+ * non-2xx with the response body in the message.
  *
- * Example (account_id in path — default):
- *   await unipileFetch(supabase, accountId, "linkedin/users/jane-doe", { method: "GET" })
- *   →  GET /api/v2/{account_id}/linkedin/users/jane-doe
+ * Callers historically wrote v2-shaped paths
+ * (e.g. `linkedin/users/{slug}`, `chats`, `inboxes/.../chats/send`).
+ * Those paths are translated to their v1 equivalents below and
+ * account_id is added as a query parameter (NOT a path segment).
  *
- * Example (top-level — chats family):
- *   await unipileFetch(supabase, accountId, "chats", { method: "GET", topLevel: true })
- *   →  GET /api/v2/chats?account_id={account_id}
+ * Example:
+ *   await unipileFetch(supabase, accountId, "linkedin/users/jane-doe")
+ *   →  GET {v1Base}/users/jane-doe?account_id={accountId}
  */
 export async function unipileFetch<T = any>(
   supabase: any,
@@ -94,19 +176,32 @@ export async function unipileFetch<T = any>(
   init: UnipileFetchInit = {},
 ): Promise<T> {
   if (!accountId) throw new Error("unipileFetch: accountId required");
-  const { base, apiKey } = await resolveConfig(supabase);
-  const cleanPath = path.replace(/^\/+/, "");
-  const url = init.topLevel
-    ? new URL(`${base}/${cleanPath}`)
-    : new URL(unipileV2Path(base, accountId, path));
-  if (init.topLevel) {
-    url.searchParams.set("account_id", accountId);
+  const v1Path = translatePathToV1(path);
+  if (v1Path === null) {
+    throw new Error(
+      `unipileFetch: no v1 equivalent for "${path}". `
+      + `This endpoint was v2-only and our v2 app lacks the scope. `
+      + `Caller should 501 or fall back to a v1 route.`,
+    );
   }
+
+  const { base, apiKey } = await resolveConfig(supabase);
+  const cleanPath = v1Path.replace(/^\/+/, "");
+
+  // Preserve a query string the caller embedded in `path`.
+  const [pathPart, embeddedQs = ""] = cleanPath.split("?");
+  const url = new URL(`${base}/${pathPart}`);
+  if (embeddedQs) {
+    const parsed = new URLSearchParams(embeddedQs);
+    for (const [k, v] of parsed.entries()) url.searchParams.set(k, v);
+  }
+  url.searchParams.set("account_id", accountId);
   if (init.query) {
     for (const [k, v] of Object.entries(init.query)) {
       if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
     }
   }
+
   const headers: Record<string, string> = {
     "X-API-KEY": apiKey,
     Accept: "application/json",

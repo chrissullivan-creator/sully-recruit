@@ -152,34 +152,25 @@ async function backfillOne(
     return stats;
   }
 
-  const inboxesData: any = await unipileFetch(
-    supabase,
-    account.unipile_account_id,
-    `inboxes`,
-    { method: "GET" },
-  );
-  const inboxes: any[] = inboxesData.items ?? inboxesData.inboxes ?? inboxesData.data ?? [];
+  // v1 has no inbox concept — list chats directly. The Recruiter
+  // vs Classic distinction is on the chat row itself (folder /
+  // content_type), so the per-inbox loop we used to do on v2 was
+  // a v2-specific hack.
   const chats: any[] = [];
-  for (const ib of inboxes) {
-    if (chats.length >= MAX_CHATS_PER_ACCOUNT) break;
-    const inboxId = ib.id ?? ib.inbox_id ?? ib.name;
-    if (!inboxId) continue;
-    try {
-      const remaining = MAX_CHATS_PER_ACCOUNT - chats.length;
-      const data: any = await unipileFetch(
-        supabase,
-        account.unipile_account_id,
-        `inboxes/${encodeURIComponent(inboxId)}/chats`,
-        { method: "GET", query: { limit: remaining } },
-      );
-      const items = data.items ?? data.chats ?? data.data ?? [];
-      for (const c of items) {
-        chats.push(c);
-        if (chats.length >= MAX_CHATS_PER_ACCOUNT) break;
-      }
-    } catch (err: any) {
-      logger.warn("inbox chats fetch failed", { inboxId, error: err.message });
+  try {
+    const data: any = await unipileFetch(
+      supabase,
+      account.unipile_account_id,
+      `chats`,
+      { method: "GET", query: { limit: MAX_CHATS_PER_ACCOUNT } },
+    );
+    const items = data.items ?? data.chats ?? data.data ?? [];
+    for (const c of items) {
+      chats.push(c);
+      if (chats.length >= MAX_CHATS_PER_ACCOUNT) break;
     }
+  } catch (err: any) {
+    logger.warn("chats fetch failed", { account_id: account.unipile_account_id, error: err.message });
   }
 
   logger.info(`Fetched ${chats.length} chats for ${accountEmail}`);

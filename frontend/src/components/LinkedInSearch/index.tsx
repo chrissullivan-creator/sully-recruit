@@ -167,19 +167,21 @@ export default function LinkedInSearch() {
     setResults([]);
 
     try {
-      // Unipile v2 splits LinkedIn search by product. Recruiter search lives
-      // at /api/v2/{account_id}/linkedin/recruiter/search; account_id is now
-      // a path segment (no longer a query param). The `api` body field is
-      // gone — the path encodes that.
-      // Convert the configured DSN (which usually ends in /api/v1) to v2.
-      const v2Dsn = unipileDsn.replace(/\/api\/v1$/, '/api/v2');
-      const url = `${v2Dsn}/${encodeURIComponent(activeAccount.accountId)}/linkedin/recruiter/search`;
+      // Unipile v1 unified LinkedIn search. The route lives at
+      //   POST /api/v1/linkedin/search?account_id=X
+      // with the LinkedIn product selected via the `api` body field
+      // ('recruiter' | 'classic'). We used to call v2/{acct}/linkedin/
+      // recruiter/search but our v2 app returns 403 Insufficient
+      // permissions on every LinkedIn endpoint, and v2 also requires
+      // acc_xxx-format account IDs that our DB doesn't store.
+      const url = `${unipileDsn}/linkedin/search?account_id=${encodeURIComponent(activeAccount.accountId)}`;
 
       let body: any;
       if (tab === 'url' && pastedUrl.trim()) {
-        body = { url: pastedUrl.trim() };
+        body = { api: 'recruiter', url: pastedUrl.trim() };
       } else {
         body = {
+          api: 'recruiter',
           category: 'people',
           keywords: keywords || undefined,
           role: title ? [{ keywords: title }] : undefined,

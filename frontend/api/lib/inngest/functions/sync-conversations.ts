@@ -40,34 +40,18 @@ export const syncConversations = inngest.createFunction(
         account.account_type === "linkedin_recruiter" ? "linkedin_recruiter" : "linkedin",
       );
       try {
+        // v1 has no inbox concept — chats live at the top level. List
+        // them in latest-first order; the v2 inbox loop we used to do
+        // here was a hack to enumerate Recruiter + Classic conversations
+        // separately, and v1 returns them all in one list anyway.
         let data: any;
         try {
-          const inboxesResp: any = await unipileFetch(
+          data = await unipileFetch(
             supabase,
             account.unipile_account_id,
-            `inboxes`,
-            { method: "GET" },
+            `chats`,
+            { method: "GET", query: { limit: BATCH_SIZE, sort: "latest" } },
           );
-          const inboxes: any[] = inboxesResp.items ?? inboxesResp.inboxes ?? inboxesResp.data ?? [];
-          const collected: any[] = [];
-          for (const ib of inboxes) {
-            if (collected.length >= BATCH_SIZE) break;
-            const inboxId = ib.id ?? ib.inbox_id ?? ib.name;
-            if (!inboxId) continue;
-            const remaining = BATCH_SIZE - collected.length;
-            const chatsResp: any = await unipileFetch(
-              supabase,
-              account.unipile_account_id,
-              `inboxes/${encodeURIComponent(inboxId)}/chats`,
-              { method: "GET", query: { limit: remaining, sort: "latest" } },
-            );
-            const items = chatsResp.items ?? chatsResp.chats ?? chatsResp.data ?? [];
-            for (const c of items) {
-              collected.push(c);
-              if (collected.length >= BATCH_SIZE) break;
-            }
-          }
-          data = { items: collected };
         } catch (err: any) {
           logger.warn("Failed to fetch chats", { accountId: account.id, error: err.message });
           continue;
