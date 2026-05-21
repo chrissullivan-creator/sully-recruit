@@ -267,32 +267,35 @@ export async function verifyRecruiterProjectsAccess(
   config: UnipileConfig,
   accountId: string,
 ): Promise<RecruiterAccessCheck> {
-  // Try the configured v2 host first (api.unipile.com/v2 — global), then
-  // fall back to the same DSN as v1 (api19.unipile.com:.../api/v2) for
-  // accounts whose IDs are tenant-local and don't route globally. New
-  // Unipile account IDs (non-acc_xxx shape) live only on the DSN.
-  const dsnV2Base = config.v1Base.replace(/\/api\/v1\/?$/, "/api/v2");
-  const candidateBases = [config.v2Base, dsnV2Base].filter((v, i, a) => v && a.indexOf(v) === i);
+  // Per Unipile docs and direct probe: Recruiter hiring projects live
+  // at /api/v1/linkedin/projects?account_id=... on the tenant DSN.
+  // The older /v2/{acct}/linkedin/recruiter/projects pattern we used
+  // hits api.unipile.com/v2 which returns "Route Not Found" (not a real
+  // host) — and even when we tried it on the DSN, /api/v2 doesn't
+  // exist either. The 401 'Invalid API Key' was Unipile's confusing
+  // way of saying the route was wrong.
+  const url = new URL(`${config.v1Base}/linkedin/projects`);
+  url.searchParams.set("account_id", accountId);
+  url.searchParams.set("limit", "1");
 
-  let last: RecruiterAccessCheck = { enabled: false, status: 0 };
-  for (const base of candidateBases) {
-    const url = new URL(`${base}/${encodeURIComponent(accountId)}/linkedin/recruiter/projects`);
-    url.searchParams.set("limit", "1");
-    const resp = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json",
-        "X-API-KEY": config.apiKey,
-      },
-    });
-    const { text } = await parseUnipileResponse(resp);
-    if (resp.ok) return { enabled: true, status: resp.status };
-    if ([401, 403, 404].includes(resp.status)) {
-      last = { enabled: false, status: resp.status, detail: text.slice(0, 400) };
-      continue;
-    }
-    throw new Error(`Recruiter verification failed (${resp.status}): ${text.slice(0, 300)}`);
+  const resp = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "X-API-KEY": config.apiKey,
+    },
+  });
+  const { text } = await parseUnipileResponse(resp);
+
+  if (resp.ok) return { enabled: true, status: resp.status };
+  if ([401, 403, 404].includes(resp.status)) {
+    return {
+      enabled: false,
+      status: resp.status,
+      detail: text.slice(0, 400),
+    };
   }
-  return last;
+
+  throw new Error(`Recruiter verification failed (${resp.status}): ${text.slice(0, 300)}`);
 }
 
 export async function applyUnipileProxyCountry(
