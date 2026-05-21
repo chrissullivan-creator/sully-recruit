@@ -141,16 +141,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!connectedAccountId) {
     return res.status(500).json({ error: "Unipile did not return an account_id" });
   }
-  if (!/^acc_/.test(String(connectedAccountId))) {
-    // The cookies path was producing junk IDs (member URN / session
-    // token shape rather than the acc_xxx format). Reject so we don't
-    // poison the row and surface what we got for diagnosis.
-    return res.status(502).json({
-      error: `Unipile returned non-standard account_id shape: ${String(connectedAccountId).slice(0, 40)}. Try the Hosted Auth path.`,
-      extracted_account_id: connectedAccountId,
-      unipile_response_keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
-    });
-  }
 
   const sync = await syncLinkedinIntegrationAccount(supabase, {
     accountLabel: account_label || null,
