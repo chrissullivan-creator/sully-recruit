@@ -11,8 +11,10 @@ import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
  *      (jobs.linkedin_project_id + jobs.linkedin_project_account_id).
  *      If the caller passes job_id, that pair is persisted on the job
  *      so subsequent Saves auto-tag without prompting.
- *   2) Asks Unipile for the project's first pipeline stage (entry point)
- *      and POSTs save_candidate to put the person in the LinkedIn pipeline.
+ *   2) Locally dedupes the candidate row in Supabase (by linkedin_url, then
+ *      by email columns). Unipile-side "save to pipeline" (POST save_candidate
+ *      under the v2 Recruiter scope) is NOT called — see comment below for
+ *      why. The candidate still lands in our local pipeline via step 4.
  *   3) Dedupes in Supabase by linkedin_url, then by email columns. If a
  *      row exists, UPDATEs profile/headline/title/company/location and
  *      avatar from the Unipile payload while preserving any email/phone
@@ -24,6 +26,17 @@ import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
  *   5) If has_resume is set, downloads the resume from Unipile, uploads
  *      to the `resumes` bucket, creates a resumes row, and fires the
  *      ingestion task.
+ *
+ * Unipile API surface note:
+ *   - The v1 LinkedIn endpoints we use (jobs/applicants/{aid}/resume,
+ *     linkedin/projects/{id}) live on the tenant DSN at /api/v1 and use
+ *     UNIPILE_API_KEY with account_id as a query parameter.
+ *   - The save_candidate flow (write a candidate into a Recruiter project's
+ *     pipeline) has no v1 equivalent. The v2 path exists
+ *     (POST /v2/{acct}/linkedin/recruiter/projects/{id}/pipeline/candidate/save)
+ *     but our v2 app currently returns 403 Insufficient permissions on every
+ *     Recruiter call (Unipile-side scope gate). We skip the Unipile-side
+ *     save and just push the candidate into our local `sourcing` pipeline.
  *
  * Body:
  *   account_id     Unipile acc_xxx (required)
@@ -98,16 +111,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── 2. Unipile config + helpers ─────────────────────────────
-    const [{ data: v2Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+    // v1 tenant DSN — the only host that serves LinkedIn endpoints for our
+    // tenant. The previous code targeted api.unipile.com/v2/{acct}/linkedin/
+    // recruiter/... which never worked: our v2 app key 403s on Recruiter
+    // scope, and v2 doesn't accept our short-form account_ids. The v1
+    // endpoints we still need (project detail for stage discovery, resume
+    // download) take account_id as a query parameter, not a path segment.
+    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
     ]);
-    const v2Base = (v2Row?.value || "").replace(/\/+$/, "") || "https://api.unipile.com/v2";
-    const apiKey = v2KeyRow?.value || v1KeyRow?.value;
+    const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
+      || "https://api19.unipile.com:14926/api/v1";
+    const apiKey = v1KeyRow?.value;
     if (!apiKey) return res.status(500).json({ error: "Unipile API key not configured" });
-    const acct = encodeURIComponent(account_id);
-    const proj = encodeURIComponent(project_id);
     const unipileHeaders: Record<string, string> = {
       "X-API-KEY": apiKey,
       Accept: "application/json",
@@ -117,9 +134,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Project detail lists pipeline.stages in display order; the first
     // stage that accepts candidates is the entry point ("Sourced" /
     // "Uncontacted" depending on the recruiter's template).
-    const projResp = await fetch(`${v2Base}/${acct}/linkedin/recruiter/projects/${proj}`, {
-      headers: unipileHeaders,
-    });
+    // v1 route:  GET /v1/linkedin/projects/{project_id}?account_id=X
+    const projUrl =
+      `${v1Base}/linkedin/projects/${encodeURIComponent(project_id)}` +
+      `?account_id=${encodeURIComponent(account_id)}`;
+    const projResp = await fetch(projUrl, { headers: unipileHeaders });
     if (!projResp.ok) {
       return res.status(projResp.status).json({
         error: `Unipile ${projResp.status}: project fetch failed`,
@@ -135,26 +154,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ── 4. Unipile save_candidate ───────────────────────────────
-    const saveResp = await fetch(
-      `${v2Base}/${acct}/linkedin/recruiter/projects/${proj}/pipeline/candidate/save`,
-      {
-        method: "POST",
-        headers: { ...unipileHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stage_id: entryStage.id,
-          candidate_id: applicant_id,
-        }),
-      },
-    );
-    if (!saveResp.ok && saveResp.status !== 409) {
-      // 409 from Unipile = already in pipeline; that's a no-op, not a failure.
-      const text = (await saveResp.text()).slice(0, 500);
-      return res.status(saveResp.status).json({
-        error: `Unipile ${saveResp.status}: save_candidate failed`,
-        detail: text,
-      });
-    }
+    // ── 4. (Skipped) Unipile save_candidate ─────────────────────
+    // Pushing a candidate into a Recruiter project's pipeline has no v1
+    // route, and our v2 app currently returns 403 Insufficient
+    // permissions for every Recruiter endpoint (Unipile-side scope gate;
+    // Phase 2 unblock pending). We still locally route the candidate
+    // into our `sourcing` table (step 7 below) at the entry stage we
+    // resolved above, so the funnel state is correct on our side.
 
     // ── 5. Build candidate payload from the UI profile ──────────
     const work = (applicant.work_experience && applicant.work_experience[0]) || {};
@@ -310,11 +316,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let resumeQueued = false;
     if (has_resume && candidateId) {
       try {
-        // Resumes live behind the project's talent-pool route; only
-        // available for applicants (not arbitrary search results).
+        // v1 route confirmed via probe:
+        //   GET /v1/linkedin/jobs/applicants/{applicant_id}/resume?account_id=X
+        // Only available for job-posting applicants (not arbitrary search
+        // results); returns PDF bytes (or sometimes JSON for non-PDF).
         const resumeUrl =
-          `${v2Base}/${acct}/linkedin/recruiter/projects/${proj}` +
-          `/talent-pool/applicants/${encodeURIComponent(applicant_id)}/resume`;
+          `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume` +
+          `?account_id=${encodeURIComponent(account_id)}`;
         const rResp = await fetch(resumeUrl, { headers: unipileHeaders });
         if (rResp.ok) {
           const contentType = rResp.headers.get("content-type") || "application/pdf";
