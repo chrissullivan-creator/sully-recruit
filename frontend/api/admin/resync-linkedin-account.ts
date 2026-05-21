@@ -56,10 +56,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (row.metadata as any)?.recruiter_contract_name ||
     null;
 
+  // Preserve how the row was originally authenticated. The resync
+  // endpoint just refreshes capability flags — it doesn't change the
+  // auth path, so overwriting to "hosted" lies about cookie-auth rows.
+  const existingAuthMethod = (row.metadata as any)?.auth_method;
+  const authMethod = existingAuthMethod === "cookies" ? "cookies" : "hosted";
+
   try {
     const sync = await syncLinkedinIntegrationAccount(supabase, {
       accountLabel: row.account_label || null,
-      authMethod: "hosted",
+      authMethod,
       contractName,
       integrationAccountId: row.id,
       ownerUserId: row.owner_user_id,

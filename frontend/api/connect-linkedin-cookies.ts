@@ -119,8 +119,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || parsed?.id
     || parsed?.data?.account_id
     || targetAccountId;
+
+  // Snapshot the success-path response so we can see what Unipile
+  // actually returned when account_id ends up looking off (e.g. not
+  // the expected acc_xxx shape).
+  await supabase.from("app_settings").upsert(
+    {
+      key: "DEBUG_CONNECT_LINKEDIN_COOKIES_LAST",
+      value: JSON.stringify({
+        at: new Date().toISOString(),
+        status: resp.status,
+        ok: true,
+        extracted_account_id: connectedAccountId,
+        unipile_response_keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
+        unipile_response: parsed,
+      }).slice(0, 4000),
+    },
+    { onConflict: "key" },
+  );
+
   if (!connectedAccountId) {
     return res.status(500).json({ error: "Unipile did not return an account_id" });
+  }
+  if (!/^acc_/.test(String(connectedAccountId))) {
+    // The cookies path was producing junk IDs (member URN / session
+    // token shape rather than the acc_xxx format). Reject so we don't
+    // poison the row and surface what we got for diagnosis.
+    return res.status(502).json({
+      error: `Unipile returned non-standard account_id shape: ${String(connectedAccountId).slice(0, 40)}. Try the Hosted Auth path.`,
+      extracted_account_id: connectedAccountId,
+      unipile_response_keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
+    });
   }
 
   const sync = await syncLinkedinIntegrationAccount(supabase, {
