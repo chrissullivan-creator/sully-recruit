@@ -209,141 +209,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ── list_applicants ──────────────────────────────────────────
-    // 1. GET project for header info
-    // 2. POST talent-pool/applicants (v2 expects POST + body, not GET)
-    // Path bases probed in order, each tried both top-level and
-    // path-segmented (mirrors list_projects probe).
+    // list_applicants — deprecated. The UI moved to list_pipeline /
+    // list_job_applicants which use confirmed v1 routes; this legacy
+    // probe was the multi-URL guess against bogus v2 hosts.
     if (action === "list_applicants") {
-      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
-      const projectId = encodeURIComponent(job_id);
-      // Mirror list_projects' expanded probe — Unipile renamed this
-      // endpoint at least once and the public docs don't quote the
-      // path. `linkedin/recruiter/projects` is the form confirmed by
-      // save-to-pipeline.ts; the rest are kept as safety nets.
-      const projectBases = [
-        `linkedin/recruiter/hiring_projects`,
-        `linkedin/recruiter/hiring-projects`,
-        `linkedin/recruiter/projects`,
-        `linkedin/hiring_projects`,
-        `linkedin/hiring-projects`,
-        `linkedin/projects`,
-      ];
-      const tries: { url: string; method: string; status?: number; ok: boolean; count?: number; error?: string; keys?: string[] }[] = [];
-
-      // Helper: build both URL shapes for a project-scoped path
-      // (path-segmented first per Unipile v2 docs, top-level as fallback).
-      const buildVariants = (base: string, suffix: string) => {
-        const root = suffix ? `${base}/${projectId}/${suffix}` : `${base}/${projectId}`;
-        return [
-          `${v2Base}/${acct}/${root}`,
-          `${v2Base}/${root}${root.includes("?") ? "&" : "?"}account_id=${acct}`,
-        ];
-      };
-
-      // 1) Project detail
-      let projectData: any = null;
-      let workingBase: string | null = null;
-      let workingShape: "topLevel" | "pathSeg" | null = null;
-      outerProj: for (const base of projectBases) {
-        const urls = buildVariants(base, "");
-        for (let i = 0; i < urls.length; i++) {
-          const projectUrl = urls[i];
-          try {
-            const r = await fetch(projectUrl, { headers });
-            const t: any = { url: projectUrl, method: "GET", status: r.status, ok: r.ok };
-            if (r.ok) {
-              projectData = await r.json();
-              t.keys = projectData ? Object.keys(projectData).slice(0, 30) : [];
-              workingBase = base;
-              workingShape = i === 0 ? "topLevel" : "pathSeg";
-              tries.push(t);
-              break outerProj;
-            } else {
-              t.error = (await r.text()).slice(0, 500);
-              console.error("[source-projects][list_applicants] project probe failed", { url: projectUrl, status: r.status, body: t.error });
-            }
-            tries.push(t);
-          } catch (err: any) {
-            tries.push({ url: projectUrl, method: "GET", ok: false, error: err.message });
-          }
-        }
-      }
-
-      // 2) Candidates — try GET pipeline-candidates first, fall back to
-      //    POST talent-pool/applicants for older Unipile builds.
-      const applicantBases = workingBase ? [workingBase] : projectBases;
-      const offset = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
-      const variants: Array<{
-        suffix: string;
-        method: "GET" | "POST";
-        body?: string;
-      }> = [
-        { suffix: `pipeline-candidates?limit=100&offset=${offset}`, method: "GET" },
-        {
-          suffix: `talent-pool/applicants`,
-          method: "POST",
-          body: JSON.stringify({ limit: 100, offset }),
-        },
-      ];
-      let applicants: any[] = [];
-      outer: for (const base of applicantBases) {
-        for (const v of variants) {
-          // If we already know the shape from step 1, only try that one.
-          const allUrls = buildVariants(base, v.suffix);
-          const urls = workingShape === "topLevel" ? [allUrls[0]]
-            : workingShape === "pathSeg" ? [allUrls[1]]
-            : allUrls;
-          for (const applicantsUrl of urls) {
-            try {
-              const r = await fetch(applicantsUrl, {
-                method: v.method,
-                headers: v.method === "POST"
-                  ? { ...headers, "Content-Type": "application/json" }
-                  : headers,
-                body: v.body,
-              });
-              const t: any = { url: applicantsUrl, method: v.method, status: r.status, ok: r.ok };
-              if (r.ok) {
-                const d = await r.json();
-                applicants = d.data ?? d.items ?? d.results ?? d.applicants ?? d.candidates ?? (Array.isArray(d) ? d : []);
-                t.count = applicants.length;
-                workingBase = base;
-                tries.push(t);
-                break outer;
-              } else {
-                t.error = (await r.text()).slice(0, 500);
-              }
-              tries.push(t);
-            } catch (err: any) {
-              tries.push({ url: applicantsUrl, method: v.method, ok: false, error: err.message });
-            }
-          }
-        }
-      }
-
-      // Normalise stage values: v2 uses `pipeline_stage`. Keep the
-      // legacy fallbacks so older v1 responses still work if they
-      // somehow leak through.
-      applicants = applicants.map((a: any) => {
-        const rawStage = String(
-          a.pipeline_stage ?? a.stage ?? a.status ?? a.recruiter_pipeline_category ?? "unknown",
-        ).toLowerCase().replace(/_/g, " ");
-        let stage = "unknown";
-        if (rawStage.includes("applied") || rawStage.includes("new") || rawStage.includes("uncontact")) stage = "uncontacted";
-        else if (rawStage.includes("contact") || rawStage.includes("reach") || rawStage.includes("sent") || rawStage.includes("inmail")) stage = "contacted";
-        else if (rawStage.includes("reply") || rawStage.includes("respond") || rawStage.includes("interest")) stage = "replied";
-        else if (rawStage.includes("screen") || rawStage.includes("interview") || rawStage.includes("review")) stage = "in_review";
-        else if (rawStage.includes("offer")) stage = "offer";
-        else if (rawStage.includes("hired") || rawStage.includes("place")) stage = "hired";
-        else if (rawStage.includes("reject") || rawStage.includes("decline") || rawStage.includes("withdrawn")) stage = "rejected";
-        return { ...a, stage };
-      });
-
-      return res.status(200).json({
-        items: applicants,
-        project: projectData,
-        debug: applicants.length === 0 ? { tries } : undefined,
+      return res.status(410).json({
+        error: "list_applicants is deprecated. Use list_pipeline or list_job_applicants.",
+        items: [],
       });
     }
 
@@ -384,28 +256,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (visibility !== "PRIVATE" && visibility !== "PUBLIC") {
         return res.status(400).json({ error: "visibility must be PRIVATE or PUBLIC" });
       }
-      const body: Record<string, any> = { name, visibility };
-      if (description) body.description = description;
-      if (company) body.company = company;
-      if (job_title) body.job_title = job_title;
-      if (location) body.location = location;
-      if (seniority_level) body.seniority_level = seniority_level;
-      const url = `${v2Base}/${acct}/linkedin/recruiter/projects`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      // No Unipile v1 endpoint for creating a Recruiter hiring project.
+      // The v2 endpoint /v2/{acct}/linkedin/recruiter/projects POST exists
+      // in the spec but our v2 app currently returns 403 for Recruiter
+      // calls (Unipile-side scope gate — see Phase 2 plan).
+      return res.status(501).json({
+        error: "create_project is not available — Unipile has no v1 route for it and our v2 app lacks the Recruiter scope. Create the project in LinkedIn Recruiter UI and re-list.",
+        name,
+        visibility,
       });
-      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      const text = await resp.text();
-      const data = text ? JSON.parse(text) : null;
-      if (!resp.ok) {
-        return res.status(resp.status).json({
-          error: `Unipile ${resp.status}: failed to create project`,
-          detail: data ?? text.slice(0, 500),
-        });
-      }
-      return res.status(201).json(data);
     }
 
     // v1 route confirmed via probe:
@@ -426,29 +285,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     }
 
-    // ── save_candidate ──────────────────────────────────────────
-    // POST /linkedin/recruiter/projects/{id}/pipeline/candidate/save
+    // save_candidate — pushes a candidate into a Recruiter project's
+    // pipeline stage. No v1 endpoint exists for this; v2 has
+    // /v2/{acct}/linkedin/recruiter/projects/{id}/pipeline/candidate/save
+    // but our v2 app currently 403s on Recruiter scope (Phase 2 unblock).
     if (action === "save_candidate") {
-      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
-      if (!stage_id) return res.status(400).json({ error: "Missing stage_id" });
-      if (!candidate_id) return res.status(400).json({ error: "Missing candidate_id" });
-      const url = `${v2Base}/${acct}/linkedin/recruiter/projects/`
-        + `${encodeURIComponent(job_id)}/pipeline/candidate/save`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ stage_id, candidate_id }),
+      return res.status(501).json({
+        error: "save_candidate is not available — no v1 route and v2 Recruiter scope is gated. Save via LinkedIn Recruiter UI for now.",
       });
-      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      const text = await resp.text();
-      const data = text ? JSON.parse(text) : null;
-      if (!resp.ok) {
-        return res.status(resp.status).json({
-          error: `Unipile ${resp.status}: failed to save candidate`,
-          detail: data ?? text.slice(0, 500),
-        });
-      }
-      return res.status(200).json(data);
     }
 
     // ── list_pipeline ───────────────────────────────────────────
@@ -504,15 +348,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ── list_job_applicants ─────────────────────────────────────
-    // POST /linkedin/recruiter/projects/{id}/talent-pool/applicants
-    // Requires the JOB_POSTING channel_id (resolved from project detail).
-    // Defaults to NEWEST_FIRST so the UI can render an "applied today / yesterday" feed.
+    // v1 route confirmed via probe:
+    //   GET /v1/linkedin/projects/{id}?account_id=X       -> project detail
+    //   GET /v1/linkedin/jobs/{job_posting_id}/applicants -> applicants list
     if (action === "list_job_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
 
-      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
+      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
       const projResp = await fetch(projUrl, { headers });
       if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       if (!projResp.ok) {
@@ -522,36 +365,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       const projectData = await projResp.json();
-      const channels: any[] = projectData?.talent_pool?.channels || [];
-      const jobChannel = channels.find((c) => c?.type === "JOB_POSTING");
-      if (!jobChannel?.id) {
-        // No linked job posting — return empty applicants instead of an error.
+      const jobPostingId = projectData?.job_posting?.id;
+      if (!jobPostingId) {
         return res.status(200).json({
           items: [],
           project: projectData,
           next_cursor: null,
           total_count: 0,
-          note: "No JOB_POSTING channel on this project",
+          note: "Project has no linked job_posting — no applicants to list",
         });
       }
 
       const qs = new URLSearchParams();
+      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const qsStr = qs.toString();
-      const appUrl =
-        `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}/talent-pool/applicants` +
-        (qsStr ? `?${qsStr}` : "");
-      const appBody: Record<string, any> = {
-        channel_id: jobChannel.id,
-        sort_by: "NEWEST_FIRST",
-      };
-      if (search && typeof search === "object") Object.assign(appBody, search);
-      const appResp = await fetch(appUrl, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(appBody),
-      });
+      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
+      const appResp = await fetch(appUrl, { headers });
       if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const appText = await appResp.text();
       const appData = appText ? JSON.parse(appText) : null;
@@ -562,11 +392,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(200).json({
-        items: appData?.data ?? [],
-        next_cursor: appData?.next_cursor ?? null,
-        total_count: appData?.total_count ?? null,
+        items: appData?.items ?? appData?.data ?? [],
+        next_cursor: appData?.cursor ?? appData?.next_cursor ?? null,
+        total_count: appData?.paging?.total_count ?? appData?.total_count ?? null,
         project: projectData,
-        channel_id: jobChannel.id,
+        job_posting_id: jobPostingId,
       });
     }
 
@@ -672,46 +502,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Fetch the batch.
       const projId = encodeURIComponent(job_id);
-      let unipileUrl: string;
-      let unipileBody: Record<string, any>;
+      // Resolve the project's job_posting.id once via v1 project detail.
+      // v1 doesn't expose a Recruiter "pipeline candidates" route, so the
+      // `pipeline` source is currently a no-op (Phase 2: route via v2 once
+      // Unipile enables the Recruiter scope on our v2 app).
       if (source === 'pipeline') {
-        const qs = new URLSearchParams();
-        if (cursor) qs.set('cursor', String(cursor));
-        qs.set('limit', String(batchLimit));
-        unipileUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projId}/pipeline?${qs}`;
-        unipileBody = {};
-      } else {
-        // talent-pool/applicants requires JOB_POSTING channel_id — fetch
-        // project detail first to pick it up.
-        const projResp = await fetch(`${v2Base}/${acct}/linkedin/recruiter/projects/${projId}`, { headers });
-        if (!projResp.ok) {
-          return res.status(projResp.status).json({
-            error: `Unipile ${projResp.status}: project fetch failed`,
-            detail: (await projResp.text()).slice(0, 500),
-          });
-        }
-        const projData = await projResp.json();
-        const ch = (projData?.talent_pool?.channels || []).find((c: any) => c?.type === 'JOB_POSTING');
-        if (!ch?.id) {
-          // No applicants channel — nothing to do for this source.
-          return res.status(200).json({
-            processed: 0, created: 0, updated: 0, errors: [],
-            next_cursor: null, total_count: 0,
-            note: 'No JOB_POSTING channel on this project',
-          });
-        }
-        const qs = new URLSearchParams();
-        if (cursor) qs.set('cursor', String(cursor));
-        qs.set('limit', String(batchLimit));
-        unipileUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projId}/talent-pool/applicants?${qs}`;
-        unipileBody = { channel_id: ch.id, sort_by: 'NEWEST_FIRST' };
+        return res.status(200).json({
+          processed: 0, created: 0, updated: 0, errors: [],
+          next_cursor: null, total_count: 0,
+          note: 'pipeline candidates not available on v1; awaiting Unipile v2 Recruiter scope',
+        });
       }
 
-      const batchResp = await fetch(unipileUrl, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(unipileBody),
-      });
+      const projResp = await fetch(
+        `${v1Base}/linkedin/projects/${projId}?account_id=${encodeURIComponent(account_id)}`,
+        { headers },
+      );
+      if (!projResp.ok) {
+        return res.status(projResp.status).json({
+          error: `Unipile ${projResp.status}: project fetch failed`,
+          detail: (await projResp.text()).slice(0, 500),
+        });
+      }
+      const projData = await projResp.json();
+      const jobPostingId = projData?.job_posting?.id;
+      if (!jobPostingId) {
+        return res.status(200).json({
+          processed: 0, created: 0, updated: 0, errors: [],
+          next_cursor: null, total_count: 0,
+          note: 'Project has no linked job_posting on Unipile',
+        });
+      }
+      const qs = new URLSearchParams();
+      qs.set('account_id', account_id);
+      qs.set('limit', String(batchLimit));
+      if (cursor) qs.set('cursor', String(cursor));
+      const unipileUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
+
+      const batchResp = await fetch(unipileUrl, { headers });
       if (batchResp.status === 429) return res.status(429).json({ error: 'Unipile rate limit reached.' });
       if (!batchResp.ok) {
         return res.status(batchResp.status).json({
@@ -720,7 +548,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       const batchData = await batchResp.json();
-      const items: any[] = batchData?.data ?? [];
+      const items: any[] = batchData?.items ?? batchData?.data ?? [];
 
       let created = 0;
       let updated = 0;
@@ -867,7 +695,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         created,
         updated,
         errors,
-        next_cursor: batchData?.next_cursor ?? null,
+        next_cursor: batchData?.cursor ?? batchData?.next_cursor ?? null,
         total_count: batchData?.total_count ?? null,
         source,
       });
