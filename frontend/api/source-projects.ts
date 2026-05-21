@@ -171,28 +171,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // candidates under each project. We probe a few candidate paths
     // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
-      // Canonical Unipile v2 endpoint per the OpenAPI spec:
-      //   GET /v2/{account_id}/linkedin/recruiter/projects
-      //     query: status[], sort_by, keywords, offset, limit (default 20)
-      // No probing — the path is fixed. We use cursor-only pagination
-      // (the schema description says offset is a fallback "if cursor
-      // is not supported"). limit defaults to the schema's 20.
+      // Per Unipile docs + direct probe: hiring projects live at
+      //   GET {dsn}/api/v1/linkedin/projects?account_id={acct}&...
+      // The /v2/{acct}/linkedin/recruiter/projects pattern we used to
+      // call hit api.unipile.com/v2 which isn't a Unipile host (returns
+      // 'Route Not Found'). The 401 'Invalid API Key' was a misleading
+      // error code, not a real auth failure.
       const qs = new URLSearchParams();
+      qs.set("account_id", account_id);
       qs.set("sort_by", "LAST_USED_BY_ME");
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const url = `${v2Base}/${acct}/linkedin/recruiter/projects?${qs.toString()}`;
+      const url = `${v1Base}/linkedin/projects?${qs.toString()}`;
       const resp = await fetch(url, { headers });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const body = await resp.text();
       if (resp.ok) {
         const data = JSON.parse(body);
         return res.status(200).json({
-          items: data.data ?? data.items ?? [],
+          items: data.items ?? data.data ?? [],
           raw: data,
           used_url: url,
-          next_cursor: data.next_cursor ?? null,
-          total_count: data.total_count ?? null,
+          next_cursor: data.cursor ?? data.next_cursor ?? null,
+          total_count: data?.paging?.total_count ?? data.total_count ?? null,
         });
       }
       // Persist the latest 4xx body to app_settings so it survives
@@ -349,44 +350,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── download_resume ──────────────────────────────────────────
-    // Try both v2 path bases in order, same as list_*.
+    // v1 route confirmed via probe:
+    //   GET /v1/linkedin/jobs/applicants/{applicant_id}/resume?account_id=X
+    // Returns PDF bytes (or sometimes JSON for non-PDF resumes).
     if (action === "download_resume") {
-      if (!job_id || !applicant_id) {
-        return res.status(400).json({ error: "Missing job_id or applicant_id" });
+      if (!applicant_id) {
+        return res.status(400).json({ error: "Missing applicant_id" });
       }
-      const projectBases = [
-        `linkedin/recruiter/hiring_projects`,
-        `linkedin/recruiter/hiring-projects`,
-        `linkedin/recruiter/projects`,
-        `linkedin/hiring_projects`,
-        `linkedin/hiring-projects`,
-        `linkedin/projects`,
-      ];
-      const tries: Array<{ url: string; status: number; bodyPrefix?: string }> = [];
-      for (const base of projectBases) {
-        const url =
-          `${v2Base}/${acct}/${base}/${encodeURIComponent(job_id)}` +
-          `/talent-pool/applicants/${encodeURIComponent(applicant_id)}/resume`;
-        const resp = await fetch(url, { headers });
-        if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-        if (resp.ok) {
-          const contentType = resp.headers.get("content-type") || "";
-          if (contentType.includes("application/json")) {
-            return res.status(200).json(await resp.json());
-          }
-          const buffer = Buffer.from(await resp.arrayBuffer());
-          return res.status(200).json({
-            content_type: contentType || "application/pdf",
-            data_base64: buffer.toString("base64"),
-            size_bytes: buffer.length,
-          });
-        }
-        tries.push({ url, status: resp.status, bodyPrefix: (await resp.text()).slice(0, 200) });
+      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?account_id=${encodeURIComponent(account_id)}`;
+      const resp = await fetch(url, { headers });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: resume fetch failed`,
+          detail: (await resp.text()).slice(0, 500),
+        });
       }
-      const last = tries[tries.length - 1];
-      return res.status(last?.status || 500).json({
-        error: `Unipile ${last?.status}: resume endpoint not found`,
-        detail: tries,
+      const contentType = resp.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return res.status(200).json(await resp.json());
+      }
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      return res.status(200).json({
+        content_type: contentType || "application/pdf",
+        data_base64: buffer.toString("base64"),
+        size_bytes: buffer.length,
       });
     }
 
@@ -422,14 +410,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(201).json(data);
     }
 
-    // ── get_applicant ───────────────────────────────────────────
-    // GET /linkedin/recruiter/projects/{id}/talent-pool/applicants/{aid}
+    // v1 route confirmed via probe:
+    //   GET /v1/linkedin/jobs/applicants/{applicant_id}?account_id=X
     if (action === "get_applicant") {
-      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id" });
-      const url = `${v2Base}/${acct}/linkedin/recruiter/projects/`
-        + `${encodeURIComponent(job_id)}/talent-pool/applicants/`
-        + `${encodeURIComponent(applicant_id)}`;
+      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}?account_id=${encodeURIComponent(account_id)}`;
       const resp = await fetch(url, { headers });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const text = await resp.text();
@@ -472,45 +457,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // POST /linkedin/recruiter/projects/{id}/pipeline — returns the
     // saved pipeline candidates (curated by the recruiter), grouped by
     // stage. Distinct from talent-pool/applicants (job posting applicants).
+    // v1 doesn't expose a Recruiter "pipeline candidates" route — only
+    // Talent Hub job applicants. So we read the project detail to get
+    // the linked job_posting.id, then list applicants of that job.
+    //   GET /v1/linkedin/projects/{id}?account_id=X
+    //   GET /v1/linkedin/jobs/{job_posting_id}/applicants?account_id=X
     if (action === "list_pipeline") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
 
-      // Project detail first so the UI has header info + the pipeline
-      // stage definitions.
-      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
+      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
       const projResp = await fetch(projUrl, { headers });
       if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       let projectData: any = null;
       if (projResp.ok) projectData = await projResp.json();
 
+      const jobPostingId = projectData?.job_posting?.id;
+      if (!jobPostingId) {
+        return res.status(200).json({
+          items: [],
+          next_cursor: null,
+          total_count: 0,
+          project: projectData,
+          note: "Project has no linked job_posting — no applicants to list",
+        });
+      }
+
       const qs = new URLSearchParams();
+      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const qsStr = qs.toString();
-      const pipeUrl =
-        `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}/pipeline` +
-        (qsStr ? `?${qsStr}` : "");
-      const pipeBody: Record<string, any> = {};
-      if (search && typeof search === "object") Object.assign(pipeBody, search);
-      const pipeResp = await fetch(pipeUrl, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(pipeBody),
-      });
-      if (pipeResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      const pipeText = await pipeResp.text();
-      const pipeData = pipeText ? JSON.parse(pipeText) : null;
-      if (!pipeResp.ok) {
-        return res.status(pipeResp.status).json({
-          error: `Unipile ${pipeResp.status}: pipeline fetch failed`,
-          detail: pipeData ?? pipeText.slice(0, 500),
+      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
+      const appResp = await fetch(appUrl, { headers });
+      if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const appText = await appResp.text();
+      const appData = appText ? JSON.parse(appText) : null;
+      if (!appResp.ok) {
+        return res.status(appResp.status).json({
+          error: `Unipile ${appResp.status}: applicants fetch failed`,
+          detail: appData ?? appText.slice(0, 500),
         });
       }
       return res.status(200).json({
-        items: pipeData?.data ?? [],
-        next_cursor: pipeData?.next_cursor ?? null,
-        total_count: pipeData?.total_count ?? null,
+        items: appData?.items ?? appData?.data ?? [],
+        next_cursor: appData?.cursor ?? appData?.next_cursor ?? null,
+        total_count: appData?.paging?.total_count ?? appData?.total_count ?? null,
         project: projectData,
       });
     }
@@ -581,14 +572,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ── search_parameters ───────────────────────────────────────
-    // POST /linkedin/recruiter/search/parameters — pass through the
-    // caller-supplied body (source/type/keywords/project_id/etc).
+    // v1 route confirmed via probe:
+    //   POST /v1/linkedin/search/parameters?account_id=X
+    //   body: { type: 'LOCATION'|'COMPANY'|..., keywords }
     if (action === "search_parameters") {
       if (!search || typeof search !== "object") {
         return res.status(400).json({ error: "Missing search body" });
       }
-      const url = `${v2Base}/${acct}/linkedin/recruiter/search/parameters`;
+      const url = `${v1Base}/linkedin/search/parameters?account_id=${encodeURIComponent(account_id)}`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -604,31 +595,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(200).json({
-        items: data?.data ?? [],
-        next_cursor: data?.next_cursor ?? null,
-        total_count: data?.total_count ?? null,
+        items: data?.items ?? data?.data ?? [],
+        next_cursor: data?.cursor ?? data?.next_cursor ?? null,
+        total_count: data?.paging?.total_count ?? data?.total_count ?? null,
         raw: data,
       });
     }
 
-    // ── search_people ───────────────────────────────────────────
-    // POST /linkedin/recruiter/search/people — filters in body.
-    // Supports cursor pagination via ?cursor=… and ?limit=…
+    // v1 route confirmed via probe:
+    //   POST /v1/linkedin/search?account_id=X&limit=Y&cursor=Z
+    //   body: { api: 'recruiter', category: 'people', ...filters }
     if (action === "search_people") {
       if (!search || typeof search !== "object") {
         return res.status(400).json({ error: "Missing search body" });
       }
       const qs = new URLSearchParams();
+      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const qsStr = qs.toString();
-      const url =
-        `${v2Base}/${acct}/linkedin/recruiter/search/people` +
-        (qsStr ? `?${qsStr}` : "");
+      const url = `${v1Base}/linkedin/search?${qs.toString()}`;
+      const body = { api: "recruiter", category: "people", ...(search as Record<string, any>) };
       const resp = await fetch(url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(search),
+        body: JSON.stringify(body),
       });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const text = await resp.text();
@@ -640,9 +630,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       return res.status(200).json({
-        items: data?.data ?? [],
-        next_cursor: data?.next_cursor ?? null,
-        total_count: data?.total_count ?? null,
+        items: data?.items ?? data?.data ?? [],
+        next_cursor: data?.cursor ?? data?.next_cursor ?? null,
+        total_count: data?.paging?.total_count ?? data?.total_count ?? null,
         raw: data,
       });
     }
