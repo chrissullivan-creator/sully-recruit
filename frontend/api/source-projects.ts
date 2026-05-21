@@ -124,24 +124,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Pull both base URLs + both keys. v2 is the canonical for new code;
-    // v1 stays for action=list_accounts and for message/send routes that
-    // haven't migrated. Prefer the v2-specific key (UNIPILE_API_KEY_V2)
-    // when set, fall back to UNIPILE_API_KEY otherwise. Same single key
-    // is fine for both products in most Unipile setups.
-    const [{ data: v2Row }, { data: v1Row }, { data: v2KeyRow }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    // Per Unipile's v2 OpenAPI spec (api.unipile.com/v2/docs/json), v2
+    // only exposes 8 endpoints: /accounts, /auth/*, /webhooks/*. All
+    // LinkedIn / Recruiter / messaging endpoints live exclusively on
+    // /api/v1 on the tenant DSN. UNIPILE_BASE_V2_URL is intentionally
+    // unused here — the only v2 calls we make (account create, hosted
+    // auth link) live in connect-linkedin*.ts, not in this file.
+    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
       supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
     ]);
 
-    const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
-      || "https://api.unipile.com/v2";
     const v1Base = (v1Row?.value || "").replace(/\/+$/, "");
-    const apiKey = v2KeyRow?.value || v1KeyRow?.value;
+    const apiKey = v1KeyRow?.value;
 
-    if (!v2Base || !apiKey) {
-      return res.status(500).json({ error: "Unipile config missing (UNIPILE_BASE_V2_URL or UNIPILE_API_KEY)" });
+    if (!v1Base || !apiKey) {
+      return res.status(500).json({ error: "Unipile config missing (UNIPILE_BASE_URL or UNIPILE_API_KEY)" });
     }
 
     const headers: Record<string, string> = {
