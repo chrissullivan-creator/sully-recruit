@@ -177,7 +177,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // error code, not a real auth failure.
       const qs = new URLSearchParams();
       qs.set("account_id", account_id);
-      qs.set("sort_by", "LAST_USED_BY_ME");
+      // v1 sort_by enum is NAME / FAVORITE / CREATED_TIME / ACCESSED_TIME
+      // / ENGAGED_TIME / ENGAGEMENT_COUNT. v2-only values like
+      // LAST_USED_BY_ME 400. ACCESSED_TIME + DESCENDING gives the same
+      // 'most-recently-used first' default the UI expects.
+      qs.set("sort_by", "ACCESSED_TIME");
+      qs.set("sort_order", "DESCENDING");
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
       const url = `${v1Base}/linkedin/projects?${qs.toString()}`;
