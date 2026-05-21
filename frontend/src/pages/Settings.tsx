@@ -97,6 +97,8 @@ const Settings = () => {
   const [backfillingRc, setBackfillingRc] = useState(false);
   const [backfillRcLookback, setBackfillRcLookback] = useState<string>('180');
   const [reextractingCalls, setReextractingCalls] = useState(false);
+  const [backfillingRecentPeople, setBackfillingRecentPeople] = useState(false);
+  const [recentPeopleLimit, setRecentPeopleLimit] = useState<string>('200');
   const [ringcentralConfig, setRingcentralConfig] = useState<IntegrationConfig>({
     client_id: '',
     client_secret: '',
@@ -241,6 +243,7 @@ const Settings = () => {
   const [selectedLinkedinSeatId, setSelectedLinkedinSeatId] = useState('');
   const [liHostedConnectingId, setLiHostedConnectingId] = useState<string | null>(null);
   const [liCookieConnecting, setLiCookieConnecting] = useState(false);
+  const [liReverifyingId, setLiReverifyingId] = useState<string | null>(null);
   const [liCookieForm, setLiCookieForm] = useState({
     contract_name: '',
     li_a: '',
@@ -418,6 +421,35 @@ const Settings = () => {
   };
 
   const selectedLinkedinSeat = linkedinSeats.find((seat) => seat.id === selectedLinkedinSeatId) || null;
+
+  const reverifyLinkedInCapabilities = async () => {
+    if (!selectedLinkedinSeat) return;
+    setLiReverifyingId(selectedLinkedinSeat.id);
+    try {
+      const resp = await fetch('/api/admin/resync-linkedin-account', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ integration_account_id: selectedLinkedinSeat.id }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+      const cap = data?.linkedin_capability || 'unknown';
+      if (data?.recruiter_enabled) {
+        toast.success(`Recruiter API access verified (capability: ${cap}).`);
+      } else {
+        toast.message(`Re-synced. Capability: ${cap}.`, {
+          description: Array.isArray(data?.warnings) && data.warnings.length
+            ? data.warnings.join(' • ')
+            : 'No Recruiter access detected for this seat.',
+        });
+      }
+      loadLinkedInSeats();
+    } catch (err: any) {
+      toast.error(err?.message || 'Re-verify failed');
+    } finally {
+      setLiReverifyingId(null);
+    }
+  };
 
   const connectLinkedInRecruiter = async () => {
     const fallbackLabel = user?.email || 'LinkedIn Recruiter';
@@ -1425,6 +1457,23 @@ Senior Recruiter | Your Company
                               ))}
                             </div>
                           )}
+                          <div className="pt-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={reverifyLinkedInCapabilities}
+                              disabled={liReverifyingId === selectedLinkedinSeat.id}
+                            >
+                              {liReverifyingId === selectedLinkedinSeat.id ? (
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Re-verifying...</>
+                              ) : (
+                                'Re-verify capabilities'
+                              )}
+                            </Button>
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              Pings Unipile to re-check Recruiter API access and refresh the badges above. Use after a manual reconnect.
+                            </p>
+                          </div>
                         </div>
                       )}
 
@@ -1937,6 +1986,63 @@ Senior Recruiter | Your Company
                           </Button>
                         </div>
                       ))}
+
+                      {/* Sweep newly-added people so email + LinkedIn
+                          history lands immediately instead of waiting on
+                          the hourly cron (50/hr). Fires
+                          messages/fetch-entity-history.requested for
+                          every person with last_history_synced_at IS NULL,
+                          ordered newest-first, capped at 500. */}
+                      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                        <div>
+                          <h3 className="text-sm font-medium text-foreground">Backfill messages for recently added people</h3>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Pulls email + LinkedIn history now for every person who's never been synced (newest first). The hourly cron only processes 50 at a time — use this after a wave import.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Select value={recentPeopleLimit} onValueChange={setRecentPeopleLimit}>
+                            <SelectTrigger className="h-9 w-40 text-xs">
+                              <SelectValue placeholder="Limit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="50">Up to 50 people</SelectItem>
+                              <SelectItem value="100">Up to 100 people</SelectItem>
+                              <SelectItem value="200">Up to 200 people</SelectItem>
+                              <SelectItem value="500">Up to 500 people</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={backfillingRecentPeople}
+                            onClick={async () => {
+                              const limit = Number(recentPeopleLimit) || 200;
+                              setBackfillingRecentPeople(true);
+                              try {
+                                const resp = await fetch('/api/trigger-backfill-recent-people', {
+                                  method: 'POST',
+                                  headers: await authHeaders(),
+                                  body: JSON.stringify({ limit }),
+                                });
+                                const data = await resp.json().catch(() => ({}));
+                                if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                if (data?.dispatched > 0) {
+                                  toast.success(`Backfill triggered for ${data.dispatched} people. History will land over the next few minutes.`);
+                                } else {
+                                  toast.info('No unsynced people found — everyone is already up to date.');
+                                }
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Backfill failed');
+                              } finally {
+                                setBackfillingRecentPeople(false);
+                              }
+                            }}
+                          >
+                            {backfillingRecentPeople ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : <><Play className="h-3.5 w-3.5 mr-1" /> Run backfill</>}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

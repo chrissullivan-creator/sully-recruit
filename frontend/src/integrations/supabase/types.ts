@@ -14,6 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
+      _jpm_enrich_staging: {
+        Row: {
+          bm_company: string | null
+          bm_email: string | null
+          bm_mobile: string | null
+          bm_personal: string | null
+          bm_req_id: number | null
+          bm_state: string | null
+          bm_title: string | null
+          candidate_email: string | null
+          current_email: string | null
+          final_email: string | null
+          full_name: string | null
+          linkedin_url: string | null
+          lm_email: string | null
+          lm_req_id: number | null
+          notes: string | null
+          person_id: string
+          source: string | null
+          validate_req_id: number | null
+          validate_status: string | null
+        }
+        Insert: {
+          bm_company?: string | null
+          bm_email?: string | null
+          bm_mobile?: string | null
+          bm_personal?: string | null
+          bm_req_id?: number | null
+          bm_state?: string | null
+          bm_title?: string | null
+          candidate_email?: string | null
+          current_email?: string | null
+          final_email?: string | null
+          full_name?: string | null
+          linkedin_url?: string | null
+          lm_email?: string | null
+          lm_req_id?: number | null
+          notes?: string | null
+          person_id: string
+          source?: string | null
+          validate_req_id?: number | null
+          validate_status?: string | null
+        }
+        Update: {
+          bm_company?: string | null
+          bm_email?: string | null
+          bm_mobile?: string | null
+          bm_personal?: string | null
+          bm_req_id?: number | null
+          bm_state?: string | null
+          bm_title?: string | null
+          candidate_email?: string | null
+          current_email?: string | null
+          final_email?: string | null
+          full_name?: string | null
+          linkedin_url?: string | null
+          lm_email?: string | null
+          lm_req_id?: number | null
+          notes?: string | null
+          person_id?: string
+          source?: string | null
+          validate_req_id?: number | null
+          validate_status?: string | null
+        }
+        Relationships: []
+      }
+      _other_enrich_staging: {
+        Row: {
+          bm_company: string | null
+          bm_email: string | null
+          bm_mobile: string | null
+          bm_personal: string | null
+          bm_req_id: number | null
+          bm_state: string | null
+          bm_title: string | null
+          current_email: string | null
+          enrollment_id: string | null
+          full_name: string | null
+          linkedin_url: string | null
+          person_id: string
+        }
+        Insert: {
+          bm_company?: string | null
+          bm_email?: string | null
+          bm_mobile?: string | null
+          bm_personal?: string | null
+          bm_req_id?: number | null
+          bm_state?: string | null
+          bm_title?: string | null
+          current_email?: string | null
+          enrollment_id?: string | null
+          full_name?: string | null
+          linkedin_url?: string | null
+          person_id: string
+        }
+        Update: {
+          bm_company?: string | null
+          bm_email?: string | null
+          bm_mobile?: string | null
+          bm_personal?: string | null
+          bm_req_id?: number | null
+          bm_state?: string | null
+          bm_title?: string | null
+          current_email?: string | null
+          enrollment_id?: string | null
+          full_name?: string | null
+          linkedin_url?: string | null
+          person_id?: string
+        }
+        Relationships: []
+      }
       ai_call_notes: {
         Row: {
           ai_action_items: string | null
@@ -40,6 +151,7 @@ export type Database = {
           phone_number: string | null
           processing_status: string | null
           recording_url: string | null
+          reextraction_version: number
           source: string | null
           structured_notes: Json | null
           transcript: string | null
@@ -71,6 +183,7 @@ export type Database = {
           phone_number?: string | null
           processing_status?: string | null
           recording_url?: string | null
+          reextraction_version?: number
           source?: string | null
           structured_notes?: Json | null
           transcript?: string | null
@@ -102,6 +215,7 @@ export type Database = {
           phone_number?: string | null
           processing_status?: string | null
           recording_url?: string | null
+          reextraction_version?: number
           source?: string | null
           structured_notes?: Json | null
           transcript?: string | null
@@ -1212,6 +1326,9 @@ export type Database = {
       }
       companies: {
         Row: {
+          apollo_company_enriched_at: string | null
+          apollo_company_status: string | null
+          company_status: string | null
           company_type: string | null
           created_at: string
           deleted_at: string | null
@@ -1224,6 +1341,7 @@ export type Database = {
           industry: string | null
           linkedin_url: string | null
           location: string | null
+          logo: string | null
           logo_url: string | null
           name: string
           size: string | null
@@ -1231,6 +1349,9 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          apollo_company_enriched_at?: string | null
+          apollo_company_status?: string | null
+          company_status?: string | null
           company_type?: string | null
           created_at?: string
           deleted_at?: string | null
@@ -1243,6 +1364,7 @@ export type Database = {
           industry?: string | null
           linkedin_url?: string | null
           location?: string | null
+          logo?: string | null
           logo_url?: string | null
           name: string
           size?: string | null
@@ -1250,6 +1372,9 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          apollo_company_enriched_at?: string | null
+          apollo_company_status?: string | null
+          company_status?: string | null
           company_type?: string | null
           created_at?: string
           deleted_at?: string | null
@@ -1262,6 +1387,7 @@ export type Database = {
           industry?: string | null
           linkedin_url?: string | null
           location?: string | null
+          logo?: string | null
           logo_url?: string | null
           name?: string
           size?: string | null
@@ -2521,6 +2647,9 @@ export type Database = {
           job_code: string | null
           job_function_id: string | null
           job_url: string | null
+          last_sourced_at: string | null
+          linkedin_project_account_id: string | null
+          linkedin_project_id: string | null
           location: string | null
           market_over: boolean
           num_openings: number
@@ -2543,6 +2672,9 @@ export type Database = {
           job_code?: string | null
           job_function_id?: string | null
           job_url?: string | null
+          last_sourced_at?: string | null
+          linkedin_project_account_id?: string | null
+          linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
           num_openings?: number
@@ -2565,6 +2697,9 @@ export type Database = {
           job_code?: string | null
           job_function_id?: string | null
           job_url?: string | null
+          last_sourced_at?: string | null
+          linkedin_project_account_id?: string | null
+          linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
           num_openings?: number
@@ -3058,9 +3193,12 @@ export type Database = {
           job_id: string | null
           job_status: string | null
           joe_says: string | null
+          joe_says_embedded_at: string | null
+          joe_says_embedding: string | null
           joe_says_updated_at: string | null
           last_comm_channel: string | null
           last_contacted_at: string | null
+          last_history_synced_at: string | null
           last_name: string | null
           last_responded_at: string | null
           last_sequence_sentiment: string | null
@@ -3077,6 +3215,8 @@ export type Database = {
           linkedin_match_key: string | null
           linkedin_profile_data: string | null
           linkedin_profile_text: string | null
+          linkedin_search_attempted_at: string | null
+          linkedin_search_status: string | null
           linkedin_url: string | null
           location_text: string | null
           mobile_phone: string | null
@@ -3162,9 +3302,12 @@ export type Database = {
           job_id?: string | null
           job_status?: string | null
           joe_says?: string | null
+          joe_says_embedded_at?: string | null
+          joe_says_embedding?: string | null
           joe_says_updated_at?: string | null
           last_comm_channel?: string | null
           last_contacted_at?: string | null
+          last_history_synced_at?: string | null
           last_name?: string | null
           last_responded_at?: string | null
           last_sequence_sentiment?: string | null
@@ -3181,6 +3324,8 @@ export type Database = {
           linkedin_match_key?: string | null
           linkedin_profile_data?: string | null
           linkedin_profile_text?: string | null
+          linkedin_search_attempted_at?: string | null
+          linkedin_search_status?: string | null
           linkedin_url?: string | null
           location_text?: string | null
           mobile_phone?: string | null
@@ -3266,9 +3411,12 @@ export type Database = {
           job_id?: string | null
           job_status?: string | null
           joe_says?: string | null
+          joe_says_embedded_at?: string | null
+          joe_says_embedding?: string | null
           joe_says_updated_at?: string | null
           last_comm_channel?: string | null
           last_contacted_at?: string | null
+          last_history_synced_at?: string | null
           last_name?: string | null
           last_responded_at?: string | null
           last_sequence_sentiment?: string | null
@@ -3285,6 +3433,8 @@ export type Database = {
           linkedin_match_key?: string | null
           linkedin_profile_data?: string | null
           linkedin_profile_text?: string | null
+          linkedin_search_attempted_at?: string | null
+          linkedin_search_status?: string | null
           linkedin_url?: string | null
           location_text?: string | null
           mobile_phone?: string | null
@@ -4278,6 +4428,10 @@ export type Database = {
       }
       send_outs: {
         Row: {
+          base_comp_max: number | null
+          base_comp_min: number | null
+          bonus_comp_max: number | null
+          bonus_comp_min: number | null
           candidate_id: string
           candidate_job_id: string | null
           contact_id: string | null
@@ -4297,6 +4451,7 @@ export type Database = {
           rejection_reason: string | null
           resume_file_name: string | null
           resume_url: string | null
+          right_to_work: string | null
           sent_to_client_at: string | null
           stage: string
           submittal_notes: string | null
@@ -4304,6 +4459,10 @@ export type Database = {
           withdrawn_reason: string | null
         }
         Insert: {
+          base_comp_max?: number | null
+          base_comp_min?: number | null
+          bonus_comp_max?: number | null
+          bonus_comp_min?: number | null
           candidate_id: string
           candidate_job_id?: string | null
           contact_id?: string | null
@@ -4323,6 +4482,7 @@ export type Database = {
           rejection_reason?: string | null
           resume_file_name?: string | null
           resume_url?: string | null
+          right_to_work?: string | null
           sent_to_client_at?: string | null
           stage?: string
           submittal_notes?: string | null
@@ -4330,6 +4490,10 @@ export type Database = {
           withdrawn_reason?: string | null
         }
         Update: {
+          base_comp_max?: number | null
+          base_comp_min?: number | null
+          bonus_comp_max?: number | null
+          bonus_comp_min?: number | null
           candidate_id?: string
           candidate_job_id?: string | null
           contact_id?: string | null
@@ -4349,6 +4513,7 @@ export type Database = {
           rejection_reason?: string | null
           resume_file_name?: string | null
           resume_url?: string | null
+          right_to_work?: string | null
           sent_to_client_at?: string | null
           stage?: string
           submittal_notes?: string | null
@@ -4450,6 +4615,7 @@ export type Database = {
           channel: string
           created_at: string | null
           delay_interval_minutes: number
+          from_integration_account_id: string | null
           id: string
           jiggle_minutes: number
           message_body: string | null
@@ -4457,6 +4623,7 @@ export type Database = {
           post_connection_hardcoded_hours: number | null
           reply_to_previous: boolean
           respect_send_window: boolean
+          sender_user_id: string | null
           subject_line: string | null
           use_signature: boolean | null
         }
@@ -4467,6 +4634,7 @@ export type Database = {
           channel: string
           created_at?: string | null
           delay_interval_minutes?: number
+          from_integration_account_id?: string | null
           id?: string
           jiggle_minutes?: number
           message_body?: string | null
@@ -4474,6 +4642,7 @@ export type Database = {
           post_connection_hardcoded_hours?: number | null
           reply_to_previous?: boolean
           respect_send_window?: boolean
+          sender_user_id?: string | null
           subject_line?: string | null
           use_signature?: boolean | null
         }
@@ -4484,6 +4653,7 @@ export type Database = {
           channel?: string
           created_at?: string | null
           delay_interval_minutes?: number
+          from_integration_account_id?: string | null
           id?: string
           jiggle_minutes?: number
           message_body?: string | null
@@ -4491,10 +4661,18 @@ export type Database = {
           post_connection_hardcoded_hours?: number | null
           reply_to_previous?: boolean
           respect_send_window?: boolean
+          sender_user_id?: string | null
           subject_line?: string | null
           use_signature?: boolean | null
         }
         Relationships: [
+          {
+            foreignKeyName: "sequence_actions_from_integration_account_id_fkey"
+            columns: ["from_integration_account_id"]
+            isOneToOne: false
+            referencedRelation: "integration_accounts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sequence_actions_node_id_fkey"
             columns: ["node_id"]
@@ -4843,6 +5021,7 @@ export type Database = {
           channel: string | null
           created_at: string | null
           created_by: string | null
+          engine: string
           id: string
           job_id: string | null
           job_ids: string[]
@@ -4863,6 +5042,7 @@ export type Database = {
           channel?: string | null
           created_at?: string | null
           created_by?: string | null
+          engine?: string
           id?: string
           job_id?: string | null
           job_ids?: string[]
@@ -4883,6 +5063,7 @@ export type Database = {
           channel?: string | null
           created_at?: string | null
           created_by?: string | null
+          engine?: string
           id?: string
           job_id?: string | null
           job_ids?: string[]
@@ -4945,6 +5126,211 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      sizzles: {
+        Row: {
+          body: string | null
+          company_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          job_id: string | null
+          person_id: string
+          title: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          body?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          job_id?: string | null
+          person_id: string
+          title?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          body?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          job_id?: string | null
+          person_id?: string
+          title?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sizzles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "v_company_primary_domain"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "sizzles_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_embedding_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sizzles_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sourcing: {
+        Row: {
+          back_of_resume_at: string | null
+          candidate_id: string
+          contacted_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          job_id: string
+          linkedin_pipeline_stage_id: string | null
+          linkedin_project_account_id: string | null
+          linkedin_project_id: string | null
+          promoted_at: string | null
+          promoted_to: string | null
+          promoted_to_id: string | null
+          replied_at: string | null
+          stage: string
+          uncontacted_at: string
+          updated_at: string
+          withdrawn_at: string | null
+          withdrawn_by: string | null
+          withdrawn_reason: string | null
+        }
+        Insert: {
+          back_of_resume_at?: string | null
+          candidate_id: string
+          contacted_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          job_id: string
+          linkedin_pipeline_stage_id?: string | null
+          linkedin_project_account_id?: string | null
+          linkedin_project_id?: string | null
+          promoted_at?: string | null
+          promoted_to?: string | null
+          promoted_to_id?: string | null
+          replied_at?: string | null
+          stage?: string
+          uncontacted_at?: string
+          updated_at?: string
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+          withdrawn_reason?: string | null
+        }
+        Update: {
+          back_of_resume_at?: string | null
+          candidate_id?: string
+          contacted_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          job_id?: string
+          linkedin_pipeline_stage_id?: string | null
+          linkedin_project_account_id?: string | null
+          linkedin_project_id?: string | null
+          promoted_at?: string | null
+          promoted_to?: string | null
+          promoted_to_id?: string | null
+          replied_at?: string | null
+          stage?: string
+          uncontacted_at?: string
+          updated_at?: string
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+          withdrawn_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sourcing_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_embedding_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidate_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       stage_transitions: {
         Row: {
@@ -6016,12 +6402,15 @@ export type Database = {
       inbox_threads: {
         Row: {
           account_id: string | null
+          assigned_user_id: string | null
           candidate_id: string | null
           candidate_name: string | null
           channel: string | null
           contact_id: string | null
           contact_name: string | null
+          created_at: string | null
           external_conversation_id: string | null
+          has_attachments: boolean | null
           id: string | null
           integration_account_id: string | null
           is_archived: boolean | null
@@ -6030,9 +6419,11 @@ export type Database = {
           last_inbound_preview: string | null
           last_message_at: string | null
           last_message_preview: string | null
+          owner_id: string | null
           send_out_id: string | null
           sort_at: string | null
           subject: string | null
+          updated_at: string | null
         }
         Relationships: [
           {
@@ -6292,6 +6683,19 @@ export type Database = {
           title: string
         }[]
       }
+      match_people_joe_says: {
+        Args: {
+          match_count?: number
+          min_similarity?: number
+          query_embedding: string
+          role_filter?: string
+        }
+        Returns: {
+          joe_says_excerpt: string
+          person_id: string
+          similarity: number
+        }[]
+      }
       match_phone_and_link_call: {
         Args: { p_call_id: string; p_phone_number: string }
         Returns: Json
@@ -6374,6 +6778,7 @@ export type Database = {
         Returns: string
       }
       purge_soft_deleted: { Args: never; Returns: undefined }
+      restore_skipped_step: { Args: { p_step_log_id: string }; Returns: number }
       search_resumes: {
         Args: { match_count?: number; query_embedding: string }
         Returns: {
@@ -6426,6 +6831,13 @@ export type Database = {
           p_reason?: string
         }
         Returns: number
+      }
+      stop_sequence: {
+        Args: { p_reason?: string; p_sequence_id: string }
+        Returns: {
+          cancelled_step_logs: number
+          stopped_enrollments: number
+        }[]
       }
       upsert_candidate_from_email: {
         Args: {
