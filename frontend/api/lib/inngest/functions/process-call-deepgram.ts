@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { runProcessCallDeepgram } from "../../../../src/trigger/lib/call-deepgram-runner.js";
+import { runProcessCallDeepgram } from "../../../../src/server-lib/call-deepgram-runner.js";
 
 /**
  * Inngest mirror of Trigger.dev's `processCallDeepgram` task. The body
- * lives in `src/trigger/lib/call-deepgram-runner.ts` so both engines
+ * lives in `src/server-lib/call-deepgram-runner.ts` so both engines
  * drive the exact same RC fetch → Deepgram → Joe extract → DB write
  * pipeline.
  *

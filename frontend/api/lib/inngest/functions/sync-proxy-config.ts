@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
 
 /**
  * Push the team's preferred Unipile auto-proxy anchor onto every active

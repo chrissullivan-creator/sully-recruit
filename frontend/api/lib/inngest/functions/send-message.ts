@@ -1,10 +1,10 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   sendEmail,
   sendSms,
   sendLinkedIn,
-} from "../../../../src/trigger/lib/send-channels.js";
+} from "../../../../src/server-lib/send-channels.js";
 
 interface SendMessagePayload {
   channel: "email" | "sms" | "linkedin";

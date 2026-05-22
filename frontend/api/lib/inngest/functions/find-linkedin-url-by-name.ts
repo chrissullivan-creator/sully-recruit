@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
 import {
   getApolloConfig,
   apolloMatchPerson,

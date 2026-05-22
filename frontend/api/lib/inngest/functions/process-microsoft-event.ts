@@ -3,16 +3,16 @@ import {
   getSupabaseAdmin,
   getMicrosoftGraphCredentials,
   getAppSetting,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
-} from "../../../../src/trigger/lib/intel-extraction.js";
-import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
+} from "../../../../src/server-lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/server-lib/sequence-runner.js";
 import {
   matchPersonByEmail,
   classifyEmail,
-} from "../../../../src/trigger/lib/match-person-by-email.js";
+} from "../../../../src/server-lib/match-person-by-email.js";
 
 /**
  * Process Microsoft Graph notifications (email, calendar events).

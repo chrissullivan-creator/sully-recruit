@@ -1,5 +1,5 @@
 /**
- * Client-side mirror of frontend/src/trigger/lib/merge-tags.ts.
+ * Client-side mirror of frontend/src/server-lib/merge-tags.ts.
  *
  * Pure-JS implementation of the same merge-tag substitution that the
  * sequence-scheduler runs at send time, so the builder can show a

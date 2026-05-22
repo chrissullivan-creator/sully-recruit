@@ -1,10 +1,10 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
-} from "../../../../src/trigger/lib/intel-extraction.js";
-import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
+} from "../../../../src/server-lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/server-lib/sequence-runner.js";
 
 /**
  * Process inbound RingCentral events (calls, SMS, voicemail). Matches

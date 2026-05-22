@@ -1,13 +1,13 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   extractMessageIntel,
   applyExtractedIntel,
-} from "../../../../src/trigger/lib/intel-extraction.js";
-import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
-import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
-import { canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
-import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-email.js";
+} from "../../../../src/server-lib/intel-extraction.js";
+import { stopEnrollment } from "../../../../src/server-lib/sequence-runner.js";
+import { calculatePostConnectionSendTime } from "../../../../src/server-lib/send-time-calculator.js";
+import { canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
+import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
 import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
 import { resolvePerson, type LinkMethod } from "../../identity-resolver.js";
 

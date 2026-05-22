@@ -1,7 +1,7 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
-import { normalizeLinkedIn } from "../../../../src/trigger/lib/resume-parsing.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
+import { normalizeLinkedIn } from "../../../../src/server-lib/resume-parsing.js";
 
 /**
  * Resolver v2 — cold LinkedIn profile lookups for people whose IDs we

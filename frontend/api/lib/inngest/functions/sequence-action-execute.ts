@@ -1,10 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../client.js";
-import { runSequenceAction } from "../../../../src/trigger/lib/sequence-runner.js";
+import { runSequenceAction } from "../../../../src/server-lib/sequence-runner.js";
 
 /**
  * Inngest mirror of Trigger.dev's `sequenceActionExecute` task. The body
- * is shared via `runSequenceAction` in `src/trigger/lib/sequence-runner.ts`
+ * is shared via `runSequenceAction` in `src/server-lib/sequence-runner.ts`
  * — same idempotency check, reply guard, send-channels dispatch, re-anchor
  * pass, and message logging the Trigger.dev path runs.
  *

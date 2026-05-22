@@ -10,7 +10,7 @@
  */
 import { logger } from "./logger.js";
 import { getAnthropicKey, getOpenAIKey } from "./supabase.js";
-import { callAIWithFallback } from "../../lib/ai-fallback.js";
+import { callAIWithFallback } from "../lib/ai-fallback.js";
 import { notifyError } from "./alerting.js";
 
 interface ExtractedIntel {

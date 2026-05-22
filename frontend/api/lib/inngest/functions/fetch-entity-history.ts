@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   unipileFetch,
   canonicalChannel,
-} from "../../../../src/trigger/lib/unipile-v2.js";
+} from "../../../../src/server-lib/unipile-v2.js";
 
 /**
  * Fetch historical email + LinkedIn messages for a person and insert

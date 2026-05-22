@@ -1,5 +1,5 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 
 /**
  * Daily cleanup pass over `sequence_enrollments`:

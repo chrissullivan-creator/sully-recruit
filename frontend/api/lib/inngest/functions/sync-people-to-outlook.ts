@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   getMicrosoftAccessToken,
   createOrUpdateOutlookContact,
-} from "../../../../src/trigger/lib/microsoft-graph.js";
+} from "../../../../src/server-lib/microsoft-graph.js";
 
 /**
  * Push every Sully candidate/contact into the owner's Outlook Contacts.

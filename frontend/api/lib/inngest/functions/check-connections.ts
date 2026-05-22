@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../client.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
-import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
+import { calculatePostConnectionSendTime } from "../../../../src/server-lib/send-time-calculator.js";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;

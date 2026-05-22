@@ -5,14 +5,14 @@
 - **Project:** Sully Recruit CRM/ATS for The Emerald Recruiting Group
 - **Supabase project:** `xlobevmhzimxjtpiontf`
 - **Repo:** chrissullivan-creator/sully-recruit
-- **Deploy:** Push to `main` → Vercel auto-deploys frontend; Trigger.dev auto-deploys tasks
+- **Deploy:** Push to `main` → Vercel auto-deploys frontend + Inngest functions
+- **Background jobs:** Inngest only (`inngest` in `package.json`). The `src/server-lib/` directory holds shared backend helpers used by both API endpoints and Inngest functions; the older `src/trigger/` name was a holdover from a Trigger.dev evaluation that never shipped.
 
 ## MCP Servers
 
 All configured in `.mcp.json`. Restart session if disconnected.
 
 - **Supabase** — SQL, migrations, schema (token: supabase.com/dashboard/account/tokens)
-- **Trigger.dev** — Task management, schedules, run logs
 - **Unipile** — LinkedIn API (DSN: api19.unipile.com:14926)
 
 ## Skills

@@ -6,7 +6,7 @@ import {
   getGeminiKey,
   getOpenRouterKey,
   getVoyageKey,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 
 interface GenerateJoeSaysPayload {

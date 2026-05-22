@@ -7,13 +7,13 @@ import {
   getOpenAIKey,
   getOpenRouterKey,
   getMistralKey,
-} from "../../../../src/trigger/lib/supabase.js";
-import { sendInternalEmail } from "../../../../src/trigger/lib/microsoft-graph.js";
-import { notifyError } from "../../../../src/trigger/lib/alerting.js";
+} from "../../../../src/server-lib/supabase.js";
+import { sendInternalEmail } from "../../../../src/server-lib/microsoft-graph.js";
+import { notifyError } from "../../../../src/server-lib/alerting.js";
 import {
   matchPersonByEmail,
   classifyEmail,
-} from "../../../../src/trigger/lib/match-person-by-email.js";
+} from "../../../../src/server-lib/match-person-by-email.js";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -21,7 +21,7 @@ import {
   normalizeEmail,
   normalizeLinkedIn,
   delay,
-} from "../../../../src/trigger/lib/resume-parsing.js";
+} from "../../../../src/server-lib/resume-parsing.js";
 import { parseResume } from "../../../../src/lib/resume-parser.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 

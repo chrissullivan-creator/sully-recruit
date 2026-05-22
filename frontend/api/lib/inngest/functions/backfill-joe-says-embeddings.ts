@@ -2,7 +2,7 @@ import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
   getVoyageKey,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 
 /**
  * Embed existing people.joe_says briefs into people.joe_says_embedding

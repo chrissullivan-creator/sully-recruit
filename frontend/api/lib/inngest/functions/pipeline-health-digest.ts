@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
-import { sendInternalEmail } from "../../../../src/trigger/lib/microsoft-graph.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
+import { sendInternalEmail } from "../../../../src/server-lib/microsoft-graph.js";
 
 /**
  * Daily pipeline-health digest. Counts what's stuck across resume

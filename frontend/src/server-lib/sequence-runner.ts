@@ -6,7 +6,7 @@
  *   - Trigger.dev `sequenceActionExecute` task → wraps `runSequenceAction`
  *   - Inngest `sequence-action-execute` function → wraps `runSequenceAction`
  *
- * Lives under `src/trigger/lib/` for proximity to the only callers we have
+ * Lives under `src/server-lib/` for proximity to the only callers we have
  * today (and to share the channel/merge-tag/send-time helpers in the same
  * directory). Nothing in this file imports the Trigger.dev SDK directly —
  * callers pass a logger that satisfies the small `Logger` interface below.

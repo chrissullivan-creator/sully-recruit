@@ -6,13 +6,13 @@ import {
   getOpenAIKey,
   getOpenRouterKey,
   getMistralKey,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 import {
   looksLikeResume,
   getVoyageEmbedding,
   buildProfileText,
   delay,
-} from "../../../../src/trigger/lib/resume-parsing.js";
+} from "../../../../src/server-lib/resume-parsing.js";
 import { parseResume } from "../../../../src/lib/resume-parser.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 

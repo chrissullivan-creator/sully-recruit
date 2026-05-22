@@ -1,5 +1,5 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 
 /**
  * Drain the `call_processing_queue` — picks up `pending` calls and POSTs
