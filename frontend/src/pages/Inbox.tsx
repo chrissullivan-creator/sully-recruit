@@ -1570,7 +1570,7 @@ export default function Inbox() {
   return (
     <MainLayout>
       <PageHeader
-        title="Inbox"
+        title="Communication Hub"
         description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
       />
 

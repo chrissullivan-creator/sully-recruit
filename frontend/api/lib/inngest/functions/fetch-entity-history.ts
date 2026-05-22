@@ -29,16 +29,32 @@ interface FetchHistoryPayload {
   entity_type?: "candidate" | "contact";
 }
 
+// Throttle between Unipile API calls — keeps a per-person backfill from
+// burning through the v1 DSN rate limit when the mass-backfill cron fans
+// out 50 people/hour. ~250ms is well under one call/second per account.
+const UNIPILE_THROTTLE_MS = 250;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const fetchEntityHistory = inngest.createFunction(
   {
     id: "fetch-entity-history",
     name: "Fetch entity history (Inngest)",
     retries: 2,
-    // Per-entity concurrency: prevents parallel fans for the same
-    // person from racing the messages-insert dedup. event.data.entity_id
-    // is the new shape; legacy contact_id callers don't get a key,
-    // which falls back to no concurrency cap (safe — they're rare).
-    concurrency: [{ key: "event.data.entity_id", limit: 1 }],
+    // Per-entity concurrency keeps duplicate fans for the same person
+    // from racing the messages-insert dedup. event.data.entity_id is
+    // the new shape; legacy contact_id callers don't get a key, which
+    // falls back to no concurrency cap (safe — they're rare).
+    //
+    // Per-account concurrency limit (3) prevents the mass-backfill cron
+    // from spinning up 50 concurrent fans against the same Unipile
+    // account, which would trip the v1 DSN's rate limit. The key
+    // resolves at runtime from event.data.account_scope_key, which
+    // backfill-entity-histories sets to the LinkedIn account id when
+    // it knows one.
+    concurrency: [
+      { key: "event.data.entity_id", limit: 1 },
+      { key: "event.data.account_scope_key", limit: 3 },
+    ],
   }, { event: "messages/fetch-entity-history.requested" },
   async ({ event, logger }) => {
     const payload = event.data as FetchHistoryPayload;
@@ -78,9 +94,14 @@ export const fetchEntityHistory = inngest.createFunction(
         : person.work_email || person.primary_email
     ) || person.primary_email || person.personal_email || person.work_email;
 
-    const results: { email_history: any; linkedin_history: any } = {
+    const results: {
+      email_history: any;
+      linkedin_history: any;
+      rc_calls_backstamp: any;
+    } = {
       email_history: { searched: false, inserted: 0 },
       linkedin_history: { searched: false, inserted: 0 },
+      rc_calls_backstamp: { searched: false, linked: 0 },
     };
 
     // ── Email history via Unipile v2 ────────────────────────────────
@@ -112,12 +133,14 @@ export const fetchEntityHistory = inngest.createFunction(
               { method: "GET", query: { any_email: lowerEmail, limit: 50 } },
             );
             emails = Array.isArray(data) ? data : (data.items ?? data.emails ?? data.data ?? []);
+            await sleep(UNIPILE_THROTTLE_MS);
           } catch (err: any) {
             logger.warn("Unipile email history fetch failed", {
               accountId: acct.id,
               account: acct.email_address,
               error: err.message,
             });
+            await sleep(UNIPILE_THROTTLE_MS);
             continue;
           }
           if (emails.length === 0) continue;
@@ -287,6 +310,7 @@ export const fetchEntityHistory = inngest.createFunction(
                 `chats/${encodeURIComponent(channel.external_conversation_id)}/messages`,
                 { method: "GET", query: { limit: 50 } },
               );
+              await sleep(UNIPILE_THROTTLE_MS);
               const messages = data.items || data || [];
               results.linkedin_history.searched = true;
 
@@ -324,6 +348,45 @@ export const fetchEntityHistory = inngest.createFunction(
         logger.warn(`LinkedIn history fetch failed: ${err.message}`);
       }
     }
+
+    // ── RingCentral calls back-stamp ────────────────────────────────
+    // `poll-rc-calls` ingests calls into `call_logs` and tries to link
+    // them to a candidate/contact at insert time. When a new person is
+    // added LATER, any historical call_logs row matching their phone
+    // sits unlinked (linked_entity_id IS NULL, candidate_id IS NULL).
+    // Back-stamp those rows so the per-person comms timeline picks
+    // them up.
+    //
+    // Last-10-digits match handles +1 (212) 555-… vs 2125550000 vs
+    // 12125550000 normalization without an extension function.
+    if (person.phone) {
+      const digits = String(person.phone).replace(/\D+/g, "");
+      const last10 = digits.length >= 10 ? digits.slice(-10) : null;
+      if (last10) {
+        const personColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
+        const { data: linked, error: rcErr } = await supabase
+          .from("call_logs")
+          .update({ [personColumn]: entityId } as any)
+          .ilike("phone_number", `%${last10}%`)
+          .is(personColumn, null)
+          .select("id");
+        if (rcErr) {
+          logger.warn("RC calls back-stamp failed", { error: rcErr.message });
+        } else {
+          results.rc_calls_backstamp.searched = true;
+          results.rc_calls_backstamp.linked = linked?.length || 0;
+        }
+      }
+    }
+
+    // ── Calendar events back-stamp (TODO) ───────────────────────────
+    // Outlook events land in `tasks` with an attendees email list,
+    // and `meeting_attendees` links each attending person. Per-person
+    // backfill needs to re-scan tasks created before this person
+    // existed and insert meeting_attendees rows whose email matches
+    // person.primary_email / personal_email / work_email. Deferred
+    // until the tasks-vs-calendar-events column shape is documented;
+    // adding it blind risks duplicate attendees on shared meetings.
 
     // Stamp last_history_synced_at so the cron skips this row next pass.
     await supabase

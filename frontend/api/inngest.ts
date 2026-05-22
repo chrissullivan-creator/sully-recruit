@@ -15,6 +15,7 @@ import {
   reclassifyLinkedinChatsOnce,
 } from "./lib/inngest/functions/reclassify-linkedin-chats.js";
 import { resolveUnipileIds } from "./lib/inngest/functions/resolve-unipile-ids.js";
+import { resolveFromChats } from "./lib/inngest/functions/resolve-from-chats.js";
 import { renewWebhookSubscriptions } from "./lib/inngest/functions/renew-webhook-subscriptions.js";
 import { backfillResumeEmbeddings } from "./lib/inngest/functions/backfill-resume-embeddings.js";
 import { reparseResumes } from "./lib/inngest/functions/reparse-resumes.js";
@@ -45,6 +46,7 @@ import { fetchEntityHistory } from "./lib/inngest/functions/fetch-entity-history
 import { recoverOrphanResumes } from "./lib/inngest/functions/recover-orphan-resumes.js";
 import { backfillEnrollmentInit } from "./lib/inngest/functions/backfill-enrollment-init.js";
 import { backfillEntityHistories } from "./lib/inngest/functions/backfill-entity-histories.js";
+import { quickBackfillNewPeople } from "./lib/inngest/functions/quick-backfill-new-people.js";
 import { findLinkedinUrlByName } from "./lib/inngest/functions/find-linkedin-url-by-name.js";
 import { findLinkedinUrlSweep } from "./lib/inngest/functions/find-linkedin-url-sweep.js";
 import { enrichCompanyViaApollo } from "./lib/inngest/functions/enrich-company-via-apollo.js";
@@ -83,6 +85,7 @@ export default serve({
     reclassifyLinkedinChatsDaily,
     reclassifyLinkedinChatsOnce,
     resolveUnipileIds,
+    resolveFromChats,
     renewWebhookSubscriptions,
     backfillResumeEmbeddings,
     reparseResumes,
@@ -112,6 +115,7 @@ export default serve({
     recoverOrphanResumes,
     backfillEnrollmentInit,
     backfillEntityHistories,
+    quickBackfillNewPeople,
     findLinkedinUrlByName,
     findLinkedinUrlSweep,
     enrichCompanyViaApollo,

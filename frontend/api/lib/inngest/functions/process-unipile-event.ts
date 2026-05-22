@@ -8,8 +8,8 @@ import { stopEnrollment } from "../../../../src/trigger/lib/sequence-runner.js";
 import { calculatePostConnectionSendTime } from "../../../../src/trigger/lib/send-time-calculator.js";
 import { canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
 import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-email.js";
-import { normalizeLinkedIn } from "../../../../src/trigger/lib/resume-parsing.js";
 import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
+import { resolvePerson, type LinkMethod } from "../../identity-resolver.js";
 
 /**
  * Process Unipile webhook events (LinkedIn messages, connection updates,
@@ -55,6 +55,7 @@ type LinkedinEntityMatch = {
   entityId: string;
   entityType: "candidate" | "contact";
   entityColumn: "candidate_id" | "contact_id";
+  linkMethod: LinkMethod;
 };
 
 // v2 event types we deliberately ignore — they fire frequently and
@@ -119,103 +120,27 @@ function detectLinkedinDirection(eventBody: any, messageData: any, senderProvide
   return "inbound" as const;
 }
 
+// Thin wrapper over the centralized identity resolver so call sites in
+// this file don't need to change shape. The resolver itself lives in
+// `frontend/api/lib/identity-resolver.ts` — single source of truth for
+// (channel, identity) → person across messages, email, calls, calendar.
 async function matchLinkedinEntity(
   supabase: any,
   providerId: string | null,
   linkedinUrl: string | null,
 ): Promise<LinkedinEntityMatch | null> {
-  if (providerId) {
-    const { data: peopleMatches } = await supabase
-      .from("people")
-      .select("id")
-      .or(
-        `unipile_recruiter_id.eq.${providerId},unipile_classic_id.eq.${providerId},unipile_provider_id.eq.${providerId}`,
-      )
-      .limit(1);
-    if (peopleMatches?.[0]?.id) {
-      return {
-        entityId: peopleMatches[0].id,
-        entityType: "candidate",
-        entityColumn: "candidate_id",
-      };
-    }
-
-    const { data: contactMatches } = await supabase
-      .from("contacts")
-      .select("id")
-      .or(
-        `unipile_recruiter_id.eq.${providerId},unipile_classic_id.eq.${providerId},unipile_provider_id.eq.${providerId}`,
-      )
-      .limit(1);
-    if (contactMatches?.[0]?.id) {
-      return {
-        entityId: contactMatches[0].id,
-        entityType: "contact",
-        entityColumn: "contact_id",
-      };
-    }
-  }
-
-  const slug = normalizeLinkedIn(linkedinUrl);
-  if (slug) {
-    const { data: peopleMatches } = await supabase
-      .from("people")
-      .select("id")
-      .ilike("linkedin_url", `%${slug}%`)
-      .limit(1);
-    if (peopleMatches?.[0]?.id) {
-      return {
-        entityId: peopleMatches[0].id,
-        entityType: "candidate",
-        entityColumn: "candidate_id",
-      };
-    }
-
-    const { data: contactMatches } = await supabase
-      .from("contacts")
-      .select("id")
-      .ilike("linkedin_url", `%${slug}%`)
-      .limit(1);
-    if (contactMatches?.[0]?.id) {
-      return {
-        entityId: contactMatches[0].id,
-        entityType: "contact",
-        entityColumn: "contact_id",
-      };
-    }
-  }
-
-  if (providerId) {
-    const { data: candidateChannelMatches } = await supabase
-      .from("candidate_channels")
-      .select("candidate_id")
-      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-      .eq("channel", "linkedin")
-      .limit(1);
-    if (candidateChannelMatches?.[0]?.candidate_id) {
-      return {
-        entityId: candidateChannelMatches[0].candidate_id,
-        entityType: "candidate",
-        entityColumn: "candidate_id",
-      };
-    }
-
-    const { data: contactChannelMatches } = await supabase
-      .from("contact_channels")
-      .select("contact_id")
-      .or(`provider_id.eq.${providerId},unipile_id.eq.${providerId}`)
-      .eq("channel", "linkedin")
-      .limit(1);
-    if (contactChannelMatches?.[0]?.contact_id) {
-      return {
-        entityId: contactChannelMatches[0].contact_id,
-        entityType: "contact",
-        entityColumn: "contact_id",
-      };
-    }
-  }
-
-  return null;
+  const resolved = await resolvePerson(supabase, "linkedin", {
+    providerId,
+    unipileId: providerId,
+    linkedinUrl,
+  });
+  if (!resolved) return null;
+  return {
+    entityId: resolved.personId,
+    entityType: resolved.personType,
+    entityColumn: resolved.entityColumn,
+    linkMethod: resolved.linkMethod,
+  };
 }
 
 export const processUnipileEvent = inngest.createFunction(
@@ -496,6 +421,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   let entityId: string | null = entityMatch?.entityId ?? null;
   let entityType: "candidate" | "contact" = entityMatch?.entityType ?? "candidate";
   let entityColumn: "candidate_id" | "contact_id" = entityMatch?.entityColumn ?? "candidate_id";
+  const linkMethod: LinkMethod | null = entityMatch?.linkMethod ?? null;
 
   // Find-or-create the conversation row. The lookup MUST match the unique
   // index (integration_account_id, channel, external_conversation_id) so
@@ -523,6 +449,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       integration_account_id: integrationAccountId,
       last_message_at: receivedAt,
       is_read: false,
+      link_method: personId && linkMethod ? `webhook:${linkMethod}` : null,
     };
     const { data: created, error } = await supabase
       .from("conversations")
@@ -564,7 +491,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
     }
 
-    await supabase.from("messages").insert({
+    const { error: unlinkedInsertErr } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       candidate_id: null,
       contact_id: null,
@@ -583,7 +510,15 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       sender_address: senderAddress,
       raw_payload: messageData,
       is_read: direction === "outbound",
+      needs_link: true,
+      link_attempted_at: new Date().toISOString(),
     } as any);
+    // Idempotency backstop: the partial UNIQUE index on
+    // (provider, external_message_id) fires 23505 on re-delivery races
+    // that slipped past the pre-insert check above.
+    if (unlinkedInsertErr && (unlinkedInsertErr as any).code === "23505") {
+      return { action: "skipped", reason: "duplicate_unique_violation", type: "linkedin_message" };
+    }
 
     const conversationUpdate: Record<string, any> = {
       last_message_at: receivedAt,
@@ -604,7 +539,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
   }
 
-  await supabase.from("messages").insert({
+  const { error: linkedInsertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
     integration_account_id: integrationAccountId,
@@ -622,7 +557,14 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     sender_address: senderProfileUrl || senderId,
     raw_payload: messageData,
     is_read: direction === "outbound",
+    needs_link: false,
+    link_method: linkMethod ? `webhook:${linkMethod}` : null,
+    link_attempted_at: new Date().toISOString(),
   } as any);
+  // Idempotency backstop — see comment on the unlinked-path insert above.
+  if (linkedInsertErr && (linkedInsertErr as any).code === "23505") {
+    return { action: "skipped", reason: "duplicate_unique_violation", entityId, channel, direction, type: "linkedin_message" };
+  }
 
   const conversationUpdate: Record<string, any> = {
     last_message_at: receivedAt,
