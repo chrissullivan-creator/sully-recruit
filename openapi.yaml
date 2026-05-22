@@ -4,7 +4,7 @@ info:
   description: |
     Read + submission-write API for the "Ask Joe Send Outs Emerald" ChatGPT GPT.
     Backed by the Sully Recruit Supabase database. All endpoints require
-    `Authorization: Bearer <EMERALD_API_KEY>`.
+    `Authorization: Bearer <ASK_JOE_SENDOUT>`.
   version: "1.0.0"
 
 servers:

@@ -14,7 +14,7 @@ same Vercel project that already hosts the recruiter app.
 ## Files added
 
 ```
-frontend/api/lib/gpt-auth.ts            ← Bearer EMERALD_API_KEY auth
+frontend/api/lib/gpt-auth.ts            ← Bearer ASK_JOE_SENDOUT auth (env var)
 frontend/api/gpt/candidates.ts          ← GET /api/gpt/candidates
 frontend/api/gpt/jobs.ts                ← GET /api/gpt/jobs
 frontend/api/gpt/submission-context.ts  ← GET /api/gpt/submission-context
@@ -79,7 +79,7 @@ environment variable:
 
 | Key                         | Where to set                | Value                                            |
 | --------------------------- | --------------------------- | ------------------------------------------------ |
-| `EMERALD_API_KEY`           | Vercel → Project → Settings → Environment Variables | A long random string (e.g. `openssl rand -hex 32`). This is the bearer token your GPT will send. |
+| `ASK_JOE_SENDOUT`           | Vercel → Project → Settings → Environment Variables | A long random string (e.g. `openssl rand -hex 32`). This is the bearer token your GPT will send. |
 | `SUPABASE_URL`              | Already set ✅              | (no change)                                      |
 | `SUPABASE_SERVICE_ROLE_KEY` | Already set ✅              | (no change)                                      |
 
@@ -95,7 +95,7 @@ openssl rand -hex 32
 ## How to test the endpoints with curl
 
 Replace `$VERCEL_URL` with your deployment URL and `$KEY` with the
-value you set for `EMERALD_API_KEY`.
+value you set for `ASK_JOE_SENDOUT`.
 
 ```bash
 # 1) Search candidates by name
@@ -139,7 +139,7 @@ curl -X POST -H "Authorization: Bearer $KEY" \
   "$VERCEL_URL/api/gpt/submissions"
 ```
 
-A 401 means `EMERALD_API_KEY` isn't set in Vercel (or your curl token
+A 401 means `ASK_JOE_SENDOUT` isn't set in Vercel (or your curl token
 is wrong). A 500 with `column "status" does not exist` means the
 migration above hasn't been applied yet.
 
@@ -149,7 +149,7 @@ migration above hasn't been applied yet.
 2. Scroll to **Actions** → **Create new action**.
 3. **Authentication** → **API Key**:
    - Auth Type: **Bearer**
-   - API Key: paste the same value you set for `EMERALD_API_KEY` in Vercel.
+   - API Key: paste the same value you set for `ASK_JOE_SENDOUT` in Vercel.
 4. **Schema**: open `openapi.yaml` from this repo, change the `servers:`
    url to your actual Vercel deployment URL (e.g.
    `https://sully-recruit.vercel.app`), and paste the whole file in.
@@ -185,11 +185,11 @@ migration above hasn't been applied yet.
 
 ## Security notes
 
-- `SUPABASE_SERVICE_ROLE_KEY` never leaves Vercel — only `EMERALD_API_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` never leaves Vercel — only `ASK_JOE_SENDOUT`
   is shared with the GPT.
 - Endpoints are **read-only** for candidates, jobs, and notes — there
   is no destructive endpoint and no edit endpoint for core records.
 - The only write is **upsert on `submissions`** (and the status check
   constraint blocks anything off-script).
-- Rotate `EMERALD_API_KEY` whenever you want — just update Vercel +
+- Rotate `ASK_JOE_SENDOUT` whenever you want — just update Vercel +
   the GPT Action config and redeploy.

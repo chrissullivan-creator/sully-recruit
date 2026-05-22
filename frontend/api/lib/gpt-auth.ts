@@ -3,20 +3,20 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 /**
  * Auth for the "Ask Joe Send Outs Emerald" ChatGPT GPT Action.
  *
- * The GPT calls our Vercel API with `Authorization: Bearer <EMERALD_API_KEY>`.
+ * The GPT calls our Vercel API with `Authorization: Bearer <ASK_JOE_SENDOUT>`.
  * That static API key is the ONLY thing the GPT carries. The Supabase
  * service-role key never leaves the server.
  *
- * Set EMERALD_API_KEY in Vercel: a long random string you paste into
+ * Set ASK_JOE_SENDOUT in Vercel: a long random string you paste into
  * the GPT Action config under "Authentication → API Key → Bearer".
  *
  * Returns true on success. On failure, writes the 401/500 response and
  * returns false so the caller can `if (!ok) return;`.
  */
 export function requireGptAuth(req: VercelRequest, res: VercelResponse): boolean {
-  const expected = process.env.EMERALD_API_KEY;
+  const expected = process.env.ASK_JOE_SENDOUT;
   if (!expected) {
-    res.status(500).json({ error: "Server misconfigured: EMERALD_API_KEY not set" });
+    res.status(500).json({ error: "Server misconfigured: ASK_JOE_SENDOUT not set" });
     return false;
   }
 
