@@ -1448,6 +1448,33 @@ export default function Inbox() {
   });
 
   const userEmail = currentUser?.email?.toLowerCase() || '';
+
+  // Realtime: subscribe to message INSERTs so a new inbound webhook
+  // updates the threads list (+ open thread) without a manual refresh.
+  // selectedId is read via ref to avoid re-subscribing on every click.
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+  useEffect(() => {
+    const channel = supabase
+      .channel('inbox-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload: any) => {
+          queryClient.invalidateQueries({ queryKey: ['inbox_threads'] });
+          queryClient.invalidateQueries({ queryKey: ['sidebar_inbox_unread'] });
+          const convId = payload.new?.conversation_id;
+          if (convId && convId === selectedIdRef.current) {
+            queryClient.invalidateQueries({ queryKey: ['messages', convId] });
+            queryClient.invalidateQueries({ queryKey: ['inbox_thread', convId] });
+          }
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
   const userId = currentUser?.id || '';
   const isAdmin = ADMIN_EMAILS.includes(userEmail);
 

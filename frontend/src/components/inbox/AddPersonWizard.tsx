@@ -346,6 +346,12 @@ export function AddPersonWizard({
         .eq('conversation_id', threadId)
         .is(linkCol, null);
 
+      // Cache the channel identity so the webhook resolver hits
+      // candidate_channels on next inbound instead of falling through
+      // to the slower people.linkedin_url scan. Best-effort — if the
+      // insert fails (RLS, missing data, dup) the link itself succeeded.
+      await cacheChannelIdentity(match, threadId, channel, externalConversationId ?? null, integrationAccountId ?? null);
+
       const name = match.full_name || `${match.first_name} ${match.last_name}`;
       toast.success(`Linked to ${name}`);
       invalidateQueries();
@@ -355,6 +361,51 @@ export function AddPersonWizard({
       toast.error('Failed to link: ' + (err.message || 'Unknown error'));
     } finally {
       setLinking(false);
+    }
+  };
+
+  /**
+   * After a manual link/create, write the channel identity into
+   * `candidate_channels` (or contact_channels) so the next webhook
+   * for the same sender resolves at O(1). Pulls the sender_address
+   * off the earliest inbound message on the thread — that's the
+   * canonical provider_id (LinkedIn URN, email address, phone).
+   */
+  const cacheChannelIdentity = async (
+    match: PersonMatch,
+    threadId: string,
+    channel: string,
+    externalConversationId: string | null,
+    integrationAccountId: string | null,
+  ): Promise<void> => {
+    try {
+      const { data: firstMsg } = await supabase
+        .from('messages')
+        .select('sender_address')
+        .eq('conversation_id', threadId)
+        .eq('direction', 'inbound')
+        .order('sent_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const providerId = firstMsg?.sender_address || null;
+      if (!providerId) return; // nothing to cache
+
+      // contact_channels is a view over candidate_channels filtered to
+      // clients — the base table holds rows for both types and uses
+      // candidate_id as the person FK regardless of person.type.
+      await supabase.from('candidate_channels').upsert(
+        {
+          candidate_id: match.id,
+          channel,
+          provider_id: providerId,
+          account_id: integrationAccountId,
+          external_conversation_id: externalConversationId,
+          is_connected: true,
+        },
+        { onConflict: 'candidate_id,channel' },
+      );
+    } catch {
+      /* swallow — see method-level comment */
     }
   };
 
