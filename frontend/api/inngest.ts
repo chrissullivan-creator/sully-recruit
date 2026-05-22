@@ -15,6 +15,7 @@ import {
   reclassifyLinkedinChatsOnce,
 } from "./lib/inngest/functions/reclassify-linkedin-chats.js";
 import { resolveUnipileIds } from "./lib/inngest/functions/resolve-unipile-ids.js";
+import { resolveFromChats } from "./lib/inngest/functions/resolve-from-chats.js";
 import { renewWebhookSubscriptions } from "./lib/inngest/functions/renew-webhook-subscriptions.js";
 import { backfillResumeEmbeddings } from "./lib/inngest/functions/backfill-resume-embeddings.js";
 import { reparseResumes } from "./lib/inngest/functions/reparse-resumes.js";
@@ -83,6 +84,7 @@ export default serve({
     reclassifyLinkedinChatsDaily,
     reclassifyLinkedinChatsOnce,
     resolveUnipileIds,
+    resolveFromChats,
     renewWebhookSubscriptions,
     backfillResumeEmbeddings,
     reparseResumes,
