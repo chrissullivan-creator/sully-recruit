@@ -46,6 +46,7 @@ import { fetchEntityHistory } from "./lib/inngest/functions/fetch-entity-history
 import { recoverOrphanResumes } from "./lib/inngest/functions/recover-orphan-resumes.js";
 import { backfillEnrollmentInit } from "./lib/inngest/functions/backfill-enrollment-init.js";
 import { backfillEntityHistories } from "./lib/inngest/functions/backfill-entity-histories.js";
+import { quickBackfillNewPeople } from "./lib/inngest/functions/quick-backfill-new-people.js";
 import { findLinkedinUrlByName } from "./lib/inngest/functions/find-linkedin-url-by-name.js";
 import { findLinkedinUrlSweep } from "./lib/inngest/functions/find-linkedin-url-sweep.js";
 import { enrichCompanyViaApollo } from "./lib/inngest/functions/enrich-company-via-apollo.js";
@@ -114,6 +115,7 @@ export default serve({
     recoverOrphanResumes,
     backfillEnrollmentInit,
     backfillEntityHistories,
+    quickBackfillNewPeople,
     findLinkedinUrlByName,
     findLinkedinUrlSweep,
     enrichCompanyViaApollo,
