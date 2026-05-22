@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   advanceCurrentNode,
   checkSequenceComplete,
-} from "../../../../src/trigger/lib/sequence-runner.js";
+} from "../../../../src/server-lib/sequence-runner.js";
 
 const PENDING_CONNECTION_TTL_DAYS = 21;
 

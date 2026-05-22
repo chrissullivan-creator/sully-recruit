@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { runSequenceEnrollmentInit } from "../../../../src/trigger/lib/enrollment-init-runner.js";
+import { runSequenceEnrollmentInit } from "../../../../src/server-lib/enrollment-init-runner.js";
 
 /**
  * Inngest function for `sequence/enrollment-init.requested`. The body
- * lives in `src/trigger/lib/enrollment-init-runner.ts` — recipient
+ * lives in `src/server-lib/enrollment-init-runner.ts` — recipient
  * pre-flight, pre-skip rules, window-aware scheduled_at via
  * calculateSendTime, idempotency gate against existing non-cancelled
  * step_logs.

@@ -6,13 +6,13 @@ import {
   getOpenAIKey,
   getOpenRouterKey,
   getMistralKey,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 import {
   buildProfileText,
   getVoyageEmbedding,
-} from "../../../../src/trigger/lib/resume-parsing.js";
+} from "../../../../src/server-lib/resume-parsing.js";
 import { classifyEmail, normalizeEmail } from "../../../../src/lib/email-classifier.js";
-import { matchPersonByEmail } from "../../../../src/trigger/lib/match-person-by-email.js";
+import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
 import { extractResumeText } from "../../../../src/lib/resume-parser.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
 

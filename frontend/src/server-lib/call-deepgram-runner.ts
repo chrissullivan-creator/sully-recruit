@@ -1,5 +1,5 @@
 import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "./supabase.js";
-import { callAIWithFallback } from "../../lib/ai-fallback.js";
+import { callAIWithFallback } from "../lib/ai-fallback.js";
 import { sendInternalEmail } from "./microsoft-graph.js";
 import { notifyError } from "./alerting.js";
 

@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   MARKETING_DOMAINS,
   MARKETING_SENDER_PATTERNS,
-} from "../../../../src/trigger/lib/marketing-blocklist.js";
+} from "../../../../src/server-lib/marketing-blocklist.js";
 
 /**
  * Purge marketing/newsletter emails from the messages + conversations
@@ -13,7 +13,7 @@ import {
  *
  * Daily at 04:00 UTC. Ported from `src/trigger/purge-marketing-emails.ts`
  * — Inngest is the only scheduler now. The blocklist + isMarketingEmail
- * helper moved to `src/trigger/lib/marketing-blocklist.ts` so the
+ * helper moved to `src/server-lib/marketing-blocklist.ts` so the
  * backfill-emails Inngest function can share it.
  */
 export const purgeMarketingEmails = inngest.createFunction(

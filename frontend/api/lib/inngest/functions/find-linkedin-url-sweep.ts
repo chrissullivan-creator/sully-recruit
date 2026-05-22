@@ -1,5 +1,5 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 
 /**
  * Every-15-min cron that picks people without a LinkedIn URL and fans

@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { unipileFetch, canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { unipileFetch, canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 
 const BATCH_SIZE = 20;
 const DELAY_MS = 400;

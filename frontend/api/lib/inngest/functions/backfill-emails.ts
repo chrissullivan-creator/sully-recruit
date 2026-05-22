@@ -1,9 +1,9 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
-import { normalizeEmail } from "../../../../src/trigger/lib/resume-parsing.js";
-import { isMarketingEmail } from "../../../../src/trigger/lib/marketing-blocklist.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
-import { notifyError } from "../../../../src/trigger/lib/alerting.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
+import { normalizeEmail } from "../../../../src/server-lib/resume-parsing.js";
+import { isMarketingEmail } from "../../../../src/server-lib/marketing-blocklist.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
+import { notifyError } from "../../../../src/server-lib/alerting.js";
 
 /**
  * Backfill emails from Unipile every 5 minutes — safety net for missed

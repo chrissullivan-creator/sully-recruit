@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { unipileFetch, canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { unipileFetch, canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 
 /**
  * Re-pull every LinkedIn conversation from Unipile v2 to read its real

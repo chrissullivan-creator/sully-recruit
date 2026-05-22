@@ -1,7 +1,7 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { normalizeLinkedIn } from "../../../../src/trigger/lib/resume-parsing.js";
-import { unipileFetch, canonicalChannel } from "../../../../src/trigger/lib/unipile-v2.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { normalizeLinkedIn } from "../../../../src/server-lib/resume-parsing.js";
+import { unipileFetch, canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 
 /**
  * Backfill LinkedIn messages from Unipile every 5 minutes for every

@@ -1,6 +1,6 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
-import { notifyError } from "../../../../src/trigger/lib/alerting.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { notifyError } from "../../../../src/server-lib/alerting.js";
 
 /**
  * Safety net for calls whose transcripts never made it to ai_call_notes.

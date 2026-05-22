@@ -1,10 +1,10 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin } from "../../../../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import {
   buildProfileText,
   getVoyageEmbedding,
   delay,
-} from "../../../../src/trigger/lib/resume-parsing.js";
+} from "../../../../src/server-lib/resume-parsing.js";
 
 /**
  * Backfill `full_profile` Voyage embeddings for candidates whose resumes

@@ -2,7 +2,7 @@ import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
   getMicrosoftGraphCredentials,
-} from "../../../../src/trigger/lib/supabase.js";
+} from "../../../../src/server-lib/supabase.js";
 
 const WEBHOOK_BASE_URL = "https://www.sullyrecruit.app";
 

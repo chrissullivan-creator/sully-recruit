@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { inngest } from "./lib/inngest/client.js";
 import { requireAuth } from "./lib/auth.js";
-import { getSupabaseAdmin } from "../src/trigger/lib/supabase.js";
+import { getSupabaseAdmin } from "../src/server-lib/supabase.js";
 
 /**
  * POST /api/trigger-backfill-recent-people

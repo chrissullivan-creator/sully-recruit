@@ -21,8 +21,8 @@
  * can flip rows from `needs_link=true` to `needs_link=false` with
  * provenance.
  */
-import { normalizeLinkedIn } from "../../src/trigger/lib/resume-parsing.js";
-import { matchPersonByEmail } from "../../src/trigger/lib/match-person-by-email.js";
+import { normalizeLinkedIn } from "../../src/server-lib/resume-parsing.js";
+import { matchPersonByEmail } from "../../src/server-lib/match-person-by-email.js";
 
 export type ResolveChannel = "linkedin" | "email" | "sms" | "phone";
 

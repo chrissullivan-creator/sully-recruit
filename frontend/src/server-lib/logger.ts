@@ -1,7 +1,7 @@
 /**
  * Drop-in replacement for `import { logger } from "@trigger.dev/sdk/v3"`.
  *
- * Used by helper files in `frontend/src/trigger/lib/` that pre-date the
+ * Used by helper files in `frontend/src/server-lib/` that pre-date the
  * Inngest cutover. Now that the SDK is gone, these helpers run inside
  * Inngest functions (and any future engine) — they need a plain
  * console-backed logger that's safe to import without an orchestrator.

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../client.js";
-import { unipileFetch } from "../../../../src/trigger/lib/unipile-v2.js";
+import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
 
 /**
  * Pull each LinkedIn Recruiter account's remaining InMail credits and

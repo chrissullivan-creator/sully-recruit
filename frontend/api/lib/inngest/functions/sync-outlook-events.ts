@@ -1,12 +1,12 @@
 import { inngest } from "../client.js";
-import { getSupabaseAdmin, getAppSetting } from "../../../../src/trigger/lib/supabase.js";
-import { getMicrosoftAccessToken } from "../../../../src/trigger/lib/microsoft-graph.js";
-import { notifyError } from "../../../../src/trigger/lib/alerting.js";
+import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
+import { getMicrosoftAccessToken } from "../../../../src/server-lib/microsoft-graph.js";
+import { notifyError } from "../../../../src/server-lib/alerting.js";
 import {
   fetchUnipileEventsForAccount,
   shouldUseUnipileCalendar,
-} from "../../../../src/trigger/lib/unipile-calendar.js";
-import { matchPersonByEmail as matchPersonByEmailHelper } from "../../../../src/trigger/lib/match-person-by-email.js";
+} from "../../../../src/server-lib/unipile-calendar.js";
+import { matchPersonByEmail as matchPersonByEmailHelper } from "../../../../src/server-lib/match-person-by-email.js";
 
 /**
  * Pull each configured mailbox's upcoming Outlook calendar events and
