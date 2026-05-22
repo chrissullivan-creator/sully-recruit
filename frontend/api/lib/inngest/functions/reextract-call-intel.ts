@@ -16,8 +16,10 @@ import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
  * re-extraction bumps ai_call_notes.reextraction_version so the
  * sweeper doesn't reprocess the same row repeatedly.
  *
- * Cron every 15 min, batch 15. Also event-triggerable via
- * `ops/reextract-call-intel.requested` for one-shot recovery.
+ * Event-only. Fire via `ops/reextract-call-intel.requested` for
+ * one-shot backfills. The 15-minute cron schedule was removed because
+ * failures don't bump reextraction_version, so stuck rows were
+ * re-sent to Sonnet every tick (~$10/hr against ~189 stuck rows).
  */
 const CURRENT_REEXTRACTION_VERSION = 1;
 
@@ -204,7 +206,7 @@ async function runSweep(logger: any, batch = 15) {
       intel = JSON.parse(text.replace(/```json|```/g, "").trim());
     } catch (err: any) {
       logger.warn("Re-extraction failed", { noteId: note.id, error: err?.message });
-      // Don't bump version on failure — we'll retry next cron tick.
+      // Don't bump version on failure — next manual event trigger will retry.
       processed++;
       continue;
     }
@@ -239,15 +241,6 @@ async function runSweep(logger: any, batch = 15) {
   logger.info("Re-extraction sweep complete", { processed, updated, batch_size: candidates.length });
   return { processed, updated };
 }
-
-export const reextractCallIntelCron = inngest.createFunction(
-  {
-    id: "reextract-call-intel-cron",
-    name: "Re-extract candidate intel from stored transcripts (Inngest cron)",
-  },
-  { cron: "11-59/15 * * * *" },
-  async ({ logger }) => runSweep(logger, 15),
-);
 
 export const reextractCallIntel = inngest.createFunction(
   {
