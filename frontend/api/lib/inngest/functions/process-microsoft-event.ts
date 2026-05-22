@@ -80,6 +80,16 @@ export const processMicrosoftEvent = inngest.createFunction(
     const resourceData = await resourceResp.json();
 
     if (notification.resource?.includes("/messages")) {
+      // Phase C kill-switch: when Unipile v2 has verifiably full email
+      // coverage (watch v_email_ingest_coverage), flip
+      // EMAIL_INGEST_MICROSOFT_GRAPH_ENABLED=false in app_settings to
+      // short-circuit this branch and run Unipile-only. Calendar branch
+      // below is unaffected — Graph is still the only path for events.
+      const graphEmailEnabled = (await getAppSetting("EMAIL_INGEST_MICROSOFT_GRAPH_ENABLED").catch(() => "true")) !== "false";
+      if (!graphEmailEnabled) {
+        logger.info("MS Graph email ingest disabled by kill-switch", { resource: notification.resource });
+        return { action: "skipped", reason: "graph_email_kill_switch" };
+      }
       return await processEmailMessage(supabase, resourceData, payload.receivedAt, resourceUrl, accessToken, logger);
     }
 
