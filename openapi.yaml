@@ -1,0 +1,298 @@
+openapi: 3.1.0
+info:
+  title: Emerald Recruiting GPT API
+  description: |
+    Read + submission-write API for the "Ask Joe Send Outs Emerald" ChatGPT GPT.
+    Backed by the Sully Recruit Supabase database. All endpoints require
+    `Authorization: Bearer <EMERALD_API_KEY>`.
+  version: "1.0.0"
+
+servers:
+  - url: https://YOUR-VERCEL-PROJECT.vercel.app
+    description: Replace with your Vercel deployment URL
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/gpt/candidates:
+    get:
+      operationId: searchCandidates
+      summary: Search candidates by name or keyword
+      description: |
+        Returns up to 10 compact candidate records. Use `name` for direct
+        name lookup ("Pururav"). Use `keyword` for thematic search across
+        title, company, summary, and merged resume/LinkedIn text
+        ("macro quant research").
+      parameters:
+        - in: query
+          name: name
+          schema: { type: string }
+          description: Candidate name (full or partial).
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Free-text keyword across title, company, summary, resume.
+      responses:
+        "200":
+          description: Matching candidates.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: "#/components/schemas/CandidateSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/gpt/jobs:
+    get:
+      operationId: searchJobs
+      summary: Search jobs by company, title, or keyword
+      description: |
+        Returns up to 10 jobs with a short job-spec preview. Use `company`
+        ("Schonfeld"), `title` ("macro quant"), or `keyword` for free-text
+        search across company, title, and the full job description.
+      parameters:
+        - in: query
+          name: company
+          schema: { type: string }
+        - in: query
+          name: title
+          schema: { type: string }
+        - in: query
+          name: keyword
+          schema: { type: string }
+      responses:
+        "200":
+          description: Matching jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/gpt/submission-context:
+    get:
+      operationId: getSubmissionContext
+      summary: Pull all source material for tailoring a resume + write-up
+      description: |
+        Returns the full candidate record, the full job record, the most
+        recent parsed resume (raw_text + ai_summary), free-form notes,
+        AI call synopses (Ask Joe / RingCentral), and any prior
+        submission for this candidate↔job pair. The `usage_rules` block
+        names the approved source material and warns against inventing
+        experience.
+      parameters:
+        - in: query
+          name: candidate_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: job_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Submission context bundle.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubmissionContext" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/gpt/submissions:
+    post:
+      operationId: createOrUpdateSubmission
+      summary: Create or update a submission for a candidate on a job
+      description: |
+        Upserts on (candidate_id, job_id). Tags are merged with existing
+        tags (deduped). Missing fields are left untouched — set
+        `mark_submitted: true` to stamp `submitted_at` to now.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmissionInput" }
+      responses:
+        "200":
+          description: Saved submission.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  submission: { $ref: "#/components/schemas/Submission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  responses:
+    BadRequest:
+      description: Missing or invalid input.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid Bearer token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Candidate or job not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    CandidateSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string, nullable: true }
+        current_title: { type: string, nullable: true }
+        current_company: { type: string, nullable: true }
+        summary: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    JobSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_name: { type: string, nullable: true }
+        job_title: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        compensation: { type: string, nullable: true }
+        job_spec_preview: { type: string, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    SubmissionContext:
+      type: object
+      properties:
+        candidate:
+          type: object
+          additionalProperties: true
+          description: Full row from the `candidates` view.
+        job:
+          type: object
+          additionalProperties: true
+          description: Full row from the `jobs` table.
+        resume:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string, format: uuid }
+            raw_text: { type: string, nullable: true }
+            ai_summary: { type: string, nullable: true }
+            file_url: { type: string, nullable: true }
+            file_name: { type: string, nullable: true }
+            source: { type: string, nullable: true }
+            created_at: { type: string, format: date-time }
+        notes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              note: { type: string }
+              created_by: { type: string, nullable: true }
+              note_source: { type: string }
+              created_at: { type: string, format: date-time }
+        call_notes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              ai_summary: { type: string, nullable: true }
+              ai_action_items: { type: string, nullable: true }
+              extracted_notes: { type: string, nullable: true }
+              extracted_reason_for_leaving: { type: string, nullable: true }
+              extracted_current_base: { type: number, nullable: true }
+              extracted_current_bonus: { type: number, nullable: true }
+              extracted_target_base: { type: number, nullable: true }
+              extracted_target_bonus: { type: number, nullable: true }
+              call_duration_seconds: { type: integer, nullable: true }
+              call_started_at: { type: string, format: date-time, nullable: true }
+              created_at: { type: string, format: date-time }
+        existing_submission:
+          oneOf:
+            - { $ref: "#/components/schemas/Submission" }
+            - { type: "null" }
+        usage_rules:
+          type: object
+          properties:
+            approved_source_material:
+              type: array
+              items: { type: string }
+            warning: { type: string }
+
+    SubmissionInput:
+      type: object
+      required: [candidate_id, job_id]
+      properties:
+        candidate_id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum:
+            - draft
+            - ready_to_submit
+            - submitted
+            - client_review
+            - interview
+            - rejected
+            - withdrawn
+            - placed
+        tags:
+          type: array
+          items: { type: string }
+        submission_writeup: { type: string }
+        formatted_resume_url: { type: string, nullable: true }
+        submitted_by:
+          type: string
+          description: Label string (e.g. "Ask Joe Send Outs Emerald").
+        mark_submitted:
+          type: boolean
+          description: When true, stamps `submitted_at` to now.
+
+    Submission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        candidate_id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        status: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          nullable: true
+        submission_writeup: { type: string, nullable: true }
+        formatted_resume_url: { type: string, nullable: true }
+        submitted_by_label: { type: string, nullable: true }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
