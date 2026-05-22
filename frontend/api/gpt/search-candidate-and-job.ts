@@ -31,31 +31,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { candidate_query, job_query } = req.body ?? {};
-    const limit = Math.min(Math.max(Number(req.body?.limit) || 5, 1), 20);
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 10, 1), 25);
+
+    // Lightweight relevance scorer: count how many of the user's tokens
+    // appear in the row's most-relevant fields. Postgres ilike can't sort
+    // multi-token relevance natively without a full-text index, so we
+    // fetch a wider net (limit*4) and sort in JS.
+    const scoreRow = (row: Record<string, any>, tokens: string[], fields: string[]) => {
+      const haystack = fields.map((f) => String(row[f] ?? "")).join(" ").toLowerCase();
+      return tokens.reduce((acc, t) => acc + (haystack.includes(t.toLowerCase()) ? 1 : 0), 0);
+    };
 
     const candidates: any[] = [];
     if (typeof candidate_query === "string" && candidate_query.trim()) {
       const q = candidate_query.trim();
       const tokens = q.split(/\s+/).filter(Boolean);
-      // Match on first_name OR last_name OR current_company OR linkedin_url against any token.
-      // ilike with '%token%' on multiple columns, OR'd together.
       const orClauses = tokens.flatMap((t) => [
         `first_name.ilike.%${t}%`,
         `last_name.ilike.%${t}%`,
         `current_company.ilike.%${t}%`,
       ]);
-      // Also a coarse linkedin handle match (no token-split — match the whole query).
       orClauses.push(`linkedin_url.ilike.%${q}%`);
+      // candidates is a view over people (already excludes soft-deleted),
+      // so no .is('deleted_at', null) filter here.
       const { data, error } = await supabase
         .from("candidates")
-        .select("id, first_name, last_name, current_title, current_company, linkedin_url, type, status")
+        .select("id, first_name, last_name, current_title, current_company, linkedin_url, type, status, created_at")
         .or(orClauses.join(","))
         .eq("type", "candidate")
-        .limit(limit);
+        .order("created_at", { ascending: false })
+        .limit(limit * 4);
       if (error) {
         return res.status(500).json({ error: `candidate search failed: ${error.message}` });
       }
-      candidates.push(...(data ?? []));
+      const rows = data ?? [];
+      rows.sort((a: any, b: any) =>
+        scoreRow(b, tokens, ["first_name", "last_name", "current_company", "current_title"]) -
+        scoreRow(a, tokens, ["first_name", "last_name", "current_company", "current_title"]),
+      );
+      candidates.push(...rows.slice(0, limit));
     }
 
     const jobs: any[] = [];
@@ -68,13 +82,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ]);
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, title, company_name, location, status")
+        .select("id, title, company_name, location, status, created_at")
         .or(orClauses.join(","))
-        .limit(limit);
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(limit * 4);
       if (error) {
         return res.status(500).json({ error: `job search failed: ${error.message}` });
       }
-      jobs.push(...(data ?? []));
+      const rows = data ?? [];
+      rows.sort((a: any, b: any) =>
+        scoreRow(b, tokens, ["title", "company_name"]) -
+        scoreRow(a, tokens, ["title", "company_name"]),
+      );
+      jobs.push(...rows.slice(0, limit));
     }
 
     return res.status(200).json({
