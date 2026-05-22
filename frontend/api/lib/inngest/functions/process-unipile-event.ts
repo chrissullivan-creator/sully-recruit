@@ -491,7 +491,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
     }
 
-    await supabase.from("messages").insert({
+    const { error: unlinkedInsertErr } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       candidate_id: null,
       contact_id: null,
@@ -513,6 +513,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       needs_link: true,
       link_attempted_at: new Date().toISOString(),
     } as any);
+    // Idempotency backstop: the partial UNIQUE index on
+    // (provider, external_message_id) fires 23505 on re-delivery races
+    // that slipped past the pre-insert check above.
+    if (unlinkedInsertErr && (unlinkedInsertErr as any).code === "23505") {
+      return { action: "skipped", reason: "duplicate_unique_violation", type: "linkedin_message" };
+    }
 
     const conversationUpdate: Record<string, any> = {
       last_message_at: receivedAt,
@@ -533,7 +539,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
   }
 
-  await supabase.from("messages").insert({
+  const { error: linkedInsertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
     integration_account_id: integrationAccountId,
@@ -555,6 +561,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     link_method: linkMethod ? `webhook:${linkMethod}` : null,
     link_attempted_at: new Date().toISOString(),
   } as any);
+  // Idempotency backstop — see comment on the unlinked-path insert above.
+  if (linkedInsertErr && (linkedInsertErr as any).code === "23505") {
+    return { action: "skipped", reason: "duplicate_unique_violation", entityId, channel, direction, type: "linkedin_message" };
+  }
 
   const conversationUpdate: Record<string, any> = {
     last_message_at: receivedAt,
