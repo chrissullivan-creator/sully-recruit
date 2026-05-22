@@ -49,7 +49,7 @@ function useSidebarCounts(userId: string | undefined) {
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
-  { name: 'Inbox',      href: '/inbox',      icon: Inbox           },
+  { name: 'Communication Hub', href: '/inbox', icon: Inbox          },
   { name: 'Ask Joe',    href: '/ask-joe',    icon: Martini         },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
   { name: 'People',     href: '/people',     icon: Users2          },
