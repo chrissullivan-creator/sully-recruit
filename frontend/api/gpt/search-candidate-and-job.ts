@@ -64,11 +64,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const tokens = q.split(/\s+/).filter(Boolean);
       const orClauses = tokens.flatMap((t) => [
         `title.ilike.%${t}%`,
-        `company.ilike.%${t}%`,
+        `company_name.ilike.%${t}%`,
       ]);
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, title, company, location, stage, priority, hiring_manager")
+        .select("id, title, company_name, location, status")
         .or(orClauses.join(","))
         .limit(limit);
       if (error) {
@@ -89,11 +89,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       jobs: jobs.map((j) => ({
         job_id: j.id,
         title: j.title,
-        company: j.company || null,
+        company: j.company_name || null,
         location: j.location || null,
-        stage: j.stage || null,
-        priority: j.priority || null,
-        hiring_manager: j.hiring_manager || null,
+        status: j.status || null,
       })),
     });
   } catch (err: any) {
