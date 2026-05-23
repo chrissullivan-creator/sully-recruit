@@ -47,11 +47,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .maybeSingle(),
         supabase
           .from("resumes")
-          .select("id, file_name, raw_text, ai_summary, parsed_json, created_at")
+          .select("id, file_name, file_path, raw_text, ai_summary, parsed_json, mime_type, parsing_status, created_at")
           .eq("candidate_id", candidate_id)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .limit(5),
         supabase
           .from("ai_call_notes")
           .select("id, summary, action_items, sentiment, created_at, call_log_id")
@@ -93,7 +92,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const cand: any = candidateRes.data;
     const job: any = jobRes.data;
-    const resume: any = resumeRes.data;
+    const resumeRows: any[] = (resumeRes.data ?? []) as any[];
+
+    // Generate short-lived signed URLs for each resume PDF in Storage so the
+    // GPT (or its code interpreter) can fetch the real document when the
+    // parsed text turns out to be just the header (the parser commonly stores
+    // a structured JSON blob in raw_text rather than the full PDF body).
+    const resumes = await Promise.all(
+      resumeRows.map(async (r: any) => {
+        let signed_url: string | null = null;
+        if (r.file_path) {
+          try {
+            const { data: signed } = await supabase.storage
+              .from("resumes")
+              .createSignedUrl(r.file_path, 3600);
+            signed_url = signed?.signedUrl ?? null;
+          } catch {
+            // Best-effort — bucket misconfiguration shouldn't kill the response.
+          }
+        }
+        return {
+          resume_id: r.id,
+          file_name: r.file_name ?? null,
+          mime_type: r.mime_type ?? null,
+          parsing_status: r.parsing_status ?? null,
+          raw_text: r.raw_text ?? null,
+          ai_summary: r.ai_summary ?? null,
+          parsed_json: r.parsed_json ?? null,
+          signed_url,
+          created_at: r.created_at,
+        };
+      }),
+    );
+    const resume = resumes[0] ?? null;
 
     return res.status(200).json({
       candidate: {
@@ -127,16 +158,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         where_interviewed: cand.where_interviewed ?? null,
         where_submitted: cand.where_submitted ?? null,
       },
-      latest_resume: resume
-        ? {
-            resume_id: resume.id,
-            file_name: resume.file_name ?? null,
-            raw_text: resume.raw_text ?? null,
-            ai_summary: resume.ai_summary ?? null,
-            parsed_json: resume.parsed_json ?? null,
-            created_at: resume.created_at,
-          }
-        : null,
+      // `latest_resume` keeps back-compat with the original schema (single
+      // most-recent resume). `resumes` is the new array surface — up to 5
+      // recent versions, each with a 1-hour signed Storage URL so the GPT
+      // can fetch the actual PDF if raw_text turns out to be the
+      // parser's structured-JSON blob instead of the document body.
+      latest_resume: resume,
+      resumes,
+      resume_parser_note:
+        resumes.length === 0
+          ? "No resume rows found for this candidate."
+          : "Note: resumes.raw_text often contains the parser's structured JSON header (name/skills/current_title), not the full PDF body. If you need the actual work history, use `signed_url` on each resume to download the PDF and read it via your code interpreter.",
       ai_call_notes: (aiNotesRes.data ?? []).map((n: any) => ({
         id: n.id,
         summary: n.summary,
