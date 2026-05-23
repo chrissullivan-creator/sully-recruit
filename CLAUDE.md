@@ -25,6 +25,8 @@ Read these before making changes:
 - `claude/SKILL-sequences.md` — Sequence engine, enrollment logic
 - `claude/SKILL-joe.md` — AI assistant (Joe) behavior
 - `claude/SKILL-calls.md` — RingCentral call handling
+- `claude/GPT-SENDOUT-ACTION.md` — Send-Out custom GPT (write tool)
+- `claude/GPT-BRAIN-ACTION.md` — Sully Brain custom GPT (read-only, hybrid search everything)
 
 ## Key Rules
 

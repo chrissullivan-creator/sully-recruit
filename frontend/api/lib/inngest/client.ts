@@ -246,6 +246,17 @@ export type EnrichCompanyViaApolloRequested = {
   data: { company_id: string };
 };
 
+/**
+ * Manual kick for the search_documents.embedding backfill. The same
+ * function also runs every 5 minutes on a cron — this event is for the
+ * `trigger-backfill-search-embeddings` HTTP endpoint when an operator
+ * wants to drain faster (up to 5 batches per invocation, ~480 rows).
+ */
+export type BackfillSearchEmbeddingsRequested = {
+  name: "ops/backfill-search-embeddings.requested";
+  data: { batches?: number };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -263,4 +274,5 @@ export type AllInngestEvents =
   | FetchEntityHistoryRequested
   | RecoverOrphanResumesRequested
   | FindLinkedinUrlRequested
-  | EnrichCompanyViaApolloRequested;
+  | EnrichCompanyViaApolloRequested
+  | BackfillSearchEmbeddingsRequested;
