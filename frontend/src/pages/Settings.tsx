@@ -241,6 +241,12 @@ const Settings = () => {
   const [linkedinSeats, setLinkedinSeats] = useState<LinkedinSeat[]>([]);
   const [linkedinSeatsLoading, setLinkedinSeatsLoading] = useState(false);
   const [selectedLinkedinSeatId, setSelectedLinkedinSeatId] = useState('');
+  // Recruiter contract picker — the manifesto's hypothesis for the
+  // Source 403 is that the account never had a contract selected.
+  // Loaded lazily when the user clicks "Load contracts".
+  const [liContracts, setLiContracts] = useState<Array<{ id: string; name: string }>>([]);
+  const [liContractsLoading, setLiContractsLoading] = useState(false);
+  const [liContractSelectingId, setLiContractSelectingId] = useState<string | null>(null);
   const [liHostedConnectingId, setLiHostedConnectingId] = useState<string | null>(null);
   const [liCookieConnecting, setLiCookieConnecting] = useState(false);
   const [liReverifyingId, setLiReverifyingId] = useState<string | null>(null);
@@ -421,6 +427,57 @@ const Settings = () => {
   };
 
   const selectedLinkedinSeat = linkedinSeats.find((seat) => seat.id === selectedLinkedinSeatId) || null;
+
+  // Fetch the contract list for the currently-selected Recruiter seat.
+  // Hits GET /api/admin/linkedin-contract which calls listLinkedinContracts.
+  // The list isn't auto-loaded on seat change because the call burns a
+  // Unipile request and most users won't need it — they click Load
+  // when they actually want to select.
+  const loadLinkedinContracts = async () => {
+    if (!selectedLinkedinSeat?.unipile_account_id) {
+      toast.error('No Unipile account id on this seat');
+      return;
+    }
+    setLiContractsLoading(true);
+    try {
+      const resp = await fetch(
+        `/api/admin/linkedin-contract?account_id=${encodeURIComponent(selectedLinkedinSeat.unipile_account_id)}`,
+        { headers: await authHeaders() },
+      );
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'load-contracts failed');
+      setLiContracts(Array.isArray(data?.contracts) ? data.contracts : []);
+      if ((data?.contracts || []).length === 0) {
+        toast.info('No Recruiter contracts found on this account');
+      }
+    } catch (err: any) {
+      toast.error('Failed to load contracts: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLiContractsLoading(false);
+    }
+  };
+
+  const selectLinkedinContract = async (contract: { id: string; name: string }) => {
+    if (!selectedLinkedinSeat?.unipile_account_id) return;
+    setLiContractSelectingId(contract.id);
+    try {
+      const resp = await fetch('/api/admin/linkedin-contract', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account_id: selectedLinkedinSeat.unipile_account_id,
+          contract_name: contract.name,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'select-contract failed');
+      toast.success(`Selected contract: ${contract.name}`);
+    } catch (err: any) {
+      toast.error('Select failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLiContractSelectingId(null);
+    }
+  };
 
   const reverifyLinkedInCapabilities = async () => {
     if (!selectedLinkedinSeat) return;
@@ -1474,6 +1531,54 @@ Senior Recruiter | Your Company
                               Pings Unipile to re-check Recruiter API access and refresh the badges above. Use after a manual reconnect.
                             </p>
                           </div>
+                        </div>
+                      )}
+
+                      {selectedLinkedinSeat?.account_type === 'linkedin_recruiter' && (
+                        <div className="rounded-md border border-border bg-muted/30 px-4 py-3 space-y-3">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">Recruiter contract</p>
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              If LinkedIn Recruiter API calls return 403 "Insufficient permissions", picking a contract here often unblocks them — Unipile requires an explicit selectContract step for accounts with multiple Recruiter seats.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={loadLinkedinContracts}
+                              disabled={liContractsLoading || !selectedLinkedinSeat.unipile_account_id}
+                            >
+                              {liContractsLoading ? (
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...</>
+                              ) : liContracts.length > 0 ? 'Reload contracts' : 'Load contracts'}
+                            </Button>
+                          </div>
+                          {liContracts.length > 0 && (
+                            <div className="space-y-1.5">
+                              {liContracts.map((contract) => (
+                                <div
+                                  key={contract.id}
+                                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm text-foreground truncate">{contract.name}</p>
+                                    <p className="text-[10px] text-muted-foreground truncate">{contract.id}</p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => selectLinkedinContract(contract)}
+                                    disabled={liContractSelectingId === contract.id}
+                                  >
+                                    {liContractSelectingId === contract.id ? (
+                                      <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Selecting...</>
+                                    ) : 'Select'}
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
