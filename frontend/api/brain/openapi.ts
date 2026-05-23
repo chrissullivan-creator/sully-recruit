@@ -276,6 +276,72 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
           responses: { "200": { description: "Activity feed.", content: { "application/json": { schema: { type: "object" } } } } },
         },
       },
+      "/api/brain/live-conversations": {
+        post: {
+          operationId: "getLiveConversations",
+          summary:
+            "Fetch a person's most recent LinkedIn conversations LIVE from Unipile (bypasses the DB cache). Use when person-comms feels stale or the chat hasn't been synced. Read-only — does not write to messages table.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["person_id"],
+                  properties: {
+                    person_id: { type: "string" },
+                    limit: { type: "integer", description: "Chat count cap (1-20). Default 8." },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Live conversations from Unipile.", content: { "application/json": { schema: { type: "object" } } } } },
+        },
+      },
+      "/api/brain/sync-history": {
+        post: {
+          operationId: "syncPersonHistory",
+          summary:
+            "Trigger backfill of email + LinkedIn message history for people who've never been synced. Fan-out is rate-limited by the underlying Inngest function. Call repeatedly to drain the backlog.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    limit: { type: "integer", description: "Per-call cap (1-500). Default 200." },
+                    only_with_linkedin: { type: "boolean", description: "Restrict to people who have a LinkedIn URL." },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Dispatched count + remaining backlog.", content: { "application/json": { schema: { type: "object" } } } } },
+        },
+      },
+      "/api/brain/find-linkedin-urls": {
+        post: {
+          operationId: "findMissingLinkedinUrls",
+          summary:
+            "Kick the LinkedIn URL finder (Apollo → Unipile fallback) for people missing a URL. Use after the failed-status reset migration to retry previously-stuck rows.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    limit: { type: "integer", description: "Per-call cap (1-500). Default 250." },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Dispatched count + remaining backlog.", content: { "application/json": { schema: { type: "object" } } } } },
+        },
+      },
     },
   };
 

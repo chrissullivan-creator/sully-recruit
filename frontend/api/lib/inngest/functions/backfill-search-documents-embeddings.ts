@@ -24,6 +24,23 @@ import {
 const BATCH_SIZE = 96;
 const MAX_MANUAL_BATCHES = 5;
 
+// We deliberately exclude `message` rows from this cron — there are ~17k
+// messages NOT linked to a person in the DB yet (the upstream Unipile +
+// Microsoft Graph + LinkedIn Recruiter sync is what backfills the
+// person link, not us). Embedding orphan messages wastes Voyage budget
+// and pollutes search results. Let the message sync land first; a
+// separate cron can pick them up once they're linked.
+const KINDS_TO_EMBED = [
+  "candidate",
+  "contact",
+  "company",
+  "resume",
+  "call",
+  "note",
+  "send_out",
+  "job",
+];
+
 async function runOneBatch(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   voyageKey: string,
@@ -34,6 +51,7 @@ async function runOneBatch(
     .select("id, source_kind, title, subtitle, body")
     .is("embedding", null)
     .not("body", "is", null)
+    .in("source_kind", KINDS_TO_EMBED)
     .order("source_updated_at", { ascending: false, nullsFirst: false })
     .limit(BATCH_SIZE);
 

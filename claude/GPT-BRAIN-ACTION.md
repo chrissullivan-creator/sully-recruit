@@ -45,12 +45,18 @@ logged-in user JWT.
 | `POST /api/brain/match-candidates` | `matchCandidatesToJob` | Rank candidates against a job. |
 | `POST /api/brain/calendar` | `getCalendar` | Outlook + internal events. |
 | `POST /api/brain/recent-activity` | `getRecentActivity` | Unified timeline. |
+| `POST /api/brain/live-conversations` | `getLiveConversations` | Live Unipile fetch — bypasses DB cache for freshest LinkedIn chats per person. |
+| `POST /api/brain/sync-history` | `syncPersonHistory` | Kick the message-history backfill for unsynced people. |
+| `POST /api/brain/find-linkedin-urls` | `findMissingLinkedinUrls` | Kick the LinkedIn URL finder (Apollo → Unipile fallback). |
 
 Plus the embedding backfill that makes semantic search actually work:
 
 - **Cron** every 5 min: `backfillSearchDocumentsEmbeddings` Inngest function.
 - **Manual kick**: `POST /api/trigger-backfill-search-embeddings`
   (body `{ "batches": 5 }` to drain up to ~480 rows in one shot).
+- **Scope**: candidates / contacts / companies / resumes / calls / notes
+  / send_outs / jobs. Excludes `message` rows — those wait for the
+  upstream sync to link them to people before being embedded.
 
 ## Setup checklist
 
@@ -229,6 +235,40 @@ curl -s -X POST "$DOMAIN/api/brain/calendar" \
   -H "Content-Type: application/json" \
   -d '{"from_date":"2026-05-23","to_date":"2026-05-30"}' | jq .
 ```
+
+## Message sync — design rules
+
+**Long-term archive (DB):** only messages that can be linked to a known
+person live in the `messages` table. The fetch-entity-history Inngest
+function attributes every insert to a `candidate_id` / `contact_id`
+upfront, so person-comms queries are clean. Unlinked inbound emails
+(LinkedIn newsletters, Microsoft system mail, internal Emerald-to-
+Emerald) do land in the table from webhooks today — they don't surface
+in /person-comms because that endpoint filters by person_id, but they
+do bloat row counts.
+
+**Fresh fetch (live):** `/api/brain/live-conversations` calls Unipile
+v1 on demand for one person's LinkedIn (Classic + Recruiter) chats.
+Useful when:
+- the DB cache feels stale,
+- the chat was never linked (no candidate_channels row), or
+- you want messages that arrived between sync ticks.
+
+This endpoint never writes to the DB. The 2-hour `sync-conversations`
+cron and the on-demand `fetch-entity-history` job are the only message
+writers.
+
+## Active integration accounts — known gap
+
+As of 2026-05-23 there are **zero active Unipile email accounts** —
+`fetch-entity-history` cannot backfill email history. Inbound emails
+still land via the Microsoft Graph webhook so live mail keeps flowing,
+but historical email pulls for a person are a no-op until the email
+account is reconnected under Settings → Integrations.
+
+LinkedIn coverage today: 1× linkedin_classic + 2× linkedin_recruiter
+accounts active. Both fan into `messages.channel='linkedin'` and
+`messages.channel='linkedin_recruiter'` respectively.
 
 ## Embedding backfill — how to think about it
 
