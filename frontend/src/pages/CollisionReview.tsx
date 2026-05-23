@@ -7,12 +7,16 @@ import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from "@/components/ui/table";
 import {
-  Collapsible, CollapsibleContent, CollapsibleTrigger,
+  Collapsible, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Wand2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
 type Severity = "critical" | "high" | "medium" | "low";
@@ -66,10 +70,20 @@ const REASON_LABELS: Record<string, string> = {
   bogus_linkedin_slug:                 "Recruiter member-ID LinkedIn",
 };
 
+// Auto-fix is only safe for high + medium where the candidate has 2+ resumes.
+// CRITICAL = multi-name AND multi-email/linkedin — those are genuinely different
+// humans and need a human to decide which resume(s) belong here. LOW = no resume
+// signal (just a bad LinkedIn slug), so there's nothing to merge.
+function isAutoFixable(s: Suspect): boolean {
+  return (s.severity === "high" || s.severity === "medium") && s.resume_count >= 2;
+}
+
 export default function CollisionReview() {
   const { session } = useAuth();
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
+  const [pendingBulkFix, setPendingBulkFix] = useState<Suspect[] | null>(null);
+  const [pendingRowFix, setPendingRowFix] = useState<Suspect | null>(null);
 
   const scanMutation = useMutation({
     mutationFn: async () => {
@@ -96,11 +110,52 @@ export default function CollisionReview() {
     },
   });
 
+  const resolveMutation = useMutation({
+    mutationFn: async (candidate_ids: string[]) => {
+      const resp = await fetch("/api/admin/resolve-collision", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify({ candidate_ids }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Auto-fix failed (${resp.status})`);
+      }
+      return await resp.json();
+    },
+    onSuccess: (data, candidate_ids) => {
+      const fixed = (data?.summary?.candidates_fixed as number) ?? 0;
+      const deleted = (data?.summary?.total_resumes_deleted as number) ?? 0;
+      toast.success(`Auto-fix done: ${fixed} candidate${fixed === 1 ? "" : "s"} cleaned, ${deleted} older resume${deleted === 1 ? "" : "s"} deleted.`);
+      // Remove the fixed candidates from the in-memory result so the table reflects reality.
+      setResult((prev) => {
+        if (!prev) return prev;
+        const fixedSet = new Set(candidate_ids);
+        return { ...prev, suspects: prev.suspects.filter((s) => !fixedSet.has(s.candidate_id)) };
+      });
+      setPendingBulkFix(null);
+      setPendingRowFix(null);
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Auto-fix failed");
+      setPendingBulkFix(null);
+      setPendingRowFix(null);
+    },
+  });
+
   const filteredSuspects = useMemo(() => {
     if (!result) return [];
     if (severityFilter === "all") return result.suspects;
     return result.suspects.filter((s) => s.severity === severityFilter);
   }, [result, severityFilter]);
+
+  const autoFixableVisible = useMemo(
+    () => filteredSuspects.filter(isAutoFixable),
+    [filteredSuspects],
+  );
 
   return (
     <MainLayout>
@@ -108,15 +163,28 @@ export default function CollisionReview() {
         title="Candidate record collisions"
         description="Finds candidate rows where two or more real people may have been merged. Different problem than the Duplicates page (which finds two rows that should be one)."
         actions={
-          <Button
-            onClick={() => scanMutation.mutate()}
-            disabled={scanMutation.isPending}
-            size="sm"
-          >
-            {scanMutation.isPending
-              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…</>
-              : <><RefreshCw className="mr-2 h-4 w-4" /> {result ? "Re-scan" : "Scan now"}</>}
-          </Button>
+          <div className="flex items-center gap-2">
+            {result && autoFixableVisible.length > 0 && (
+              <Button
+                onClick={() => setPendingBulkFix(autoFixableVisible)}
+                disabled={resolveMutation.isPending}
+                size="sm"
+                variant="outline"
+              >
+                <Wand2 className="mr-2 h-4 w-4" />
+                Auto-fix {autoFixableVisible.length} visible
+              </Button>
+            )}
+            <Button
+              onClick={() => scanMutation.mutate()}
+              disabled={scanMutation.isPending}
+              size="sm"
+            >
+              {scanMutation.isPending
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…</>
+                : <><RefreshCw className="mr-2 h-4 w-4" /> {result ? "Re-scan" : "Scan now"}</>}
+            </Button>
+          </div>
         }
       />
 
@@ -127,6 +195,74 @@ export default function CollisionReview() {
           <p className="mt-2 text-xs">Scan reads every parsed resume and compares against each candidate's profile. Usually takes a few seconds.</p>
         </div>
       )}
+
+      {/* Per-row confirmation */}
+      <AlertDialog open={!!pendingRowFix} onOpenChange={(open) => { if (!open) setPendingRowFix(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Auto-fix this candidate?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Keeps the most recent resume for{" "}
+              <strong>{pendingRowFix?.full_name || "this candidate"}</strong> and
+              hard-deletes the older {Math.max(0, (pendingRowFix?.resume_count ?? 1) - 1)}{" "}
+              resume row{(pendingRowFix?.resume_count ?? 1) - 1 === 1 ? "" : "s"} from
+              the database. The underlying PDF files stay in Supabase Storage and
+              can be recovered manually if you regret this. <strong>This action
+              cannot be undone from the UI.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resolveMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingRowFix) resolveMutation.mutate([pendingRowFix.candidate_id]);
+              }}
+              disabled={resolveMutation.isPending}
+            >
+              {resolveMutation.isPending
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Fixing…</>
+                : "Auto-fix"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk confirmation */}
+      <AlertDialog open={!!pendingBulkFix} onOpenChange={(open) => { if (!open) setPendingBulkFix(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Auto-fix {pendingBulkFix?.length ?? 0} candidates?</AlertDialogTitle>
+            <AlertDialogDescription>
+              For each candidate, keeps the most recent resume and hard-deletes
+              the older resume rows. Across these {pendingBulkFix?.length ?? 0}{" "}
+              candidates that will delete approximately{" "}
+              <strong>
+                {(pendingBulkFix ?? []).reduce((n, s) => n + Math.max(0, s.resume_count - 1), 0)}
+              </strong>{" "}
+              resume row{(pendingBulkFix ?? []).reduce((n, s) => n + Math.max(0, s.resume_count - 1), 0) === 1 ? "" : "s"}.
+              The PDF files stay in Supabase Storage. <strong>This action cannot be
+              undone from the UI.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resolveMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingBulkFix?.length) {
+                  resolveMutation.mutate(pendingBulkFix.map((s) => s.candidate_id));
+                }
+              }}
+              disabled={resolveMutation.isPending}
+            >
+              {resolveMutation.isPending
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Fixing…</>
+                : `Auto-fix ${pendingBulkFix?.length ?? 0}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {result && (
         <>
@@ -183,7 +319,12 @@ export default function CollisionReview() {
                   </TableRow>
                 )}
                 {filteredSuspects.map((s) => (
-                  <SuspectRow key={s.candidate_id} suspect={s} />
+                  <SuspectRow
+                    key={s.candidate_id}
+                    suspect={s}
+                    onRequestAutoFix={() => setPendingRowFix(s)}
+                    autoFixDisabled={resolveMutation.isPending}
+                  />
                 ))}
               </TableBody>
             </Table>
@@ -194,8 +335,17 @@ export default function CollisionReview() {
   );
 }
 
-function SuspectRow({ suspect }: { suspect: Suspect }) {
+function SuspectRow({
+  suspect,
+  onRequestAutoFix,
+  autoFixDisabled,
+}: {
+  suspect: Suspect;
+  onRequestAutoFix: () => void;
+  autoFixDisabled: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const canAutoFix = isAutoFixable(suspect);
   return (
     <>
       <TableRow className="align-top">
@@ -245,6 +395,18 @@ function SuspectRow({ suspect }: { suspect: Suspect }) {
             >
               <ExternalLink className="h-4 w-4" />
             </Link>
+            {canAutoFix && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={onRequestAutoFix}
+                disabled={autoFixDisabled}
+                title="Keep latest resume, delete older ones"
+              >
+                <Wand2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </TableCell>
       </TableRow>
