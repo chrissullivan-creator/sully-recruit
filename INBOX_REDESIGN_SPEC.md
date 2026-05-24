@@ -642,25 +642,43 @@ Files:
 - Inngest function to resurface follow-up reminders.
 - Status auto-derivation (`awaiting_reply` / `replied`) on every new inbound/outbound.
 
-### Phase 5 — Person-based persistence + Sent folder + auto-add + backfill (~5 days)
+### Phase 5 — Person-based persistence + Sent folder + auto-add + backfill (~3 days, revised)
 
-Files:
-- **Migrations**: `inbox_saved_views`, `inbox_event_log`, `people.needs_classification` + `auto_added_at` + `auto_added_source`.
-- `frontend/src/server-lib/resolve-counterparty.ts` (new) — normalize address/provider_id and look up `candidate_channels` / `contact_channels`.
-- `frontend/src/server-lib/auto-create-person.ts` (new) — used by outbound handlers when recipient isn't in CRM. Defaults `type='candidate'`, sets `needs_classification=true`, fires `person.created`.
-- **Webhook + send-path changes**:
-  - `frontend/api/webhooks/unipile-events.ts` (and Microsoft, RingCentral) — switch inbound to recognition-gated persistence. SMS always persists. Outbound always persists; auto-creates person if needed.
-  - **Audit all send endpoints** to confirm they call `persistOutbound()`: Outlook email send, LinkedIn DM send, LinkedIn Recruiter InMail send, RingCentral SMS send. Add the call wherever missing.
-- `frontend/src/server-lib/inngest/backfill-person-communications.ts` (new) — fires on `person.created`. Fetches past email + LinkedIn + SMS for the new person; dedupes; AI-tags.
-- Wire the `person.created` event for **every** path that inserts into `people` (Add Person Wizard, resume parsing, sequence enrollment, manual add, LinkedIn import, **auto-create from outbound**). Centralize via a `createPerson()` helper if not already.
-- `frontend/api/inbox/live-threads.ts` (new) — proxy that returns last 100 threads per channel from Unipile / Microsoft for unknown-sender display.
-- **Sent folder**: new sidebar view + query (`inbox_threads` filtered to last-message-outbound, scoped to current user). No new endpoint needed.
-- **Sequence cross-channel stop safety**:
-  - One-time backfill: `candidate_channels` rows derived from `people.email` / `linkedin_url` / `phone` where missing.
-  - Audit `process-unipile-event.ts`, `process-microsoft-event.ts`, `process-ringcentral-event.ts` — make sure each calls `hasRepliedSinceEnrollment` → `stopEnrollment` immediately after persisting an inbound from a person.
-  - Pre-enrollment warning UI when channel coverage is incomplete for an enrolled candidate.
-- **Needs Classification view**: new sidebar view + UI for `people WHERE needs_classification = true`. Inline classifier banner in the reading pane.
-- Frontend: React Query hook unions persisted Supabase rows + live-API rows; dedupes on `external_conversation_id`.
+**Audit (2026-05-24) revealed most of the plumbing already exists.** What's already built vs what we need:
+
+**✅ Already works (no change needed):**
+- **All outbound persists.** Sequence sends (`sequence-runner.ts:385`), manual sends from inbox (`api/lib/inngest/functions/send-message.ts:80`). Every channel — Outlook email, LinkedIn DM, LinkedIn Recruiter InMail, RingCentral SMS — already writes to `messages` with `direction='outbound'`.
+- **Webhooks call `stopEnrollment()` immediately on a recognized inbound reply.** All four handlers (`process-unipile-event.ts:362` email, `:612` LinkedIn; `process-microsoft-event.ts:591`; `process-ringcentral-event.ts:152`) already match the candidate and call `stopEnrollment(supabase, enrollment, "reply_received", ...)`. No waiting for the next step run. **Cross-channel reply stop already works in production.**
+- **Person-created → backfill is already wired.** Supabase trigger → `api/webhooks/person-created.ts:142` fires `messages/fetch-entity-history.requested` Inngest event on any insert into `people`. This is the backfill we wanted.
+- **Backfill jobs exist**: `api/lib/inngest/functions/fetch-entity-history.ts`, `backfill-emails.ts`, `backfill-linkedin-messages.ts`.
+- **SMS always persists**: RingCentral webhook (`process-ringcentral-event.ts:112`) inserts every inbound SMS regardless of recognition.
+- **Inbound email/LinkedIn already match by email/provider_id**, not by `candidate_channels` row existence — so recognition works even when channel rows are missing.
+
+**⚠️ Currently broken vs the new rule (must change):**
+- **Inbound LinkedIn from unknown senders is currently persisted** at `process-unipile-event.ts:494` (the "linkedin unlinked inbound" path) with `candidate_id=NULL` + `contact_id=NULL`. **This is exactly what the new rule says to stop doing.** Phase 5 must gate this insert behind the recognition check.
+- **Inbound email from unknown senders**: similar — check `process-unipile-event.ts:311` and `process-microsoft-event.ts:527` for the same drop-on-no-match gate.
+
+**🔨 Net new work for Phase 5:**
+
+1. **Gate inbound persistence** — in `process-unipile-event.ts` and `process-microsoft-event.ts`, wrap the email + LinkedIn insert in a recognition check; drop if no match. Leave SMS path alone (always persists). **~3 hours.**
+2. **Live-fetch endpoint** `api/inbox/live-threads.ts` — proxy Unipile + Microsoft, return last 100 threads per channel for the "Other" view. **~1 day.**
+3. **Auto-add on outbound to unknown recipient** — in the manual send path (`send-message.ts`), if `resolveCounterparty(recipient)` returns null, call new `autoCreatePerson()` helper before persisting. Already wired for sequences? **Audit and confirm.** Default `type='candidate'`, `needs_classification=true`, fires `person.created` (which already triggers backfill). **~half day.**
+4. **`needs_classification` migration** + sidebar view + inline classifier banner in reading pane. **~half day.**
+5. **Sent folder view** — UI only. Filter `inbox_threads` by latest message `direction='outbound'`, scoped to current user via `owner_id`. **~half day.**
+6. **`candidate_channels` auto-sync** — Postgres trigger (or Inngest job on person update) that creates channel rows when `people.email` / `linkedin_url` / `phone` are set/changed. Improves backfill completeness; not strictly required since webhooks match by email/provider_id directly. **~half day.**
+7. **(Optional) Centralized `persistMessage()` helper** — 13 hand-rolled `.from("messages").insert()` sites today, with slight field drift between them (`unipile_message_id` set in some, not others, etc.). Pull into a single helper. Reduces long-term bug surface but not required for the redesign. **~1 day if we do it.**
+
+**Removed from Phase 5 because already done:**
+- ~~Audit every send endpoint to ensure outbound persistence~~ — confirmed all 4 channels persist.
+- ~~Wire `stopEnrollment` from webhook handlers~~ — confirmed all 4 webhooks already do this immediately.
+- ~~Build the Inngest backfill job~~ — `fetch-entity-history.ts` + `backfill-emails.ts` + `backfill-linkedin-messages.ts` already exist and are triggered by the person-created webhook.
+- ~~Wire `person.created` event from every create path~~ — Supabase trigger covers every insert into `people` regardless of code path.
+
+**Pre-Phase-5 verification (one-line tasks):**
+- Confirm `PERSON_CREATED_WEBHOOK_SECRET` env var is set in production so the trigger → webhook → backfill chain actually fires.
+- Spot-check that `fetch-entity-history.ts` respects the 24-month lookback we want (or set it).
+
+**Revised effort: ~3 days** (down from the original 5).
 
 ### Phase 6 — Keyboard shortcuts + cheat sheet (~1 day)
 
