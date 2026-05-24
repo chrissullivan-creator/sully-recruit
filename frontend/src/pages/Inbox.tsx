@@ -37,6 +37,7 @@ import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
+import { CallMessageCard } from '@/components/inbox/CallMessageCard';
 import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
 import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
 import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationList';
@@ -1189,6 +1190,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
   };
 
   const isEmail = thread.channel === 'email';
+  const isCall = thread.channel === 'call';
   const personRole: 'candidate' | 'contact' | null = thread.candidate_id
     ? 'candidate'
     : thread.contact_id
@@ -1406,6 +1408,20 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
               </div>
               <p className="text-sm font-medium mt-4">Conversation starting...</p>
               <p className="text-xs opacity-60 mt-1">Messages will appear here as they sync</p>
+            </div>
+          ) : isCall ? (
+            /* Call layout — one rich card with direction, duration,
+               AI summary, action items, extracted comp intel, inline
+               audio playback, and an optional transcript dropdown.
+               The conversation_id mirrors the call_log id thanks to the
+               sync trigger, so we hand it straight to CallMessageCard. */
+            <div className="max-w-3xl mx-auto space-y-3">
+              <CallMessageCard
+                callLogId={thread.id}
+                entityName={entityName}
+                defaultExpanded
+              />
+              <div ref={messagesEndRef} />
             </div>
           ) : isEmail ? (
             /* Email layout — Outlook-style cards. Latest expanded, older
