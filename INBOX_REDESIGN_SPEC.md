@@ -186,7 +186,22 @@ When a person is added to the CRM — by **any path** (Add Person Wizard from th
 
 **Failure mode**: partial-channel failure retries that channel; doesn't block person creation.
 
-### Migration of existing data
+### Sequences must stop on a reply from ANY channel
+
+The sequence engine already detects replies cross-channel — `hasRepliedSinceEnrollment` (`frontend/src/server-lib/sequence-runner.ts:430`) queries `messages` for any inbound message tagged to the candidate/contact since enrollment, with no channel filter. **A LinkedIn reply stops an email sequence, a SMS reply stops a LinkedIn sequence, etc.**
+
+The new storage rule must preserve this. Specifically:
+
+1. **Anyone enrolled in a sequence is, by definition, a person in the CRM.** So their inbound replies on any channel **must** be recognized and persisted under the new recognition logic. The sequence-stop guarantee depends on this.
+2. **Recognition must cover every channel identifier we know for the candidate.** Before allowing a candidate to be enrolled in a sequence, surface a warning if `candidate_channels` is missing entries for major channels we have data for (e.g. "We have a LinkedIn URL but no `candidate_channels` row for it — replies on LinkedIn won't be recognized and the sequence won't stop").
+3. **Auto-populate `candidate_channels` from the people table.** If `people.email` is set but no `candidate_channels` row with `channel='email'` exists → backfill it. Same for `linkedin_url` → LinkedIn channel row, and `phone` → SMS channel row. One-time migration + a trigger so future inserts to `people` cascade.
+4. **AI-fallback recognition (Phase 5+):** if an inbound message arrives that *looks* like it's from a candidate we have (matching name + company + sentiment context), but no hard channel match → attempt soft-resolution and stop the sequence with a "soft-matched reply detected" reason. Log the case; let the user confirm/reject.
+5. **Connection-accepted exclusion stays** — `message_type='connection_accepted'` is already excluded from reply detection (line 439); keep that.
+
+**Migration safety check:** when shipping Phase 5, do a one-time audit pass:
+- For every active sequence enrollment, check that `candidate_channels` has rows for every channel the candidate could reply on (based on `people.email`, `people.linkedin_url`, `people.phone`). Auto-backfill missing rows; surface a report for any that couldn't be derived.
+
+**Webhook implementation detail:** when a recognition match succeeds for an inbound, **after** persisting the message, check if the candidate has an active sequence enrollment. If yes, call the same `hasRepliedSinceEnrollment` → `stopEnrollment` path the runner uses — don't wait for the next scheduled step run to discover the reply. This makes the stop immediate rather than up-to-N-hours delayed. (May already be partially the case in `process-unipile-event.ts` / `process-microsoft-event.ts` / `process-ringcentral-event.ts` — Phase 5 audit confirms or adds it.)
 
 Existing 10k conversations + 21k messages stay (forward-looking change). Optional later cleanup: messages where `candidate_id IS NULL AND contact_id IS NULL` AND channel ∈ (email, linkedin, linkedin_recruiter) AND older than 6 months → archive/delete. SMS rows stay regardless.
 
@@ -640,6 +655,10 @@ Files:
 - Wire the `person.created` event for **every** path that inserts into `people` (Add Person Wizard, resume parsing, sequence enrollment, manual add, LinkedIn import, **auto-create from outbound**). Centralize via a `createPerson()` helper if not already.
 - `frontend/api/inbox/live-threads.ts` (new) — proxy that returns last 100 threads per channel from Unipile / Microsoft for unknown-sender display.
 - **Sent folder**: new sidebar view + query (`inbox_threads` filtered to last-message-outbound, scoped to current user). No new endpoint needed.
+- **Sequence cross-channel stop safety**:
+  - One-time backfill: `candidate_channels` rows derived from `people.email` / `linkedin_url` / `phone` where missing.
+  - Audit `process-unipile-event.ts`, `process-microsoft-event.ts`, `process-ringcentral-event.ts` — make sure each calls `hasRepliedSinceEnrollment` → `stopEnrollment` immediately after persisting an inbound from a person.
+  - Pre-enrollment warning UI when channel coverage is incomplete for an enrolled candidate.
 - **Needs Classification view**: new sidebar view + UI for `people WHERE needs_classification = true`. Inline classifier banner in the reading pane.
 - Frontend: React Query hook unions persisted Supabase rows + live-API rows; dedupes on `external_conversation_id`.
 
@@ -679,5 +698,7 @@ Files:
 13. **Existing 21k messages cleanup**: leave as-is, or one-time cleanup of inbound rows where `candidate_id IS NULL AND contact_id IS NULL` + channel ∈ (email, linkedin, linkedin_recruiter) + older than 6 months?
 14. **Event log TTL**: 7 days OK for the debug-only `inbox_event_log`?
 15. **Audit scope for outbound persistence**: Phase 5 audits every send endpoint to ensure it persists. Do you want me to first do a read-only pass and report which send paths today already persist vs not, before changing anything?
+16. **Sequence cross-channel stop — AI soft-match**: when an inbound looks like it's from a known candidate but no channel-ID matches (e.g. new LinkedIn account we haven't linked), should we use an AI soft-match to stop the sequence anyway (with a "confirm match" prompt to the user)? Or is hard-channel-match strict enough?
+17. **Sequence pre-enrollment warning**: surface a warning before enrolling someone in an email sequence if we have their LinkedIn URL but no `candidate_channels` row for it (so a LinkedIn reply might not get recognized)? Or silently auto-create the channel row from `people` fields?
 
 Once you answer these, I'll start Phase 1 (timestamps + list polish — biggest UX win, no DB risk).
