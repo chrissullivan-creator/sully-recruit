@@ -19,6 +19,7 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
+  Star, Clock as ClockIcon,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
@@ -35,6 +36,7 @@ import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
+import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -58,6 +60,10 @@ interface InboxThread {
   sort_at: string | null;
   is_read: boolean;
   is_archived: boolean;
+  flagged?: boolean | null;
+  snoozed_until?: string | null;
+  follow_up_at?: string | null;
+  status?: 'awaiting_reply' | 'replied' | 'snoozed' | 'closed' | 'no_reply_needed' | null;
   candidate_id: string | null;
   candidate_name: string | null;
   contact_id: string | null;
@@ -136,6 +142,11 @@ function ThreadItem({
   density,
   onClick,
   onToggleCheck,
+  onToggleFlag,
+  onToggleRead,
+  onArchive,
+  onSnooze,
+  onUnsnooze,
 }: {
   thread: InboxThread;
   isSelected: boolean;
@@ -144,6 +155,11 @@ function ThreadItem({
   density: InboxDensity;
   onClick: () => void;
   onToggleCheck: (shiftKey: boolean) => void;
+  onToggleFlag: () => void | Promise<void>;
+  onToggleRead: () => void | Promise<void>;
+  onArchive: () => void | Promise<void>;
+  onSnooze: (wakeAt: Date) => void | Promise<void>;
+  onUnsnooze: () => void | Promise<void>;
 }) {
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
   const entityName = thread.candidate_name || thread.contact_name;
@@ -241,25 +257,56 @@ function ThreadItem({
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {/* Hover actions — UI only in Phase 1; wired to handlers in Phase 4 */}
+              {/* Persistent flag indicator — shown whenever flagged, even
+                  not on hover */}
+              {thread.flagged && (
+                <Star className="h-3.5 w-3.5 fill-[#C9A84C] text-[#C9A84C] shrink-0" aria-label="Flagged" />
+              )}
+              {/* Hover actions — wired to handlers */}
               <div className="hidden group-hover:flex items-center gap-0.5">
                 <button
                   type="button"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); onToggleFlag(); }}
+                  className={cn(
+                    'p-1 rounded hover:bg-muted',
+                    thread.flagged ? 'text-[#C9A84C]' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  title={thread.flagged ? 'Unflag' : 'Flag'}
+                  aria-label={thread.flagged ? 'Unflag' : 'Flag'}
+                >
+                  <Star className={cn('h-3.5 w-3.5', thread.flagged && 'fill-[#C9A84C]')} />
+                </button>
+                <SnoozeMenu
+                  currentSnoozedUntil={thread.snoozed_until ?? null}
+                  onSnooze={onSnooze}
+                  onUnsnooze={onUnsnooze}
+                  trigger={
+                    <button
+                      type="button"
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                      title="Snooze"
+                      aria-label="Snooze"
+                    >
+                      <ClockIcon className="h-3.5 w-3.5" />
+                    </button>
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggleRead(); }}
                   className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                  title="Mark unread (coming soon)"
-                  aria-label="Mark unread"
-                  disabled
+                  title={thread.is_read ? 'Mark unread' : 'Mark read'}
+                  aria-label={thread.is_read ? 'Mark unread' : 'Mark read'}
                 >
                   <MailOpen className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); onArchive(); }}
                   className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                  title="Archive (coming soon)"
-                  aria-label="Archive"
-                  disabled
+                  title={thread.is_archived ? 'Unarchive' : 'Archive'}
+                  aria-label={thread.is_archived ? 'Unarchive' : 'Archive'}
                 >
                   <Archive className="h-3.5 w-3.5" />
                 </button>
@@ -304,6 +351,20 @@ function ThreadItem({
               <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
                 {CHANNEL_LABELS[thread.channel] || thread.channel}
               </Badge>
+              {thread.snoozed_until && new Date(thread.snoozed_until).getTime() > Date.now() && (
+                <span
+                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-[#7C3AED]/10 text-[#7C3AED] inline-flex items-center gap-1"
+                  title={`Snoozed until ${formatAbsoluteTimestamp(thread.snoozed_until)}`}
+                >
+                  <ClockIcon className="h-2.5 w-2.5" />
+                  Snoozed
+                </span>
+              )}
+              {awaitingReply && !thread.snoozed_until && (
+                <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                  Awaiting reply
+                </span>
+              )}
               {!isLinked && (
                 <span
                   className="text-[10px] text-muted-foreground/70"
@@ -1755,49 +1816,99 @@ export default function Inbox() {
     return true;
   });
 
+  // Helper: is this thread currently snoozed (wake-time in the future)?
+  const isCurrentlySnoozed = (t: InboxThread) =>
+    !!t.snoozed_until && new Date(t.snoozed_until).getTime() > Date.now();
+
+  // Snoozed threads are hidden from every view EXCEPT the Snoozed view itself
+  // and the Archive view. Archived threads are hidden from every view except
+  // the Archive view.
+  const visibleByDefault = (t: InboxThread) => !isCurrentlySnoozed(t) && !t.is_archived;
+
   // Focused = threads tagged to a person in the CRM. Other = unlinked.
-  const focusedThreads = teamScoped.filter((t) => t.candidate_id || t.contact_id);
-  const otherThreads = teamScoped.filter((t) => !t.candidate_id && !t.contact_id);
+  // Both tabs exclude snoozed + archived by default; the Snoozed and Archive
+  // views below opt in explicitly.
+  const focusedThreads = teamScoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
+  const otherThreads = teamScoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
   const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
 
-  const filtered = tabPool.filter((t) => {
-    // Channel filter
-    if (channel === 'email' && t.channel !== 'email') return false;
-    if (channel === 'sms' && t.channel !== 'sms') return false;
-    if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
-    if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
-
-    // View filter (sidebar)
-    if (view === 'unread' && t.is_read) return false;
-    if (view === 'archive' && !t.is_archived) return false;
-    if (view === 'awaiting_reply' && !(!t.last_inbound_at && !!t.last_message_at)) return false;
-    // Views not yet backed by data — render empty list:
-    if (view === 'starred' || view === 'snoozed' || view === 'sent' || view === 'drafts' || view === 'needs_classification') {
-      return false;
+  const filtered = (() => {
+    // The Snoozed and Archive views ignore the Focused/Other split — they
+    // pull from the full team-scoped set since the user wants to see them
+    // regardless of tagging.
+    let pool: InboxThread[];
+    if (view === 'snoozed') {
+      pool = teamScoped.filter(isCurrentlySnoozed);
+    } else if (view === 'archive') {
+      pool = teamScoped.filter((t) => t.is_archived);
+    } else if (view === 'starred') {
+      pool = teamScoped.filter((t) => t.flagged && visibleByDefault(t));
+    } else {
+      pool = tabPool;
     }
 
-    // Search
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        t.subject?.toLowerCase().includes(q) ||
-        t.last_message_preview?.toLowerCase().includes(q) ||
-        t.last_inbound_preview?.toLowerCase().includes(q) ||
-        t.candidate_name?.toLowerCase().includes(q) ||
-        t.contact_name?.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+    return pool.filter((t) => {
+      // Channel filter
+      if (channel === 'email' && t.channel !== 'email') return false;
+      if (channel === 'sms' && t.channel !== 'sms') return false;
+      if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
+      if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
 
-  const unreadCount = teamScoped.filter((t) => !t.is_read).length;
+      // View filter (only the views that aren't already pool-defined above)
+      if (view === 'unread' && t.is_read) return false;
+      if (view === 'awaiting_reply' && !(!t.last_inbound_at && !!t.last_message_at)) return false;
+      // Views not yet backed by data — render empty list:
+      if (view === 'sent' || view === 'drafts' || view === 'needs_classification') return false;
+
+      // Search
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          t.subject?.toLowerCase().includes(q) ||
+          t.last_message_preview?.toLowerCase().includes(q) ||
+          t.last_inbound_preview?.toLowerCase().includes(q) ||
+          t.candidate_name?.toLowerCase().includes(q) ||
+          t.contact_name?.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  })();
+
+  const unreadCount = teamScoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
 
   const sidebarCounts = {
     all: tabPool.length,
     unread: tabPool.filter((t) => !t.is_read).length,
-    archive: tabPool.filter((t) => t.is_archived).length,
+    archive: teamScoped.filter((t) => t.is_archived).length,
     awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
+    starred: teamScoped.filter((t) => t.flagged && visibleByDefault(t)).length,
+    snoozed: teamScoped.filter(isCurrentlySnoozed).length,
   };
+
+  // Mutation helpers — used by the per-row hover actions.
+  const updateThread = async (threadId: string, patch: Record<string, unknown>) => {
+    const { error } = await supabase
+      .from('conversations')
+      .update(patch as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Update failed: ${error.message}`);
+      return;
+    }
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleToggleFlag = (t: InboxThread) =>
+    updateThread(t.id, { flagged: !t.flagged });
+  const handleToggleRead = (t: InboxThread) =>
+    updateThread(t.id, { is_read: !t.is_read });
+  const handleArchive = (t: InboxThread) =>
+    updateThread(t.id, { is_archived: !t.is_archived });
+  const handleSnooze = (t: InboxThread, wakeAt: Date) =>
+    updateThread(t.id, { snoozed_until: wakeAt.toISOString(), status: 'snoozed' });
+  const handleUnsnooze = (t: InboxThread) =>
+    updateThread(t.id, { snoozed_until: null, status: null });
 
   return (
     <MainLayout>
@@ -2025,6 +2136,11 @@ export default function Inbox() {
                         isChecked={checkedIds.has(thread.id)}
                         selectionActive={checkedIds.size > 0}
                         onClick={() => setSelectedId(thread.id)}
+                        onToggleFlag={() => handleToggleFlag(thread)}
+                        onToggleRead={() => handleToggleRead(thread)}
+                        onArchive={() => handleArchive(thread)}
+                        onSnooze={(wakeAt) => handleSnooze(thread, wakeAt)}
+                        onUnsnooze={() => handleUnsnooze(thread)}
                         onToggleCheck={(shiftKey) => {
                           const next = new Set(checkedIds);
                           if (shiftKey && lastCheckedId) {
