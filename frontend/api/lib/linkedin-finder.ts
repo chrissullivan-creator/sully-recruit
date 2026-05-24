@@ -177,25 +177,33 @@ export async function applyLinkedinProfileToPerson(
   const updated: string[] = [];
   const updates: Record<string, any> = {};
 
-  // ── Pick the "current" experience: profile may expose either the
-  //    experience[]/work_experience[] arrays or flat current_* fields.
-  const expArray =
-    (Array.isArray(profileData?.experience) && profileData.experience)
+  // ── Pick the "current" experience. Unipile v1 /users/{slug} returns
+  //    `positions[]` for some account types and `experience[]` /
+  //    `work_experience[]` for others. Cover all three. Prefer the
+  //    entry flagged is_current (or with no end_date) over the first
+  //    one — most-recent-first ordering isn't guaranteed.
+  const expArray: any[] =
+    (Array.isArray(profileData?.positions) && profileData.positions)
+    || (Array.isArray(profileData?.experience) && profileData.experience)
     || (Array.isArray(profileData?.work_experience) && profileData.work_experience)
     || [];
-  const currentExp = expArray.length > 0 ? expArray[0] : null;
+  const currentExp =
+    expArray.find((e: any) => e?.is_current || e?.current || (!e?.end_date && !e?.end && !e?.ends_at && !e?.to))
+    ?? expArray[0]
+    ?? null;
 
   const currentTitle = pickString(
     currentExp?.title,
     currentExp?.position,
+    currentExp?.role,
     profileData?.current_position,
     profileData?.current_title,
     profileData?.title,
   );
   const currentCompany = pickString(
     typeof currentExp?.company === "string" ? currentExp.company : null,
-    currentExp?.company_name,
     currentExp?.company?.name,
+    currentExp?.company_name,
     currentExp?.organization,
     profileData?.current_company,
     profileData?.company,
@@ -207,9 +215,14 @@ export async function applyLinkedinProfileToPerson(
     profileData?.location_name,
   );
   const headline = pickString(profileData?.headline);
+  // resolve-unipile-ids.ts treats picture_url / image_url as additional
+  // fallbacks for the same field — match that so the two enrichment
+  // paths produce consistent avatar_url values.
   const photo = pickString(
     profileData?.profile_picture_url,
     profileData?.profile_picture_url_large,
+    profileData?.picture_url,
+    profileData?.image_url,
     profileData?.photo_url,
     profileData?.avatar_url,
   );
@@ -272,23 +285,44 @@ export async function applyLinkedinProfileToPerson(
     .eq("id", personId);
   if (updErr) throw new Error(`people update failed: ${updErr.message}`);
 
-  // ── candidate_work_history: replace from Unipile experience array.
-  //    Delete-then-insert is the simplest correct strategy: LinkedIn is
-  //    the source of truth, dates/titles can change subtly, and we
-  //    don't want to leave stale rows behind when a job is renamed.
+  // ── candidate_work_history: merge from Unipile experience array.
+  //    We deliberately do NOT delete existing rows — they may have come
+  //    from resume parsing or been manually edited by the recruiter,
+  //    and LinkedIn shouldn't silently clobber that. Instead, match
+  //    each LinkedIn entry against existing rows by (company_name,
+  //    title) case-insensitively and only insert the ones that aren't
+  //    already there. A future "Refresh from LinkedIn" action can offer
+  //    explicit replace semantics if recruiters ask for it.
   let workHistoryRows = 0;
   if (expArray.length > 0) {
-    const rows = expArray
+    const incoming = expArray
       .map((exp: any) => flattenWorkExperience(exp, personId))
       .filter((r: any): r is NonNullable<typeof r> => r !== null);
-    if (rows.length > 0) {
-      await supabase.from("candidate_work_history").delete().eq("candidate_id", personId);
-      const { error: insErr } = await supabase.from("candidate_work_history").insert(rows);
-      if (!insErr) workHistoryRows = rows.length;
+    if (incoming.length > 0) {
+      const { data: existingRows } = await supabase
+        .from("candidate_work_history")
+        .select("company_name, title")
+        .eq("candidate_id", personId);
+      const existingKeys = new Set(
+        (existingRows ?? []).map((r: any) => workHistoryKey(r.company_name, r.title)),
+      );
+      const toInsert = incoming.filter(
+        (r) => !existingKeys.has(workHistoryKey(r.company_name, r.title)),
+      );
+      if (toInsert.length > 0) {
+        const { error: insErr } = await supabase
+          .from("candidate_work_history")
+          .insert(toInsert);
+        if (!insErr) workHistoryRows = toInsert.length;
+      }
     }
   }
 
   return { fieldsUpdated: updated, workHistoryRows };
+}
+
+function workHistoryKey(company: string | null | undefined, title: string | null | undefined): string {
+  return `${(company ?? "").trim().toLowerCase()}|${(title ?? "").trim().toLowerCase()}`;
 }
 
 /* ───────────────────────────── helpers ────────────────────────────── */
