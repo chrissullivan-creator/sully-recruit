@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MessageTemplateManager } from '@/components/templates/MessageTemplateManager';
+import { AdminTeamConnect } from '@/components/settings/AdminTeamConnect';
+import { DataCleanupContent } from '@/components/settings/DataCleanupContent';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -652,6 +654,7 @@ Senior Recruiter | Your Company
 
   const tabs = [
     { id: 'integrations', label: 'Integrations', icon: Link2 },
+    { id: 'data_cleanup', label: 'Data Cleanup', icon: AlertTriangle },
     { id: 'job_functions', label: 'Job Functions', icon: Briefcase },
     { id: 'templates', label: 'Message Templates', icon: PenLine },
     { id: 'signature', label: 'Email Signature', icon: PenLine },
@@ -846,6 +849,18 @@ Senior Recruiter | Your Company
                   </div>
                 )}
 
+                {activeTab === 'data_cleanup' && (
+                  <div className="space-y-4">
+                    <div className="mb-2">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Data Cleanup</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Resolve auto-added people, duplicates, ambiguous enrichments, and missing channel coverage.
+                      </p>
+                    </div>
+                    <DataCleanupContent />
+                  </div>
+                )}
+
                 {activeTab === 'integrations' && (
                   <div className="space-y-6">
                     <div className="mb-6">
@@ -854,6 +869,12 @@ Senior Recruiter | Your Company
                         Connect your email and LinkedIn accounts to send outreach.
                       </p>
                     </div>
+
+                    {/* Team-wide Unipile connect: any signed-in user can
+                        generate Hosted Auth links scoped to any teammate.
+                        We'll gate this on a role once role differentiation
+                        lands; until then everyone gets it. */}
+                    <AdminTeamConnect />
 
                     {/* Email SMTP */}
                     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
