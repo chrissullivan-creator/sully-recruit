@@ -10,25 +10,35 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { invalidateCommsScope } from '@/lib/invalidate';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
-  UserCheck, Target, Send, Loader2, MoreVertical, Check,
+  UserCheck, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
-  CheckSquare, Square, MailOpen, Archive,
+  CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
+  Star, Clock as ClockIcon, Bell, Sun,
 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
+import { useInboxDensity, type InboxDensity } from '@/lib/use-inbox-density';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
+import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
+import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
+import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
+import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
+import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
+import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationList';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -52,6 +62,14 @@ interface InboxThread {
   sort_at: string | null;
   is_read: boolean;
   is_archived: boolean;
+  flagged?: boolean | null;
+  snoozed_until?: string | null;
+  follow_up_at?: string | null;
+  follow_up_at_set_at?: string | null;
+  follow_up_triggered_at?: string | null;
+  woke_from_snooze_at?: string | null;
+  last_outbound_at?: string | null;
+  status?: 'awaiting_reply' | 'replied' | 'snoozed' | 'closed' | 'no_reply_needed' | null;
   candidate_id: string | null;
   candidate_name: string | null;
   contact_id: string | null;
@@ -110,21 +128,44 @@ const CHANNEL_COLORS: Record<string, string> = {
   call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
 };
 
+// ---------- Date group header ----------
+function DateGroupHeader({ label }: { label: string }) {
+  return (
+    <div className="sticky top-0 z-10 px-3 py-1.5 bg-background/95 backdrop-blur border-b border-border/60">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 // ---------- Thread Item ----------
 function ThreadItem({
   thread,
   isSelected,
   isChecked,
   selectionActive,
+  density,
   onClick,
   onToggleCheck,
+  onToggleFlag,
+  onToggleRead,
+  onArchive,
+  onSnooze,
+  onUnsnooze,
 }: {
   thread: InboxThread;
   isSelected: boolean;
   isChecked: boolean;
   selectionActive: boolean;
+  density: InboxDensity;
   onClick: () => void;
   onToggleCheck: (shiftKey: boolean) => void;
+  onToggleFlag: () => void | Promise<void>;
+  onToggleRead: () => void | Promise<void>;
+  onArchive: () => void | Promise<void>;
+  onSnooze: (wakeAt: Date) => void | Promise<void>;
+  onUnsnooze: () => void | Promise<void>;
 }) {
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
   const entityName = thread.candidate_name || thread.contact_name;
@@ -136,14 +177,16 @@ function ThreadItem({
   const previewText = thread.last_inbound_preview ?? thread.last_message_preview;
   const previewTime = thread.last_inbound_at ?? thread.last_message_at;
   const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
+  const isUnread = !thread.is_read;
+  const compact = density === 'compact';
 
   return (
     <div
       className={cn(
-        'group w-full text-left px-3 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
-        isSelected && 'bg-accent/8 border-l-2 border-l-accent',
+        'group w-full text-left border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
+        compact ? 'px-3 py-2' : 'px-3 py-3.5',
+        isSelected && 'bg-accent/8',
         isChecked && 'bg-accent/12',
-        !thread.is_read && !isSelected && !isChecked && 'bg-muted/20'
       )}
       onClick={(e) => {
         // Cmd/Ctrl-click toggles selection; plain click opens
@@ -155,7 +198,15 @@ function ThreadItem({
         onClick();
       }}
     >
-      <div className="flex items-start gap-2">
+      {/* Accent bar on left — full-row height, marks unread or selected */}
+      <div
+        className={cn(
+          'absolute left-0 top-0 bottom-0 w-1 transition-colors',
+          isSelected ? 'bg-accent' : isUnread ? 'bg-accent/70' : 'bg-transparent'
+        )}
+        aria-hidden
+      />
+      <div className="flex items-start gap-2 pl-1">
         {/* Checkbox column — always reserves space when selection is active so
             the rest of the row doesn't jump around mid-select. */}
         <button
@@ -177,20 +228,33 @@ function ThreadItem({
             <Square className="h-4 w-4 text-muted-foreground" />
           )}
         </button>
-        <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
-          <Icon className="h-4 w-4" />
+        <div className={cn(
+          'mt-0.5 flex shrink-0 items-center justify-center rounded-full',
+          compact ? 'h-7 w-7' : 'h-8 w-8',
+          CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground',
+        )}>
+          <Icon className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">
             <div className="flex items-center gap-1.5 min-w-0">
               {entityName ? (
-                <span className={cn('text-sm truncate', !thread.is_read ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                <span className={cn(
+                  'truncate',
+                  compact ? 'text-sm' : 'text-[15px]',
+                  isUnread ? 'font-semibold text-foreground' : 'font-medium text-foreground/90',
+                )}>
                   {entityName}
                 </span>
               ) : (
-                <span className="text-sm font-medium text-warning italic">Unlinked</span>
+                <span className={cn(
+                  'font-medium italic flex items-center gap-1',
+                  compact ? 'text-sm' : 'text-[15px]',
+                  'text-muted-foreground',
+                )}>
+                  Unknown sender
+                </span>
               )}
-              {!thread.is_read && <Circle className="h-1.5 w-1.5 fill-accent text-accent shrink-0" />}
               {thread.has_attachments && (
                 <Paperclip
                   className="h-3 w-3 shrink-0 text-muted-foreground"
@@ -198,34 +262,134 @@ function ThreadItem({
                 />
               )}
             </div>
-            <span className="text-[10px] text-muted-foreground shrink-0">
-              {previewTime
-                ? formatDistanceToNow(new Date(previewTime), { addSuffix: true })
-                : ''}
-            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Persistent flag indicator — shown whenever flagged, even
+                  not on hover */}
+              {thread.flagged && (
+                <Star className="h-3.5 w-3.5 fill-[#C9A84C] text-[#C9A84C] shrink-0" aria-label="Flagged" />
+              )}
+              {/* Hover actions — wired to handlers */}
+              <div className="hidden group-hover:flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggleFlag(); }}
+                  className={cn(
+                    'p-1 rounded hover:bg-muted',
+                    thread.flagged ? 'text-[#C9A84C]' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  title={thread.flagged ? 'Unflag' : 'Flag'}
+                  aria-label={thread.flagged ? 'Unflag' : 'Flag'}
+                >
+                  <Star className={cn('h-3.5 w-3.5', thread.flagged && 'fill-[#C9A84C]')} />
+                </button>
+                <SnoozeMenu
+                  currentSnoozedUntil={thread.snoozed_until ?? null}
+                  onSnooze={onSnooze}
+                  onUnsnooze={onUnsnooze}
+                  trigger={
+                    <button
+                      type="button"
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                      title="Snooze"
+                      aria-label="Snooze"
+                    >
+                      <ClockIcon className="h-3.5 w-3.5" />
+                    </button>
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggleRead(); }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title={thread.is_read ? 'Mark unread' : 'Mark read'}
+                  aria-label={thread.is_read ? 'Mark unread' : 'Mark read'}
+                >
+                  <MailOpen className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onArchive(); }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title={thread.is_archived ? 'Unarchive' : 'Archive'}
+                  aria-label={thread.is_archived ? 'Unarchive' : 'Archive'}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {previewTime ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={cn(
+                      'text-xs tabular-nums shrink-0 group-hover:hidden',
+                      isUnread ? 'font-semibold text-foreground/80' : 'font-medium text-muted-foreground',
+                    )}>
+                      {formatSmartTimestamp(previewTime)}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="text-xs">
+                    {formatAbsoluteTimestamp(previewTime)}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
           </div>
           {thread.subject && (
-            <p className={cn('text-xs truncate mb-0.5', !thread.is_read ? 'text-foreground/80 font-medium' : 'text-foreground/70')}>
+            <p className={cn(
+              'truncate mb-0.5',
+              compact ? 'text-xs' : 'text-sm',
+              isUnread ? 'text-foreground font-semibold' : 'text-foreground/80 font-medium',
+            )}>
               {thread.subject}
             </p>
           )}
-          <p className="text-xs text-muted-foreground truncate">
-            {awaitingReply ? (
-              <span className="italic opacity-70">Awaiting reply…</span>
-            ) : (
-              previewText || '—'
-            )}
-          </p>
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
-              {CHANNEL_LABELS[thread.channel] || thread.channel}
-            </Badge>
-            {!isLinked && (
-              <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide border-warning/40 text-warning">
-                Unlinked
+          {!compact && (
+            <p className="text-xs text-muted-foreground truncate">
+              {awaitingReply ? (
+                <span className="italic opacity-70">Awaiting reply…</span>
+              ) : (
+                previewText || '—'
+              )}
+            </p>
+          )}
+          {!compact && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
+                {CHANNEL_LABELS[thread.channel] || thread.channel}
               </Badge>
-            )}
-          </div>
+              {thread.id.startsWith('live:') && (
+                <span
+                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600 inline-flex items-center gap-1"
+                  title="Live from Unipile — add the person to start tracking"
+                >
+                  Live
+                </span>
+              )}
+              {thread.snoozed_until && new Date(thread.snoozed_until).getTime() > Date.now() && (
+                <span
+                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-[#7C3AED]/10 text-[#7C3AED] inline-flex items-center gap-1"
+                  title={`Snoozed until ${formatAbsoluteTimestamp(thread.snoozed_until)}`}
+                >
+                  <ClockIcon className="h-2.5 w-2.5" />
+                  Snoozed
+                </span>
+              )}
+              {awaitingReply && !thread.snoozed_until && (
+                <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                  Awaiting reply
+                </span>
+              )}
+              {!isLinked && (
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="No person linked"
+                  aria-label="No person linked"
+                >
+                  ?
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -750,6 +914,60 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     invalidateCommsScope(queryClient);
   };
 
+  // Clear the "just woke from snooze" banner once the user opens the thread.
+  // The DB column stays as audit; the UI banner only shows when it's recent
+  // (< 1 day) AND we haven't dismissed it in this session.
+  const [wakeDismissed, setWakeDismissed] = useState(false);
+  useEffect(() => {
+    setWakeDismissed(false);
+  }, [threadId]);
+
+  const handleSetFollowUp = async (followUpAt: Date) => {
+    if (!threadId) return;
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        follow_up_at: followUpAt.toISOString(),
+        follow_up_at_set_at: new Date().toISOString(),
+        follow_up_triggered_at: null,
+      } as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Couldn't set reminder: ${error.message}`);
+      return;
+    }
+    toast.success('Reminder set');
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleClearFollowUp = async () => {
+    if (!threadId) return;
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        follow_up_at: null,
+        follow_up_at_set_at: null,
+        follow_up_triggered_at: null,
+      } as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Couldn't clear reminder: ${error.message}`);
+      return;
+    }
+    toast.success('Reminder cleared');
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleDismissWake = async () => {
+    if (!threadId) return;
+    setWakeDismissed(true);
+    await supabase
+      .from('conversations')
+      .update({ woke_from_snooze_at: null } as any)
+      .eq('id', threadId);
+    invalidateCommsScope(queryClient);
+  };
+
   // Auto-mark-read shortly after a thread is opened. 600ms delay so a
   // misclick during quick scanning doesn't flip the state — long
   // enough to feel intentional, short enough to feel automatic.
@@ -969,84 +1187,155 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     return format(new Date(d), 'yyyy-MM-dd');
   };
 
+  const isEmail = thread.channel === 'email';
+  const personRole: 'candidate' | 'contact' | null = thread.candidate_id
+    ? 'candidate'
+    : thread.contact_id
+      ? 'contact'
+      : null;
+  const personId = thread.candidate_id || thread.contact_id || null;
+  const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
+  const lastMessageDirection = messages.length > 0 ? messages[messages.length - 1].direction : null;
+  // Prefer the explicit conversations.status column (set by webhook
+  // handlers + send-message in Phase 5). Fall back to the heuristic
+  // derived from message history for legacy rows.
+  const statusLabel = ((): 'Awaiting reply' | 'Replied' | 'Closed' | null => {
+    switch (thread.status) {
+      case 'awaiting_reply': return 'Awaiting reply';
+      case 'replied': return 'Replied';
+      case 'closed':
+      case 'no_reply_needed': return 'Closed';
+      case 'snoozed': return null; // handled by the snoozed pill elsewhere
+    }
+    if (awaitingReply) return 'Awaiting reply';
+    if (lastMessageDirection === 'inbound') return 'Replied';
+    return null;
+  })();
+
   return (
     <div className="flex h-full">
       {/* Messages */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-          <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
-            <Icon className="h-4 w-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {isUnlinked ? (
-                <UnknownPersonBadge
-                  senderName={senderName || undefined}
-                  senderEmail={senderAddress.includes('@') ? senderAddress : undefined}
-                  senderPhone={!senderAddress.includes('@') && senderAddress ? senderAddress : undefined}
-                  channel={thread.channel}
-                  onAdd={() => setCreateDialogOpen(true)}
-                />
-              ) : (
-                (() => {
-                  const target = thread.candidate_id
-                    ? `/candidates/${thread.candidate_id}`
-                    : thread.contact_id
-                      ? `/contacts/${thread.contact_id}`
-                      : null;
-                  return target ? (
-                    <Link to={target} className="text-sm font-semibold text-foreground truncate hover:text-emerald hover:underline transition-colors">
-                      {entityName}
-                    </Link>
-                  ) : (
-                    <h2 className="text-sm font-semibold text-foreground truncate">{entityName}</h2>
-                  );
-                })()
-              )}
-              <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
-                {CHANNEL_LABELS[thread.channel] || thread.channel}
-              </Badge>
+        {/* Sticky header zone: identity bar + subject + recruiter strip */}
+        <div className="sticky top-0 z-20 bg-background border-b border-border">
+          {/* Identity bar */}
+          <div className="px-6 py-3 flex items-center gap-3">
+            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
+              <Icon className="h-4 w-4" />
             </div>
-            {thread.subject && (
-              <p className="text-xs text-muted-foreground truncate">{thread.subject}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {!thread.is_read && (
-              <Button variant="ghost" size="sm" onClick={handleMarkRead} className="text-xs">
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Read
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowEntity((v) => !v)}
-              title="Toggle contact panel"
-              className={showEntity ? 'text-accent' : ''}
-            >
-              <Users className="h-4 w-4" />
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" disabled={deleting} title="Delete conversation">
-                  <Trash2 className="h-4 w-4" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {isUnlinked ? (
+                  <UnknownPersonBadge
+                    senderName={senderName || undefined}
+                    senderEmail={senderAddress.includes('@') ? senderAddress : undefined}
+                    senderPhone={!senderAddress.includes('@') && senderAddress ? senderAddress : undefined}
+                    channel={thread.channel}
+                    onAdd={() => setCreateDialogOpen(true)}
+                  />
+                ) : (
+                  (() => {
+                    const target = thread.candidate_id
+                      ? `/candidates/${thread.candidate_id}`
+                      : thread.contact_id
+                        ? `/contacts/${thread.contact_id}`
+                        : null;
+                    return target ? (
+                      <Link to={target} className="text-sm font-semibold text-foreground truncate hover:text-emerald hover:underline transition-colors">
+                        {entityName}
+                      </Link>
+                    ) : (
+                      <h2 className="text-sm font-semibold text-foreground truncate">{entityName}</h2>
+                    );
+                  })()
+                )}
+                <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
+                  {CHANNEL_LABELS[thread.channel] || thread.channel}
+                </Badge>
+                {statusLabel && (
+                  <span
+                    className={cn(
+                      'text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded shrink-0',
+                      statusLabel === 'Awaiting reply' && 'bg-muted text-muted-foreground',
+                      statusLabel === 'Replied' && 'bg-success/15 text-success',
+                      statusLabel === 'Closed' && 'bg-muted/50 text-muted-foreground',
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {!thread.is_read && (
+                <Button variant="ghost" size="sm" onClick={handleMarkRead} className="text-xs">
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Read
                 </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This permanently removes the conversation and its message history. This cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteThread}>Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+              )}
+              <FollowUpMenu
+                currentFollowUp={thread.follow_up_at ?? null}
+                onSet={handleSetFollowUp}
+                onClear={handleClearFollowUp}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title={thread.follow_up_at ? 'Edit follow-up reminder' : 'Remind me if no reply'}
+                    className={thread.follow_up_at ? 'text-accent' : ''}
+                  >
+                    <Bell className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowEntity((v) => !v)}
+                title="Toggle contact panel"
+                className={showEntity ? 'text-accent' : ''}
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" disabled={deleting} title="Delete conversation">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes the conversation and its message history. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteThread}>Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </div>
+
+          {/* Prominent subject line — the email-channel header. For chat
+              channels it's still useful when a subject is set (e.g. linked
+              send-out), but it's smaller. */}
+          {thread.subject && (
+            <div className="px-6 pb-3">
+              <h1 className={cn(
+                'text-foreground font-semibold truncate',
+                isEmail ? 'text-lg' : 'text-sm',
+              )}>
+                {thread.subject}
+              </h1>
+            </div>
+          )}
+
+          {/* Recruiter context strip — appears when linked */}
+          {personId && personRole && (
+            <RecruiterContextStrip personId={personId} role={personRole} />
+          )}
         </div>
 
         {/* Unlinked banner */}
@@ -1060,6 +1349,45 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
               </button>{' '}
               to track them.
             </p>
+          </div>
+        )}
+
+        {/* Wake-from-snooze banner — shows when the cron fired in the last
+            24h and the user hasn't dismissed it in this session. */}
+        {!wakeDismissed && thread.woke_from_snooze_at && (Date.now() - new Date(thread.woke_from_snooze_at).getTime()) < 24 * 60 * 60 * 1000 && (
+          <div className="px-6 py-2.5 bg-[#7C3AED]/5 border-b border-[#7C3AED]/20 flex items-center gap-2">
+            <Sun className="h-3.5 w-3.5 text-[#7C3AED] shrink-0" />
+            <p className="text-xs text-[#7C3AED] flex-1">
+              <span className="font-medium">Welcome back —</span> this thread woke from snooze {formatSmartTimestamp(thread.woke_from_snooze_at)}.
+            </p>
+            <button
+              type="button"
+              onClick={handleDismissWake}
+              className="text-xs text-[#7C3AED] hover:text-[#7C3AED]/80"
+              title="Dismiss"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Follow-up triggered banner — shows when the reminder fired
+            because no reply came in. Cleared when user dismisses or sets
+            a new reminder. */}
+        {thread.follow_up_triggered_at && !thread.follow_up_at && (Date.now() - new Date(thread.follow_up_triggered_at).getTime()) < 7 * 24 * 60 * 60 * 1000 && (
+          <div className="px-6 py-2.5 bg-accent/5 border-b border-accent/20 flex items-center gap-2">
+            <Bell className="h-3.5 w-3.5 text-accent shrink-0" />
+            <p className="text-xs text-accent flex-1">
+              <span className="font-medium">Follow-up reminder —</span> no reply received since you set this.
+            </p>
+            <button
+              type="button"
+              onClick={handleClearFollowUp}
+              className="text-xs text-accent hover:text-accent/80"
+              title="Dismiss"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
 
@@ -1078,6 +1406,50 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
               <p className="text-sm font-medium mt-4">Conversation starting...</p>
               <p className="text-xs opacity-60 mt-1">Messages will appear here as they sync</p>
             </div>
+          ) : isEmail ? (
+            /* Email layout — Outlook-style cards. Latest expanded, older
+               messages collapsed. Date separators between days. */
+            <div className="max-w-3xl mx-auto space-y-3">
+              {messages.map((msg, idx) => {
+                const msgTime = msg.sent_at || msg.received_at || msg.created_at;
+                const msgDate = getDateKey(msg);
+                const prevDate = idx > 0 ? getDateKey(messages[idx - 1]) : null;
+                const showDateSep = msgDate !== prevDate;
+                const isLatest = idx === messages.length - 1;
+                return (
+                  <div key={msg.id}>
+                    {showDateSep && (
+                      <div className="flex items-center gap-3 py-3">
+                        <div className="flex-1 h-px bg-border/60" />
+                        <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">
+                          {getDateGroup(msgTime).label === 'Today' || getDateGroup(msgTime).label === 'Yesterday'
+                            ? getDateGroup(msgTime).label
+                            : format(new Date(msgTime), 'EEEE, MMMM d')}
+                        </span>
+                        <div className="flex-1 h-px bg-border/60" />
+                      </div>
+                    )}
+                    <EmailMessageCard
+                      message={msg}
+                      defaultExpanded={isLatest}
+                      entityName={entityName}
+                      stripQuoted={stripEmailThread}
+                      attachmentsSlot={
+                        msg.attachments && (msg.attachments as MessageAttachment[]).length > 0 ? (
+                          <div className="mt-3">
+                            <MessageAttachmentList
+                              attachments={msg.attachments}
+                              isOutbound={msg.direction === 'outbound'}
+                            />
+                          </div>
+                        ) : undefined
+                      }
+                    />
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
           ) : (
             <div className="max-w-2xl mx-auto">
               {messages.map((msg, idx) => {
@@ -1095,7 +1467,6 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                 // Determine display body
                 let displayBody = msg.body || '';
                 if (!displayBody && msg.subject) displayBody = msg.subject;
-                if (displayBody && thread.channel === 'email') displayBody = stripEmailThread(displayBody);
 
                 // Outbound sender initials from sender_name
                 const outboundInitials = getInitials(msg.sender_name || 'You');
@@ -1104,12 +1475,14 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
 
                 return (
                   <div key={msg.id}>
-                    {/* Date divider */}
+                    {/* Date divider — smart format: Today / Yesterday / weekday / full date */}
                     {showDateSep && (
                       <div className="flex items-center gap-3 py-4 my-2">
                         <div className="flex-1 h-px bg-border/60" />
                         <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">
-                          {format(new Date(msgTime), 'MMMM d')}
+                          {getDateGroup(msgTime).label === 'Today' || getDateGroup(msgTime).label === 'Yesterday'
+                            ? getDateGroup(msgTime).label
+                            : format(new Date(msgTime), 'EEEE, MMMM d')}
                         </span>
                         <div className="flex-1 h-px bg-border/60" />
                       </div>
@@ -1164,9 +1537,16 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                               {isOutbound ? (msg.sender_name || 'You') : (msg.sender_name || entityName || 'Sender')}
                             </span>
                             <span className="text-[10px] text-muted-foreground/50">·</span>
-                            <span className="text-[10px] text-muted-foreground/70">
-                              {format(new Date(msgTime), 'h:mm a')}
-                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="text-[10px] text-muted-foreground/70 cursor-default">
+                                  {formatThreadTimestamp(msgTime)}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {formatAbsoluteTimestamp(msgTime)}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         )}
                       </div>
@@ -1426,9 +1806,31 @@ function BulkActionBar({
 export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
+
+  // URL-synced state for sidebar nav: ?tab=focused|other &view=unread|archive|... &channel=email|...
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: 'focused' | 'other' = searchParams.get('tab') === 'other' ? 'other' : 'focused';
+  const view: InboxView = ((): InboxView => {
+    const v = searchParams.get('view');
+    const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification'];
+    return (valid as string[]).includes(v ?? '') ? (v as InboxView) : 'all';
+  })();
+  const channel: InboxChannel = ((): InboxChannel => {
+    const c = searchParams.get('channel');
+    const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms'];
+    return (valid as string[]).includes(c ?? '') ? (c as InboxChannel) : 'all';
+  })();
+  const updateParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === 'all' || (key === 'tab' && value === 'focused')) {
+      next.delete(key);
+    } else {
+      next.set(key, value);
+    }
+    setSearchParams(next, { replace: true });
+  };
   // Bulk-select state: thread IDs the user has checked. The toolbar
   // appears whenever this is non-empty. lastCheckedId enables shift-click
   // range selection on long inbox lists.
@@ -1436,6 +1838,7 @@ export default function Inbox() {
   const [lastCheckedId, setLastCheckedId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [density, setDensity] = useInboxDensity();
   const queryClient = useQueryClient();
 
   // Get current user for permission check
@@ -1510,6 +1913,57 @@ export default function Inbox() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: needsClassificationCount = 0 } = useQuery({
+    queryKey: ['inbox_needs_classification_count'],
+    queryFn: async () => {
+      const { count, error } = await (supabase as any)
+        .from('people')
+        .select('id', { count: 'exact', head: true })
+        .eq('needs_classification', true);
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
+  // Live fetch from Unipile for the "Other" tab — only fires when the
+  // user is actually viewing that tab. Returns threads from unknown
+  // senders that we don't persist under the Phase 5 storage rule.
+  const liveChannel = channel === 'all' ? 'linkedin' : channel;
+  const { data: liveData } = useQuery({
+    queryKey: ['inbox_live_threads', liveChannel],
+    enabled: tab === 'other' && !!userId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token || '';
+      const res = await fetch(`/api/inbox/live-threads?channel=${liveChannel}&limit=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { items: [] };
+      return res.json();
+    },
+  });
+  const liveThreads: InboxThread[] = (liveData?.items ?? []).map((it: any) => ({
+    id: it.id,
+    channel: it.channel,
+    subject: it.subject,
+    last_message_at: it.last_message_at,
+    last_message_preview: it.last_message_preview,
+    last_inbound_at: it.last_message_at,
+    last_inbound_preview: it.last_message_preview,
+    sort_at: it.last_message_at,
+    is_read: true, // live results aren't tracked unread/read
+    is_archived: false,
+    candidate_id: null,
+    candidate_name: it.sender_name,
+    contact_id: null,
+    contact_name: null,
+    send_out_id: null,
+    account_id: it.account_id ?? null,
+    external_conversation_id: it.external_conversation_id,
+    integration_account_id: it.integration_account_id,
+  }));
+
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
     enabled: !!userId,
@@ -1535,37 +1989,124 @@ export default function Inbox() {
     },
   });
 
-  const filtered = allThreads.filter((t) => {
-    // Admin owner filter — restrict to selected team member's accounts
+  // Threads visible after admin-team filter — used as the base for everything
+  // else (counts, tab split, view filter, channel filter, search).
+  const teamScoped = allThreads.filter((t) => {
     if (isAdmin && ownerFilter !== 'all') {
       const member = teamMembers.find((m: any) => m.key === ownerFilter);
       if (member && !member.accountIds.includes(t.integration_account_id)) return false;
     }
-
-    // Channel filters
-    if (filterTab === 'email' && t.channel !== 'email') return false;
-    if (filterTab === 'sms' && t.channel !== 'sms') return false;
-    if (filterTab === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
-    if (filterTab === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
-    if (filterTab === 'candidates' && !t.candidate_id) return false;
-    if (filterTab === 'contacts' && !t.contact_id) return false;
-    if (filterTab === 'unlinked' && (t.candidate_id || t.contact_id)) return false;
-
-    // Search
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        t.subject?.toLowerCase().includes(q) ||
-        t.last_message_preview?.toLowerCase().includes(q) ||
-        t.last_inbound_preview?.toLowerCase().includes(q) ||
-        t.candidate_name?.toLowerCase().includes(q) ||
-        t.contact_name?.toLowerCase().includes(q)
-      );
-    }
     return true;
   });
 
-  const unreadCount = allThreads.filter((t) => !t.is_read).length;
+  // Helper: is this thread currently snoozed (wake-time in the future)?
+  const isCurrentlySnoozed = (t: InboxThread) =>
+    !!t.snoozed_until && new Date(t.snoozed_until).getTime() > Date.now();
+
+  // Snoozed threads are hidden from every view EXCEPT the Snoozed view itself
+  // and the Archive view. Archived threads are hidden from every view except
+  // the Archive view.
+  const visibleByDefault = (t: InboxThread) => !isCurrentlySnoozed(t) && !t.is_archived;
+
+  // Focused = threads tagged to a person in the CRM. Other = unlinked.
+  // Both tabs exclude snoozed + archived by default; the Snoozed and Archive
+  // views below opt in explicitly.
+  const focusedThreads = teamScoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
+  const persistedOther = teamScoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
+  // Other tab unions persisted unlinked threads with live-fetched
+  // unknown-sender threads from Unipile. Live results are deduped by
+  // external_conversation_id on the API side.
+  const otherThreads: InboxThread[] = tab === 'other'
+    ? [...persistedOther, ...liveThreads].sort((a, b) => {
+        const ta = a.sort_at ? new Date(a.sort_at).getTime() : 0;
+        const tb = b.sort_at ? new Date(b.sort_at).getTime() : 0;
+        return tb - ta;
+      })
+    : persistedOther;
+  const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
+
+  const filtered = (() => {
+    // The Snoozed and Archive views ignore the Focused/Other split — they
+    // pull from the full team-scoped set since the user wants to see them
+    // regardless of tagging.
+    let pool: InboxThread[];
+    if (view === 'snoozed') {
+      pool = teamScoped.filter(isCurrentlySnoozed);
+    } else if (view === 'archive') {
+      pool = teamScoped.filter((t) => t.is_archived);
+    } else if (view === 'starred') {
+      pool = teamScoped.filter((t) => t.flagged && visibleByDefault(t));
+    } else if (view === 'sent') {
+      // Every thread where we've sent at least one outbound message.
+      pool = teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t));
+    } else {
+      pool = tabPool;
+    }
+
+    return pool.filter((t) => {
+      // Channel filter
+      if (channel === 'email' && t.channel !== 'email') return false;
+      if (channel === 'sms' && t.channel !== 'sms') return false;
+      if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
+      if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
+
+      // View filter (only the views that aren't already pool-defined above)
+      if (view === 'unread' && t.is_read) return false;
+      if (view === 'awaiting_reply' && !(!t.last_inbound_at && !!t.last_message_at)) return false;
+      // Views not yet backed by data — render empty list:
+      if (view === 'drafts') return false;
+
+      // Search
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          t.subject?.toLowerCase().includes(q) ||
+          t.last_message_preview?.toLowerCase().includes(q) ||
+          t.last_inbound_preview?.toLowerCase().includes(q) ||
+          t.candidate_name?.toLowerCase().includes(q) ||
+          t.contact_name?.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  })();
+
+  const unreadCount = teamScoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
+
+  const sidebarCounts = {
+    all: tabPool.length,
+    unread: tabPool.filter((t) => !t.is_read).length,
+    archive: teamScoped.filter((t) => t.is_archived).length,
+    awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
+    starred: teamScoped.filter((t) => t.flagged && visibleByDefault(t)).length,
+    snoozed: teamScoped.filter(isCurrentlySnoozed).length,
+    sent: teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
+    needs_classification: needsClassificationCount,
+  };
+
+  // Mutation helpers — used by the per-row hover actions.
+  const updateThread = async (threadId: string, patch: Record<string, unknown>) => {
+    const { error } = await supabase
+      .from('conversations')
+      .update(patch as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Update failed: ${error.message}`);
+      return;
+    }
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleToggleFlag = (t: InboxThread) =>
+    updateThread(t.id, { flagged: !t.flagged });
+  const handleToggleRead = (t: InboxThread) =>
+    updateThread(t.id, { is_read: !t.is_read });
+  const handleArchive = (t: InboxThread) =>
+    updateThread(t.id, { is_archived: !t.is_archived });
+  const handleSnooze = (t: InboxThread, wakeAt: Date) =>
+    updateThread(t.id, { snoozed_until: wakeAt.toISOString(), status: 'snoozed' });
+  const handleUnsnooze = (t: InboxThread) =>
+    updateThread(t.id, { snoozed_until: null, status: null });
 
   return (
     <MainLayout>
@@ -1577,9 +2118,33 @@ export default function Inbox() {
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
 
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
-        {/* Left: Thread List */}
-        <div className="w-96 border-r border-border flex flex-col bg-background">
-          {/* Search + Compose */}
+        {/* Inbox-internal sidebar — views + channels */}
+        <InboxSidebar
+          view={view}
+          channel={channel}
+          counts={sidebarCounts}
+          onSelectView={(v) => updateParam('view', v)}
+          onSelectChannel={(c) => updateParam('channel', c)}
+          footer={
+            isAdmin && teamMembers.length > 0 ? (
+              <select
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+                className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
+                aria-label="Team member filter"
+              >
+                <option value="all">All team</option>
+                {teamMembers.map((m: any) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </select>
+            ) : null
+          }
+        />
+
+        {/* Thread list */}
+        <div className="w-80 border-r border-border flex flex-col bg-background">
+          {/* Search + Density toggle + Compose */}
           <div className="p-3 border-b border-border/60 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -1590,6 +2155,26 @@ export default function Inbox() {
                 className="pl-8 h-8 text-xs"
               />
             </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDensity(density === 'comfortable' ? 'compact' : 'comfortable')}
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Toggle list density"
+                >
+                  {density === 'comfortable' ? (
+                    <Rows3 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Rows2 className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {density === 'comfortable' ? 'Switch to compact' : 'Switch to comfortable'}
+              </TooltipContent>
+            </Tooltip>
             <Button
               variant="gold"
               size="icon"
@@ -1601,72 +2186,42 @@ export default function Inbox() {
             </Button>
           </div>
 
-          {/* Record type filters */}
-          <div className="px-3 pt-2.5">
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { key: 'all', label: 'All', count: allThreads.length },
-                { key: 'candidates', label: 'Candidates' },
-                { key: 'contacts', label: 'Contacts' },
-                { key: 'unlinked', label: 'Unlinked' },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setFilterTab(tab.key)}
-                  className={cn(
-                    'text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors',
-                    filterTab === tab.key
-                      ? 'bg-accent text-accent-foreground border-accent'
-                      : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-                  )}
-                >
-                  {tab.label}
-                  {tab.count !== undefined && (
-                    <span className="ml-1 opacity-70">{tab.count}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Channel filters */}
-          <div className="px-3 pt-1.5 pb-2.5">
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { key: 'email', label: 'Email', Icon: Mail },
-                { key: 'sms', label: 'SMS', Icon: MessageSquare },
-                { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
-                { key: 'recruiter', label: 'Recruiter', Icon: Target },
-              ].map(({ key, label, Icon: Ico }) => (
-                <button
-                  key={key}
-                  onClick={() => setFilterTab(filterTab === key ? 'all' : key)}
-                  className={cn(
-                    'flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors',
-                    filterTab === key
-                      ? 'bg-accent text-accent-foreground border-accent'
-                      : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-                  )}
-                >
-                  <Ico className="h-3 w-3" />
-                  {label}
-                </button>
-              ))}
-
-              {/* Admin user filter */}
-              {isAdmin && teamMembers.length > 0 && (
-                <select
-                  value={ownerFilter}
-                  onChange={(e) => setOwnerFilter(e.target.value)}
-                  className="text-[11px] font-medium px-2 py-1 rounded-full border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer ml-auto"
-                >
-                  <option value="all">All team</option>
-                  {teamMembers.map((m: any) => (
-                    <option key={m.key} value={m.key}>{m.label}</option>
-                  ))}
-                </select>
+          {/* Focused / Other tab strip */}
+          <div className="px-3 pt-2.5 pb-1.5 flex items-center gap-4 border-b border-border/40">
+            <button
+              type="button"
+              onClick={() => updateParam('tab', 'focused')}
+              className={cn(
+                'relative pb-2 text-xs font-medium transition-colors',
+                tab === 'focused'
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
               )}
-            </div>
+              title="Threads tied to a candidate or client in the CRM"
+            >
+              Focused
+              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{focusedThreads.length}</span>
+              {tab === 'focused' && (
+                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => updateParam('tab', 'other')}
+              className={cn(
+                'relative pb-2 text-xs font-medium transition-colors',
+                tab === 'other'
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              title="Threads from people not yet in the CRM"
+            >
+              Other
+              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{otherThreads.length}</span>
+              {tab === 'other' && (
+                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
+              )}
+            </button>
           </div>
 
           {/* Bulk-action toolbar — only shown while at least one row is checked. */}
@@ -1740,7 +2295,9 @@ export default function Inbox() {
 
           {/* Thread list */}
           <ScrollArea className="flex-1">
-            {isLoading ? (
+            {view === 'needs_classification' ? (
+              <NeedsClassificationList />
+            ) : isLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
@@ -1754,35 +2311,67 @@ export default function Inbox() {
               </div>
             ) : (
               <div>
-                {filtered.map((thread) => (
-                  <ThreadItem
-                    key={thread.id}
-                    thread={thread}
-                    isSelected={selectedId === thread.id}
-                    isChecked={checkedIds.has(thread.id)}
-                    selectionActive={checkedIds.size > 0}
-                    onClick={() => setSelectedId(thread.id)}
-                    onToggleCheck={(shiftKey) => {
-                      const next = new Set(checkedIds);
-                      // Shift-click: select range from lastCheckedId to this id.
-                      if (shiftKey && lastCheckedId) {
-                        const startIdx = filtered.findIndex((t) => t.id === lastCheckedId);
-                        const endIdx = filtered.findIndex((t) => t.id === thread.id);
-                        if (startIdx >= 0 && endIdx >= 0) {
-                          const [a, b] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-                          for (let i = a; i <= b; i++) next.add(filtered[i].id);
+                {(() => {
+                  // Render with sticky date-group headers. Threads are
+                  // already sorted by sort_at desc upstream; we just emit
+                  // a header whenever the bucket changes.
+                  const now = new Date();
+                  let lastBucket: string | null = null;
+                  const items: React.ReactNode[] = [];
+                  filtered.forEach((thread) => {
+                    const ts = thread.last_inbound_at ?? thread.last_message_at;
+                    const group = getDateGroup(ts, now);
+                    if (group.key !== lastBucket) {
+                      items.push(
+                        <DateGroupHeader key={`hdr-${group.key}-${group.label}`} label={group.label} />,
+                      );
+                      lastBucket = group.key;
+                    }
+                    items.push(
+                      <ThreadItem
+                        key={thread.id}
+                        thread={thread}
+                        density={density}
+                        isSelected={selectedId === thread.id}
+                        isChecked={checkedIds.has(thread.id)}
+                        selectionActive={checkedIds.size > 0}
+                        onClick={() => {
+                          if (thread.id.startsWith('live:')) {
+                            toast.info(
+                              'This thread is live from Unipile. Add the sender to your CRM to view + reply.',
+                            );
+                            return;
+                          }
+                          setSelectedId(thread.id);
+                        }}
+                        onToggleFlag={() => handleToggleFlag(thread)}
+                        onToggleRead={() => handleToggleRead(thread)}
+                        onArchive={() => handleArchive(thread)}
+                        onSnooze={(wakeAt) => handleSnooze(thread, wakeAt)}
+                        onUnsnooze={() => handleUnsnooze(thread)}
+                        onToggleCheck={(shiftKey) => {
+                          const next = new Set(checkedIds);
+                          if (shiftKey && lastCheckedId) {
+                            const startIdx = filtered.findIndex((t) => t.id === lastCheckedId);
+                            const endIdx = filtered.findIndex((t) => t.id === thread.id);
+                            if (startIdx >= 0 && endIdx >= 0) {
+                              const [a, b] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+                              for (let i = a; i <= b; i++) next.add(filtered[i].id);
+                              setCheckedIds(next);
+                              setLastCheckedId(thread.id);
+                              return;
+                            }
+                          }
+                          if (next.has(thread.id)) next.delete(thread.id);
+                          else next.add(thread.id);
                           setCheckedIds(next);
                           setLastCheckedId(thread.id);
-                          return;
-                        }
-                      }
-                      if (next.has(thread.id)) next.delete(thread.id);
-                      else next.add(thread.id);
-                      setCheckedIds(next);
-                      setLastCheckedId(thread.id);
-                    }}
-                  />
-                ))}
+                        }}
+                      />,
+                    );
+                  });
+                  return items;
+                })()}
               </div>
             )}
           </ScrollArea>

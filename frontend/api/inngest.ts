@@ -59,6 +59,8 @@ import {
   dispatchMissingTranscripts,
 } from "./lib/inngest/functions/dispatch-missing-transcripts.js";
 import { reextractCallIntel } from "./lib/inngest/functions/reextract-call-intel.js";
+import { wakeSnoozedThreads } from "./lib/inngest/functions/wake-snoozed-threads.js";
+import { processFollowUps } from "./lib/inngest/functions/process-follow-ups.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -129,5 +131,7 @@ export default serve({
     dispatchMissingTranscriptsCron,
     dispatchMissingTranscripts,
     reextractCallIntel,
+    wakeSnoozedThreads,
+    processFollowUps,
   ],
 });

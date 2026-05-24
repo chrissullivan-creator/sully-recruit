@@ -546,7 +546,9 @@ async function processEmailMessage(
       last_message_at: receivedAt,
       last_message_preview: (message.bodyPreview || "").substring(0, 100),
       is_read: false,
-    })
+      // Microsoft webhook fires for inbound email arrival — status = replied.
+      status: "replied",
+    } as any)
     .eq("id", conversationId);
 
   const table = match.entityType === "candidate" ? "candidates" : "contacts";
