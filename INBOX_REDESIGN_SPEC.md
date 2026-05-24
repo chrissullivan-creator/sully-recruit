@@ -16,6 +16,7 @@ This is a design spec, not a build plan yet. Review, push back, then we phase it
 - **Chat stays chat.** LinkedIn DMs and SMS keep conversational bubbles. The reading pane swaps layouts based on channel.
 - **Workflow > passive view.** Snooze, flag, follow-up reminders, and conversation status (`Awaiting reply` / `Replied` / `Closed`) are first-class.
 - **Show all messages, save the ones that matter (per channel).** Inbox shows the last 100 emails / LinkedIn DMs / Recruiter messages live from the providers. Persistence rules: **always save all SMS (in + out)** and **always save outbound** on every channel. Save **inbound email + LinkedIn** only when the sender is already a person in the CRM. When we send to someone not in the CRM, **auto-add them** with a quick Candidate/Client classifier. Adding a person triggers an **automatic backfill** of past communications from every channel. **Sent folder** in the sidebar surfaces everything we've sent across Outlook, LinkedIn, Recruiter, and SMS.
+- **Saved messages are RAG-searchable by Joe.** Every persisted message (email, LinkedIn, Recruiter, SMS) gets embedded and indexed into `search_documents`. New Joe tool `search_messages` so he can answer questions like "who said they wanted 30% upside" or "find any message about a non-compete."
 - **Keyboard-first.** `j/k/e/r/h/#/u/?` shortcuts.
 - **Better than Outlook on the things Outlook is bad at:** cross-channel unification, recruiter context sidebar, snooze/follow-up, mobile, density.
 
@@ -697,6 +698,97 @@ Files:
 - Saved view CRUD UI.
 - Optional: live-provider search (Unipile search API surfaced separately).
 
+### Phase 9 — Index persisted messages for RAG / Ask Joe (~2 days)
+
+**Goal**: every message we save to `messages` becomes searchable by Joe via semantic + keyword search. Today Joe can list recent messages per candidate (`list_recent_communications`) but **cannot semantically search message bodies** — he can't answer "find the candidate who said they wanted 30% upside" or "who mentioned a non-compete recently."
+
+**Live state of `search_documents` (verified via DB query, 2026-05-24):**
+
+| source_kind | rows | with embedding |
+|---|---|---|
+| candidate | 6,679 | 100 |
+| **message** | **4,607** | **100** |
+| contact | 1,062 | 98 |
+| company | 526 | 100 |
+| resume | 186 | 93 |
+| call | 99 | 99 |
+| job | 38 | 38 |
+| send_out | 15 | 15 |
+| note | 4 | 4 |
+
+**Diagnosis**: a one-shot batch in **April 2026** populated 4,607 message rows (subject as `title`, "EMAIL | outbound | Chris Sullivan" as `subtitle`, body as `body`, metadata json with channel/direction/sent_at/conversation_id). **No code in the current repo writes to `search_documents`** — the populator was likely a deleted/manual script. ~98% of the rows have NO embedding. **No new messages have been indexed since April 2026** — meaning ~16k messages from the last ~5 weeks aren't even in `search_documents`, and the 4,607 that are have no vectors. The Joe RPCs (`match_search_documents`, `search_search_documents`) exist and are correct — they're just unused for messages because the data isn't there.
+
+**Existing infrastructure (correct, ready to use):**
+- `search_documents` table with `embedding vector`, `fts tsvector` (generated column, weighted title/subtitle/body), person/candidate/contact tagging, metadata jsonb.
+- RPCs `match_search_documents(query_embedding, filter_kinds, match_count, min_similarity)` and `search_search_documents(search_query, filter_kinds, match_count)`.
+- Voyage Finance-2 embedding helper in `supabase/functions/ask-joe/index.ts:157` (`embedQuery()`).
+
+**Work to do:**
+
+1. **New indexer helper** `frontend/src/server-lib/index-message.ts` — given a `messages` row, build the doc shape and upsert into `search_documents`:
+   ```ts
+   {
+     source_kind: 'message',
+     source_id: message.id,
+     person_id: message.candidate_id ?? message.contact_id,
+     candidate_id: message.candidate_id,
+     contact_id: message.contact_id,
+     title: `${direction === 'outbound' ? 'To' : 'From'} ${counterpartyName} · ${channelLabel}`,
+     subtitle: message.subject ?? null,
+     body: stripQuotedAndHtml(message.body),   // dequote replies, strip HTML, cap at 8KB
+     metadata: { channel, direction, sent_at, conversation_id, attachments_count, ai_tags },
+     source_updated_at: message.sent_at ?? message.received_at,
+     embedding: await embedVoyage(combinedText),   // title + subtitle + body, capped
+   }
+   ```
+
+2. **Trigger on persistence** — call `indexMessage()` from the (new or existing) `persistMessage()` helper, right after the `messages` insert. Fire as an Inngest job (`messages/indexed.requested`) so the embed API call doesn't block the webhook response.
+
+3. **Two-step backfill** (because of the half-built state):
+   - **Step A — Index the missing rows**: `backfill-message-search-documents.ts` Inngest fn pages through `messages` where `id NOT IN (SELECT source_id::uuid FROM search_documents WHERE source_kind='message')`. Upserts the doc shape. **~16k+ rows** since the April 2026 batch.
+   - **Step B — Embed the unembedded rows**: separate `backfill-message-embeddings.ts` pages through `search_documents WHERE source_kind='message' AND embedding IS NULL`. Embeds the combined title+subtitle+body and writes. **~21k rows total** after step A. ~$2.50 one-time at Voyage Finance-2 pricing ($0.00012/1K tokens × ~200 tokens/msg). Throttled to 50 req/sec → ~7 minutes wall time.
+   - Both jobs are idempotent and resumable; can be run in either order (the embedder skips rows already with embedding).
+
+4. **Delete on message delete** — when a `messages` row is deleted (rare; archive-then-delete), cascade-delete the `search_documents` row by `source_id`. Add a Postgres trigger or include it in the delete helper.
+
+5. **New Joe tool** `search_messages` in `supabase/functions/ask-joe/index.ts`:
+   ```
+   name: "search_messages",
+   description: "Semantic + keyword search across all saved communications
+                (emails, LinkedIn DMs, Recruiter InMails, SMS). Returns the
+                message excerpts plus the person, channel, direction, and date.
+                Use to answer 'who said X' or 'find any message about Y'."
+   input: { query: string, person_id?: uuid, channel?: string, direction?: string,
+            since?: date, limit?: int (default 8) }
+   ```
+   Calls a new RPC `match_messages_hybrid(query_embedding, query_text, ...)` that combines `match_search_documents(filter_kinds=['message'])` (vector) with `search_search_documents` (FTS via `fts` column) and reciprocal-rank-fusion merges them — same pattern as `search_people` today.
+
+6. **Joe system prompt update** — add `search_messages` to the tools list and a one-line hint: "Use `search_messages` for questions about what someone said, agreed to, complained about, asked for, etc."
+
+7. **Also index calls** (low-effort bonus) — `search_documents.source_kind` already supports `'call'`. Call transcripts (from Deepgram, via `call-deepgram-runner.ts`) can use the same indexer pattern. Skip for this phase unless trivial; track as a follow-up.
+
+**Privacy / scope note:**
+- Only messages already persisted under the new storage rule get indexed (i.e. tagged to a person in the CRM). Unrecognized inbound is never embedded.
+- Outbound is always indexed (it's always persisted under the new rule).
+- SMS always indexed (it's always persisted).
+- This means RAG search scope = exactly the message body of every persisted message.
+
+**Cost:**
+- Voyage Finance-2 embeddings: ~$0.00012 per 1K tokens. Typical message ~200 tokens. Going-forward steady-state at ~50 saved messages/day = ~$0.12/year. Negligible.
+- Backfill of 21k existing: ~$2.50 one-time.
+
+**Files:**
+- `frontend/src/server-lib/index-message.ts` (new) — indexer helper. Builds doc + calls Voyage embed in one go.
+- `frontend/api/lib/inngest/functions/index-message.ts` (new) — Inngest wrapper.
+- `frontend/api/lib/inngest/functions/backfill-message-search-documents.ts` (new) — Step A backfill (missing rows).
+- `frontend/api/lib/inngest/functions/backfill-message-embeddings.ts` (new) — Step B backfill (missing embeddings).
+- New migration: `match_messages_hybrid` RPC (hybrid vector + FTS via RRF). Optional; could call the two existing RPCs from the tool handler and merge in JS.
+- `frontend/supabase/functions/ask-joe/index.ts` — add `search_messages` tool + handler.
+- Update `persistMessage()` helper (or the 13 insert sites) to enqueue `messages/indexed.requested`.
+- Tweak `BASE_SYSTEM_PROMPT` in ask-joe to mention `search_messages` and chain hint (e.g. `search_messages('compensation') → get_person_detail`).
+
+**Effort revision: ~3 days** (was ~2). The +1 day covers the two-step backfill, embedding ~21k rows, and verifying the existing April 2026 batch's data shape works for our new indexer (or whether we should re-index those rows with our new shape — vote: re-index for consistency).
+
 ---
 
 ## 7. Open questions for Chris
@@ -718,5 +810,7 @@ Files:
 15. **Audit scope for outbound persistence**: Phase 5 audits every send endpoint to ensure it persists. Do you want me to first do a read-only pass and report which send paths today already persist vs not, before changing anything?
 16. **Sequence cross-channel stop — AI soft-match**: when an inbound looks like it's from a known candidate but no channel-ID matches (e.g. new LinkedIn account we haven't linked), should we use an AI soft-match to stop the sequence anyway (with a "confirm match" prompt to the user)? Or is hard-channel-match strict enough?
 17. **Sequence pre-enrollment warning**: surface a warning before enrolling someone in an email sequence if we have their LinkedIn URL but no `candidate_channels` row for it (so a LinkedIn reply might not get recognized)? Or silently auto-create the channel row from `people` fields?
+18. **RAG — strip quoted email replies from indexed body?** Email replies often include the entire prior thread in `>` quotes. Strip them before embedding so the search isn't dominated by duplicated text? Default yes.
+19. **RAG — also index calls in this phase?** `search_documents.source_kind` already supports `'call'`. Call transcripts (from Deepgram) could use the same indexer for ~½ day extra. Or defer to a follow-up?
 
 Once you answer these, I'll start Phase 1 (timestamps + list polish — biggest UX win, no DB risk).
