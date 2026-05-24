@@ -9,6 +9,25 @@ This is a design spec, not a build plan yet. Review, push back, then we phase it
 
 ---
 
+## 0. Decisions locked in (as of 2026-05-24)
+
+Tracking answers as they come in.
+
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Live-fetch cap | **100 per channel per person**, scrollable (cursor pagination), filterable by channel + person + "all" |
+| 1a | Compose new message/email to a person | **Yes** — prominent "New message" button in inbox list, channel picker driven by what we have for the person |
+| 2 | Default density | **Comfortable** (Claude's call — Chris said "your call") |
+| 3 | Focused = persisted (in CRM), Other = live unknown senders | **Yes** |
+| 4 | Auto-add default type | **AI-guess** based on email domain + signature + message context (candidate vs client). Falls back to `candidate` + `needs_classification=true` if guess is low-confidence |
+| 5 | Deny-list for auto-add | **Yes** — own domain, distribution lists, common service addresses (`support@`, `noreply@`, etc.) |
+| 7+8 | Backfill — when person added, call Unipile to get cross-platform IDs first, then backfill all channels | **Yes** — two-stage: enrich Unipile IDs → backfill across email + LinkedIn + SMS. Lookback default 24 months unless Chris says otherwise |
+| 19 | Index call notes too | **Yes** — unified `search_communications` Joe tool covers both messages and calls |
+
+*Still pending: questions 6, 9-18 in §7.*
+
+---
+
 ## 1. Goals
 
 - **Make timestamps obvious.** No more tiny "3 hours ago" in the corner. Smart formatting (`10:43 AM` / `Yesterday` / `Mon` / `May 12`) plus absolute time on hover. Date group headers in the list.
@@ -158,34 +177,59 @@ For this to work, every send path must call `persistOutbound()`:
 
 ### Live inbox fetch path
 
-For inbound from unknown senders (email + LinkedIn):
+For inbound from unknown senders (email + LinkedIn) **and** for any per-person communication history view:
 
-- `GET /api/inbox/live-threads?channel=email|linkedin|recruiter&limit=100` — proxies Unipile / Microsoft Graph, returns the **last 100 threads** per channel with normalized shape.
+- `GET /api/inbox/live-threads?channel=email|linkedin|recruiter&person_id=...&cursor=...&limit=100` — proxies Unipile / Microsoft Graph. Returns up to **100 messages per channel per person** (or per unknown sender if no `person_id`). **Scrollable**: cursor-based pagination — scroll past the first 100 fetches the next 100.
 - React Query caches 60s; webhook tickle invalidates.
 - Frontend unions persisted Supabase rows + live-API rows, dedupes by `external_conversation_id`.
 
 SMS view doesn't need the live endpoint — it's all in Supabase.
 
-### Adding a person → auto-backfill past communications
+**Inbox filters and views** (applies in every list — Focused, Other, per-person):
+- **Filter by channel**: All / Email / LinkedIn / Recruiter / SMS / Calls
+- **Filter by person**: typeahead picker — narrows the list to one person across all channels
+- **Filter "All"**: full mixed-channel firehose, paginated/scrollable
+- **Search bar**: text query against persisted bodies (Supabase) + optional "Also search inbox provider…" affordance to hit Unipile/Microsoft's search API for live results
+- **Compose new**: prominent "New message" button (top-right of list) opens compose dialog with channel picker + person picker (typeahead) + rich editor. Person picker drives channel options based on what we know about them — e.g. picking Bob enables Email and LinkedIn buttons because we have both for him; SMS is disabled because no phone.
 
-When a person is added to the CRM — by **any path** (Add Person Wizard from the inbox, resume parsing, manual add, LinkedIn import, sequence enrollment, **auto-add from outbound**, etc.) — the system **automatically fetches and saves all past communications** with that person from every connected channel.
+### Adding a person → cross-channel ID lookup → auto-backfill
 
-**Trigger**: any insert into `people` with at least one resolvable channel identifier.
+When a person is added to the CRM (any path), we don't just backfill from the channels we already know — we **first call out to Unipile to discover all of their channel IDs across platforms**, then backfill from each.
 
-**Implementation**: Inngest job `backfill-person-communications` on `person.created`:
+**Two-stage flow on `person.created`:**
 
-1. Read all channel identifiers from `candidate_channels` / `contact_channels` for the new person.
-2. For each channel:
-   - **Email** (Microsoft Graph): query `/me/messages?$search="from:{email}" OR "to:{email}"` (paged); both Inbox + Sent.
-   - **LinkedIn DM / Recruiter** (Unipile v1): `GET /chats?account_id=X` filtered to attendee = the LinkedIn provider ID. Then `GET /chats/{id}/messages` for each match.
+**Stage 1 — Cross-channel ID enrichment (new):**
+1. Read what we have for the new person: `email`, `linkedin_url`, `phone`.
+2. Call Unipile to find their identifiers across platforms (exact endpoints TBD — needs short discovery sprint; see "Unipile lookup options" below):
+   - If we have a LinkedIn URL → `GET /users/{public_identifier}?account_id=X` to fetch their LinkedIn member URN + Unipile attendee ID.
+   - If we have an email but no LinkedIn URL → try Unipile's people search to find their LinkedIn (best-effort; not all emails resolve).
+   - If LinkedIn resolves → check whether they're an existing Unipile chat attendee on any of our connected LinkedIn / Recruiter accounts.
+3. Persist every resolved identifier into `candidate_channels` / `contact_channels` so subsequent webhooks recognize them.
+4. Persist any name/title/company/company_domain enrichments we got back onto the `people` row (don't overwrite existing values; fill blanks only).
+
+**Stage 2 — Cross-channel backfill:**
+1. For each channel identifier in `candidate_channels` / `contact_channels`:
+   - **Email** (Microsoft Graph): query `/me/messages?$search="from:{email}" OR "to:{email}"` across Inbox + Sent.
+   - **LinkedIn DM / Recruiter** (Unipile v1): `GET /chats?account_id=X` filtered to attendee = LinkedIn provider ID; then `GET /chats/{id}/messages`.
    - **SMS** (RingCentral): list messages with the matching phone number.
-3. Write to `conversations` + `messages` tagged to the new person.
-4. Dedupe on `external_message_id`.
-5. AI-tag the backfilled messages.
+2. Write to `conversations` + `messages` tagged to the new person.
+3. Dedupe on `external_message_id`.
+4. AI-tag the backfilled messages.
+5. Enqueue `messages/indexed.requested` for each backfilled row so they land in `search_documents` for Joe.
 
-**Bounds**: configurable lookback (default 24 months). Toast: "Backfilling past communications for {name}…"
+**Bounds**: configurable lookback (default 24 months). Toast: "Looking up {name} across channels… Backfilling past communications…"
 
-**Failure mode**: partial-channel failure retries that channel; doesn't block person creation.
+**Failure mode**: partial-channel failure retries that channel; doesn't block person creation or stage 2 from running on the channels that did resolve.
+
+#### Unipile lookup options (discovery sprint)
+
+The exact API path is TBD — needs a 1-hour spike before Phase 5. Options:
+- `GET /api/v1/users/{public_identifier}?account_id=X` — confirmed working for LinkedIn profile lookup (CLAUDE.md §"Confirmed v1 routes").
+- `POST /api/v1/linkedin/search?account_id=X` with `{api:'recruiter', category:'people', keywords: '<name>'}` — Recruiter search by name/email.
+- `POST /api/v1/linkedin/search/parameters?account_id=X` with `{type:'COMPANY', keywords: '<company>'}` — narrow by company.
+- Email-to-LinkedIn lookup probably needs a third-party enrichment provider (Clearbit, Apollo) — note as a follow-up if Unipile alone isn't enough.
+
+Add to spec once the spike confirms which calls return the IDs we need.
 
 ### Sequences must stop on a reply from ANY channel
 
@@ -799,16 +843,16 @@ Files:
 
 ## 7. Open questions for Chris
 
-1. **Live-fetch cap of 100 — per channel or total?** Email last 100 + LinkedIn last 100 + Recruiter last 100 = up to 300 rows in the "Other" view. Or one combined cap of 100?
-2. **Auto-add default type**: defaulting to `candidate` when we send to an unknown email/LinkedIn. Right call, or default to `client` based on context (e.g. domain matches a known client company in `companies`)?
-3. **Auto-add from sent — what if the email is to e.g. `support@vendor.com` or my own teammates?** Suggest a deny-list (own domain, distribution lists, common service addresses). Confirm.
-4. **AI-guess classification on auto-add**: parse signature / domain / message context to guess candidate vs client and pre-fill the type? Reduces the "Needs classification" backlog.
+1. ✅ **Live-fetch cap** — **answered**: 100 per channel per person, scrollable, filterable.
+2. ✅ **Auto-add default type** — **answered**: AI-guess.
+3. ✅ **Deny-list** — **answered**: yes.
+4. ✅ **AI-guess classification** — **answered**: yes (same as #2).
 5. **Backfill lookback window**: default 24 months. Long enough? Some senior candidates have 3+ years of LinkedIn DM history.
 6. **Backfill on existing people**: when this ships, run a one-time backfill on existing candidates/clients to catch pre-existing messages we'd have dropped under the old behavior? Or forward-only?
 7. **AI tagging on non-persisted inbound**: still run Joe's classification on every inbound webhook even when the sender isn't in the system (to flag e.g. an unknown person saying "I accept the offer")? Cost vs catching edge cases.
 8. **Counterparty edge cases — group threads, forwards, dist lists**: if a single email has multiple recipients and one matches a candidate, save the whole thread tagged to that candidate? Default yes.
-9. **Default density**: Comfortable or Compact?
-10. **Focused vs Other criteria**: "Focused" = persisted threads (people in CRM). "Other" = live-fetched from unknown senders. Confirm.
+9. ✅ **Default density** — **answered**: Comfortable (Claude's call).
+10. ✅ **Focused vs Other criteria** — **answered**: yes, persisted vs live unknown.
 11. **Snooze wake notification**: push notification or silent re-appear with a "Welcome back" banner?
 12. **Search across unknown-sender history**: provider's own search only (via a "Search inbox provider…" affordance)? Or keep a 30-day rolling snapshot for global search?
 13. **Existing 21k messages cleanup**: leave as-is, or one-time cleanup of inbound rows where `candidate_id IS NULL AND contact_id IS NULL` + channel ∈ (email, linkedin, linkedin_recruiter) + older than 6 months?
