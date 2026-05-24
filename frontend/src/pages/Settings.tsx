@@ -33,6 +33,7 @@ import {
   Play,
   Wrench,
   Briefcase,
+  Target,
   Plus,
   Pencil,
   Trash2,
@@ -257,6 +258,138 @@ const Settings = () => {
 
   const togglePassword = (key: string) =>
     setShowPasswords((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // Enrichment-provider API keys (live in app_settings — Apollo + the
+  // four Phase 2/3 providers). One state object so a single save
+  // handler covers all of them.
+  type EnrichmentKey =
+    | 'APOLLO_API_KEY'
+    | 'BETTERCONTACT_API_KEY'
+    | 'FULLENRICH_API_KEY'
+    | 'PDL_API_KEY'
+    | 'ZEROBOUNCE_API_KEY';
+  const ENRICHMENT_KEY_META: Record<EnrichmentKey, { label: string; help: string; signupUrl: string }> = {
+    APOLLO_API_KEY: {
+      label: 'Apollo',
+      help: 'People match + organization enrich + person_id capture',
+      signupUrl: 'https://app.apollo.io/#/settings/integrations/api',
+    },
+    BETTERCONTACT_API_KEY: {
+      label: 'BetterContact',
+      help: 'Waterfall for work email + mobile (verifies upstream)',
+      signupUrl: 'https://bettercontact.rocks/api',
+    },
+    FULLENRICH_API_KEY: {
+      label: 'FullEnrich',
+      help: 'Primary for personal email, secondary for work email',
+      signupUrl: 'https://app.fullenrich.com/settings/api',
+    },
+    PDL_API_KEY: {
+      label: 'People Data Labs',
+      help: 'Personal email + mobile fallback; company job postings',
+      signupUrl: 'https://dashboard.peopledatalabs.com/api-keys',
+    },
+    ZEROBOUNCE_API_KEY: {
+      label: 'ZeroBounce',
+      help: 'Verifies Apollo + PDL emails before writing',
+      signupUrl: 'https://www.zerobounce.net/members/settings/api/',
+    },
+  };
+  const [enrichmentKeys, setEnrichmentKeys] = useState<Record<EnrichmentKey, string>>({
+    APOLLO_API_KEY: '',
+    BETTERCONTACT_API_KEY: '',
+    FULLENRICH_API_KEY: '',
+    PDL_API_KEY: '',
+    ZEROBOUNCE_API_KEY: '',
+  });
+  const [enrichmentKeysLoaded, setEnrichmentKeysLoaded] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'api' || enrichmentKeysLoaded) return;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', Object.keys(ENRICHMENT_KEY_META));
+      const next = { ...enrichmentKeys };
+      for (const row of data ?? []) {
+        if (row.key in next) (next as any)[row.key] = row.value ?? '';
+      }
+      setEnrichmentKeys(next);
+      setEnrichmentKeysLoaded(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Lead Search Filter — natural-language job spec + AI-translated
+  // PDL filter JSON. Loaded on tab open.
+  const [jobSpecText, setJobSpecText] = useState('');
+  const [jobSpecFilters, setJobSpecFilters] = useState<any>({});
+  const [jobSpecLastTranslated, setJobSpecLastTranslated] = useState<string | null>(null);
+  const [jobSpecLoaded, setJobSpecLoaded] = useState(false);
+  const [jobSpecTranslating, setJobSpecTranslating] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'job_spec' || jobSpecLoaded) return;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['JOB_SPEC_NATURAL_LANGUAGE', 'JOB_SPEC_PDL_FILTERS', 'JOB_SPEC_LAST_TRANSLATED_AT']);
+      for (const row of data ?? []) {
+        if (row.key === 'JOB_SPEC_NATURAL_LANGUAGE') setJobSpecText(row.value ?? '');
+        if (row.key === 'JOB_SPEC_PDL_FILTERS') {
+          try { setJobSpecFilters(row.value ? JSON.parse(row.value) : {}); }
+          catch { setJobSpecFilters({}); }
+        }
+        if (row.key === 'JOB_SPEC_LAST_TRANSLATED_AT') {
+          setJobSpecLastTranslated(row.value || null);
+        }
+      }
+      setJobSpecLoaded(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const translateJobSpec = async (save: boolean) => {
+    setJobSpecTranslating(true);
+    try {
+      const res = await fetch('/api/settings/translate-job-spec', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ spec: jobSpecText, save }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Translation failed');
+      setJobSpecFilters(data.filters ?? {});
+      if (save) {
+        setJobSpecLastTranslated(new Date().toISOString());
+        toast.success('Job spec saved — applies to all future fetches');
+      } else {
+        toast.success('Preview generated');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Translation failed');
+    } finally {
+      setJobSpecTranslating(false);
+    }
+  };
+
+  const saveEnrichmentKey = async (key: EnrichmentKey) => {
+    setSaving(key);
+    try {
+      const { error } = await supabase.from('app_settings').upsert(
+        { key, value: enrichmentKeys[key], updated_at: new Date().toISOString() },
+        { onConflict: 'key' },
+      );
+      if (error) throw error;
+      toast.success(`${ENRICHMENT_KEY_META[key].label} key saved`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setSaving(null);
+    }
+  };
 
   // Load existing settings
   const loadSettings = useCallback(async () => {
@@ -657,6 +790,7 @@ Senior Recruiter | Your Company
     { id: 'signature', label: 'Email Signature', icon: PenLine },
     { id: 'linkedin_safety', label: 'LinkedIn Safety', icon: ShieldCheck },
     { id: 'api', label: 'API Keys', icon: Key },
+    { id: 'job_spec', label: 'Lead Search Filter', icon: Target },
     { id: 'general', label: 'General', icon: SettingsIcon },
     ...(isAdmin ? [{ id: 'admin', label: 'Admin Tools', icon: Wrench }] : []),
   ];
@@ -1909,27 +2043,140 @@ Senior Recruiter | Your Company
                 {activeTab === 'api' && (
                   <div>
                     <div className="mb-6">
-                      <h2 className="text-lg font-semibold text-foreground mb-1">API Keys</h2>
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Enrichment provider keys</h2>
                       <p className="text-sm text-muted-foreground">
-                        Manage API keys for external integrations.
+                        Stored in <code className="text-xs">app_settings</code>. Updates apply instantly — no redeploy needed. Pasted keys are sensitive: rotate at the provider if you ever expose them.
                       </p>
                     </div>
-                    <div className="rounded-lg border border-border bg-card p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="text-sm font-medium text-foreground">Production API Key</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Use this key for production integrations
-                          </p>
-                        </div>
-                        <Button size="sm" variant="outline">Generate New Key</Button>
+                    <div className="space-y-3">
+                      {(Object.keys(ENRICHMENT_KEY_META) as EnrichmentKey[]).map((key) => {
+                        const meta = ENRICHMENT_KEY_META[key];
+                        const value = enrichmentKeys[key];
+                        const isShown = showPasswords[`enrich_${key}`];
+                        return (
+                          <div key={key} className="rounded-lg border border-border bg-card p-4">
+                            <div className="flex items-center justify-between mb-2 gap-3">
+                              <div className="min-w-0">
+                                <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                                  {meta.label}
+                                  {value && (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      set ({value.length} chars)
+                                    </Badge>
+                                  )}
+                                </h3>
+                                <p className="text-xs text-muted-foreground mt-0.5">{meta.help}</p>
+                              </div>
+                              <a href={meta.signupUrl} target="_blank" rel="noreferrer"
+                                className="text-xs text-accent hover:underline shrink-0">
+                                Get key
+                              </a>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <Input
+                                  type={isShown ? 'text' : 'password'}
+                                  value={value}
+                                  placeholder="Paste key…"
+                                  onChange={(e) =>
+                                    setEnrichmentKeys((prev) => ({ ...prev, [key]: e.target.value }))
+                                  }
+                                  className="h-9 text-sm font-mono pr-9"
+                                />
+                                <button
+                                  type="button"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  onClick={() => togglePassword(`enrich_${key}`)}
+                                >
+                                  {isShown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => saveEnrichmentKey(key)}
+                                disabled={saving === key}
+                              >
+                                {saving === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ============ JOB SPEC TAB ============ */}
+                {activeTab === 'job_spec' && (
+                  <div>
+                    <div className="mb-6">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Lead search filter</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Describe the kinds of jobs the firm cares about in plain English. We translate it to a structured PDL filter that's applied to every bulk "Fetch postings" run — so you don't pull every JP Morgan job, only the ones worth pursuing.
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      <div>
+                        <Label className="text-xs">Spec (free text)</Label>
+                        <Textarea
+                          value={jobSpecText}
+                          onChange={(e) => setJobSpecText(e.target.value)}
+                          rows={6}
+                          placeholder="e.g. Senior software engineering leaders in financial services (NYC, San Francisco, or remote). Director level or above. Full-time, $200k base minimum. No interns or contract roles."
+                          className="mt-1 text-sm font-mono"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Tip: be specific about seniority, location, and what to exclude. Vague specs translate to vague filters.
+                        </p>
                       </div>
+
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-muted px-3 py-2 rounded text-sm font-mono text-muted-foreground">
-                          sk_live_••••••••••••••••••••••••
-                        </code>
-                        <Button size="sm" variant="ghost">Copy</Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={jobSpecTranslating || !jobSpecText.trim()}
+                          onClick={() => translateJobSpec(false)}
+                        >
+                          {jobSpecTranslating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Target className="h-3.5 w-3.5 mr-1.5" />}
+                          Preview filter
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="gold"
+                          disabled={jobSpecTranslating}
+                          onClick={() => translateJobSpec(true)}
+                        >
+                          {jobSpecTranslating && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                          Translate & save
+                        </Button>
+                        {jobSpecLastTranslated && (
+                          <span className="text-[11px] text-muted-foreground ml-2">
+                            Saved {new Date(jobSpecLastTranslated).toLocaleString()}
+                          </span>
+                        )}
                       </div>
+
+                      {Object.keys(jobSpecFilters ?? {}).length > 0 && (
+                        <div className="pt-3 border-t border-border">
+                          <div className="flex items-center justify-between mb-2">
+                            <Label className="text-xs">Active PDL filter</Label>
+                            <span className="text-[10px] text-muted-foreground">
+                              This is what we send to PDL on each fetch
+                            </span>
+                          </div>
+                          <pre className="bg-muted rounded p-3 text-[11px] font-mono whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+                            {JSON.stringify(jobSpecFilters, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+
+                      {Object.keys(jobSpecFilters ?? {}).length === 0 && jobSpecLoaded && (
+                        <div className="text-[11px] text-muted-foreground italic">
+                          No filter active — every fetch pulls every posting PDL has for the company.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

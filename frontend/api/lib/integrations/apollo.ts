@@ -42,6 +42,8 @@ export async function getApolloConfig(supabase: any): Promise<ApolloConfig | nul
 }
 
 export interface ApolloPerson {
+  id: string | null;
+  organization_id: string | null;
   linkedin_url: string | null;
   first_name: string | null;
   last_name: string | null;
@@ -49,6 +51,13 @@ export interface ApolloPerson {
   headline: string | null;
   title: string | null;
   email: string | null;
+  /**
+   * Apollo's verification signal. Documented values:
+   *   verified | likely_to_engage | guessed | unavailable | bounced | spam_trap | unknown
+   * Only `verified` and `likely_to_engage` are safe to write without a
+   * downstream verifier. Anything else should go through ZeroBounce.
+   */
+  email_status: string | null;
   organization_name: string | null;
   organization_domain: string | null;
   photo_url: string | null;
@@ -97,6 +106,8 @@ export async function apolloMatchPerson(
 
   const org = person.organization || {};
   return {
+    id: person.id ?? null,
+    organization_id: org.id ?? person.organization_id ?? null,
     linkedin_url: person.linkedin_url ?? null,
     first_name: person.first_name ?? null,
     last_name: person.last_name ?? null,
@@ -104,11 +115,46 @@ export async function apolloMatchPerson(
     headline: person.headline ?? null,
     title: person.title ?? null,
     email: person.email ?? null,
+    email_status: person.email_status ?? null,
     organization_name: org.name ?? null,
     organization_domain: org.primary_domain ?? null,
     photo_url: person.photo_url ?? null,
     raw: person,
   };
+}
+
+/**
+ * Apollo credit balance. The /v1/users/api/profile endpoint returns
+ * the calling user's credit pools — we read `credits_left` /
+ * `email_credits_left` and return the smaller. Returns null if
+ * neither field is parseable.
+ */
+export async function apolloGetCredits(config: ApolloConfig): Promise<number | null> {
+  try {
+    const resp = await fetch(`${config.baseUrl}/users/api/profile`, {
+      method: "GET",
+      headers: {
+        "Cache-Control": "no-cache",
+        "x-api-key": config.apiKey,
+      },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const user = data?.user ?? data;
+    const candidates = [
+      user?.credits_left,
+      user?.email_credits_left,
+      user?.api_credits_left,
+    ];
+    let lowest: number | null = null;
+    for (const v of candidates) {
+      const n = Number(v);
+      if (Number.isFinite(n)) lowest = lowest == null ? n : Math.min(lowest, n);
+    }
+    return lowest;
+  } catch {
+    return null;
+  }
 }
 
 export interface ApolloOrganization {

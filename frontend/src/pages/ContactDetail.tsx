@@ -596,9 +596,8 @@ const ContactDetail = () => {
           {id && (
             <EnrichButton
               peopleIds={[id]}
-              disabled={!contact.linkedin_url}
               variant="ghost"
-              invalidateKeys={[['contact', id], ['contacts']]}
+              invalidateKeys={[['contact', id], ['contacts'], ['candidate_work_history', id]]}
             />
           )}
 

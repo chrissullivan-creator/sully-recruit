@@ -476,7 +476,27 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   }
 
   if (!entityId) {
-    logger.info("No matching entity for LinkedIn sender, creating unlinked conversation", { senderId });
+    // Phase 5 rule: inbound from unknown LinkedIn senders is NOT persisted.
+    // The live inbox UI will fetch the last 100 LinkedIn messages from
+    // Unipile directly for the "Other" view; once the user adds the
+    // person, the person.created webhook backfills the history.
+    // Outbound from us to a non-CRM recipient still persists (it's our
+    // work product) — auto-add of the recipient happens upstream in the
+    // send path.
+    if (direction === "inbound") {
+      logger.info("Dropping inbound LinkedIn from unknown sender (Phase 5 rule)", {
+        senderId,
+        external_message_id: unipileMessageId,
+      });
+      return {
+        action: "dropped",
+        reason: "unknown_sender_inbound",
+        senderId,
+        type: "linkedin_message",
+      };
+    }
+
+    logger.info("Outbound LinkedIn to non-CRM recipient — persisting as unlinked", { senderId });
 
     const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
     const senderAddress =
@@ -569,6 +589,9 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const conversationUpdate: Record<string, any> = {
     last_message_at: receivedAt,
     last_message_preview: messageBody.substring(0, 100),
+    // Auto-derive status: inbound = replied, outbound = awaiting_reply.
+    // Clears any prior snooze status now that there's fresh activity.
+    status: direction === "inbound" ? "replied" : "awaiting_reply",
   };
   if (direction === "inbound") conversationUpdate.is_read = false;
 

@@ -51,12 +51,16 @@ import { findLinkedinUrlByName } from "./lib/inngest/functions/find-linkedin-url
 import { findLinkedinUrlSweep } from "./lib/inngest/functions/find-linkedin-url-sweep.js";
 import { enrichCompanyViaApollo } from "./lib/inngest/functions/enrich-company-via-apollo.js";
 import { enrichCompaniesSweep } from "./lib/inngest/functions/enrich-companies-sweep.js";
+import { checkEnrichmentCredits, checkEnrichmentCreditsOnce } from "./lib/inngest/functions/check-enrichment-credits.js";
+import { processEnrichmentJob } from "./lib/inngest/functions/process-enrichment-job.js";
 import { backfillJoeSaysEmbeddings } from "./lib/inngest/functions/backfill-joe-says-embeddings.js";
 import {
   dispatchMissingTranscriptsCron,
   dispatchMissingTranscripts,
 } from "./lib/inngest/functions/dispatch-missing-transcripts.js";
 import { reextractCallIntel } from "./lib/inngest/functions/reextract-call-intel.js";
+import { wakeSnoozedThreads } from "./lib/inngest/functions/wake-snoozed-threads.js";
+import { processFollowUps } from "./lib/inngest/functions/process-follow-ups.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -120,9 +124,14 @@ export default serve({
     findLinkedinUrlSweep,
     enrichCompanyViaApollo,
     enrichCompaniesSweep,
+    checkEnrichmentCredits,
+    checkEnrichmentCreditsOnce,
+    processEnrichmentJob,
     backfillJoeSaysEmbeddings,
     dispatchMissingTranscriptsCron,
     dispatchMissingTranscripts,
     reextractCallIntel,
+    wakeSnoozedThreads,
+    processFollowUps,
   ],
 });
