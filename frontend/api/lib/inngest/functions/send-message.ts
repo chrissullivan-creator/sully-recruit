@@ -110,6 +110,8 @@ export const sendMessage = inngest.createFunction(
           last_message_at: new Date().toISOString(),
           last_message_preview: body.substring(0, 100),
           is_read: true,
+          // Outbound from Sully — we now wait on a reply.
+          status: "awaiting_reply",
         } as any)
         .eq("id", conversationId);
     }

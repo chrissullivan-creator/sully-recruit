@@ -67,6 +67,7 @@ interface InboxThread {
   follow_up_at_set_at?: string | null;
   follow_up_triggered_at?: string | null;
   woke_from_snooze_at?: string | null;
+  last_outbound_at?: string | null;
   status?: 'awaiting_reply' | 'replied' | 'snoozed' | 'closed' | 'no_reply_needed' | null;
   candidate_id: string | null;
   candidate_name: string | null;
@@ -1186,11 +1187,21 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
   const personId = thread.candidate_id || thread.contact_id || null;
   const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
   const lastMessageDirection = messages.length > 0 ? messages[messages.length - 1].direction : null;
-  const statusLabel = awaitingReply
-    ? 'Awaiting reply'
-    : lastMessageDirection === 'inbound'
-      ? 'Replied'
-      : null;
+  // Prefer the explicit conversations.status column (set by webhook
+  // handlers + send-message in Phase 5). Fall back to the heuristic
+  // derived from message history for legacy rows.
+  const statusLabel = ((): 'Awaiting reply' | 'Replied' | 'Closed' | null => {
+    switch (thread.status) {
+      case 'awaiting_reply': return 'Awaiting reply';
+      case 'replied': return 'Replied';
+      case 'closed':
+      case 'no_reply_needed': return 'Closed';
+      case 'snoozed': return null; // handled by the snoozed pill elsewhere
+    }
+    if (awaitingReply) return 'Awaiting reply';
+    if (lastMessageDirection === 'inbound') return 'Replied';
+    return null;
+  })();
 
   return (
     <div className="flex h-full">
@@ -1236,9 +1247,9 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                   <span
                     className={cn(
                       'text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded shrink-0',
-                      statusLabel === 'Awaiting reply'
-                        ? 'bg-muted text-muted-foreground'
-                        : 'bg-success/15 text-success',
+                      statusLabel === 'Awaiting reply' && 'bg-muted text-muted-foreground',
+                      statusLabel === 'Replied' && 'bg-success/15 text-success',
+                      statusLabel === 'Closed' && 'bg-muted/50 text-muted-foreground',
                     )}
                   >
                     {statusLabel}
@@ -1955,6 +1966,9 @@ export default function Inbox() {
       pool = teamScoped.filter((t) => t.is_archived);
     } else if (view === 'starred') {
       pool = teamScoped.filter((t) => t.flagged && visibleByDefault(t));
+    } else if (view === 'sent') {
+      // Every thread where we've sent at least one outbound message.
+      pool = teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t));
     } else {
       pool = tabPool;
     }
@@ -1970,7 +1984,7 @@ export default function Inbox() {
       if (view === 'unread' && t.is_read) return false;
       if (view === 'awaiting_reply' && !(!t.last_inbound_at && !!t.last_message_at)) return false;
       // Views not yet backed by data — render empty list:
-      if (view === 'sent' || view === 'drafts' || view === 'needs_classification') return false;
+      if (view === 'drafts') return false;
 
       // Search
       if (searchQuery) {
@@ -1996,6 +2010,7 @@ export default function Inbox() {
     awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
     starred: teamScoped.filter((t) => t.flagged && visibleByDefault(t)).length,
     snoozed: teamScoped.filter(isCurrentlySnoozed).length,
+    sent: teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
   };
 
   // Mutation helpers — used by the per-row hover actions.

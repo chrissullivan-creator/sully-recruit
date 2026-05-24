@@ -85,7 +85,7 @@ export function InboxSidebar({
     { key: 'awaiting_reply', label: 'Awaiting reply', Icon: CornerDownLeft, count: counts.awaiting_reply },
     { key: 'starred', label: 'Starred', Icon: Star, count: counts.starred },
     { key: 'snoozed', label: 'Snoozed', Icon: Clock, count: counts.snoozed },
-    { key: 'sent', label: 'Sent', Icon: SendIcon, count: counts.sent, comingSoon: true },
+    { key: 'sent', label: 'Sent', Icon: SendIcon, count: counts.sent },
     { key: 'drafts', label: 'Drafts', Icon: FileEdit, count: counts.drafts, comingSoon: true },
     { key: 'archive', label: 'Archive', Icon: ArchiveIcon, count: counts.archive },
     {
