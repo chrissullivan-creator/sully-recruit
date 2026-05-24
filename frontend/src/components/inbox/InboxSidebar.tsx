@@ -4,6 +4,7 @@ import {
   Linkedin,
   MessageSquare,
   Target,
+  Phone,
   Star,
   Clock,
   CornerDownLeft,
@@ -25,7 +26,7 @@ export type InboxView =
   | 'archive'
   | 'needs_classification';
 
-export type InboxChannel = 'all' | 'email' | 'linkedin' | 'recruiter' | 'sms';
+export type InboxChannel = 'all' | 'email' | 'linkedin' | 'recruiter' | 'sms' | 'call';
 
 export interface InboxSidebarCounts {
   all?: number;
@@ -60,6 +61,7 @@ const CHANNEL_ITEMS: ChannelItem[] = [
   { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
   { key: 'recruiter', label: 'Recruiter', Icon: Target },
   { key: 'sms', label: 'SMS', Icon: MessageSquare },
+  { key: 'call', label: 'Calls', Icon: Phone },
 ];
 
 export interface InboxSidebarProps {

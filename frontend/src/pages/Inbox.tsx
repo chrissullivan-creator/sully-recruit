@@ -1820,7 +1820,7 @@ export default function Inbox() {
   })();
   const channel: InboxChannel = ((): InboxChannel => {
     const c = searchParams.get('channel');
-    const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms'];
+    const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms', 'call'];
     return (valid as string[]).includes(c ?? '') ? (c as InboxChannel) : 'all';
   })();
   const updateParam = (key: string, value: string | null) => {
@@ -2050,6 +2050,7 @@ export default function Inbox() {
       if (channel === 'sms' && t.channel !== 'sms') return false;
       if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
       if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
+      if (channel === 'call' && t.channel !== 'call') return false;
 
       // View filter (only the views that aren't already pool-defined above)
       if (view === 'unread' && t.is_read) return false;

@@ -8,7 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
-  Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
+  Building2, Settings, LayoutDashboard, ListTodo, FolderSearch, Copy,
   Send, Martini, Calendar, BarChart3, Menu, X, AlertTriangle,
 } from 'lucide-react';
 
@@ -59,7 +59,6 @@ const navigation = [
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
-  { name: 'Calls',      href: '/calls',      icon: Phone           },
   { name: 'Reports',    href: '/reports',    icon: BarChart3       },
   { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Collisions', href: '/admin/collisions', icon: AlertTriangle },
