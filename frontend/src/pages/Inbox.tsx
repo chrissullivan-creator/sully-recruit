@@ -33,6 +33,8 @@ import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
+import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
+import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -1056,84 +1058,130 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     return format(new Date(d), 'yyyy-MM-dd');
   };
 
+  const isEmail = thread.channel === 'email';
+  const personRole: 'candidate' | 'contact' | null = thread.candidate_id
+    ? 'candidate'
+    : thread.contact_id
+      ? 'contact'
+      : null;
+  const personId = thread.candidate_id || thread.contact_id || null;
+  const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
+  const lastMessageDirection = messages.length > 0 ? messages[messages.length - 1].direction : null;
+  const statusLabel = awaitingReply
+    ? 'Awaiting reply'
+    : lastMessageDirection === 'inbound'
+      ? 'Replied'
+      : null;
+
   return (
     <div className="flex h-full">
       {/* Messages */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-          <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
-            <Icon className="h-4 w-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {isUnlinked ? (
-                <UnknownPersonBadge
-                  senderName={senderName || undefined}
-                  senderEmail={senderAddress.includes('@') ? senderAddress : undefined}
-                  senderPhone={!senderAddress.includes('@') && senderAddress ? senderAddress : undefined}
-                  channel={thread.channel}
-                  onAdd={() => setCreateDialogOpen(true)}
-                />
-              ) : (
-                (() => {
-                  const target = thread.candidate_id
-                    ? `/candidates/${thread.candidate_id}`
-                    : thread.contact_id
-                      ? `/contacts/${thread.contact_id}`
-                      : null;
-                  return target ? (
-                    <Link to={target} className="text-sm font-semibold text-foreground truncate hover:text-emerald hover:underline transition-colors">
-                      {entityName}
-                    </Link>
-                  ) : (
-                    <h2 className="text-sm font-semibold text-foreground truncate">{entityName}</h2>
-                  );
-                })()
-              )}
-              <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
-                {CHANNEL_LABELS[thread.channel] || thread.channel}
-              </Badge>
+        {/* Sticky header zone: identity bar + subject + recruiter strip */}
+        <div className="sticky top-0 z-20 bg-background border-b border-border">
+          {/* Identity bar */}
+          <div className="px-6 py-3 flex items-center gap-3">
+            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
+              <Icon className="h-4 w-4" />
             </div>
-            {thread.subject && (
-              <p className="text-xs text-muted-foreground truncate">{thread.subject}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {!thread.is_read && (
-              <Button variant="ghost" size="sm" onClick={handleMarkRead} className="text-xs">
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Read
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowEntity((v) => !v)}
-              title="Toggle contact panel"
-              className={showEntity ? 'text-accent' : ''}
-            >
-              <Users className="h-4 w-4" />
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" disabled={deleting} title="Delete conversation">
-                  <Trash2 className="h-4 w-4" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {isUnlinked ? (
+                  <UnknownPersonBadge
+                    senderName={senderName || undefined}
+                    senderEmail={senderAddress.includes('@') ? senderAddress : undefined}
+                    senderPhone={!senderAddress.includes('@') && senderAddress ? senderAddress : undefined}
+                    channel={thread.channel}
+                    onAdd={() => setCreateDialogOpen(true)}
+                  />
+                ) : (
+                  (() => {
+                    const target = thread.candidate_id
+                      ? `/candidates/${thread.candidate_id}`
+                      : thread.contact_id
+                        ? `/contacts/${thread.contact_id}`
+                        : null;
+                    return target ? (
+                      <Link to={target} className="text-sm font-semibold text-foreground truncate hover:text-emerald hover:underline transition-colors">
+                        {entityName}
+                      </Link>
+                    ) : (
+                      <h2 className="text-sm font-semibold text-foreground truncate">{entityName}</h2>
+                    );
+                  })()
+                )}
+                <Badge variant="secondary" className="text-[10px] uppercase shrink-0">
+                  {CHANNEL_LABELS[thread.channel] || thread.channel}
+                </Badge>
+                {statusLabel && (
+                  <span
+                    className={cn(
+                      'text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded shrink-0',
+                      statusLabel === 'Awaiting reply'
+                        ? 'bg-muted text-muted-foreground'
+                        : 'bg-success/15 text-success',
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {!thread.is_read && (
+                <Button variant="ghost" size="sm" onClick={handleMarkRead} className="text-xs">
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Read
                 </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This permanently removes the conversation and its message history. This cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteThread}>Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowEntity((v) => !v)}
+                title="Toggle contact panel"
+                className={showEntity ? 'text-accent' : ''}
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" disabled={deleting} title="Delete conversation">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes the conversation and its message history. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteThread}>Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </div>
+
+          {/* Prominent subject line — the email-channel header. For chat
+              channels it's still useful when a subject is set (e.g. linked
+              send-out), but it's smaller. */}
+          {thread.subject && (
+            <div className="px-6 pb-3">
+              <h1 className={cn(
+                'text-foreground font-semibold truncate',
+                isEmail ? 'text-lg' : 'text-sm',
+              )}>
+                {thread.subject}
+              </h1>
+            </div>
+          )}
+
+          {/* Recruiter context strip — appears when linked */}
+          {personId && personRole && (
+            <RecruiterContextStrip personId={personId} role={personRole} />
+          )}
         </div>
 
         {/* Unlinked banner */}
@@ -1165,6 +1213,50 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
               <p className="text-sm font-medium mt-4">Conversation starting...</p>
               <p className="text-xs opacity-60 mt-1">Messages will appear here as they sync</p>
             </div>
+          ) : isEmail ? (
+            /* Email layout — Outlook-style cards. Latest expanded, older
+               messages collapsed. Date separators between days. */
+            <div className="max-w-3xl mx-auto space-y-3">
+              {messages.map((msg, idx) => {
+                const msgTime = msg.sent_at || msg.received_at || msg.created_at;
+                const msgDate = getDateKey(msg);
+                const prevDate = idx > 0 ? getDateKey(messages[idx - 1]) : null;
+                const showDateSep = msgDate !== prevDate;
+                const isLatest = idx === messages.length - 1;
+                return (
+                  <div key={msg.id}>
+                    {showDateSep && (
+                      <div className="flex items-center gap-3 py-3">
+                        <div className="flex-1 h-px bg-border/60" />
+                        <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">
+                          {getDateGroup(msgTime).label === 'Today' || getDateGroup(msgTime).label === 'Yesterday'
+                            ? getDateGroup(msgTime).label
+                            : format(new Date(msgTime), 'EEEE, MMMM d')}
+                        </span>
+                        <div className="flex-1 h-px bg-border/60" />
+                      </div>
+                    )}
+                    <EmailMessageCard
+                      message={msg}
+                      defaultExpanded={isLatest}
+                      entityName={entityName}
+                      stripQuoted={stripEmailThread}
+                      attachmentsSlot={
+                        msg.attachments && (msg.attachments as MessageAttachment[]).length > 0 ? (
+                          <div className="mt-3">
+                            <MessageAttachmentList
+                              attachments={msg.attachments}
+                              isOutbound={msg.direction === 'outbound'}
+                            />
+                          </div>
+                        ) : undefined
+                      }
+                    />
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
           ) : (
             <div className="max-w-2xl mx-auto">
               {messages.map((msg, idx) => {
@@ -1182,7 +1274,6 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                 // Determine display body
                 let displayBody = msg.body || '';
                 if (!displayBody && msg.subject) displayBody = msg.subject;
-                if (displayBody && thread.channel === 'email') displayBody = stripEmailThread(displayBody);
 
                 // Outbound sender initials from sender_name
                 const outboundInitials = getInitials(msg.sender_name || 'You');
