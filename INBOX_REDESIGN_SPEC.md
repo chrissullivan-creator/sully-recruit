@@ -16,7 +16,7 @@ This is a design spec, not a build plan yet. Review, push back, then we phase it
 - **Chat stays chat.** LinkedIn DMs and SMS keep conversational bubbles. The reading pane swaps layouts based on channel.
 - **Workflow > passive view.** Snooze, flag, follow-up reminders, and conversation status (`Awaiting reply` / `Replied` / `Closed`) are first-class.
 - **Show all messages, save the ones that matter (per channel).** Inbox shows the last 100 emails / LinkedIn DMs / Recruiter messages live from the providers. Persistence rules: **always save all SMS (in + out)** and **always save outbound** on every channel. Save **inbound email + LinkedIn** only when the sender is already a person in the CRM. When we send to someone not in the CRM, **auto-add them** with a quick Candidate/Client classifier. Adding a person triggers an **automatic backfill** of past communications from every channel. **Sent folder** in the sidebar surfaces everything we've sent across Outlook, LinkedIn, Recruiter, and SMS.
-- **Saved messages are RAG-searchable by Joe.** Every persisted message (email, LinkedIn, Recruiter, SMS) gets embedded and indexed into `search_documents`. New Joe tool `search_messages` so he can answer questions like "who said they wanted 30% upside" or "find any message about a non-compete."
+- **Saved messages AND call notes are RAG-searchable by Joe.** Every persisted message (email, LinkedIn, Recruiter, SMS) plus every AI-summarized call note gets embedded and indexed into `search_documents`. New unified Joe tool `search_communications` so he can answer questions like "who said they wanted 30% upside", "find any message about a non-compete", "did we talk to anyone about FX volumes last week".
 - **Keyboard-first.** `j/k/e/r/h/#/u/?` shortcuts.
 - **Better than Outlook on the things Outlook is bad at:** cross-channel unification, recruiter context sidebar, snooze/follow-up, mobile, density.
 
@@ -751,43 +751,49 @@ Files:
 
 4. **Delete on message delete** — when a `messages` row is deleted (rare; archive-then-delete), cascade-delete the `search_documents` row by `source_id`. Add a Postgres trigger or include it in the delete helper.
 
-5. **New Joe tool** `search_messages` in `supabase/functions/ask-joe/index.ts`:
+5. **New Joe tool** `search_communications` in `supabase/functions/ask-joe/index.ts`:
    ```
-   name: "search_messages",
-   description: "Semantic + keyword search across all saved communications
-                (emails, LinkedIn DMs, Recruiter InMails, SMS). Returns the
-                message excerpts plus the person, channel, direction, and date.
-                Use to answer 'who said X' or 'find any message about Y'."
+   name: "search_communications",
+   description: "Semantic + keyword search across saved messages and call notes
+                (emails, LinkedIn DMs, Recruiter InMails, SMS, phone calls).
+                Returns excerpts plus the person, channel, direction, and date.
+                Use to answer 'who said X', 'find any message or call about Y',
+                'when did they mention Z'."
    input: { query: string, person_id?: uuid, channel?: string, direction?: string,
-            since?: date, limit?: int (default 8) }
+            kinds?: ['message'|'call'] (default both), since?: date,
+            limit?: int (default 8) }
    ```
-   Calls a new RPC `match_messages_hybrid(query_embedding, query_text, ...)` that combines `match_search_documents(filter_kinds=['message'])` (vector) with `search_search_documents` (FTS via `fts` column) and reciprocal-rank-fusion merges them — same pattern as `search_people` today.
+   Calls existing `match_search_documents(filter_kinds=['message','call'], ...)` (vector) and `search_search_documents(filter_kinds=['message','call'], ...)` (FTS via the `fts` generated column), then reciprocal-rank-fusion merges in JS — same pattern as `search_people` today. No new RPC strictly required.
 
-6. **Joe system prompt update** — add `search_messages` to the tools list and a one-line hint: "Use `search_messages` for questions about what someone said, agreed to, complained about, asked for, etc."
+6. **Joe system prompt update** — add `search_communications` to the tools list and a one-line hint: "Use `search_communications` for questions about what someone said, agreed to, complained about, asked for, talked about on a call, etc."
 
-7. **Also index calls** (low-effort bonus) — `search_documents.source_kind` already supports `'call'`. Call transcripts (from Deepgram, via `call-deepgram-runner.ts`) can use the same indexer pattern. Skip for this phase unless trivial; track as a follow-up.
+7. **Also index calls** — same April 2026 one-shot batch indexed 99 call rows (all embedded) but no calls have been indexed since. Live state: 525 total `call_logs`, 331 `ai_call_notes` (Deepgram-generated summaries), only **99 in `search_documents`** (a ~70% gap). Build the same per-persistence indexer for `ai_call_notes` insert → `search_documents` row with `source_kind='call'`. Body = the AI-generated call summary; title = candidate/contact name + phone; subtitle = direction + timestamp. Reuse the same backfill pattern (two-step: missing rows, then missing embeddings).
+
+**Unified Joe tool**: instead of separate `search_messages` and `search_calls` tools, name it **`search_communications`** and have it cover both — `filter_kinds=['message', 'call']` by default, optional `kinds` arg to restrict. Joe doesn't need to know the distinction unless asked.
 
 **Privacy / scope note:**
 - Only messages already persisted under the new storage rule get indexed (i.e. tagged to a person in the CRM). Unrecognized inbound is never embedded.
 - Outbound is always indexed (it's always persisted under the new rule).
 - SMS always indexed (it's always persisted).
-- This means RAG search scope = exactly the message body of every persisted message.
+- Calls: every `ai_call_notes` row indexed (calls are already always tagged to a person via `candidate_id` / `contact_id` on the call_logs row).
+- RAG search scope = every persisted message body + every AI call summary.
 
 **Cost:**
-- Voyage Finance-2 embeddings: ~$0.00012 per 1K tokens. Typical message ~200 tokens. Going-forward steady-state at ~50 saved messages/day = ~$0.12/year. Negligible.
-- Backfill of 21k existing: ~$2.50 one-time.
+- Voyage Finance-2 embeddings: ~$0.00012 per 1K tokens. Typical message ~200 tokens, typical call note ~400 tokens.
+- Backfill: ~21k messages + ~331 ai_call_notes ≈ ~$3.00 one-time.
+- Steady state at ~50 saved messages/day + ~3 calls/day: ~$0.15/year. Negligible.
 
 **Files:**
-- `frontend/src/server-lib/index-message.ts` (new) — indexer helper. Builds doc + calls Voyage embed in one go.
-- `frontend/api/lib/inngest/functions/index-message.ts` (new) — Inngest wrapper.
-- `frontend/api/lib/inngest/functions/backfill-message-search-documents.ts` (new) — Step A backfill (missing rows).
-- `frontend/api/lib/inngest/functions/backfill-message-embeddings.ts` (new) — Step B backfill (missing embeddings).
-- New migration: `match_messages_hybrid` RPC (hybrid vector + FTS via RRF). Optional; could call the two existing RPCs from the tool handler and merge in JS.
-- `frontend/supabase/functions/ask-joe/index.ts` — add `search_messages` tool + handler.
+- `frontend/src/server-lib/index-communication.ts` (new) — shared indexer helper used for both messages and call notes. Builds doc + calls Voyage embed in one go.
+- `frontend/api/lib/inngest/functions/index-communication.ts` (new) — Inngest wrapper. Handles `messages/indexed.requested` + `calls/indexed.requested` events.
+- `frontend/api/lib/inngest/functions/backfill-communication-search-documents.ts` (new) — Step A backfill (missing rows, both kinds).
+- `frontend/api/lib/inngest/functions/backfill-communication-embeddings.ts` (new) — Step B backfill (missing embeddings, both kinds).
+- `frontend/supabase/functions/ask-joe/index.ts` — add `search_communications` tool + handler (filter_kinds=['message','call']).
 - Update `persistMessage()` helper (or the 13 insert sites) to enqueue `messages/indexed.requested`.
-- Tweak `BASE_SYSTEM_PROMPT` in ask-joe to mention `search_messages` and chain hint (e.g. `search_messages('compensation') → get_person_detail`).
+- Add similar enqueue on `ai_call_notes` insert (likely in `call-deepgram-runner.ts` or wherever the AI summarization writes the row) — enqueue `calls/indexed.requested`.
+- Tweak `BASE_SYSTEM_PROMPT` in ask-joe to mention `search_communications`.
 
-**Effort revision: ~3 days** (was ~2). The +1 day covers the two-step backfill, embedding ~21k rows, and verifying the existing April 2026 batch's data shape works for our new indexer (or whether we should re-index those rows with our new shape — vote: re-index for consistency).
+**Effort revision: ~3.5 days** (was ~3). The +0.5 day covers the call indexer + ai_call_notes backfill (most logic shared with messages via the unified `index-communication.ts`).
 
 ---
 
@@ -811,6 +817,5 @@ Files:
 16. **Sequence cross-channel stop — AI soft-match**: when an inbound looks like it's from a known candidate but no channel-ID matches (e.g. new LinkedIn account we haven't linked), should we use an AI soft-match to stop the sequence anyway (with a "confirm match" prompt to the user)? Or is hard-channel-match strict enough?
 17. **Sequence pre-enrollment warning**: surface a warning before enrolling someone in an email sequence if we have their LinkedIn URL but no `candidate_channels` row for it (so a LinkedIn reply might not get recognized)? Or silently auto-create the channel row from `people` fields?
 18. **RAG — strip quoted email replies from indexed body?** Email replies often include the entire prior thread in `>` quotes. Strip them before embedding so the search isn't dominated by duplicated text? Default yes.
-19. **RAG — also index calls in this phase?** `search_documents.source_kind` already supports `'call'`. Call transcripts (from Deepgram) could use the same indexer for ~½ day extra. Or defer to a follow-up?
 
 Once you answer these, I'll start Phase 1 (timestamps + list polish — biggest UX win, no DB risk).
