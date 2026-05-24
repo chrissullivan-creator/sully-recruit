@@ -177,6 +177,37 @@ export async function pdlEnrichCompany(
   }
 }
 
+/* ─────────────────────────── credit balance ────────────────────────── */
+
+/**
+ * PDL exposes credit info under /v5/account/me. The shape changes a
+ * bit between plans, so this is intentionally lenient — picks the
+ * first numeric value it finds for any of the candidate paths. Returns
+ * null when nothing parses, which the alert cron treats as "unknown".
+ */
+export async function pdlGetCredits(config: PdlConfig): Promise<number | null> {
+  try {
+    const resp = await fetch(`${BASE}/account/me`, {
+      headers: { "X-Api-Key": config.apiKey, Accept: "application/json" },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const candidates = [
+      data?.balance?.api_calls?.remaining,
+      data?.usage_quotas?.api_calls?.remaining,
+      data?.credits_remaining,
+      data?.balance?.remaining,
+    ];
+    for (const v of candidates) {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /* ─────────────────────────── job search ────────────────────────────── */
 
 export interface PdlJobPosting {

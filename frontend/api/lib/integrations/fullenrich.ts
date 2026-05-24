@@ -54,6 +54,37 @@ export async function getFullEnrichConfig(
   return config;
 }
 
+/**
+ * Remaining credits. FullEnrich exposes /v1/account or /v1/account/credits
+ * — endpoint name varies by plan. Try both, parse lenient.
+ */
+export async function fullEnrichGetCredits(
+  config: FullEnrichConfig,
+): Promise<number | null> {
+  const headers = {
+    Authorization: `Bearer ${config.apiKey}`,
+    Accept: "application/json",
+  };
+  for (const path of ["/account/credits", "/account"]) {
+    try {
+      const resp = await fetch(`${BASE}${path}`, { headers });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const candidates = [
+        data?.credits_remaining, data?.credits_left,
+        data?.credits, data?.remaining, data?.balance,
+      ];
+      for (const v of candidates) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+    } catch {
+      // try next path
+    }
+  }
+  return null;
+}
+
 export interface FullEnrichInput {
   firstname?: string | null;
   lastname?: string | null;

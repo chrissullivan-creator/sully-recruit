@@ -58,6 +58,32 @@ export async function getBetterContactConfig(
   return config;
 }
 
+/**
+ * Remaining credits. BetterContact's docs list /v2/credits returning
+ * { credits_left }. Lenient parser in case the field is renamed.
+ */
+export async function betterContactGetCredits(
+  config: BetterContactConfig,
+): Promise<number | null> {
+  try {
+    const resp = await fetch(`${BASE}/credits`, {
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json" },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const candidates = [
+      data?.credits_left, data?.credits_remaining, data?.remaining, data?.balance,
+    ];
+    for (const v of candidates) {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export interface BetterContactInput {
   first_name?: string | null;
   last_name?: string | null;

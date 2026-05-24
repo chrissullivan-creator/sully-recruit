@@ -123,6 +123,40 @@ export async function apolloMatchPerson(
   };
 }
 
+/**
+ * Apollo credit balance. The /v1/users/api/profile endpoint returns
+ * the calling user's credit pools — we read `credits_left` /
+ * `email_credits_left` and return the smaller. Returns null if
+ * neither field is parseable.
+ */
+export async function apolloGetCredits(config: ApolloConfig): Promise<number | null> {
+  try {
+    const resp = await fetch(`${config.baseUrl}/users/api/profile`, {
+      method: "GET",
+      headers: {
+        "Cache-Control": "no-cache",
+        "x-api-key": config.apiKey,
+      },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const user = data?.user ?? data;
+    const candidates = [
+      user?.credits_left,
+      user?.email_credits_left,
+      user?.api_credits_left,
+    ];
+    let lowest: number | null = null;
+    for (const v of candidates) {
+      const n = Number(v);
+      if (Number.isFinite(n)) lowest = lowest == null ? n : Math.min(lowest, n);
+    }
+    return lowest;
+  } catch {
+    return null;
+  }
+}
+
 export interface ApolloOrganization {
   name: string | null;
   primary_domain: string | null;

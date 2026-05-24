@@ -60,6 +60,27 @@ export interface ZeroBounceResult {
 
 const ACCEPTABLE_STATUSES = new Set(["valid", "catch-all", "unknown"]);
 
+/**
+ * Remaining credit count. Returns null on any failure so the caller
+ * (credit-alert cron) can flag the provider as "unknown" rather than
+ * fall over.
+ */
+export async function zerobounceGetCredits(
+  config: ZeroBounceConfig,
+): Promise<number | null> {
+  try {
+    const resp = await fetch(
+      `https://api.zerobounce.net/v2/getcredits?api_key=${encodeURIComponent(config.apiKey)}`,
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const n = Number(data?.Credits ?? data?.credits);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function zerobounceValidate(
   config: ZeroBounceConfig,
   email: string,
