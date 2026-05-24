@@ -231,9 +231,9 @@ export const BulkCandidateActionsDialog = ({
           <div className="rounded-md border border-card-border bg-secondary/30 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium">Enrich contact info</p>
+                <p className="text-sm font-medium">Enrich</p>
                 <p className="text-xs text-muted-foreground">
-                  Pick fields to verify — LeadMagic first, Bytemine fallback.
+                  Pick fields — work email, mobile, or LinkedIn profile & work history.
                 </p>
               </div>
               <EnrichButton

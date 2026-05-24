@@ -16,8 +16,10 @@ import {
   ArrowLeft, Building, Globe, MapPin, Briefcase, FileText, Upload,
   Loader2, ExternalLink, Edit, Check, X, Linkedin, Users, Info, Plus,
   FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Sparkles,
+  Rss,
 } from 'lucide-react';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
+import { JobPostingsTab } from '@/components/companies/JobPostingsTab';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
@@ -524,6 +526,7 @@ const CompanyDetail = () => {
                     <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{contracts.length}</span>
                   )}
                 </TabsTrigger>
+                <TabsTrigger value="postings" className="gap-1.5"><Rss className="h-3.5 w-3.5" /> Job postings</TabsTrigger>
                 <TabsTrigger value="sizzles" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
               </TabsList>
             </div>
@@ -636,6 +639,11 @@ const CompanyDetail = () => {
                     ))}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* Job postings tab */}
+              <TabsContent value="postings" className="px-8 py-5 mt-0">
+                {id && <JobPostingsTab companyId={id} companyName={company.name} />}
               </TabsContent>
 
               {/* Sizzles tab */}
