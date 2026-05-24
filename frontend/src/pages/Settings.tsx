@@ -258,6 +258,84 @@ const Settings = () => {
   const togglePassword = (key: string) =>
     setShowPasswords((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  // Enrichment-provider API keys (live in app_settings — Apollo + the
+  // four Phase 2/3 providers). One state object so a single save
+  // handler covers all of them.
+  type EnrichmentKey =
+    | 'APOLLO_API_KEY'
+    | 'BETTERCONTACT_API_KEY'
+    | 'FULLENRICH_API_KEY'
+    | 'PDL_API_KEY'
+    | 'ZEROBOUNCE_API_KEY';
+  const ENRICHMENT_KEY_META: Record<EnrichmentKey, { label: string; help: string; signupUrl: string }> = {
+    APOLLO_API_KEY: {
+      label: 'Apollo',
+      help: 'People match + organization enrich + person_id capture',
+      signupUrl: 'https://app.apollo.io/#/settings/integrations/api',
+    },
+    BETTERCONTACT_API_KEY: {
+      label: 'BetterContact',
+      help: 'Waterfall for work email + mobile (verifies upstream)',
+      signupUrl: 'https://bettercontact.rocks/api',
+    },
+    FULLENRICH_API_KEY: {
+      label: 'FullEnrich',
+      help: 'Primary for personal email, secondary for work email',
+      signupUrl: 'https://app.fullenrich.com/settings/api',
+    },
+    PDL_API_KEY: {
+      label: 'People Data Labs',
+      help: 'Personal email + mobile fallback; company job postings',
+      signupUrl: 'https://dashboard.peopledatalabs.com/api-keys',
+    },
+    ZEROBOUNCE_API_KEY: {
+      label: 'ZeroBounce',
+      help: 'Verifies Apollo + PDL emails before writing',
+      signupUrl: 'https://www.zerobounce.net/members/settings/api/',
+    },
+  };
+  const [enrichmentKeys, setEnrichmentKeys] = useState<Record<EnrichmentKey, string>>({
+    APOLLO_API_KEY: '',
+    BETTERCONTACT_API_KEY: '',
+    FULLENRICH_API_KEY: '',
+    PDL_API_KEY: '',
+    ZEROBOUNCE_API_KEY: '',
+  });
+  const [enrichmentKeysLoaded, setEnrichmentKeysLoaded] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'api' || enrichmentKeysLoaded) return;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', Object.keys(ENRICHMENT_KEY_META));
+      const next = { ...enrichmentKeys };
+      for (const row of data ?? []) {
+        if (row.key in next) (next as any)[row.key] = row.value ?? '';
+      }
+      setEnrichmentKeys(next);
+      setEnrichmentKeysLoaded(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const saveEnrichmentKey = async (key: EnrichmentKey) => {
+    setSaving(key);
+    try {
+      const { error } = await supabase.from('app_settings').upsert(
+        { key, value: enrichmentKeys[key], updated_at: new Date().toISOString() },
+        { onConflict: 'key' },
+      );
+      if (error) throw error;
+      toast.success(`${ENRICHMENT_KEY_META[key].label} key saved`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setSaving(null);
+    }
+  };
+
   // Load existing settings
   const loadSettings = useCallback(async () => {
     if (!user) return;
@@ -1909,27 +1987,66 @@ Senior Recruiter | Your Company
                 {activeTab === 'api' && (
                   <div>
                     <div className="mb-6">
-                      <h2 className="text-lg font-semibold text-foreground mb-1">API Keys</h2>
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Enrichment provider keys</h2>
                       <p className="text-sm text-muted-foreground">
-                        Manage API keys for external integrations.
+                        Stored in <code className="text-xs">app_settings</code>. Updates apply instantly — no redeploy needed. Pasted keys are sensitive: rotate at the provider if you ever expose them.
                       </p>
                     </div>
-                    <div className="rounded-lg border border-border bg-card p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="text-sm font-medium text-foreground">Production API Key</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Use this key for production integrations
-                          </p>
-                        </div>
-                        <Button size="sm" variant="outline">Generate New Key</Button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-muted px-3 py-2 rounded text-sm font-mono text-muted-foreground">
-                          sk_live_••••••••••••••••••••••••
-                        </code>
-                        <Button size="sm" variant="ghost">Copy</Button>
-                      </div>
+                    <div className="space-y-3">
+                      {(Object.keys(ENRICHMENT_KEY_META) as EnrichmentKey[]).map((key) => {
+                        const meta = ENRICHMENT_KEY_META[key];
+                        const value = enrichmentKeys[key];
+                        const isShown = showPasswords[`enrich_${key}`];
+                        return (
+                          <div key={key} className="rounded-lg border border-border bg-card p-4">
+                            <div className="flex items-center justify-between mb-2 gap-3">
+                              <div className="min-w-0">
+                                <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                                  {meta.label}
+                                  {value && (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      set ({value.length} chars)
+                                    </Badge>
+                                  )}
+                                </h3>
+                                <p className="text-xs text-muted-foreground mt-0.5">{meta.help}</p>
+                              </div>
+                              <a href={meta.signupUrl} target="_blank" rel="noreferrer"
+                                className="text-xs text-accent hover:underline shrink-0">
+                                Get key
+                              </a>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <Input
+                                  type={isShown ? 'text' : 'password'}
+                                  value={value}
+                                  placeholder="Paste key…"
+                                  onChange={(e) =>
+                                    setEnrichmentKeys((prev) => ({ ...prev, [key]: e.target.value }))
+                                  }
+                                  className="h-9 text-sm font-mono pr-9"
+                                />
+                                <button
+                                  type="button"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  onClick={() => togglePassword(`enrich_${key}`)}
+                                >
+                                  {isShown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => saveEnrichmentKey(key)}
+                                disabled={saving === key}
+                              >
+                                {saving === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
