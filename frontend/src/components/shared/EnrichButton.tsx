@@ -10,18 +10,20 @@ import { toast } from 'sonner';
 import { authHeaders } from '@/lib/api-auth';
 import { useQueryClient } from '@tanstack/react-query';
 
-export type EnrichField = 'work_email' | 'personal_email' | 'mobile';
+export type EnrichField = 'work_email' | 'personal_email' | 'mobile' | 'linkedin_profile';
 
 const FIELD_LABEL: Record<EnrichField, string> = {
   work_email: 'Work email',
   personal_email: 'Personal email',
   mobile: 'Mobile phone',
+  linkedin_profile: 'LinkedIn profile & work history',
 };
 
 const FIELD_COST_HINT: Record<EnrichField, string> = {
   work_email: '~5 cr (LeadMagic) + 0.25 verify',
   personal_email: '~2 cr (LeadMagic)',
   mobile: '~5 cr (LeadMagic)',
+  linkedin_profile: 'Free — Apollo + Unipile (also finds URL if missing)',
 };
 
 /**
@@ -56,6 +58,7 @@ export function EnrichButton({
     work_email: true,
     personal_email: false,
     mobile: false,
+    linkedin_profile: false,
   });
 
   const selected: EnrichField[] = (Object.keys(fields) as EnrichField[]).filter((k) => fields[k]);
@@ -72,6 +75,7 @@ export function EnrichButton({
       }
       let okTotal = 0, changedTotal = 0, failedTotal = 0, noLink = 0;
       let leadmagicCredits = 0, bytemineCalls = 0;
+      let urlsFound = 0, profilesSynced = 0, workHistoryRows = 0;
       for (const chunk of chunks) {
         const res = await fetch('/api/people/enrich', {
           method: 'POST',
@@ -86,11 +90,21 @@ export function EnrichButton({
         noLink += data.counts?.no_linkedin ?? 0;
         leadmagicCredits += data.credits?.leadmagic ?? 0;
         bytemineCalls += data.credits?.bytemine_calls ?? 0;
+        for (const r of (data.results ?? []) as Array<{ linkedin?: { found_url?: string; profile_fetched?: boolean; work_history_rows?: number } }>) {
+          if (r.linkedin?.found_url) urlsFound += 1;
+          if (r.linkedin?.profile_fetched) profilesSynced += 1;
+          workHistoryRows += r.linkedin?.work_history_rows ?? 0;
+        }
       }
+      const linkedinBits: string[] = [];
+      if (urlsFound > 0) linkedinBits.push(`${urlsFound} URL${urlsFound === 1 ? '' : 's'} found`);
+      if (profilesSynced > 0) linkedinBits.push(`${profilesSynced} profile${profilesSynced === 1 ? '' : 's'} synced`);
+      if (workHistoryRows > 0) linkedinBits.push(`${workHistoryRows} work-history row${workHistoryRows === 1 ? '' : 's'}`);
       toast.success(
         `Enriched: ${changedTotal} updated, ${okTotal - changedTotal} unchanged, ${failedTotal} failed` +
         (noLink > 0 ? ` (${noLink} no LinkedIn)` : '') +
-        ` — LM ${leadmagicCredits.toFixed(2)} cr, BM ${bytemineCalls} calls`,
+        ` — LM ${leadmagicCredits.toFixed(2)} cr, BM ${bytemineCalls} calls` +
+        (linkedinBits.length > 0 ? ` • ${linkedinBits.join(', ')}` : ''),
       );
       for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
       setOpen(false);
@@ -115,7 +129,8 @@ export function EnrichButton({
         <div>
           <p className="text-sm font-medium">What to enrich?</p>
           <p className="text-[11px] text-muted-foreground">
-            LeadMagic first → Bytemine fallback. Only selected fields are charged.
+            Contact info: LeadMagic → Bytemine fallback.
+            LinkedIn: Apollo → Unipile search (finds URL if missing).
           </p>
         </div>
         <div className="space-y-2">

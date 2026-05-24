@@ -1094,8 +1094,7 @@ const CandidateDetail = () => {
           {id && (
             <EnrichButton
               peopleIds={[id]}
-              disabled={!c.linkedin_url}
-              invalidateKeys={[['candidate', id], ['candidates']]}
+              invalidateKeys={[['candidate', id], ['candidates'], ['candidate_work_history', id]]}
             />
           )}
 

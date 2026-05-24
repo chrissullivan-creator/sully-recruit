@@ -1,5 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import {
+  findLinkedinUrlForPerson,
+  fetchUnipileProfile,
+  applyLinkedinProfileToPerson,
+} from "../lib/linkedin-finder.js";
 
 /**
  * POST /api/people/enrich
@@ -12,7 +17,7 @@ import { createClient } from "@supabase/supabase-js";
  *
  *   Body: {
  *     peopleIds: string[],                // up to 100
- *     fields:    Array<'work_email' | 'personal_email' | 'mobile'>
+ *     fields:    Array<'work_email' | 'personal_email' | 'mobile' | 'linkedin_profile'>
  *   }
  *
  * Per-field cascade:
@@ -32,15 +37,28 @@ import { createClient } from "@supabase/supabase-js";
  *     1. LeadMagic /v1/people/mobile-finder       (5 cr if found)
  *     2. Bytemine  /contacts/enrich
  *
+ *   linkedin_profile:
+ *     1. If the person has no linkedin_url, search for one (Apollo
+ *        /people/match → Unipile recruiter search). Writes URL only
+ *        on high-confidence match.
+ *     2. Fetch the full profile via Unipile v1 /users/{slug}.
+ *     3. Update current_title / current_company / location_text +
+ *        linkedin_* mirror columns, profile picture, and replace
+ *        candidate_work_history rows from work_experience[].
+ *
  * Per-person writes (only fields that came back AND differ):
- *   work_email      → people.work_email + people.primary_email
- *                     (clears email_invalid when work_email changes)
- *   personal_email  → people.personal_email
- *   mobile          → people.mobile_phone (falls back to phone)
- *   current_company → only updated if Bytemine returns one and ours
- *                     is empty (LeadMagic doesn't reliably return this)
- *   current_title   → same logic
- *   location_text   → same logic
+ *   work_email       → people.work_email + people.primary_email
+ *                      (clears email_invalid when work_email changes)
+ *   personal_email   → people.personal_email
+ *   mobile           → people.mobile_phone (falls back to phone)
+ *   linkedin_profile → linkedin_url (if discovered), current_title,
+ *                      current_company, location_text, linkedin_*
+ *                      mirror columns, profile_picture_url,
+ *                      candidate_work_history rows
+ *   current_company  → also updated opportunistically if Bytemine
+ *                      returns one and ours is empty
+ *   current_title    → same logic
+ *   location_text    → same logic
  *
  * Returns per-person results so a single bad row doesn't fail the
  * batch. `credits` totals each provider's spend for the call so the
@@ -51,14 +69,22 @@ const LEADMAGIC_BASE = "https://api.leadmagic.io";
 const BYTEMINE_URL =
   "https://bvjmtgaxijpyasjtaqiv.supabase.co/functions/v1/api-gateway";
 
-type Field = "work_email" | "personal_email" | "mobile";
+type Field = "work_email" | "personal_email" | "mobile" | "linkedin_profile";
+type ContactField = "work_email" | "personal_email" | "mobile";
 
 interface EnrichResult {
   id: string;
   ok: boolean;
   error?: string;
   updated: string[];
-  source?: Partial<Record<Field, "leadmagic" | "bytemine" | "none">>;
+  source?: Partial<Record<ContactField, "leadmagic" | "bytemine" | "none">>;
+  /** linkedin_profile-specific extras for caller telemetry. */
+  linkedin?: {
+    found_url?: string;
+    url_source?: "apollo" | "unipile";
+    profile_fetched: boolean;
+    work_history_rows: number;
+  };
 }
 
 interface BytemineFlat {
@@ -180,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: rows, error: peopleErr } = await supabase
     .from("people")
-    .select("id, linkedin_url, work_email, personal_email, primary_email, mobile_phone, phone, current_title, current_company, location_text, email_invalid, first_name, last_name")
+    .select("id, linkedin_url, work_email, personal_email, primary_email, mobile_phone, phone, current_title, current_company, location_text, email_invalid, first_name, last_name, full_name, avatar_url, profile_picture_url, linkedin_current_title, linkedin_current_company, linkedin_location, linkedin_headline")
     .in("id", peopleIds);
   if (peopleErr) return res.status(500).json({ error: `people lookup failed: ${peopleErr.message}` });
 
@@ -194,17 +220,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results.push({ id, ok: false, error: "person not found", updated: [] });
       continue;
     }
+
+    const updates: Record<string, any> = {};
+    const updated: string[] = [];
+    const source: EnrichResult["source"] = {};
+    let linkedinInfo: EnrichResult["linkedin"] | undefined;
+
+    // ── linkedin_profile: URL discovery + Unipile profile fetch.
+    //    Runs FIRST so a freshly-discovered URL unlocks the contact
+    //    cascades below for the same call.
+    if (fields.includes("linkedin_profile")) {
+      linkedinInfo = { profile_fetched: false, work_history_rows: 0 };
+
+      if (!row.linkedin_url) {
+        try {
+          const found = await findLinkedinUrlForPerson(supabase, {
+            id: row.id,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            full_name: row.full_name,
+            current_company: row.current_company,
+            primary_email: row.primary_email,
+            work_email: row.work_email,
+            personal_email: row.personal_email,
+          });
+          if (found?.url) {
+            await supabase
+              .from("people")
+              .update({
+                linkedin_url: found.url,
+                linkedin_search_status: "found",
+                linkedin_search_attempted_at: new Date().toISOString(),
+              })
+              .eq("id", id);
+            row.linkedin_url = found.url;
+            linkedinInfo.found_url = found.url;
+            linkedinInfo.url_source = found.source;
+            updated.push("linkedin_url");
+          }
+        } catch {
+          // Discovery failures are non-fatal — the row just stays
+          // without a URL and the next branch reports it.
+        }
+      }
+
+      if (row.linkedin_url) {
+        const profile = await fetchUnipileProfile(supabase, row.linkedin_url);
+        if (profile) {
+          try {
+            const applied = await applyLinkedinProfileToPerson(supabase, id, profile, row);
+            linkedinInfo.profile_fetched = true;
+            linkedinInfo.work_history_rows = applied.workHistoryRows;
+            for (const f of applied.fieldsUpdated) {
+              if (!updated.includes(f)) updated.push(f);
+            }
+          } catch (err: any) {
+            results.push({
+              id, ok: false,
+              error: `profile apply failed: ${err.message}`,
+              updated, source, linkedin: linkedinInfo,
+            });
+            continue;
+          }
+        }
+      }
+    }
+
+    // Without a URL we can't run the contact cascades. Record and move
+    // on — `linkedin` payload still tells the caller whether discovery
+    // was attempted.
     if (!row.linkedin_url) {
-      results.push({ id, ok: false, error: "no linkedin_url", updated: [] });
+      results.push({
+        id, ok: false, error: "no linkedin_url",
+        updated, source, linkedin: linkedinInfo,
+      });
       continue;
     }
 
     const slug = asLinkedinSlug(row.linkedin_url);
     const profileUrl = slug ?? row.linkedin_url;
-
-    const updates: Record<string, any> = {};
-    const updated: string[] = [];
-    const source: EnrichResult["source"] = {};
 
     // Lazy Bytemine response — fetched at most once per person and only
     // if at least one cascade step actually needs it.
@@ -356,7 +450,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (Object.keys(updates).length === 0) {
-      results.push({ id, ok: true, updated: [], source });
+      // linkedin_profile may have already written via its helper; keep
+      // the `updated` list (not empty in that case) so the toast counts
+      // the row as changed.
+      results.push({ id, ok: true, updated, source, linkedin: linkedinInfo });
       continue;
     }
 
@@ -364,10 +461,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { error: updErr } = await supabase
       .from("people").update(updates).eq("id", id);
     if (updErr) {
-      results.push({ id, ok: false, error: `update failed: ${updErr.message}`, updated: [], source });
+      results.push({
+        id, ok: false, error: `update failed: ${updErr.message}`,
+        updated, source, linkedin: linkedinInfo,
+      });
       continue;
     }
-    results.push({ id, ok: true, updated, source });
+    results.push({ id, ok: true, updated, source, linkedin: linkedinInfo });
   }
 
   return res.status(200).json({
