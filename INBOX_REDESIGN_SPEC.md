@@ -21,10 +21,22 @@ Tracking answers as they come in.
 | 3 | Focused = persisted (in CRM), Other = live unknown senders | **Yes** |
 | 4 | Auto-add default type | **AI-guess** based on email domain + signature + message context (candidate vs client). Falls back to `candidate` + `needs_classification=true` if guess is low-confidence |
 | 5 | Deny-list for auto-add | **Yes** — own domain, distribution lists, common service addresses (`support@`, `noreply@`, etc.) |
-| 7+8 | Backfill — when person added, call Unipile to get cross-platform IDs first, then backfill all channels | **Yes** — two-stage: enrich Unipile IDs → backfill across email + LinkedIn + SMS. Lookback default 24 months unless Chris says otherwise |
+| 7 | Backfill — when person added, multi-stage enrichment + backfill | **Yes**: Stage 1a = if LinkedIn URL → fill profile fields from Unipile + capture URN/attendee IDs; Stage 1b = cross-channel ID resolution; Stage 1c = third-party enrichment for missing email/phone (**provider TBD — Chris to choose**); Stage 2 = backfill messages across email + LinkedIn + SMS |
+| 7a | Backfill lookback window | **Email: back to 2019. LinkedIn: forever** (no cap) |
+| 8 | One-time backfill on existing people | **Yes** — sent + received. Must accurately populate `people.last_contacted_at` and `people.last_responded_at` as it runs |
+| 16 | Sequence cross-channel AI soft-match | **Yes** — stop on soft-match AND run enrichment API to confirm. On confirmed match, persist new channel ID. On low-confidence, send to Data Cleanup |
+| 17 | Pre-enrollment warning | **No warning** — auto-run enrichment to fill missing channel data. Ambiguous matches → **Data Cleanup** view |
+| 17a | **Data Cleanup Settings view (new)** | New page rolling up: enrichment ambiguity, needs-classification (auto-added people), and existing duplicates (CollisionReview merged in) |
+| 11 | AI tagging on non-persisted inbound | **Skip** to save cost. Backfill covers it once the person is added |
+| 12 | Snooze wake | **Push notification** when a snoozed thread wakes |
+| 13 | Cleanup of existing 21k unlinked messages | **Leave as-is** — the one-time backfill re-fetches, dedupes, and tags previously-orphan rows where counterparty matches |
+| 15 | Search across unknown-sender history | **Provider-side search button**. No rolling snapshot — auto-backfill on add captures retrospective history |
+| 16 | Phase 5 scope confirmed (~3 days) | **Good — ship as-is** |
+| 8b | Counterparty edge cases (group threads) | **Multi-tag**: 2+ matching recipients → save to all. 1 match + unknown others → prompt "save & add others?" with quick add |
+| 18 | Strip quoted email replies before embedding | **Yes** — strip `>` blocks and forwarded-message headers before Voyage |
 | 19 | Index call notes too | **Yes** — unified `search_communications` Joe tool covers both messages and calls |
 
-*Still pending: questions 6, 9-18 in §7.*
+*Only pending: Q14 (event log TTL — defaulting to 30d unless Chris says otherwise).*
 
 ---
 
@@ -196,16 +208,24 @@ SMS view doesn't need the live endpoint — it's all in Supabase.
 
 When a person is added to the CRM (any path), we don't just backfill from the channels we already know — we **first call out to Unipile to discover all of their channel IDs across platforms**, then backfill from each.
 
-**Two-stage flow on `person.created`:**
+**Multi-stage flow on `person.created`:**
 
-**Stage 1 — Cross-channel ID enrichment (new):**
-1. Read what we have for the new person: `email`, `linkedin_url`, `phone`.
-2. Call Unipile to find their identifiers across platforms (exact endpoints TBD — needs short discovery sprint; see "Unipile lookup options" below):
-   - If we have a LinkedIn URL → `GET /users/{public_identifier}?account_id=X` to fetch their LinkedIn member URN + Unipile attendee ID.
-   - If we have an email but no LinkedIn URL → try Unipile's people search to find their LinkedIn (best-effort; not all emails resolve).
-   - If LinkedIn resolves → check whether they're an existing Unipile chat attendee on any of our connected LinkedIn / Recruiter accounts.
-3. Persist every resolved identifier into `candidate_channels` / `contact_channels` so subsequent webhooks recognize them.
-4. Persist any name/title/company/company_domain enrichments we got back onto the `people` row (don't overwrite existing values; fill blanks only).
+**Stage 1a — LinkedIn profile fill (if LinkedIn URL present):**
+1. Read what we have for the new person: `email`, `linkedin_url`, `phone`, `full_name`, `current_title`, `current_company`.
+2. If `linkedin_url` is set → call `GET /api/v1/users/{public_identifier}?account_id=X` (Unipile v1) to fetch the full LinkedIn profile.
+3. **Fill blank fields only** on the `people` row from the profile: `current_title`, `current_company`, `linkedin_headline`, `location`, `avatar_url`, etc. Never overwrite values the user has set.
+4. Capture the LinkedIn member URN + Unipile attendee ID → upsert into `candidate_channels` / `contact_channels` (so future LinkedIn messages from them auto-recognize as hard matches).
+
+**Stage 1b — Cross-channel ID resolution:**
+1. If we still don't have LinkedIn (only an email) → try Unipile people search to find it (best-effort).
+2. If LinkedIn resolves → check whether they're an existing Unipile chat attendee on any of our connected LinkedIn / Recruiter accounts; pull all known provider IDs.
+3. Upsert every resolved identifier into `candidate_channels` / `contact_channels`.
+
+**Stage 1c — Third-party enrichment for missing data (provider TBD):**
+1. If after Stages 1a + 1b we're still missing key fields (e.g. no email, no phone, no company domain) → call a third-party enrichment provider. **Provider not yet selected** (candidates: Clearbit, Apollo, FullEnrich, Proxycurl). Chris will pick once we evaluate.
+2. **Fill blank fields only** on the `people` row.
+3. Add resolved email/phone to `candidate_channels` / `contact_channels`.
+4. If the enrichment returns **multiple plausible matches** for the person → don't auto-pick. Write to `enrichment_ambiguity` table and surface in the **Data Cleanup** view for Chris to disambiguate.
 
 **Stage 2 — Cross-channel backfill:**
 1. For each channel identifier in `candidate_channels` / `contact_channels`:
@@ -217,19 +237,30 @@ When a person is added to the CRM (any path), we don't just backfill from the ch
 4. AI-tag the backfilled messages.
 5. Enqueue `messages/indexed.requested` for each backfilled row so they land in `search_documents` for Joe.
 
-**Bounds**: configurable lookback (default 24 months). Toast: "Looking up {name} across channels… Backfilling past communications…"
+**Bounds**:
+- **Email lookback: back to 2019-01-01** (anything older not pulled).
+- **LinkedIn lookback: no cap** — fetch the full chat history Unipile exposes.
+- **SMS lookback: no cap** — RingCentral retention is what it is.
+- Toast: "Looking up {name} across channels… Backfilling past communications…"
+
+**`last_contacted_at` / `last_responded_at` bookkeeping**: as backfill processes each message, update the `people` row:
+- `last_contacted_at` = max of (existing value, every outbound message's `sent_at` to this person)
+- `last_responded_at` = max of (existing value, every inbound message's `sent_at` from this person)
+- `last_comm_channel` = the channel of the most recent activity in either direction
+- Set in a single `UPDATE people SET last_contacted_at = greatest(...), last_responded_at = greatest(...) WHERE id = X` at the end of the backfill (not per-message — avoids 1000+ updates per person). Also recompute on the steady-state webhook insert path so the values stay fresh going forward.
 
 **Failure mode**: partial-channel failure retries that channel; doesn't block person creation or stage 2 from running on the channels that did resolve.
 
-#### Unipile lookup options (discovery sprint)
+#### API lookup matrix
 
-The exact API path is TBD — needs a 1-hour spike before Phase 5. Options:
-- `GET /api/v1/users/{public_identifier}?account_id=X` — confirmed working for LinkedIn profile lookup (CLAUDE.md §"Confirmed v1 routes").
-- `POST /api/v1/linkedin/search?account_id=X` with `{api:'recruiter', category:'people', keywords: '<name>'}` — Recruiter search by name/email.
-- `POST /api/v1/linkedin/search/parameters?account_id=X` with `{type:'COMPANY', keywords: '<company>'}` — narrow by company.
-- Email-to-LinkedIn lookup probably needs a third-party enrichment provider (Clearbit, Apollo) — note as a follow-up if Unipile alone isn't enough.
+| What we need | API | Status |
+|---|---|---|
+| LinkedIn profile from URL | `GET /api/v1/users/{public_identifier}?account_id=X` (Unipile) | ✅ Confirmed working (CLAUDE.md §"Confirmed v1 routes") |
+| LinkedIn URL from email | `POST /api/v1/linkedin/search?account_id=X` body `{api:'recruiter', category:'people', keywords:'<email>'}` | ⏳ Needs 1-hour spike — may not always resolve |
+| Email + phone from a name + company | Third-party enrichment provider | ⏳ **Provider TBD — Chris to choose** (candidates: Clearbit, Apollo, FullEnrich, Proxycurl) |
+| Existing Unipile attendee on our accounts | `GET /api/v1/chats?account_id=X` filter by attendee | ✅ Confirmed working |
 
-Add to spec once the spike confirms which calls return the IDs we need.
+Add to spec once the spike confirms which calls return the IDs we need and once the third-party provider is selected.
 
 ### Sequences must stop on a reply from ANY channel
 
@@ -249,6 +280,29 @@ The new storage rule must preserve this. Specifically:
 **Webhook implementation detail:** when a recognition match succeeds for an inbound, **after** persisting the message, check if the candidate has an active sequence enrollment. If yes, call the same `hasRepliedSinceEnrollment` → `stopEnrollment` path the runner uses — don't wait for the next scheduled step run to discover the reply. This makes the stop immediate rather than up-to-N-hours delayed. (May already be partially the case in `process-unipile-event.ts` / `process-microsoft-event.ts` / `process-ringcentral-event.ts` — Phase 5 audit confirms or adds it.)
 
 Existing 10k conversations + 21k messages stay (forward-looking change). Optional later cleanup: messages where `candidate_id IS NULL AND contact_id IS NULL` AND channel ∈ (email, linkedin, linkedin_recruiter) AND older than 6 months → archive/delete. SMS rows stay regardless.
+
+### One-time backfill on all existing people (Phase 5 launch)
+
+When this ships, queue every existing candidate + client (~7,700 rows: 6,679 candidates + 1,062 clients) through the same two-stage `backfill-person-communications` Inngest job.
+
+- **Reuses** the same enrichment + backfill flow as new-person creation.
+- **Idempotent**: dedupes by `external_message_id` so re-running is safe.
+- **Throttled**: ~5 people/sec to respect Microsoft Graph + Unipile rate limits → ~25 min wall time at the start, longer if heavy-history people queue up.
+- **Sequenced per person**: Stage 1 (enrich Unipile IDs) → Stage 2 (backfill messages) → recompute `last_contacted_at` / `last_responded_at` → enqueue `messages/indexed.requested` for each row so they land in `search_documents` for Joe.
+- **Resumable**: progress tracked in a new lightweight `backfill_run` table (`person_id`, `started_at`, `completed_at`, `status`, `messages_imported`, `error`) so we can pause/resume without re-scanning processed people.
+- **Progress widget** in the Data Cleanup view: "4,231 of 7,741 people backfilled · 2h remaining."
+
+### AI soft-match flow (sequence cross-channel stop)
+
+When an inbound message arrives that does NOT hard-match a known person via `candidate_channels`:
+
+1. Run a fast AI classifier (Joe Sonnet) comparing the inbound sender's name + email/LinkedIn handle + signature text + company context against active sequence enrollments.
+2. **If soft-match confidence ≥ threshold (start at 0.85):**
+   - **Stop the sequence immediately** with `stop_trigger='soft_match_reply'`.
+   - **Call the enrichment API** (TBD: Unipile users lookup + optional third-party like Clearbit/Apollo) to confirm the match — pull their full identity (LinkedIn URN, official email, phone).
+   - If enrichment **confirms** → **persist the new channel ID** to `candidate_channels` so future messages on this channel auto-recognize as hard matches. Update the `people` row with any new info (LinkedIn URL, etc.).
+   - If enrichment **can't confirm OR returns multiple candidates** → leave the sequence stopped (better to over-stop than miss a real reply) but **send the case to Data Cleanup** for Chris to disambiguate.
+3. If soft-match confidence < threshold: log the inbound to `inbox_event_log` with `soft_match_skipped` reason; don't act.
 
 ### Risk / things to watch
 
@@ -521,6 +575,57 @@ Below `lg` (1024px):
 - 3-pane → stack: List view → tap row → Thread view (back button) → tap "Person" → Entity slide-over.
 - Quick actions become swipe gestures (swipe left = archive, swipe right = snooze).
 
+### 4.13 Data Cleanup — new Settings view
+
+A new page at `/settings/data-cleanup` (or `/admin/data-cleanup`) that unifies every "this needs your attention" data hygiene case in one place. Replaces / absorbs the existing `frontend/src/pages/CollisionReview.tsx`.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Settings › Data Cleanup                                        │
+│                                                                 │
+│  Backfill progress: 4,231 of 7,741 people · 2h remaining        │
+│  ████████████████░░░░░░░░░░░░░░░░░░░░░░░░  54%                  │
+│                                                                 │
+│  ┌──────────────┬─────────────┬─────────────┬──────────────┐    │
+│  │ Needs        │ Enrichment  │ Duplicates  │ Missing      │    │
+│  │ classification│ ambiguous   │             │ channel data │    │
+│  │  (12)        │  (7)        │  (23)       │  (89)        │    │
+│  └──────────────┴─────────────┴─────────────┴──────────────┘    │
+│                                                                 │
+│  ─── Needs classification (12) ─────────────────────────        │
+│  Jane Doe — sent via Outlook 3 hrs ago                          │
+│    Suggested by AI: Candidate (0.92 confidence)                 │
+│    [✓ Accept]  [👤 Candidate]  [🤝 Client]  [✕ Remove]          │
+│  ────────────────────────────────────────────                   │
+│  …                                                              │
+│                                                                 │
+│  ─── Enrichment ambiguous (7) ──────────────────────────        │
+│  Mark Johnson — enriched: 3 possible LinkedIn matches           │
+│    [Mark Johnson, Senior PM at Citadel]  [Select]               │
+│    [Mark Johnson, MD at Goldman Sachs]   [Select]               │
+│    [Mark Johnson, Partner at Apollo]     [Select]               │
+│  …                                                              │
+│                                                                 │
+│  ─── Duplicates (23) ───────────────────────────────────        │
+│  (existing CollisionReview UI surfaces here — merge action)     │
+│                                                                 │
+│  ─── Missing channel data (89) ─────────────────────────        │
+│  Bob Smith — has email, no LinkedIn URL                         │
+│    [🔍 Run enrichment]  [Skip]                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Four sections:**
+
+1. **Needs classification** — people auto-added from outbound sends (`needs_classification=true`). Shows AI-guessed type + confidence. Quick-classify buttons.
+2. **Enrichment ambiguous** — when our Unipile/third-party lookup returned multiple plausible matches for a person, surface them here for manual pick. Triggered by add-person, sequence enrollment, or soft-match flow.
+3. **Duplicates** — existing `CollisionReview.tsx` UI absorbed as a tab. Detect overlapping records by email/LinkedIn URL/phone. Merge action consolidates.
+4. **Missing channel data** — people with sparse channel coverage (e.g. has email + name but no LinkedIn URL). Click "Run enrichment" to fill on demand. Bulk action: "Enrich all" runs the API in batch.
+
+**Counts as badge in main app nav** so the user notices when cleanup is needed.
+
+**Permissions**: admin-only for now (Chris is admin; Ashley + Nancy see read-only).
+
 ---
 
 ## 5. Data model changes
@@ -558,6 +663,44 @@ CREATE INDEX IF NOT EXISTS idx_people_needs_classification ON public.people(need
 ```
 
 Note: `people.type` keeps its existing `CHECK (type IN ('candidate','client'))` constraint. Auto-added people default to `type = 'candidate'` + `needs_classification = true`. User confirms or flips type, which clears the flag. No need to extend the CHECK constraint or touch the candidate/client filters elsewhere in the app.
+
+### 5.1c New `backfill_run` table — tracks one-time + per-person backfill
+
+```sql
+CREATE TABLE public.backfill_run (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id uuid REFERENCES public.people(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('person_created','one_time_existing','manual_retry')),
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','enriching','backfilling','indexing','complete','partial','failed')),
+  started_at timestamptz,
+  completed_at timestamptz,
+  messages_imported int DEFAULT 0,
+  channels_enriched text[] DEFAULT '{}',
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON public.backfill_run (status, created_at) WHERE status != 'complete';
+CREATE INDEX ON public.backfill_run (person_id, created_at DESC);
+```
+
+### 5.1d New `enrichment_ambiguity` table — feeds the Data Cleanup view
+
+```sql
+CREATE TABLE public.enrichment_ambiguity (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id uuid NOT NULL REFERENCES public.people(id) ON DELETE CASCADE,
+  source text NOT NULL CHECK (source IN ('person_created','soft_match','manual')),
+  candidates jsonb NOT NULL,    -- [{ name, linkedin_url, title, company, source_provider, confidence }, ...]
+  resolved_choice jsonb,        -- the chosen item once user picks; NULL until resolved
+  resolved_at timestamptz,
+  resolved_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON public.enrichment_ambiguity (person_id) WHERE resolved_at IS NULL;
+```
 
 ### 5.2 New `inbox_event_log` (lightweight webhook trace, 7-day TTL)
 
@@ -847,19 +990,19 @@ Files:
 2. ✅ **Auto-add default type** — **answered**: AI-guess.
 3. ✅ **Deny-list** — **answered**: yes.
 4. ✅ **AI-guess classification** — **answered**: yes (same as #2).
-5. **Backfill lookback window**: default 24 months. Long enough? Some senior candidates have 3+ years of LinkedIn DM history.
-6. **Backfill on existing people**: when this ships, run a one-time backfill on existing candidates/clients to catch pre-existing messages we'd have dropped under the old behavior? Or forward-only?
-7. **AI tagging on non-persisted inbound**: still run Joe's classification on every inbound webhook even when the sender isn't in the system (to flag e.g. an unknown person saying "I accept the offer")? Cost vs catching edge cases.
-8. **Counterparty edge cases — group threads, forwards, dist lists**: if a single email has multiple recipients and one matches a candidate, save the whole thread tagged to that candidate? Default yes.
+5. ✅ **Backfill lookback window** — **answered**: email **back to 2019**; LinkedIn **forever** (no cap).
+6. ✅ **Backfill on existing people** — **answered**: yes, one-time backfill on all existing candidates/clients across sent + received. **Plus**: backfill must accurately populate `people.last_contacted_at` and `people.last_responded_at` as it goes.
+7. ✅ **AI tagging on non-persisted inbound** — **answered**: **skip** to save cost. The one-time backfill (Q8) will re-run AI tags on previously-unknown messages once the person is added.
+8. ✅ **Counterparty edge cases (group threads, forwards, dist lists)** — **answered**: **multi-tag**. If 2+ recipients match known people, save the conversation tagged to ALL of them. If only 1 matches and the others are unknown, surface a "Save & add the other recipients?" prompt with quick add buttons.
 9. ✅ **Default density** — **answered**: Comfortable (Claude's call).
 10. ✅ **Focused vs Other criteria** — **answered**: yes, persisted vs live unknown.
-11. **Snooze wake notification**: push notification or silent re-appear with a "Welcome back" banner?
-12. **Search across unknown-sender history**: provider's own search only (via a "Search inbox provider…" affordance)? Or keep a 30-day rolling snapshot for global search?
-13. **Existing 21k messages cleanup**: leave as-is, or one-time cleanup of inbound rows where `candidate_id IS NULL AND contact_id IS NULL` + channel ∈ (email, linkedin, linkedin_recruiter) + older than 6 months?
-14. **Event log TTL**: 7 days OK for the debug-only `inbox_event_log`?
-15. **Audit scope for outbound persistence**: Phase 5 audits every send endpoint to ensure it persists. Do you want me to first do a read-only pass and report which send paths today already persist vs not, before changing anything?
-16. **Sequence cross-channel stop — AI soft-match**: when an inbound looks like it's from a known candidate but no channel-ID matches (e.g. new LinkedIn account we haven't linked), should we use an AI soft-match to stop the sequence anyway (with a "confirm match" prompt to the user)? Or is hard-channel-match strict enough?
-17. **Sequence pre-enrollment warning**: surface a warning before enrolling someone in an email sequence if we have their LinkedIn URL but no `candidate_channels` row for it (so a LinkedIn reply might not get recognized)? Or silently auto-create the channel row from `people` fields?
-18. **RAG — strip quoted email replies from indexed body?** Email replies often include the entire prior thread in `>` quotes. Strip them before embedding so the search isn't dominated by duplicated text? Default yes.
+11. ✅ **Snooze wake notification** — **answered**: **push notification** when a snoozed thread wakes.
+12. ✅ **Search across unknown-sender history** — **answered**: provider-side search button. No rolling snapshot needed — auto-backfill on add captures retrospective history.
+13. ✅ **Existing 21k messages cleanup** — **answered**: **leave as-is**. The one-time backfill (Q8) re-fetches from providers and dedupes; previously-orphan rows get tagged when their counterparty turns out to be a now-known person.
+14. ⏳ **Event log TTL** — **awaiting Chris's pick**. Default suggested: **30 days**. (Explanation: tiny debug table logging webhook arrivals with metadata only — no message bodies. ~18k rows/year = trivial cost. 7d = tight, 30d = covers most "where did my message go?" reports, no TTL = never wonder if logs rotated.)
+15. ✅ **Audit scope for outbound persistence** — **answered (separately)**: audit complete. Outbound persists across all paths; cross-channel `stopEnrollment` already wired; person-created → backfill chain already exists. Phase 5 shrinks to ~3 days.
+16. ✅ **Sequence cross-channel AI soft-match** — **answered**: yes, **stop the sequence on soft-match AND run the enrichment API to confirm**. On confirmed match, persist the new channel ID to `candidate_channels` so the next message recognizes hard. On enrichment fail or low confidence, surface in **Data Cleanup**.
+17. ✅ **Pre-enrollment warning** — **answered**: don't warn — instead **auto-run enrichment** to fill missing channel data (e.g. enroll an email-only candidate → silently enrich for LinkedIn). If enrichment returns **multiple candidates / ambiguous match**, add the case to a new **Data Cleanup** Settings view for manual disambiguation. **Duplicates** (existing CollisionReview at `frontend/src/pages/CollisionReview.tsx`) folded into the same Data Cleanup view.
+18. ✅ **Strip quoted email replies before embedding** — **answered**: yes. Indexer will strip `>` quote blocks and forwarded-message headers before sending to Voyage.
 
-Once you answer these, I'll start Phase 1 (timestamps + list polish — biggest UX win, no DB risk).
+**All required questions answered.** Only #14 (event log TTL) needs a quick pick — defaulting to 30 days unless you say otherwise.
