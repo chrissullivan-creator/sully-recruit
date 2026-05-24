@@ -21,7 +21,8 @@ Tracking answers as they come in.
 | 3 | Focused = persisted (in CRM), Other = live unknown senders | **Yes** |
 | 4 | Auto-add default type | **AI-guess** based on email domain + signature + message context (candidate vs client). Falls back to `candidate` + `needs_classification=true` if guess is low-confidence |
 | 5 | Deny-list for auto-add | **Yes** — own domain, distribution lists, common service addresses (`support@`, `noreply@`, etc.) |
-| 7 | Backfill — when person added, multi-stage enrichment + backfill | **Yes**: Stage 1a = if LinkedIn URL → fill profile fields from Unipile + capture URN/attendee IDs; Stage 1b = cross-channel ID resolution; Stage 1c = third-party enrichment for missing email/phone (**provider TBD — Chris to choose**); Stage 2 = backfill messages across email + LinkedIn + SMS |
+| 7 | Backfill — when person added, multi-stage enrichment + backfill | **Yes**: Stage 1a = if LinkedIn URL → fill profile fields from Unipile + capture URN/attendee IDs; Stage 1b = cross-channel ID resolution; Stage 1c = **provider waterfall** per data type (see §3 Enrichment Waterfall); Stage 2 = backfill messages across email + LinkedIn + SMS |
+| 7b | **Enrichment waterfall (locked in)** | Work email: Apollo → FullEnrich → BetterContact (ZeroBounce verifies). Personal email: FullEnrich → PDL (ZeroBounce verifies). Mobile: BetterContact → PDL. Company info: Apollo → PDL. LinkedIn: Unipile. Apollo IDs persisted on `people.apollo_person_id` + `companies.apollo_organization_id`. Job postings: PDL → `company_job_postings` table |
 | 7a | Backfill lookback window | **Email: back to 2019. LinkedIn: forever** (no cap) |
 | 8 | One-time backfill on existing people | **Yes** — sent + received. Must accurately populate `people.last_contacted_at` and `people.last_responded_at` as it runs |
 | 16 | Sequence cross-channel AI soft-match | **Yes** — stop on soft-match AND run enrichment API to confirm. On confirmed match, persist new channel ID. On low-confidence, send to Data Cleanup |
@@ -222,11 +223,41 @@ When a person is added to the CRM (any path), we don't just backfill from the ch
 2. If LinkedIn resolves → check whether they're an existing Unipile chat attendee on any of our connected LinkedIn / Recruiter accounts; pull all known provider IDs.
 3. Upsert every resolved identifier into `candidate_channels` / `contact_channels`.
 
-**Stage 1c — Third-party enrichment for missing data (provider TBD):**
-1. If after Stages 1a + 1b we're still missing key fields (e.g. no email, no phone, no company domain) → call a third-party enrichment provider. **Provider not yet selected** (candidates: Clearbit, Apollo, FullEnrich, Proxycurl). Chris will pick once we evaluate.
-2. **Fill blank fields only** on the `people` row.
-3. Add resolved email/phone to `candidate_channels` / `contact_channels`.
-4. If the enrichment returns **multiple plausible matches** for the person → don't auto-pick. Write to `enrichment_ambiguity` table and surface in the **Data Cleanup** view for Chris to disambiguate.
+**Stage 1c — Third-party enrichment waterfall for missing data:**
+
+Different providers do different things best. We waterfall per-data-type, stopping at the first one that returns a high-confidence answer:
+
+| Data needed | Waterfall (top to bottom, stop at first hit) | Verification |
+|---|---|---|
+| **Work email** | Apollo → FullEnrich → BetterContact | Apollo's result is piped through **ZeroBounce** before we save it |
+| **Personal email** | FullEnrich → PDL | PDL's result piped through **ZeroBounce** |
+| **Mobile (phone)** | BetterContact → PDL | No verification — providers are trusted |
+| **Company info** (size, industry, domain, etc.) | Apollo → PDL | n/a |
+| **LinkedIn profile + member URN** | Unipile (Stage 1a above) | already shipped |
+| **Job postings (per company)** | PDL → writes to `company_job_postings` table | per-career-url incremental fetch |
+
+**Persisted identifiers** so we don't re-enrich on every webhook:
+- `people.apollo_person_id` — Apollo's stable person ID once we've matched them
+- `companies.apollo_organization_id` — Apollo's stable company ID
+- (Existing LinkedIn URN persisted to `candidate_channels`/`contact_channels`)
+
+**Flow per data field:**
+1. Check what we have. If field is set, skip.
+2. Hit provider 1. On success, run verification (if applicable). On verified result, persist + stop. On low-confidence or 0 hits, fall through.
+3. Hit provider 2. Same logic.
+4. (Continue down the waterfall.)
+5. If all providers return nothing, leave the field blank. **Don't** flag as ambiguous — only flag if multiple providers return *different* plausible answers.
+6. If two providers return *different* plausible person/company matches → write to `enrichment_ambiguity` and surface in **Data Cleanup**.
+
+**Implementation**: a single `enrichPerson(personId, fields[])` helper in `frontend/src/server-lib/enrich.ts` driven by a per-field waterfall config, so the runtime is just "for each missing field, call the providers in order until one verifies." All provider calls go through a thin wrapper that handles rate limits, retries, and ZeroBounce verification for the relevant fields.
+
+**Per-provider API keys** stored in `app_settings`:
+- `APOLLO_API_KEY`
+- `FULLENRICH_API_KEY`
+- `BETTERCONTACT_API_KEY`
+- `PDL_API_KEY`
+- `ZEROBOUNCE_API_KEY`
+- (UNIPILE_API_KEY already exists.)
 
 **Stage 2 — Cross-channel backfill:**
 1. For each channel identifier in `candidate_channels` / `contact_channels`:
@@ -258,7 +289,11 @@ When a person is added to the CRM (any path), we don't just backfill from the ch
 |---|---|---|
 | LinkedIn profile from URL | `GET /api/v1/users/{public_identifier}?account_id=X` (Unipile) | ✅ Confirmed working (CLAUDE.md §"Confirmed v1 routes") |
 | LinkedIn URL from email | `POST /api/v1/linkedin/search?account_id=X` body `{api:'recruiter', category:'people', keywords:'<email>'}` | ⏳ Needs 1-hour spike — may not always resolve |
-| Email + phone from a name + company | Third-party enrichment provider | ⏳ **Provider TBD — Chris to choose** (candidates: Clearbit, Apollo, FullEnrich, Proxycurl) |
+| Work email | Apollo → FullEnrich → BetterContact (ZeroBounce verifies Apollo) | ✅ Provider waterfall locked in |
+| Personal email | FullEnrich → PDL (ZeroBounce verifies PDL) | ✅ Provider waterfall locked in |
+| Mobile phone | BetterContact → PDL | ✅ Provider waterfall locked in |
+| Company info | Apollo → PDL | ✅ Provider waterfall locked in |
+| Job postings | PDL → `company_job_postings` table | ✅ Locked in |
 | Existing Unipile attendee on our accounts | `GET /api/v1/chats?account_id=X` filter by attendee | ✅ Confirmed working |
 
 Add to spec once the spike confirms which calls return the IDs we need and once the third-party provider is selected.
@@ -702,6 +737,51 @@ CREATE TABLE public.enrichment_ambiguity (
 
 CREATE INDEX ON public.enrichment_ambiguity (person_id) WHERE resolved_at IS NULL;
 ```
+
+### 5.1e Apollo IDs + enrichment cache columns
+
+```sql
+ALTER TABLE public.people
+  ADD COLUMN IF NOT EXISTS apollo_person_id text,
+  ADD COLUMN IF NOT EXISTS enriched_at timestamptz,         -- last successful enrichment pass
+  ADD COLUMN IF NOT EXISTS enrichment_meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+  -- enrichment_meta shape: { work_email: { provider, verified, at }, mobile: { provider, at }, ... }
+
+CREATE INDEX IF NOT EXISTS idx_people_apollo_person_id ON public.people(apollo_person_id)
+  WHERE apollo_person_id IS NOT NULL;
+
+ALTER TABLE public.companies
+  ADD COLUMN IF NOT EXISTS apollo_organization_id text,
+  ADD COLUMN IF NOT EXISTS enriched_at timestamptz,
+  ADD COLUMN IF NOT EXISTS enrichment_meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_companies_apollo_organization_id ON public.companies(apollo_organization_id)
+  WHERE apollo_organization_id IS NOT NULL;
+```
+
+### 5.1f New `company_job_postings` table (PDL-fed)
+
+```sql
+CREATE TABLE public.company_job_postings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  external_id text NOT NULL,             -- PDL's posting ID
+  title text,
+  location text,
+  career_url text,
+  posting_url text,
+  posted_at timestamptz,
+  closed_at timestamptz,
+  fetched_at timestamptz NOT NULL DEFAULT now(),
+  raw_payload jsonb,
+  UNIQUE (company_id, external_id)
+);
+
+CREATE INDEX ON public.company_job_postings (company_id, posted_at DESC);
+CREATE INDEX ON public.company_job_postings (career_url) WHERE career_url IS NOT NULL;
+```
+
+Per-career-url incremental fetch — fetch new postings only since the last `fetched_at` for that career_url.
 
 ### 5.2 New `inbox_event_log` (lightweight webhook trace, 7-day TTL)
 
