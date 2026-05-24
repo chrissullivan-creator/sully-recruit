@@ -20,9 +20,9 @@ const FIELD_LABEL: Record<EnrichField, string> = {
 };
 
 const FIELD_COST_HINT: Record<EnrichField, string> = {
-  work_email: '~5 cr (LeadMagic) + 0.25 verify',
-  personal_email: '~2 cr (LeadMagic)',
-  mobile: '~5 cr (LeadMagic)',
+  work_email: 'Apollo → FullEnrich → BetterContact (~$0.05–0.15)',
+  personal_email: 'FullEnrich → PDL (~$0.05–0.10, PDL gated by ZeroBounce)',
+  mobile: 'BetterContact → PDL (~$0.10–0.20 when found)',
   linkedin_profile: 'Free — Apollo + Unipile (also finds URL if missing)',
 };
 
@@ -73,8 +73,8 @@ export function EnrichButton({
       for (let i = 0; i < peopleIds.length; i += 100) {
         chunks.push(peopleIds.slice(i, i + 100));
       }
-      let okTotal = 0, changedTotal = 0, failedTotal = 0, noLink = 0;
-      let leadmagicCredits = 0, bytemineCalls = 0;
+      let okTotal = 0, changedTotal = 0, failedTotal = 0;
+      let apolloCalls = 0, fullenrichCalls = 0, bettercontactCalls = 0, pdlCalls = 0, zbChecks = 0;
       let urlsFound = 0, profilesSynced = 0, workHistoryRows = 0;
       for (const chunk of chunks) {
         const res = await fetch('/api/people/enrich', {
@@ -87,9 +87,11 @@ export function EnrichButton({
         okTotal += data.counts?.ok ?? 0;
         changedTotal += data.counts?.changed ?? 0;
         failedTotal += data.counts?.failed ?? 0;
-        noLink += data.counts?.no_linkedin ?? 0;
-        leadmagicCredits += data.credits?.leadmagic ?? 0;
-        bytemineCalls += data.credits?.bytemine_calls ?? 0;
+        apolloCalls += data.credits?.apollo_calls ?? 0;
+        fullenrichCalls += data.credits?.fullenrich_calls ?? 0;
+        bettercontactCalls += data.credits?.bettercontact_calls ?? 0;
+        pdlCalls += data.credits?.pdl_calls ?? 0;
+        zbChecks += data.credits?.zerobounce_checks ?? 0;
         for (const r of (data.results ?? []) as Array<{ linkedin?: { found_url?: string; profile_fetched?: boolean; work_history_rows?: number } }>) {
           if (r.linkedin?.found_url) urlsFound += 1;
           if (r.linkedin?.profile_fetched) profilesSynced += 1;
@@ -100,10 +102,15 @@ export function EnrichButton({
       if (urlsFound > 0) linkedinBits.push(`${urlsFound} URL${urlsFound === 1 ? '' : 's'} found`);
       if (profilesSynced > 0) linkedinBits.push(`${profilesSynced} profile${profilesSynced === 1 ? '' : 's'} synced`);
       if (workHistoryRows > 0) linkedinBits.push(`${workHistoryRows} work-history row${workHistoryRows === 1 ? '' : 's'}`);
+      const apiBits: string[] = [];
+      if (apolloCalls) apiBits.push(`Apollo ${apolloCalls}`);
+      if (fullenrichCalls) apiBits.push(`FullEnrich ${fullenrichCalls}`);
+      if (bettercontactCalls) apiBits.push(`BetterContact ${bettercontactCalls}`);
+      if (pdlCalls) apiBits.push(`PDL ${pdlCalls}`);
+      if (zbChecks) apiBits.push(`ZB ${zbChecks}`);
       toast.success(
         `Enriched: ${changedTotal} updated, ${okTotal - changedTotal} unchanged, ${failedTotal} failed` +
-        (noLink > 0 ? ` (${noLink} no LinkedIn)` : '') +
-        ` — LM ${leadmagicCredits.toFixed(2)} cr, BM ${bytemineCalls} calls` +
+        (apiBits.length > 0 ? ` — ${apiBits.join(', ')}` : '') +
         (linkedinBits.length > 0 ? ` • ${linkedinBits.join(', ')}` : ''),
       );
       for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
@@ -129,8 +136,8 @@ export function EnrichButton({
         <div>
           <p className="text-sm font-medium">What to enrich?</p>
           <p className="text-[11px] text-muted-foreground">
-            Contact info: LeadMagic → Bytemine fallback.
-            LinkedIn: Apollo → Unipile search (finds URL if missing).
+            Cascades fall through per field — Apollo / FullEnrich /
+            BetterContact / PDL. PDL emails go through ZeroBounce.
           </p>
         </div>
         <div className="space-y-2">

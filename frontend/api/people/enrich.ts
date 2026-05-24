@@ -5,79 +5,94 @@ import {
   fetchUnipileProfile,
   applyLinkedinProfileToPerson,
 } from "../lib/linkedin-finder.js";
+import {
+  getApolloConfig,
+  apolloMatchPerson,
+  type ApolloPerson,
+} from "../lib/integrations/apollo.js";
+import {
+  getZeroBounceConfig,
+  zerobounceValidate,
+} from "../lib/integrations/zerobounce.js";
+import {
+  getPdlConfig,
+  pdlEnrichPerson,
+} from "../lib/integrations/pdl.js";
+import {
+  getBetterContactConfig,
+  betterContactEnrich,
+} from "../lib/integrations/bettercontact.js";
+import {
+  getFullEnrichConfig,
+  fullEnrichContact,
+} from "../lib/integrations/fullenrich.js";
 
 /**
  * POST /api/people/enrich
  *
- * Enrich one or more people with verified contact info. Multi-provider
- * cascade per requested field — LeadMagic first (cheaper, validated),
- * Bytemine as fallback. The recruiter picks which fields to spend
- * credits on via `fields[]`, so we never call APIs for slots they
- * don't care about.
+ * Enrich one or more people. Multi-provider cascade per field — the
+ * recruiter picks which fields to spend credits on via `fields[]`, so
+ * we never call APIs for slots they don't care about.
  *
  *   Body: {
  *     peopleIds: string[],                // up to 100
  *     fields:    Array<'work_email' | 'personal_email' | 'mobile' | 'linkedin_profile'>
  *   }
  *
- * Per-field cascade:
+ * Per-field cascade (Phase 2 — LeadMagic and Bytemine removed):
  *
  *   work_email:
- *     1. LeadMagic /v1/people/b2b-profile-email   (5 cr if found, free if not)
- *     2. Bytemine  /contacts/enrich               (LinkedIn lookup)
- *     ──> validate the resulting address via /v1/people/email-validation
- *         (0.25 cr) so we don't write a known-bad address back.
+ *     1. Apollo /people/match
+ *        ├─ email_status ∈ {verified, likely_to_engage} → write directly
+ *        └─ else                                        → ZeroBounce gate
+ *     2. FullEnrich (waterfall) — accept only `valid`
+ *     3. BetterContact (waterfall) — verifies upstream, accept as-is
  *
  *   personal_email:
- *     1. LeadMagic /v1/people/personal-email-finder  (2 cr if found)
- *     2. Bytemine  /contacts/enrich                  (rarely returns
- *        personal — but cheap fallback)
+ *     1. FullEnrich (personal)  — accept only `valid`
+ *     2. PDL /person/enrich     → ZeroBounce gate
  *
  *   mobile:
- *     1. LeadMagic /v1/people/mobile-finder       (5 cr if found)
- *     2. Bytemine  /contacts/enrich
+ *     1. BetterContact (phone)  — prefer mobile, fall back to landline
+ *     2. PDL /person/enrich     → mobile_phone (carrier-validated upstream)
  *
  *   linkedin_profile:
  *     1. If the person has no linkedin_url, search for one (Apollo
- *        /people/match → Unipile recruiter search). Writes URL only
- *        on high-confidence match.
+ *        /people/match → Unipile recruiter search).
  *     2. Fetch the full profile via Unipile v1 /users/{slug}.
  *     3. Update current_title / current_company / location_text +
- *        linkedin_* mirror columns, profile picture, and replace
- *        candidate_work_history rows from work_experience[].
+ *        linkedin_* mirror columns, profile picture, candidate_work_history.
+ *
+ * Apollo is called at most once per person — its match response covers
+ * work_email AND gives us apollo_person_id for future bulk re-enrichment.
+ * We capture the ID even when the email isn't useable.
  *
  * Per-person writes (only fields that came back AND differ):
- *   work_email       → people.work_email + people.primary_email
- *                      (clears email_invalid when work_email changes)
- *   personal_email   → people.personal_email
- *   mobile           → people.mobile_phone (falls back to phone)
- *   linkedin_profile → linkedin_url (if discovered), current_title,
- *                      current_company, location_text, linkedin_*
- *                      mirror columns, profile_picture_url,
- *                      candidate_work_history rows
- *   current_company  → also updated opportunistically if Bytemine
- *                      returns one and ours is empty
- *   current_title    → same logic
- *   location_text    → same logic
+ *   apollo_person_id  → people.apollo_person_id (once, idempotent)
+ *   work_email        → people.work_email + people.primary_email
+ *                       (clears email_invalid when work_email changes)
+ *   personal_email    → people.personal_email
+ *   mobile            → people.mobile_phone (falls back to phone)
+ *   linkedin_profile  → linkedin_url (if discovered) + current_title,
+ *                       current_company, location_text, linkedin_*
+ *                       mirror columns, profile_picture_url,
+ *                       candidate_work_history rows
  *
  * Returns per-person results so a single bad row doesn't fail the
- * batch. `credits` totals each provider's spend for the call so the
- * caller can show "spent N credits" feedback.
+ * batch. `credits` totals each provider's spend so the caller can
+ * show "spent N credits" feedback.
  */
-
-const LEADMAGIC_BASE = "https://api.leadmagic.io";
-const BYTEMINE_URL =
-  "https://bvjmtgaxijpyasjtaqiv.supabase.co/functions/v1/api-gateway";
 
 type Field = "work_email" | "personal_email" | "mobile" | "linkedin_profile";
 type ContactField = "work_email" | "personal_email" | "mobile";
+type Source = "apollo" | "apollo_zb" | "fullenrich" | "bettercontact" | "pdl" | "pdl_zb" | "none";
 
 interface EnrichResult {
   id: string;
   ok: boolean;
   error?: string;
   updated: string[];
-  source?: Partial<Record<ContactField, "leadmagic" | "bytemine" | "none">>;
+  source?: Partial<Record<ContactField, Source>>;
   /** linkedin_profile-specific extras for caller telemetry. */
   linkedin?: {
     found_url?: string;
@@ -87,83 +102,7 @@ interface EnrichResult {
   };
 }
 
-interface BytemineFlat {
-  work_email?: string | null;
-  personal_email?: string | null;
-  phone?: string | null;
-  phone_cell?: string | null;
-  cell_phone?: string | null;
-  mobile_phone?: string | null;
-  title?: string | null;
-  job_title?: string | null;
-  company?: string | null;
-  company_name?: string | null;
-  state?: string | null;
-  city?: string | null;
-}
-
-function asLinkedinSlug(url: string): string | null {
-  if (!url) return null;
-  const m = url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/i);
-  return m?.[1] ?? null;
-}
-
-async function leadmagicCall<T>(
-  path: string,
-  body: any,
-  apiKey: string,
-): Promise<{ data: T | null; credits: number }> {
-  const resp = await fetch(`${LEADMAGIC_BASE}${path}`, {
-    method: "POST",
-    headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    // 402 = no credits, 429 = rate limit. Treat as "no result" so the
-    // cascade falls through to Bytemine.
-    return { data: null, credits: 0 };
-  }
-  const json = await resp.json();
-  const credits = Number(json?.credits_consumed ?? 0);
-  return { data: json as T, credits };
-}
-
-async function bytemineEnrich(
-  linkedin: string,
-  token: string,
-): Promise<BytemineFlat | null> {
-  try {
-    const resp = await fetch(BYTEMINE_URL, {
-      method: "POST",
-      headers: {
-        "x-amz-security-token": token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        path: "/contacts/enrich",
-        method: "POST",
-        body: { linkedin },
-      }),
-    });
-    if (!resp.ok) return null;
-    const raw = (await resp.json()) as any;
-    return raw?.contact ? raw.contact : raw;
-  } catch {
-    return null;
-  }
-}
-
-async function validateEmail(
-  email: string,
-  apiKey: string,
-): Promise<{ status: string; credits: number }> {
-  const { data, credits } = await leadmagicCall<{ email_status: string }>(
-    "/v1/people/email-validation",
-    { email },
-    apiKey,
-  );
-  return { status: data?.email_status ?? "unknown", credits };
-}
+const APOLLO_TRUSTED_EMAIL_STATUSES = new Set(["verified", "likely_to_engage"]);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -181,38 +120,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
   }
 
-  // Provider keys: env first, app_settings fallback.
-  let bytemineKey = process.env.BYTEMINE_API_KEY || "";
-  let leadmagicKey = process.env.LEADMAGIC_API_KEY || "";
-  if (!bytemineKey || !leadmagicKey) {
-    const { data } = await supabase
-      .from("app_settings")
-      .select("key, value")
-      .in("key", ["BYTEMINE_API_KEY", "LEADMAGIC_API_KEY"]);
-    for (const row of data ?? []) {
-      if (row.key === "BYTEMINE_API_KEY" && !bytemineKey) bytemineKey = row.value;
-      if (row.key === "LEADMAGIC_API_KEY" && !leadmagicKey) leadmagicKey = row.value;
-    }
-  }
-  if (!bytemineKey && !leadmagicKey) {
-    return res.status(500).json({ error: "Neither BYTEMINE_API_KEY nor LEADMAGIC_API_KEY configured" });
-  }
-
   const peopleIds: string[] = Array.isArray(req.body?.peopleIds) ? req.body.peopleIds : [];
   const fields: Field[] = Array.isArray(req.body?.fields) ? req.body.fields : ["work_email"];
   if (peopleIds.length === 0) return res.status(400).json({ error: "peopleIds[] required" });
   if (peopleIds.length > 100) return res.status(400).json({ error: "Max 100 per request" });
   if (fields.length === 0) return res.status(400).json({ error: "fields[] required" });
 
+  // Load provider configs up-front. Each returns null if the key is
+  // missing — the cascade gracefully skips that step. We DON'T 500 when
+  // a provider is missing; the recruiter may have configured only some.
+  const [apolloConfig, fullenrichConfig, bettercontactConfig, pdlConfig, zbConfig] =
+    await Promise.all([
+      getApolloConfig(supabase),
+      getFullEnrichConfig(supabase),
+      getBetterContactConfig(supabase),
+      getPdlConfig(supabase),
+      getZeroBounceConfig(supabase),
+    ]);
+
+  const wantsContactInfo = fields.some(
+    (f) => f === "work_email" || f === "personal_email" || f === "mobile",
+  );
+  if (wantsContactInfo && !apolloConfig && !fullenrichConfig && !bettercontactConfig && !pdlConfig) {
+    return res.status(500).json({
+      error:
+        "No enrichment provider configured. Set at least one of APOLLO_API_KEY / FULLENRICH_API_KEY / BETTERCONTACT_API_KEY / PDL_API_KEY in app_settings.",
+    });
+  }
+
   const { data: rows, error: peopleErr } = await supabase
     .from("people")
-    .select("id, linkedin_url, work_email, personal_email, primary_email, mobile_phone, phone, current_title, current_company, location_text, email_invalid, first_name, last_name, full_name, avatar_url, profile_picture_url, linkedin_current_title, linkedin_current_company, linkedin_location, linkedin_headline")
+    .select("id, linkedin_url, work_email, personal_email, primary_email, mobile_phone, phone, current_title, current_company, location_text, email_invalid, first_name, last_name, full_name, avatar_url, profile_picture_url, linkedin_current_title, linkedin_current_company, linkedin_location, linkedin_headline, apollo_person_id")
     .in("id", peopleIds);
   if (peopleErr) return res.status(500).json({ error: `people lookup failed: ${peopleErr.message}` });
 
   const byId = new Map<string, any>((rows ?? []).map((r) => [r.id, r]));
   const results: EnrichResult[] = [];
-  const credits = { leadmagic: 0, bytemine_calls: 0 };
+  const credits = {
+    apollo_calls: 0,
+    fullenrich_calls: 0,
+    bettercontact_calls: 0,
+    pdl_calls: 0,
+    zerobounce_checks: 0,
+  };
 
   for (const id of peopleIds) {
     const row = byId.get(id);
@@ -227,8 +177,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let linkedinInfo: EnrichResult["linkedin"] | undefined;
 
     // ── linkedin_profile: URL discovery + Unipile profile fetch.
-    //    Runs FIRST so a freshly-discovered URL unlocks the contact
-    //    cascades below for the same call.
+    //    Runs FIRST so a freshly-discovered URL feeds the contact
+    //    cascades below as a more precise selector.
     if (fields.includes("linkedin_profile")) {
       linkedinInfo = { profile_fetched: false, work_history_rows: 0 };
 
@@ -259,8 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             updated.push("linkedin_url");
           }
         } catch {
-          // Discovery failures are non-fatal — the row just stays
-          // without a URL and the next branch reports it.
+          // Discovery failures are non-fatal.
         }
       }
 
@@ -286,134 +235,220 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Without a URL we can't run the contact cascades. Record and move
-    // on — `linkedin` payload still tells the caller whether discovery
-    // was attempted.
-    if (!row.linkedin_url) {
-      results.push({
-        id, ok: false, error: "no linkedin_url",
-        updated, source, linkedin: linkedinInfo,
-      });
-      continue;
+    // ── Apollo: call once per person if any field needs it. Apollo
+    //    gives us work_email + apollo_person_id + opportunistic title /
+    //    company in a single $0.10 match call. Cache the result so we
+    //    don't burn credits in the work_email branch below.
+    let apolloMatch: ApolloPerson | null = null;
+    const wantsApollo =
+      apolloConfig &&
+      (fields.includes("work_email") /* primary work-email source */);
+    if (wantsApollo) {
+      try {
+        apolloMatch = await apolloMatchPerson(apolloConfig, {
+          first_name: row.first_name,
+          last_name: row.last_name,
+          name: !row.first_name && !row.last_name ? row.full_name : null,
+          organization_name: row.current_company,
+          email: row.primary_email || row.work_email || row.personal_email,
+          linkedin_url: row.linkedin_url,
+        });
+        credits.apollo_calls += 1;
+        if (apolloMatch?.id && apolloMatch.id !== row.apollo_person_id) {
+          updates.apollo_person_id = apolloMatch.id;
+          updated.push("apollo_person_id");
+        }
+        // Opportunistic title / company backfill.
+        if (apolloMatch?.title && !row.current_title) {
+          updates.current_title = apolloMatch.title;
+          updated.push("current_title");
+        }
+        if (apolloMatch?.organization_name && !row.current_company) {
+          updates.current_company = apolloMatch.organization_name;
+          updated.push("current_company");
+        }
+      } catch {
+        // Apollo errors fall through to the next cascade step.
+      }
     }
 
-    const slug = asLinkedinSlug(row.linkedin_url);
-    const profileUrl = slug ?? row.linkedin_url;
-
-    // Lazy Bytemine response — fetched at most once per person and only
-    // if at least one cascade step actually needs it.
-    let bytemineCache: BytemineFlat | null | undefined;
-    const getBytemine = async () => {
-      if (bytemineCache !== undefined) return bytemineCache;
-      if (!bytemineKey) {
-        bytemineCache = null;
-        return null;
-      }
-      bytemineCache = await bytemineEnrich(row.linkedin_url, bytemineKey);
-      credits.bytemine_calls += 1;
-      return bytemineCache;
-    };
-
-    // ── work_email ───────────────────────────────────────────────
+    // ── work_email ──────────────────────────────────────────────
     if (fields.includes("work_email")) {
       let workEmail: string | null = null;
-      if (leadmagicKey) {
-        const { data, credits: c } = await leadmagicCall<{ email?: string }>(
-          "/v1/people/b2b-profile-email",
-          { profile_url: profileUrl },
-          leadmagicKey,
-        );
-        credits.leadmagic += c;
-        if (data?.email) {
-          workEmail = data.email.toLowerCase();
-          source.work_email = "leadmagic";
-        }
-      }
-      if (!workEmail) {
-        const bm = await getBytemine();
-        if (bm?.work_email) {
-          workEmail = bm.work_email.toLowerCase();
-          source.work_email = "bytemine";
-        }
-      }
+      let workSource: Source = "none";
 
-      if (workEmail) {
-        // Verify before writing — don't replace a bounced address with
-        // another bounced address. unknown/valid both pass; only block
-        // explicit `invalid`.
-        let okToWrite = true;
-        if (leadmagicKey) {
-          const { status, credits: c } = await validateEmail(workEmail, leadmagicKey);
-          credits.leadmagic += c;
-          if (status === "invalid") okToWrite = false;
-        }
-        if (okToWrite && workEmail !== (row.work_email ?? "").toLowerCase()) {
-          updates.work_email = workEmail;
-          updates.primary_email = workEmail;
-          updated.push("work_email", "primary_email");
-          if (row.email_invalid) {
-            updates.email_invalid = false;
-            updates.email_invalid_at = null;
-            updates.email_invalid_reason = null;
-            updated.push("email_invalid");
+      // 1. Apollo (already fetched above)
+      if (apolloMatch?.email) {
+        const apolloEmail = apolloMatch.email.toLowerCase();
+        const trusted =
+          apolloMatch.email_status &&
+          APOLLO_TRUSTED_EMAIL_STATUSES.has(apolloMatch.email_status.toLowerCase());
+        if (trusted) {
+          workEmail = apolloEmail;
+          workSource = "apollo";
+        } else if (zbConfig) {
+          // Untrusted Apollo email → ZeroBounce gate.
+          const check = await zerobounceValidate(zbConfig, apolloEmail);
+          credits.zerobounce_checks += 1;
+          if (check?.acceptable) {
+            workEmail = apolloEmail;
+            workSource = "apollo_zb";
           }
         }
       }
-      if (!source.work_email) source.work_email = "none";
+
+      // 2. FullEnrich (professional)
+      if (!workEmail && fullenrichConfig) {
+        const fe = await fullEnrichContact(
+          fullenrichConfig,
+          {
+            firstname: row.first_name,
+            lastname: row.last_name,
+            company_name: row.current_company,
+            linkedin_url: row.linkedin_url,
+          },
+          ["contact_email_professional"],
+        );
+        credits.fullenrich_calls += 1;
+        if (fe?.professional_email && fe.professional_email_status === "valid") {
+          workEmail = fe.professional_email.toLowerCase();
+          workSource = "fullenrich";
+        }
+      }
+
+      // 3. BetterContact (waterfall, verifies upstream)
+      if (!workEmail && bettercontactConfig) {
+        const bc = await betterContactEnrich(
+          bettercontactConfig,
+          {
+            first_name: row.first_name,
+            last_name: row.last_name,
+            company: row.current_company,
+            linkedin_url: row.linkedin_url,
+          },
+          { wantEmail: true, wantPhone: false },
+        );
+        credits.bettercontact_calls += 1;
+        if (bc?.email) {
+          workEmail = bc.email.toLowerCase();
+          workSource = "bettercontact";
+        }
+      }
+
+      if (workEmail && workEmail !== (row.work_email ?? "").toLowerCase()) {
+        updates.work_email = workEmail;
+        updates.primary_email = workEmail;
+        updated.push("work_email", "primary_email");
+        if (row.email_invalid) {
+          updates.email_invalid = false;
+          updates.email_invalid_at = null;
+          updates.email_invalid_reason = null;
+          updated.push("email_invalid");
+        }
+      }
+      source.work_email = workSource;
     }
 
-    // ── personal_email ───────────────────────────────────────────
+    // ── personal_email ──────────────────────────────────────────
     if (fields.includes("personal_email")) {
       let personal: string | null = null;
-      if (leadmagicKey) {
-        const { data, credits: c } = await leadmagicCall<{
-          first_personal_email?: string; personal_emails?: string[];
-        }>("/v1/people/personal-email-finder", { profile_url: profileUrl }, leadmagicKey);
-        credits.leadmagic += c;
-        const found = data?.first_personal_email || data?.personal_emails?.[0];
-        if (found) {
-          personal = found.toLowerCase();
-          source.personal_email = "leadmagic";
+      let personalSource: Source = "none";
+
+      // 1. FullEnrich (personal)
+      if (fullenrichConfig) {
+        const fe = await fullEnrichContact(
+          fullenrichConfig,
+          {
+            firstname: row.first_name,
+            lastname: row.last_name,
+            company_name: row.current_company,
+            linkedin_url: row.linkedin_url,
+          },
+          ["contact_email_personal"],
+        );
+        credits.fullenrich_calls += 1;
+        if (fe?.personal_email && fe.personal_email_status === "valid") {
+          personal = fe.personal_email.toLowerCase();
+          personalSource = "fullenrich";
         }
       }
-      if (!personal) {
-        const bm = await getBytemine();
-        if (bm?.personal_email) {
-          personal = bm.personal_email.toLowerCase();
-          source.personal_email = "bytemine";
+
+      // 2. PDL (gated through ZeroBounce — PDL emails are graph-derived)
+      if (!personal && pdlConfig) {
+        const pdlPerson = await pdlEnrichPerson(pdlConfig, {
+          email: row.primary_email || row.work_email,
+          linkedin_url: row.linkedin_url,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          company: row.current_company,
+        });
+        credits.pdl_calls += 1;
+        const candidate = pdlPerson?.personal_email;
+        if (candidate) {
+          if (zbConfig) {
+            const check = await zerobounceValidate(zbConfig, candidate);
+            credits.zerobounce_checks += 1;
+            if (check?.acceptable) {
+              personal = candidate.toLowerCase();
+              personalSource = "pdl_zb";
+            }
+          } else {
+            // No verifier configured — write PDL's recommendation as-is.
+            // Less safe than gating, but the operator may have chosen to
+            // skip ZeroBounce for cost reasons.
+            personal = candidate.toLowerCase();
+            personalSource = "pdl";
+          }
         }
       }
+
       if (personal && personal !== (row.personal_email ?? "").toLowerCase()) {
         updates.personal_email = personal;
         updated.push("personal_email");
       }
-      if (!source.personal_email) source.personal_email = "none";
+      source.personal_email = personalSource;
     }
 
-    // ── mobile ───────────────────────────────────────────────────
+    // ── mobile ──────────────────────────────────────────────────
     if (fields.includes("mobile")) {
       let mobile: string | null = null;
-      if (leadmagicKey) {
-        const body: any = { profile_url: profileUrl };
-        if (row.work_email) body.work_email = row.work_email;
-        if (row.personal_email) body.personal_email = row.personal_email;
-        const { data, credits: c } = await leadmagicCall<{ mobile_number?: string }>(
-          "/v1/people/mobile-finder", body, leadmagicKey,
+      let mobileSource: Source = "none";
+
+      // 1. BetterContact (waterfall)
+      if (bettercontactConfig) {
+        const bc = await betterContactEnrich(
+          bettercontactConfig,
+          {
+            first_name: row.first_name,
+            last_name: row.last_name,
+            company: row.current_company,
+            linkedin_url: row.linkedin_url,
+          },
+          { wantEmail: false, wantPhone: true },
         );
-        credits.leadmagic += c;
-        if (data?.mobile_number) {
-          mobile = data.mobile_number;
-          source.mobile = "leadmagic";
+        credits.bettercontact_calls += 1;
+        if (bc?.phone) {
+          mobile = bc.phone;
+          mobileSource = "bettercontact";
         }
       }
-      if (!mobile) {
-        const bm = await getBytemine();
-        const cell = bm?.phone_cell ?? bm?.cell_phone ?? bm?.mobile_phone ?? bm?.phone ?? null;
-        if (cell) {
-          mobile = String(cell);
-          source.mobile = "bytemine";
+
+      // 2. PDL
+      if (!mobile && pdlConfig) {
+        const pdlPerson = await pdlEnrichPerson(pdlConfig, {
+          email: row.primary_email || row.work_email,
+          linkedin_url: row.linkedin_url,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          company: row.current_company,
+        });
+        credits.pdl_calls += 1;
+        if (pdlPerson?.mobile_phone) {
+          mobile = pdlPerson.mobile_phone;
+          mobileSource = "pdl";
         }
       }
+
       if (mobile) {
         // Prefer mobile_phone slot when empty; fall back to phone.
         if (!row.mobile_phone) {
@@ -424,29 +459,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           updated.push("phone");
         }
       }
-      if (!source.mobile) source.mobile = "none";
-    }
-
-    // ── opportunistic profile fields from Bytemine if we already
-    //    pulled it — current_title / current_company / location.
-    //    Cheap because no extra API call.
-    if (bytemineCache) {
-      const bm = bytemineCache;
-      const title = (bm.title ?? bm.job_title ?? "").trim();
-      if (title && title !== (row.current_title ?? "")) {
-        updates.current_title = title;
-        updated.push("current_title");
-      }
-      const company = (bm.company_name ?? bm.company ?? "").trim();
-      if (company && company !== (row.current_company ?? "")) {
-        updates.current_company = company;
-        updated.push("current_company");
-      }
-      const loc = (bm.state ?? bm.city ?? "").trim();
-      if (loc && !row.location_text) {
-        updates.location_text = loc;
-        updated.push("location_text");
-      }
+      source.mobile = mobileSource;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -477,7 +490,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       total: peopleIds.length,
       ok: results.filter((r) => r.ok).length,
       failed: results.filter((r) => !r.ok).length,
-      no_linkedin: results.filter((r) => r.error === "no linkedin_url").length,
       changed: results.filter((r) => r.updated.length > 0).length,
     },
   });
