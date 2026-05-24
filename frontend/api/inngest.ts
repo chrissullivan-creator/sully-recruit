@@ -52,6 +52,7 @@ import { findLinkedinUrlSweep } from "./lib/inngest/functions/find-linkedin-url-
 import { enrichCompanyViaApollo } from "./lib/inngest/functions/enrich-company-via-apollo.js";
 import { enrichCompaniesSweep } from "./lib/inngest/functions/enrich-companies-sweep.js";
 import { checkEnrichmentCredits, checkEnrichmentCreditsOnce } from "./lib/inngest/functions/check-enrichment-credits.js";
+import { processEnrichmentJob } from "./lib/inngest/functions/process-enrichment-job.js";
 import { backfillJoeSaysEmbeddings } from "./lib/inngest/functions/backfill-joe-says-embeddings.js";
 import {
   dispatchMissingTranscriptsCron,
@@ -123,6 +124,7 @@ export default serve({
     enrichCompaniesSweep,
     checkEnrichmentCredits,
     checkEnrichmentCreditsOnce,
+    processEnrichmentJob,
     backfillJoeSaysEmbeddings,
     dispatchMissingTranscriptsCron,
     dispatchMissingTranscripts,

@@ -64,54 +64,105 @@ export function EnrichButton({
   const selected: EnrichField[] = (Object.keys(fields) as EnrichField[]).filter((k) => fields[k]);
   const canRun = peopleIds.length > 0 && selected.length > 0 && !disabled;
 
+  const formatSummary = (
+    changed: number, ok: number, failed: number,
+    credits: any, linkedin: any,
+  ) => {
+    const apiBits: string[] = [];
+    if (credits?.apollo_calls) apiBits.push(`Apollo ${credits.apollo_calls}`);
+    if (credits?.fullenrich_calls) apiBits.push(`FullEnrich ${credits.fullenrich_calls}`);
+    if (credits?.bettercontact_calls) apiBits.push(`BetterContact ${credits.bettercontact_calls}`);
+    if (credits?.pdl_calls) apiBits.push(`PDL ${credits.pdl_calls}`);
+    if (credits?.zerobounce_checks) apiBits.push(`ZB ${credits.zerobounce_checks}`);
+    const liBits: string[] = [];
+    if (linkedin?.urls_found) liBits.push(`${linkedin.urls_found} URL${linkedin.urls_found === 1 ? '' : 's'} found`);
+    if (linkedin?.profiles_synced) liBits.push(`${linkedin.profiles_synced} profile${linkedin.profiles_synced === 1 ? '' : 's'} synced`);
+    if (linkedin?.work_history_rows) liBits.push(`${linkedin.work_history_rows} work-history row${linkedin.work_history_rows === 1 ? '' : 's'}`);
+    return (
+      `Enriched: ${changed} updated, ${ok - changed} unchanged, ${failed} failed` +
+      (apiBits.length > 0 ? ` — ${apiBits.join(', ')}` : '') +
+      (liBits.length > 0 ? ` • ${liBits.join(', ')}` : '')
+    );
+  };
+
+  const pollJob = async (jobId: string, total: number) => {
+    // Show a sticky loading toast that updates as the job advances.
+    // Replaced with success/error toast at terminal state.
+    const toastId = toast.loading(`Queued ${total} people — starting…`);
+    let backoff = 2000;
+    let lastProcessed = -1;
+    // Cap at 30 minutes total (900 polls × 2s) — far beyond any realistic batch.
+    for (let i = 0; i < 900; i++) {
+      await new Promise((r) => setTimeout(r, backoff));
+      try {
+        const res = await fetch(`/api/enrichment-jobs/${jobId}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) continue;
+        const job = await res.json();
+        if (job.processed !== lastProcessed) {
+          lastProcessed = job.processed;
+          backoff = 2000;            // reset backoff on real progress
+          toast.loading(`${job.processed}/${job.total} processed — ${job.changed} updated, ${job.failed} failed`, { id: toastId });
+        } else {
+          backoff = Math.min(backoff * 1.25, 6000);
+        }
+        if (job.status === 'completed') {
+          toast.success(
+            formatSummary(job.changed, job.processed, job.failed, job.credits, job.linkedin_summary),
+            { id: toastId },
+          );
+          for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
+          return;
+        }
+        if (job.status === 'failed') {
+          toast.error(`Enrich job failed: ${job.error || 'unknown'}`, { id: toastId });
+          return;
+        }
+      } catch {
+        // network blip — keep polling
+      }
+    }
+    toast.error('Enrich job is taking unusually long — check the enrichment_jobs table.', { id: toastId });
+  };
+
   const run = async () => {
     if (!canRun) return;
     setRunning(true);
     try {
-      // Backend caps at 100 per call — chunk to handle bulk selects.
-      const chunks: string[][] = [];
-      for (let i = 0; i < peopleIds.length; i += 100) {
-        chunks.push(peopleIds.slice(i, i + 100));
+      const res = await fetch('/api/people/enrich', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ peopleIds, fields: selected }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Enrich failed');
+
+      // ── ASYNC PATH ─────────────────────────────────────────────
+      // Backend returned 202 + jobId because batch > SYNC_THRESHOLD.
+      // Close the popover so the user can keep working; poll in
+      // background with a sticky toast.
+      if (data.queued && data.jobId) {
+        setOpen(false);
+        toast.info(`Queued ${data.total} people — running in background`);
+        pollJob(data.jobId, data.total);
+        return;
       }
-      let okTotal = 0, changedTotal = 0, failedTotal = 0;
-      let apolloCalls = 0, fullenrichCalls = 0, bettercontactCalls = 0, pdlCalls = 0, zbChecks = 0;
-      let urlsFound = 0, profilesSynced = 0, workHistoryRows = 0;
-      for (const chunk of chunks) {
-        const res = await fetch('/api/people/enrich', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({ peopleIds: chunk, fields: selected }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Enrich failed');
-        okTotal += data.counts?.ok ?? 0;
-        changedTotal += data.counts?.changed ?? 0;
-        failedTotal += data.counts?.failed ?? 0;
-        apolloCalls += data.credits?.apollo_calls ?? 0;
-        fullenrichCalls += data.credits?.fullenrich_calls ?? 0;
-        bettercontactCalls += data.credits?.bettercontact_calls ?? 0;
-        pdlCalls += data.credits?.pdl_calls ?? 0;
-        zbChecks += data.credits?.zerobounce_checks ?? 0;
-        for (const r of (data.results ?? []) as Array<{ linkedin?: { found_url?: string; profile_fetched?: boolean; work_history_rows?: number } }>) {
-          if (r.linkedin?.found_url) urlsFound += 1;
-          if (r.linkedin?.profile_fetched) profilesSynced += 1;
-          workHistoryRows += r.linkedin?.work_history_rows ?? 0;
-        }
-      }
-      const linkedinBits: string[] = [];
-      if (urlsFound > 0) linkedinBits.push(`${urlsFound} URL${urlsFound === 1 ? '' : 's'} found`);
-      if (profilesSynced > 0) linkedinBits.push(`${profilesSynced} profile${profilesSynced === 1 ? '' : 's'} synced`);
-      if (workHistoryRows > 0) linkedinBits.push(`${workHistoryRows} work-history row${workHistoryRows === 1 ? '' : 's'}`);
-      const apiBits: string[] = [];
-      if (apolloCalls) apiBits.push(`Apollo ${apolloCalls}`);
-      if (fullenrichCalls) apiBits.push(`FullEnrich ${fullenrichCalls}`);
-      if (bettercontactCalls) apiBits.push(`BetterContact ${bettercontactCalls}`);
-      if (pdlCalls) apiBits.push(`PDL ${pdlCalls}`);
-      if (zbChecks) apiBits.push(`ZB ${zbChecks}`);
+
+      // ── SYNC PATH ──────────────────────────────────────────────
+      const linkedin = {
+        urls_found: (data.results ?? []).filter((r: any) => r.linkedin?.found_url).length,
+        profiles_synced: (data.results ?? []).filter((r: any) => r.linkedin?.profile_fetched).length,
+        work_history_rows: (data.results ?? []).reduce((s: number, r: any) => s + (r.linkedin?.work_history_rows ?? 0), 0),
+      };
       toast.success(
-        `Enriched: ${changedTotal} updated, ${okTotal - changedTotal} unchanged, ${failedTotal} failed` +
-        (apiBits.length > 0 ? ` — ${apiBits.join(', ')}` : '') +
-        (linkedinBits.length > 0 ? ` • ${linkedinBits.join(', ')}` : ''),
+        formatSummary(
+          data.counts?.changed ?? 0,
+          data.counts?.ok ?? 0,
+          data.counts?.failed ?? 0,
+          data.credits,
+          linkedin,
+        ),
       );
       for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
       setOpen(false);
