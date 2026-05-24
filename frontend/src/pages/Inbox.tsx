@@ -357,6 +357,14 @@ function ThreadItem({
               <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
                 {CHANNEL_LABELS[thread.channel] || thread.channel}
               </Badge>
+              {thread.id.startsWith('live:') && (
+                <span
+                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600 inline-flex items-center gap-1"
+                  title="Live from Unipile — add the person to start tracking"
+                >
+                  Live
+                </span>
+              )}
               {thread.snoozed_until && new Date(thread.snoozed_until).getTime() > Date.now() && (
                 <span
                   className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-[#7C3AED]/10 text-[#7C3AED] inline-flex items-center gap-1"
@@ -1917,6 +1925,45 @@ export default function Inbox() {
     },
   });
 
+  // Live fetch from Unipile for the "Other" tab — only fires when the
+  // user is actually viewing that tab. Returns threads from unknown
+  // senders that we don't persist under the Phase 5 storage rule.
+  const liveChannel = channel === 'all' ? 'linkedin' : channel;
+  const { data: liveData } = useQuery({
+    queryKey: ['inbox_live_threads', liveChannel],
+    enabled: tab === 'other' && !!userId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token || '';
+      const res = await fetch(`/api/inbox/live-threads?channel=${liveChannel}&limit=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { items: [] };
+      return res.json();
+    },
+  });
+  const liveThreads: InboxThread[] = (liveData?.items ?? []).map((it: any) => ({
+    id: it.id,
+    channel: it.channel,
+    subject: it.subject,
+    last_message_at: it.last_message_at,
+    last_message_preview: it.last_message_preview,
+    last_inbound_at: it.last_message_at,
+    last_inbound_preview: it.last_message_preview,
+    sort_at: it.last_message_at,
+    is_read: true, // live results aren't tracked unread/read
+    is_archived: false,
+    candidate_id: null,
+    candidate_name: it.sender_name,
+    contact_id: null,
+    contact_name: null,
+    send_out_id: null,
+    account_id: it.account_id ?? null,
+    external_conversation_id: it.external_conversation_id,
+    integration_account_id: it.integration_account_id,
+  }));
+
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
     enabled: !!userId,
@@ -1965,7 +2012,17 @@ export default function Inbox() {
   // Both tabs exclude snoozed + archived by default; the Snoozed and Archive
   // views below opt in explicitly.
   const focusedThreads = teamScoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
-  const otherThreads = teamScoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
+  const persistedOther = teamScoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
+  // Other tab unions persisted unlinked threads with live-fetched
+  // unknown-sender threads from Unipile. Live results are deduped by
+  // external_conversation_id on the API side.
+  const otherThreads: InboxThread[] = tab === 'other'
+    ? [...persistedOther, ...liveThreads].sort((a, b) => {
+        const ta = a.sort_at ? new Date(a.sort_at).getTime() : 0;
+        const tb = b.sort_at ? new Date(b.sort_at).getTime() : 0;
+        return tb - ta;
+      })
+    : persistedOther;
   const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
 
   const filtered = (() => {
@@ -2278,7 +2335,15 @@ export default function Inbox() {
                         isSelected={selectedId === thread.id}
                         isChecked={checkedIds.has(thread.id)}
                         selectionActive={checkedIds.size > 0}
-                        onClick={() => setSelectedId(thread.id)}
+                        onClick={() => {
+                          if (thread.id.startsWith('live:')) {
+                            toast.info(
+                              'This thread is live from Unipile. Add the sender to your CRM to view + reply.',
+                            );
+                            return;
+                          }
+                          setSelectedId(thread.id);
+                        }}
                         onToggleFlag={() => handleToggleFlag(thread)}
                         onToggleRead={() => handleToggleRead(thread)}
                         onArchive={() => handleArchive(thread)}
