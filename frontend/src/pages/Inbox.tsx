@@ -38,6 +38,7 @@ import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip'
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
 import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
 import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
+import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationList';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -1904,6 +1905,18 @@ export default function Inbox() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: needsClassificationCount = 0 } = useQuery({
+    queryKey: ['inbox_needs_classification_count'],
+    queryFn: async () => {
+      const { count, error } = await (supabase as any)
+        .from('people')
+        .select('id', { count: 'exact', head: true })
+        .eq('needs_classification', true);
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
   const { data: allThreads = [], isLoading } = useQuery({
     queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
     enabled: !!userId,
@@ -2011,6 +2024,7 @@ export default function Inbox() {
     starred: teamScoped.filter((t) => t.flagged && visibleByDefault(t)).length,
     snoozed: teamScoped.filter(isCurrentlySnoozed).length,
     sent: teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
+    needs_classification: needsClassificationCount,
   };
 
   // Mutation helpers — used by the per-row hover actions.
@@ -2224,7 +2238,9 @@ export default function Inbox() {
 
           {/* Thread list */}
           <ScrollArea className="flex-1">
-            {isLoading ? (
+            {view === 'needs_classification' ? (
+              <NeedsClassificationList />
+            ) : isLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>

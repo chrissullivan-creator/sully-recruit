@@ -5,6 +5,10 @@ import {
   sendSms,
   sendLinkedIn,
 } from "../../../../src/server-lib/send-channels.js";
+import {
+  resolveCounterparty,
+  autoCreatePersonFromOutbound,
+} from "../../../../src/server-lib/resolve-counterparty.js";
 
 interface SendMessagePayload {
   channel: "email" | "sms" | "linkedin";
@@ -51,6 +55,43 @@ export const sendMessage = inngest.createFunction(
 
     logger.info("Sending message", { channel, to, userId });
 
+    // If the caller didn't pass candidateId/contactId (e.g. composing
+    // outbound to a fresh email), resolve from the recipient. If still
+    // no match, auto-create a person with needs_classification=true.
+    // person.created trigger fires backfill downstream.
+    let resolvedCandidateId = candidateId || null;
+    let resolvedContactId = contactId || null;
+    if (!resolvedCandidateId && !resolvedContactId) {
+      const matched = await resolveCounterparty(supabase, { channel, address: to });
+      if (matched) {
+        if (matched.entityColumn === "candidate_id") resolvedCandidateId = matched.id;
+        else resolvedContactId = matched.id;
+        logger.info("Resolved outbound recipient to existing person", {
+          person_id: matched.id,
+          type: matched.type,
+        });
+      } else {
+        const sourceMap = {
+          email: "outbound_email" as const,
+          sms: "outbound_sms" as const,
+          linkedin: "outbound_linkedin" as const,
+        };
+        const created = await autoCreatePersonFromOutbound(supabase, {
+          channel,
+          address: to,
+          ownerUserId: userId,
+          source: sourceMap[channel],
+        });
+        if (created) {
+          resolvedCandidateId = created.id;
+          logger.info("Auto-created person from outbound to unknown recipient", {
+            person_id: created.id,
+            channel,
+          });
+        }
+      }
+    }
+
     let externalMessageId: string | null = null;
     let senderAddress: string | null = null;
 
@@ -79,8 +120,8 @@ export const sendMessage = inngest.createFunction(
 
     const { error: msgError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
-      candidate_id: candidateId || null,
-      contact_id: contactId || null,
+      candidate_id: resolvedCandidateId,
+      contact_id: resolvedContactId,
       channel,
       direction: "outbound",
       subject: subject || null,
@@ -116,8 +157,8 @@ export const sendMessage = inngest.createFunction(
         .eq("id", conversationId);
     }
 
-    const entityId = candidateId || contactId;
-    const entityType = candidateId ? "candidate" : "contact";
+    const entityId = resolvedCandidateId || resolvedContactId;
+    const entityType = resolvedCandidateId ? "candidate" : "contact";
     if (entityId) {
       const table = entityType === "candidate" ? "candidates" : "contacts";
       await supabase

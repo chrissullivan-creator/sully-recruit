@@ -93,7 +93,6 @@ export function InboxSidebar({
       label: 'Needs classification',
       Icon: HelpCircle,
       count: counts.needs_classification,
-      comingSoon: true,
     },
   ];
 
