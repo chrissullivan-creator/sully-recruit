@@ -226,12 +226,82 @@ export interface PdlJobPosting {
 }
 
 /**
+ * Job-spec filters layered onto every PDL job/search call. The
+ * operator writes a natural-language spec ("Senior eng leaders in
+ * fintech NYC, $200k+, no interns") in Settings; an AI step
+ * translates that to this JSON shape; we materialise it into PDL's
+ * Elasticsearch DSL below. Any field can be omitted.
+ */
+export interface JobSpecFilters {
+  title_includes?: string[];        // OR — any match counts
+  title_excludes?: string[];        // NONE — exclude if any match
+  seniorities?: string[];           // PDL values: junior | mid | senior | director | vp | cxo | ...
+  locations?: string[];             // free-text location names (e.g. "new york", "san francisco")
+  employment_types?: string[];      // full-time | part-time | contract | internship | ...
+  industries?: string[];            // PDL industry strings
+  min_salary?: number;              // minimum base — PDL has `salary` numeric field
+  only_remote?: boolean;
+}
+
+function buildSpecClauses(filters: JobSpecFilters | null | undefined) {
+  if (!filters) return { must: [], must_not: [] };
+  const must: any[] = [];
+  const must_not: any[] = [];
+
+  if (filters.title_includes && filters.title_includes.length > 0) {
+    must.push({
+      bool: {
+        should: filters.title_includes.map((t) => ({ match: { title: t } })),
+        minimum_should_match: 1,
+      },
+    });
+  }
+  if (filters.title_excludes && filters.title_excludes.length > 0) {
+    for (const t of filters.title_excludes) must_not.push({ match: { title: t } });
+  }
+  if (filters.seniorities && filters.seniorities.length > 0) {
+    must.push({ terms: { "seniority.keyword": filters.seniorities.map((s) => s.toLowerCase()) } });
+  }
+  if (filters.locations && filters.locations.length > 0) {
+    must.push({
+      bool: {
+        should: filters.locations.map((loc) => ({ match: { location_name: loc } })),
+        minimum_should_match: 1,
+      },
+    });
+  }
+  if (filters.employment_types && filters.employment_types.length > 0) {
+    must.push({ terms: { "employment_type.keyword": filters.employment_types.map((e) => e.toLowerCase()) } });
+  }
+  if (filters.industries && filters.industries.length > 0) {
+    must.push({
+      bool: {
+        should: filters.industries.map((i) => ({ match: { industry: i } })),
+        minimum_should_match: 1,
+      },
+    });
+  }
+  if (typeof filters.min_salary === "number" && filters.min_salary > 0) {
+    must.push({ range: { salary: { gte: filters.min_salary } } });
+  }
+  if (filters.only_remote) {
+    must.push({ term: { is_remote: true } });
+  }
+  return { must, must_not };
+}
+
+/**
  * Search PDL's job_listing dataset for a single company. Used by Phase 3
  * to populate company_job_postings.
  *
  * `since` is an ISO timestamp — postings older than this are filtered
  * server-side via PDL's Elasticsearch range query, so we only pull the
  * delta on each refresh.
+ *
+ * `filters` (optional) is the operator's saved job-spec — when set,
+ * its clauses are merged into the same `bool` as the company match
+ * + since-clause, so PDL only returns postings that match BOTH the
+ * company AND the operator's lead criteria.
  */
 export async function pdlSearchJobs(
   config: PdlConfig,
@@ -240,6 +310,7 @@ export async function pdlSearchJobs(
     companyName?: string | null;
     since?: string | null;
     size?: number;
+    filters?: JobSpecFilters | null;
   },
 ): Promise<PdlJobPosting[]> {
   if (!input.companyDomain && !input.companyName) return [];
@@ -254,6 +325,9 @@ export async function pdlSearchJobs(
     must.push({ range: { posted_date: { gte: input.since } } });
   }
 
+  const spec = buildSpecClauses(input.filters);
+  must.push(...spec.must);
+
   try {
     const resp = await fetch(`${BASE}/job/search`, {
       method: "POST",
@@ -263,7 +337,7 @@ export async function pdlSearchJobs(
         Accept: "application/json",
       },
       body: JSON.stringify({
-        query: { bool: { must } },
+        query: { bool: { must, must_not: spec.must_not } },
         size: input.size ?? 50,
       }),
     });

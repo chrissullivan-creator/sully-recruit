@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { getPdlConfig, pdlSearchJobs } from "../lib/integrations/pdl.js";
+import { getPdlConfig, pdlSearchJobs, type JobSpecFilters } from "../lib/integrations/pdl.js";
 
 /**
  * POST /api/companies/fetch-job-postings
@@ -61,6 +61,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "PDL_API_KEY not configured in app_settings" });
   }
 
+  // Load the operator's saved job-spec filters. This is the difference
+  // between pulling every JP Morgan job (no filter) and only the
+  // ones matching "senior engineering leaders in fintech NYC".
+  const { data: specRow } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "JOB_SPEC_PDL_FILTERS")
+    .maybeSingle();
+  let specFilters: JobSpecFilters | null = null;
+  if (specRow?.value && specRow.value !== "{}") {
+    try { specFilters = JSON.parse(specRow.value); } catch { /* malformed → ignore */ }
+  }
+
   const { data: companies, error: cErr } = await supabase
     .from("companies")
     .select("id, name, domain")
@@ -110,6 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           companyName: !company.domain ? company.name : null,
           since: target.last_fetched_at,
           size: 100,
+          filters: specFilters,
         });
         pdlCalls += 1;
       } catch (err: any) {

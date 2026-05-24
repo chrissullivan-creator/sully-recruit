@@ -33,6 +33,7 @@ import {
   Play,
   Wrench,
   Briefcase,
+  Target,
   Plus,
   Pencil,
   Trash2,
@@ -319,6 +320,60 @@ const Settings = () => {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Lead Search Filter — natural-language job spec + AI-translated
+  // PDL filter JSON. Loaded on tab open.
+  const [jobSpecText, setJobSpecText] = useState('');
+  const [jobSpecFilters, setJobSpecFilters] = useState<any>({});
+  const [jobSpecLastTranslated, setJobSpecLastTranslated] = useState<string | null>(null);
+  const [jobSpecLoaded, setJobSpecLoaded] = useState(false);
+  const [jobSpecTranslating, setJobSpecTranslating] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'job_spec' || jobSpecLoaded) return;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['JOB_SPEC_NATURAL_LANGUAGE', 'JOB_SPEC_PDL_FILTERS', 'JOB_SPEC_LAST_TRANSLATED_AT']);
+      for (const row of data ?? []) {
+        if (row.key === 'JOB_SPEC_NATURAL_LANGUAGE') setJobSpecText(row.value ?? '');
+        if (row.key === 'JOB_SPEC_PDL_FILTERS') {
+          try { setJobSpecFilters(row.value ? JSON.parse(row.value) : {}); }
+          catch { setJobSpecFilters({}); }
+        }
+        if (row.key === 'JOB_SPEC_LAST_TRANSLATED_AT') {
+          setJobSpecLastTranslated(row.value || null);
+        }
+      }
+      setJobSpecLoaded(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const translateJobSpec = async (save: boolean) => {
+    setJobSpecTranslating(true);
+    try {
+      const res = await fetch('/api/settings/translate-job-spec', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ spec: jobSpecText, save }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Translation failed');
+      setJobSpecFilters(data.filters ?? {});
+      if (save) {
+        setJobSpecLastTranslated(new Date().toISOString());
+        toast.success('Job spec saved — applies to all future fetches');
+      } else {
+        toast.success('Preview generated');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Translation failed');
+    } finally {
+      setJobSpecTranslating(false);
+    }
+  };
 
   const saveEnrichmentKey = async (key: EnrichmentKey) => {
     setSaving(key);
@@ -735,6 +790,7 @@ Senior Recruiter | Your Company
     { id: 'signature', label: 'Email Signature', icon: PenLine },
     { id: 'linkedin_safety', label: 'LinkedIn Safety', icon: ShieldCheck },
     { id: 'api', label: 'API Keys', icon: Key },
+    { id: 'job_spec', label: 'Lead Search Filter', icon: Target },
     { id: 'general', label: 'General', icon: SettingsIcon },
     ...(isAdmin ? [{ id: 'admin', label: 'Admin Tools', icon: Wrench }] : []),
   ];
@@ -2047,6 +2103,80 @@ Senior Recruiter | Your Company
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ============ JOB SPEC TAB ============ */}
+                {activeTab === 'job_spec' && (
+                  <div>
+                    <div className="mb-6">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Lead search filter</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Describe the kinds of jobs the firm cares about in plain English. We translate it to a structured PDL filter that's applied to every bulk "Fetch postings" run — so you don't pull every JP Morgan job, only the ones worth pursuing.
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                      <div>
+                        <Label className="text-xs">Spec (free text)</Label>
+                        <Textarea
+                          value={jobSpecText}
+                          onChange={(e) => setJobSpecText(e.target.value)}
+                          rows={6}
+                          placeholder="e.g. Senior software engineering leaders in financial services (NYC, San Francisco, or remote). Director level or above. Full-time, $200k base minimum. No interns or contract roles."
+                          className="mt-1 text-sm font-mono"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Tip: be specific about seniority, location, and what to exclude. Vague specs translate to vague filters.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={jobSpecTranslating || !jobSpecText.trim()}
+                          onClick={() => translateJobSpec(false)}
+                        >
+                          {jobSpecTranslating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Target className="h-3.5 w-3.5 mr-1.5" />}
+                          Preview filter
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="gold"
+                          disabled={jobSpecTranslating}
+                          onClick={() => translateJobSpec(true)}
+                        >
+                          {jobSpecTranslating && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                          Translate & save
+                        </Button>
+                        {jobSpecLastTranslated && (
+                          <span className="text-[11px] text-muted-foreground ml-2">
+                            Saved {new Date(jobSpecLastTranslated).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+
+                      {Object.keys(jobSpecFilters ?? {}).length > 0 && (
+                        <div className="pt-3 border-t border-border">
+                          <div className="flex items-center justify-between mb-2">
+                            <Label className="text-xs">Active PDL filter</Label>
+                            <span className="text-[10px] text-muted-foreground">
+                              This is what we send to PDL on each fetch
+                            </span>
+                          </div>
+                          <pre className="bg-muted rounded p-3 text-[11px] font-mono whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+                            {JSON.stringify(jobSpecFilters, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+
+                      {Object.keys(jobSpecFilters ?? {}).length === 0 && jobSpecLoaded && (
+                        <div className="text-[11px] text-muted-foreground italic">
+                          No filter active — every fetch pulls every posting PDL has for the company.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

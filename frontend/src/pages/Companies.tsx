@@ -3,8 +3,9 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
-import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye, Rss } from 'lucide-react';
+import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye, Rss, Loader2 } from 'lucide-react';
 import { authHeaders } from '@/lib/api-auth';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
@@ -26,7 +27,39 @@ const Companies = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkFetching, setBulkFetching] = useState(false);
   const { data: companies = [], isLoading } = useCompanies();
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const handleBulkFetchPostings = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkFetching(true);
+    try {
+      const res = await fetch('/api/companies/fetch-job-postings', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ companyIds: selectedIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Bulk fetch failed');
+      const newTotal = data.counts?.new_postings ?? 0;
+      const okCount = (data.results ?? []).filter((r: any) => r.ok).length;
+      const failed = (data.results ?? []).filter((r: any) => !r.ok).length;
+      toast.success(
+        `${newTotal} new posting${newTotal === 1 ? '' : 's'} across ${okCount} compan${okCount === 1 ? 'y' : 'ies'}` +
+        (failed > 0 ? ` (${failed} failed)` : ''),
+      );
+      setSelectedIds([]);
+    } catch (err: any) {
+      toast.error(err.message || 'Bulk fetch failed');
+    } finally {
+      setBulkFetching(false);
+    }
+  };
 
   const handleQuickTypeChange = async (companyId: string, newType: string) => {
     try {
@@ -109,6 +142,21 @@ const Companies = () => {
             <Button variant={filter === 'client' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('client')}>Clients</Button>
             <Button variant={filter === 'target' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('target')}>Targets</Button>
           </div>
+
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-xs text-muted-foreground">{selectedIds.length} selected</span>
+              <Button size="sm" variant="outline" onClick={() => setSelectedIds([])} disabled={bulkFetching}>
+                Clear
+              </Button>
+              <Button size="sm" variant="gold" onClick={handleBulkFetchPostings} disabled={bulkFetching}>
+                {bulkFetching
+                  ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  : <Rss className="h-3.5 w-3.5 mr-1.5" />}
+                Fetch postings ({selectedIds.length})
+              </Button>
+            </div>
+          )}
         </div>
 
         {isLoading ? (
@@ -125,11 +173,21 @@ const Companies = () => {
             {filteredCompanies.map((company) => (
               <div
                 key={company.id}
-                className="rounded-lg border border-border bg-card p-5 hover:border-accent/50 transition-all duration-150 cursor-pointer hover-lift"
+                className={cn(
+                  "rounded-lg border bg-card p-5 hover:border-accent/50 transition-all duration-150 cursor-pointer hover-lift",
+                  selectedIds.includes(company.id) ? "border-accent" : "border-border",
+                )}
                 onClick={() => navigate(`/companies/${company.id}`)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.includes(company.id)}
+                        onCheckedChange={() => toggleSelect(company.id)}
+                        className="h-4 w-4"
+                      />
+                    </div>
                     {(() => {
                       const logoSrc = company.logo_url || (company.domain ? `https://logo.clearbit.com/${company.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}` : null);
                       return logoSrc ? (
