@@ -32,11 +32,12 @@ Tracking answers as they come in.
 | 13 | Cleanup of existing 21k unlinked messages | **Leave as-is** — the one-time backfill re-fetches, dedupes, and tags previously-orphan rows where counterparty matches |
 | 15 | Search across unknown-sender history | **Provider-side search button**. No rolling snapshot — auto-backfill on add captures retrospective history |
 | 16 | Phase 5 scope confirmed (~3 days) | **Good — ship as-is** |
-| 8b | Counterparty edge cases (group threads) | **Multi-tag**: 2+ matching recipients → save to all. 1 match + unknown others → prompt "save & add others?" with quick add |
+| 8b | Counterparty edge cases (group threads) | **Multi-tag**: 2+ matching recipients → save to all. 1 match + unknown others → prompt "save & add others?" with quick add. Quick-add runs the full enrichment + backfill pipeline tailored to candidate vs client classification |
+| 14 | Event log TTL | **30 days** — small debug table for "where did my message go?" forensics |
 | 18 | Strip quoted email replies before embedding | **Yes** — strip `>` blocks and forwarded-message headers before Voyage |
 | 19 | Index call notes too | **Yes** — unified `search_communications` Joe tool covers both messages and calls |
 
-*Only pending: Q14 (event log TTL — defaulting to 30d unless Chris says otherwise).*
+**✅ All questions answered.** Ready to start Phase 1 (timestamps + list polish) when Chris gives the go.
 
 ---
 
@@ -993,16 +994,16 @@ Files:
 5. ✅ **Backfill lookback window** — **answered**: email **back to 2019**; LinkedIn **forever** (no cap).
 6. ✅ **Backfill on existing people** — **answered**: yes, one-time backfill on all existing candidates/clients across sent + received. **Plus**: backfill must accurately populate `people.last_contacted_at` and `people.last_responded_at` as it goes.
 7. ✅ **AI tagging on non-persisted inbound** — **answered**: **skip** to save cost. The one-time backfill (Q8) will re-run AI tags on previously-unknown messages once the person is added.
-8. ✅ **Counterparty edge cases (group threads, forwards, dist lists)** — **answered**: **multi-tag**. If 2+ recipients match known people, save the conversation tagged to ALL of them. If only 1 matches and the others are unknown, surface a "Save & add the other recipients?" prompt with quick add buttons.
+8. ✅ **Counterparty edge cases (group threads, forwards, dist lists)** — **answered**: **multi-tag**. If 2+ recipients match known people, save the conversation tagged to ALL of them. If only 1 matches and the others are unknown, surface a "Save & add the other recipients?" prompt with quick add buttons. **Quick-adding an unknown recipient runs the full add-person enrichment pipeline** (Stages 1a–1c + Stage 2 backfill) tailored to whatever the AI-classify (or user-confirm) says they are — candidate vs client.
 9. ✅ **Default density** — **answered**: Comfortable (Claude's call).
 10. ✅ **Focused vs Other criteria** — **answered**: yes, persisted vs live unknown.
 11. ✅ **Snooze wake notification** — **answered**: **push notification** when a snoozed thread wakes.
 12. ✅ **Search across unknown-sender history** — **answered**: provider-side search button. No rolling snapshot needed — auto-backfill on add captures retrospective history.
 13. ✅ **Existing 21k messages cleanup** — **answered**: **leave as-is**. The one-time backfill (Q8) re-fetches from providers and dedupes; previously-orphan rows get tagged when their counterparty turns out to be a now-known person.
-14. ⏳ **Event log TTL** — **awaiting Chris's pick**. Default suggested: **30 days**. (Explanation: tiny debug table logging webhook arrivals with metadata only — no message bodies. ~18k rows/year = trivial cost. 7d = tight, 30d = covers most "where did my message go?" reports, no TTL = never wonder if logs rotated.)
+14. ✅ **Event log TTL** — **answered**: yes to the small debug table, **30 day TTL**.
 15. ✅ **Audit scope for outbound persistence** — **answered (separately)**: audit complete. Outbound persists across all paths; cross-channel `stopEnrollment` already wired; person-created → backfill chain already exists. Phase 5 shrinks to ~3 days.
 16. ✅ **Sequence cross-channel AI soft-match** — **answered**: yes, **stop the sequence on soft-match AND run the enrichment API to confirm**. On confirmed match, persist the new channel ID to `candidate_channels` so the next message recognizes hard. On enrichment fail or low confidence, surface in **Data Cleanup**.
 17. ✅ **Pre-enrollment warning** — **answered**: don't warn — instead **auto-run enrichment** to fill missing channel data (e.g. enroll an email-only candidate → silently enrich for LinkedIn). If enrichment returns **multiple candidates / ambiguous match**, add the case to a new **Data Cleanup** Settings view for manual disambiguation. **Duplicates** (existing CollisionReview at `frontend/src/pages/CollisionReview.tsx`) folded into the same Data Cleanup view.
 18. ✅ **Strip quoted email replies before embedding** — **answered**: yes. Indexer will strip `>` quote blocks and forwarded-message headers before sending to Voyage.
 
-**All required questions answered.** Only #14 (event log TTL) needs a quick pick — defaulting to 30 days unless you say otherwise.
+**✅ All questions answered. Ready to start Phase 1.**
