@@ -15,7 +15,7 @@ This is a design spec, not a build plan yet. Review, push back, then we phase it
 - **Email reads like email.** Outlook-style cards with `From / To / Date / Subject` headers — not chat bubbles squashing long emails.
 - **Chat stays chat.** LinkedIn DMs and SMS keep conversational bubbles. The reading pane swaps layouts based on channel.
 - **Workflow > passive view.** Snooze, flag, follow-up reminders, and conversation status (`Awaiting reply` / `Replied` / `Closed`) are first-class.
-- **Show all messages, save only the ones that belong to a person in the CRM.** Inbox reads live from Unipile/Microsoft/RingCentral and renders everything. Supabase only persists messages where the sender or recipient is already a candidate or client. When a new person is added to the CRM, their past communications backfill automatically.
+- **Show all messages, save the ones that matter (per channel).** Inbox shows the last 100 emails / LinkedIn DMs / Recruiter messages live from the providers. Persistence rules: **always save all SMS (in + out)** and **always save outbound** on every channel. Save **inbound email + LinkedIn** only when the sender is already a person in the CRM. When we send to someone not in the CRM, **auto-add them** with a quick Candidate/Client classifier. Adding a person triggers an **automatic backfill** of past communications from every channel. **Sent folder** in the sidebar surfaces everything we've sent across Outlook, LinkedIn, Recruiter, and SMS.
 - **Keyboard-first.** `j/k/e/r/h/#/u/?` shortcuts.
 - **Better than Outlook on the things Outlook is bad at:** cross-channel unification, recruiter context sidebar, snooze/follow-up, mobile, density.
 
@@ -50,111 +50,153 @@ Main file: `frontend/src/pages/Inbox.tsx` (1855 lines, single component). Suppor
 
 ## 3. Architectural shift — storage strategy
 
-**New rule:** show every message in the inbox UI, but **only save to Supabase when the sender or recipient is already a person in the system** (candidate or client). This keeps communication tagged to that person's record, without bloating the DB with messages from unknown senders.
+**New rule (per channel):**
 
-### The rule, plainly
+| Channel | Inbox display | Persistence |
+|---|---|---|
+| **SMS (RingCentral)** | All texts, live + persisted | **Always save** every inbound and outbound text (in and out). SMS is low-volume and high-signal — keep everything. |
+| **Email (Outlook / Microsoft)** | Last **100 messages** fetched live | Save **inbound** only if sender resolves to a person in the CRM. Save **outbound (Sent)** always — every email we send from our Outlook is saved. |
+| **LinkedIn DM (Unipile)** | Last **100 messages** fetched live | Save **inbound** only if sender resolves to a person in the CRM. Save **outbound** always. |
+| **LinkedIn Recruiter / InMail (Unipile)** | Last **100 messages** fetched live | Save **inbound** only if sender resolves to a person in the CRM. Save **outbound** always. |
 
-| Action | Storage |
-|---|---|
-| Inbox displays a message | Always (fetched live from Unipile / Microsoft / RingCentral, no DB write required). |
-| Message persisted to `conversations` + `messages` | **Only if** the sender's email / LinkedIn ID / phone resolves to an existing `people` row, OR the recipient does, OR the message is outbound from us. |
-| User clicks "Add person" on an unknown sender | Future messages from that person auto-persist; optional one-click backfill of the past thread. |
+In short: **all outbound is saved. All inbound SMS is saved. Inbound email + LinkedIn is saved only when the counterparty is already a person in the CRM.**
 
 ### Why
-- 21k messages today, most never linked to a candidate or client = noise.
-- Privacy: random newsletters, personal mail, vendor pitches don't belong in the CRM.
-- Keeps the principle that **everything in `messages` is tagged to a person** — which is the whole point of the CRM.
+- Outbound = our work product. Always belongs in the CRM, regardless of recipient.
+- SMS = low volume, high intent (texting is rarely cold). Always save.
+- Email + LinkedIn = high volume, much of it noise from unknown senders. Filter to known people.
 
-### Recognition logic — "is this person in the system?"
+### Recognition logic — "is the counterparty in the system?"
 
-When a webhook fires (or when the UI fetches a live message), we resolve the counterparty:
+When a webhook fires or a live fetch normalizer runs:
 
-1. **Email**: lookup `candidate_channels.address` or `contact_channels.address` (via the `people` table) for the inbound `sender_address` and the outbound `recipient_address`. Use normalized email (lowercased, plus-tag-stripped).
-2. **LinkedIn**: lookup `candidate_channels.provider_id` against the Unipile attendee ID (or LinkedIn `public_identifier` / member URN).
-3. **SMS**: lookup `candidate_channels.address` against the E.164 phone number.
-4. **Outbound**: always persist (it's something *we* sent — it belongs in the timeline).
+1. **Email**: lookup `candidate_channels.address` or `contact_channels.address` for the inbound `sender_address`. Normalize email (lowercase, strip `+tags`).
+2. **LinkedIn**: lookup `candidate_channels.provider_id` against the Unipile attendee ID / `public_identifier` / member URN.
+3. **SMS**: skip the check — always save.
+4. **Outbound (any channel)**: always save. If the recipient isn't a person yet → see "Auto-add on outbound" below.
 
-If a match is found → write to `conversations` + `messages` with the resolved `candidate_id` or `contact_id`. If no match → drop the body / payload; the live inbox UI still shows it via direct API fetch.
+If inbound + match → write to `conversations` + `messages` tagged to the resolved `candidate_id` / `contact_id`. If inbound + no match → drop the body; the live inbox UI still shows it via direct API fetch.
 
 ### Webhook handler changes (concrete)
 
-Currently `frontend/api/webhooks/unipile-events.ts` (and Microsoft / RingCentral equivalents) write every inbound message. New behavior:
-
 ```ts
 async function handleInboundMessage(payload) {
-  await supabase.from('inbox_event_log').insert({ ...metadata });   // lightweight trace
+  await supabase.from('inbox_event_log').insert({ ...metadata });
 
-  const personMatch = await resolveCounterparty({
-    channel: payload.channel,
-    address: payload.sender_address,          // email / phone
-    provider_id: payload.sender_attendee_id,  // LinkedIn URN / Unipile attendee
-  });
-
-  if (!personMatch) {
-    // Not in the system. Don't persist body. UI will fetch live from Unipile if needed.
-    return;
+  // SMS: always save
+  if (payload.channel === 'sms') {
+    return await persistMessage(payload, { person: await resolveCounterparty(payload) });
+    // resolveCounterparty may return null for SMS — that's OK, we still persist (untagged)
+    // and surface in a "Needs classification" view so user can attach to a person.
   }
 
-  // In the system → persist with person tagging.
-  await supabase.from('messages').insert({
-    ...messageRow,
-    candidate_id: personMatch.role === 'candidate' ? personMatch.id : null,
-    contact_id:   personMatch.role === 'client'    ? personMatch.id : null,
-  });
-  await upsertConversation(personMatch, payload);
+  // Email / LinkedIn / Recruiter: only save if counterparty is in the system
+  const personMatch = await resolveCounterparty(payload);
+  if (!personMatch) {
+    return; // UI will fetch live for display
+  }
+
+  await persistMessage(payload, { person: personMatch });
+}
+
+async function handleOutboundMessage(payload) {
+  // Always save. If recipient not in system, auto-create + flag for classification.
+  let person = await resolveCounterparty({ ...payload, address: payload.recipient_address });
+  if (!person) {
+    person = await autoCreatePersonFromOutbound(payload);
+  }
+  await persistMessage(payload, { person });
 }
 ```
 
-A new shared helper `frontend/src/server-lib/resolve-counterparty.ts` does the lookup — used by all webhook handlers and any live-fetch normalizer.
+Shared helper: `frontend/src/server-lib/resolve-counterparty.ts`.
 
-### Outbound messages
+### Auto-add on outbound — "send to someone not in the CRM"
 
-Always persist outbound (sequences, manual replies, etc.) — those are first-party data and *we* know who we sent to. Even if the recipient isn't yet in the system, the act of sending to them should create the person on the fly (this is already the case in some paths; ensure it's consistent across email/LinkedIn/SMS send endpoints).
+When we send an email or LinkedIn message to someone who isn't yet a person:
+
+1. **Auto-create** a `people` row with what we know from the outbound payload (name, email/LinkedIn URL, signature-parsed company/title if available).
+2. **Add the channel** to `candidate_channels` (defaulting to candidate, see below).
+3. **Mark `needs_classification = true`** on the person row.
+4. **Fire `person.created`** event → triggers the auto-backfill job (catches any past history we might have with them through other channels).
+5. **Toast in the UI**: "Added {Name} to CRM — classify them?" with quick buttons.
+
+#### `needs_classification` UI
+
+- **Sidebar view** "Needs classification" (count badge) — shows auto-added people awaiting type.
+- **Inline classifier in the reading pane** when a thread is open with an unclassified person:
+  ```
+  ┌────────────────────────────────────────────────────────┐
+  │ ⚡ Just added {Name} from this message.               │
+  │   Classify them:                                       │
+  │   [👤 Candidate]  [🤝 Client]  [✕ Remove]              │
+  └────────────────────────────────────────────────────────┘
+  ```
+- **Inbox row indicator**: small `?` next to sender name on rows where the person is `needs_classification = true`.
+- **Quick-classify on hover** in the thread list: hover action `📋` opens a one-click menu Candidate / Client / Remove.
+
+Default `type = 'candidate'` on auto-add since recruiter outreach is more often to candidates than clients. User flips to `client` with one click if wrong.
+
+### Sent folder
+
+New sidebar item **Sent** under INBOX. Lists outbound conversations (filter: `direction = 'outbound'` on the most recent message OR conversation has an outbound message recently). Multi-channel — emails I sent through Outlook, LinkedIn messages I sent, LinkedIn Recruiter InMails, SMS I sent.
+
+This is critical because the new rule means LinkedIn Recruiter sends, Outlook sends, etc. all live in Supabase and we want a single view of "what I've sent."
+
+Implementation: filter on `inbox_threads` view by latest message direction = `'outbound'` (or last-outbound-from-user, scoped to current user via `owner_id`). Sort by `last_message_at DESC`.
+
+### Outbound capture — every Sent message persists
+
+For this to work, every send path must call `persistOutbound()`:
+
+- **Outlook/Microsoft Graph email send** (`frontend/api/email/send.ts` or similar) — already persists for sequence-driven sends; ensure manual replies + new-compose also persist.
+- **LinkedIn DM** via Unipile (`POST /chats?account_id=X`) — confirm wired.
+- **LinkedIn Recruiter InMail** via Unipile — confirm wired.
+- **SMS via RingCentral** — confirm wired (likely already).
+- **Audit task** during Phase 5: grep every `unipile`/`microsoft`/`ringcentral` send call and verify there's a follow-on `messages` insert.
 
 ### Live inbox fetch path
 
-For threads NOT persisted (sender unknown), the UI hits a new endpoint:
+For inbound from unknown senders (email + LinkedIn):
 
-- `GET /api/inbox/live-threads` — proxies Unipile + Microsoft Graph + RingCentral, returns the last ~30 days of threads with normalized shape (`{ id, channel, sender, subject, preview, last_message_at, ... }`).
-- React Query caches with 60s stale; SSE/webhook tickle invalidates.
-- Merging: frontend unions persisted Supabase rows + live-API rows, dedupes by `external_conversation_id`.
+- `GET /api/inbox/live-threads?channel=email|linkedin|recruiter&limit=100` — proxies Unipile / Microsoft Graph, returns the **last 100 threads** per channel with normalized shape.
+- React Query caches 60s; webhook tickle invalidates.
+- Frontend unions persisted Supabase rows + live-API rows, dedupes by `external_conversation_id`.
+
+SMS view doesn't need the live endpoint — it's all in Supabase.
 
 ### Adding a person → auto-backfill past communications
 
-When a person is added to the CRM — by **any path** (Add Person Wizard from the inbox, resume parsing, manual add, LinkedIn import, sequence enrollment, etc.) — the system **automatically fetches and saves all past communications** with that person from every connected channel. No opt-in prompt. This is the contract: if you're in the CRM, your history with us is in the CRM.
+When a person is added to the CRM — by **any path** (Add Person Wizard from the inbox, resume parsing, manual add, LinkedIn import, sequence enrollment, **auto-add from outbound**, etc.) — the system **automatically fetches and saves all past communications** with that person from every connected channel.
 
-**Trigger**: any insert into `people` that also has a resolvable address/identifier in `candidate_channels` or `contact_channels`.
+**Trigger**: any insert into `people` with at least one resolvable channel identifier.
 
-**Implementation**: a new Inngest job `backfill-person-communications` (`frontend/src/server-lib/inngest/backfill-person-communications.ts`) fires on a `person.created` event. It:
+**Implementation**: Inngest job `backfill-person-communications` on `person.created`:
 
-1. Reads all channel identifiers from `candidate_channels` / `contact_channels` for the new person.
+1. Read all channel identifiers from `candidate_channels` / `contact_channels` for the new person.
 2. For each channel:
-   - **Email** (Microsoft Graph): query `/me/messages?$search="from:{email}" OR "to:{email}"` (paged); also folder-scoped (Inbox + Sent).
+   - **Email** (Microsoft Graph): query `/me/messages?$search="from:{email}" OR "to:{email}"` (paged); both Inbox + Sent.
    - **LinkedIn DM / Recruiter** (Unipile v1): `GET /chats?account_id=X` filtered to attendee = the LinkedIn provider ID. Then `GET /chats/{id}/messages` for each match.
    - **SMS** (RingCentral): list messages with the matching phone number.
-3. Writes everything to `conversations` + `messages` with the resolved `candidate_id` or `contact_id`.
-4. Skips messages already present (dedupe on `external_message_id`).
-5. AI-tags the backfilled messages so candidate timeline + send-out state derives correctly.
+3. Write to `conversations` + `messages` tagged to the new person.
+4. Dedupe on `external_message_id`.
+5. AI-tag the backfilled messages.
 
-**Bounds**: configurable lookback (default: 24 months) to avoid surprise massive backfills. Surface a small toast in the UI: "Backfilling past communications for {name}…" with a count when done.
+**Bounds**: configurable lookback (default 24 months). Toast: "Backfilling past communications for {name}…"
 
-**Failure mode**: if a channel API errors mid-backfill, mark the job as partial and retry that channel only. Don't block the person creation.
-
-**Going forward** after the person is added, the webhook recognition logic naturally picks up new messages with no extra work.
+**Failure mode**: partial-channel failure retries that channel; doesn't block person creation.
 
 ### Migration of existing data
 
-Existing 10k conversations + 21k messages stay (forward-looking change). Optional cleanup script later:
-- Identify `messages` rows with `candidate_id IS NULL AND contact_id IS NULL` AND no AI tags AND older than 6 months → archive / delete.
-- Don't run automatically; surface as a one-off cleanup tool.
+Existing 10k conversations + 21k messages stay (forward-looking change). Optional later cleanup: messages where `candidate_id IS NULL AND contact_id IS NULL` AND channel ∈ (email, linkedin, linkedin_recruiter) AND older than 6 months → archive/delete. SMS rows stay regardless.
 
 ### Risk / things to watch
 
-- **Search across history**: only persisted (tagged-to-person) threads are searchable inside Sully. Unknown-sender messages live only in the source provider; if you want to find them, use the provider's own search (or hit Unipile search via the "Search inbox provider…" affordance — see §4.10).
-- **Latency**: Unipile/Microsoft fetch on inbox open. Cache aggressively (60s React Query). On first paint, show persisted rows immediately and live rows as they arrive.
-- **Rate limits**: page ≤50 threads, cursor pagination.
-- **Sequence engine**: sequences only enroll candidates already in the system → their messages auto-resolve and persist via the recognition rule. No special case needed.
-- **Counterparty edge cases**: forwarded emails, group threads, dist lists. Rule: if ANY counterparty (sender OR primary recipient) matches a person, persist with that person. If multiple match (rare), pick the first; surface both in the UI.
+- **Outbound volume**: with every Outlook email persisting, the `messages` table will grow faster than today. We're OK — outbound is the highest-value data. If volume becomes an issue, archive after 24 months.
+- **Auto-classification drift**: defaulting to `candidate` and relying on user to flip will drift toward incorrect classification. Counter: surface "Needs classification" prominently in sidebar; consider an AI guess based on signature parsing (e.g. if signature says "Director of Talent at X" → likely client).
+- **Backfill from auto-add**: when an outbound to a new email triggers auto-add → backfill might pull months of past back-and-forth. That's the goal but verify it doesn't surprise users (toast count helps).
+- **Search across history**: inbound from unknown senders isn't searchable inside Sully (only the provider's search). Acceptable trade-off.
+- **Counterparty edge cases**: forwarded emails, group threads, dist lists. Rule: if ANY counterparty matches a person, persist tagged to that person. If multiple match, pick the first.
 
 ---
 
@@ -197,13 +239,14 @@ Below `lg` (1024px): collapse to single column with breadcrumb (Inbox → Thread
 ```
 INBOX
   All
-  Unread          (count badge)
+  Unread             (count badge)
   Starred
-  Snoozed         (count + soonest wake)
-  Awaiting reply  (count)
-  Sent
+  Snoozed            (count + soonest wake)
+  Awaiting reply     (count)
+  Sent               ← all outbound across channels
   Drafts
   Archive
+  Needs classification (count) ← auto-added people waiting for type
 ─────
 CHANNELS
   📧 Email
@@ -424,8 +467,6 @@ Below `lg` (1024px):
 
 ### 5.1 New columns on `conversations`
 
-Every row in `conversations` is now, by definition, tagged to a person (the recognition rule). No `is_persisted` flag needed.
-
 ```sql
 ALTER TABLE public.conversations
   ADD COLUMN IF NOT EXISTS flagged boolean NOT NULL DEFAULT false,
@@ -443,6 +484,20 @@ CREATE INDEX IF NOT EXISTS idx_conversations_flagged ON public.conversations(fla
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON public.conversations(status)
   WHERE status IS NOT NULL;
 ```
+
+### 5.1b New column on `people` — needs_classification
+
+```sql
+ALTER TABLE public.people
+  ADD COLUMN IF NOT EXISTS needs_classification boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS auto_added_at timestamptz,
+  ADD COLUMN IF NOT EXISTS auto_added_source text;  -- 'outbound_email'|'outbound_linkedin'|'outbound_recruiter'|...
+
+CREATE INDEX IF NOT EXISTS idx_people_needs_classification ON public.people(needs_classification)
+  WHERE needs_classification = true;
+```
+
+Note: `people.type` keeps its existing `CHECK (type IN ('candidate','client'))` constraint. Auto-added people default to `type = 'candidate'` + `needs_classification = true`. User confirms or flips type, which clears the flag. No need to extend the CHECK constraint or touch the candidate/client filters elsewhere in the app.
 
 ### 5.2 New `inbox_event_log` (lightweight webhook trace, 7-day TTL)
 
@@ -572,16 +627,21 @@ Files:
 - Inngest function to resurface follow-up reminders.
 - Status auto-derivation (`awaiting_reply` / `replied`) on every new inbound/outbound.
 
-### Phase 5 — Person-based persistence + auto-backfill (~4 days)
+### Phase 5 — Person-based persistence + Sent folder + auto-add + backfill (~5 days)
 
 Files:
-- Migration: `inbox_saved_views`, `inbox_event_log`.
+- **Migrations**: `inbox_saved_views`, `inbox_event_log`, `people.needs_classification` + `auto_added_at` + `auto_added_source`.
 - `frontend/src/server-lib/resolve-counterparty.ts` (new) — normalize address/provider_id and look up `candidate_channels` / `contact_channels`.
-- `frontend/api/webhooks/unipile-events.ts` (and Microsoft, RingCentral) — drop the unconditional write; call `resolveCounterparty()`, persist only on match. Always persist outbound.
-- `frontend/src/server-lib/inngest/backfill-person-communications.ts` (new) — fires on `person.created`; fetches and saves past email + LinkedIn + SMS messages for the new person.
-- Wire the trigger: every code path that inserts into `people` emits a `person.created` event (Add Person Wizard, resume parsing, sequence enrollment, manual add, LinkedIn import). Centralize via a `createPerson()` helper if not already.
-- `frontend/api/inbox/live-threads.ts` (new) — proxy endpoint that calls Unipile/Microsoft and returns normalized threads for the inbox UI (used for unknown senders).
-- Frontend: React Query hook unions persisted Supabase rows + live-API rows for display; dedupes on `external_conversation_id`.
+- `frontend/src/server-lib/auto-create-person.ts` (new) — used by outbound handlers when recipient isn't in CRM. Defaults `type='candidate'`, sets `needs_classification=true`, fires `person.created`.
+- **Webhook + send-path changes**:
+  - `frontend/api/webhooks/unipile-events.ts` (and Microsoft, RingCentral) — switch inbound to recognition-gated persistence. SMS always persists. Outbound always persists; auto-creates person if needed.
+  - **Audit all send endpoints** to confirm they call `persistOutbound()`: Outlook email send, LinkedIn DM send, LinkedIn Recruiter InMail send, RingCentral SMS send. Add the call wherever missing.
+- `frontend/src/server-lib/inngest/backfill-person-communications.ts` (new) — fires on `person.created`. Fetches past email + LinkedIn + SMS for the new person; dedupes; AI-tags.
+- Wire the `person.created` event for **every** path that inserts into `people` (Add Person Wizard, resume parsing, sequence enrollment, manual add, LinkedIn import, **auto-create from outbound**). Centralize via a `createPerson()` helper if not already.
+- `frontend/api/inbox/live-threads.ts` (new) — proxy that returns last 100 threads per channel from Unipile / Microsoft for unknown-sender display.
+- **Sent folder**: new sidebar view + query (`inbox_threads` filtered to last-message-outbound, scoped to current user). No new endpoint needed.
+- **Needs Classification view**: new sidebar view + UI for `people WHERE needs_classification = true`. Inline classifier banner in the reading pane.
+- Frontend: React Query hook unions persisted Supabase rows + live-API rows; dedupes on `external_conversation_id`.
 
 ### Phase 6 — Keyboard shortcuts + cheat sheet (~1 day)
 
@@ -604,15 +664,20 @@ Files:
 
 ## 7. Open questions for Chris
 
-1. **Backfill lookback window**: default 24 months — too short, too long? Some senior candidates might have 3+ years of LinkedIn DM history we'd want.
-2. **Backfill on existing people**: when this ships, do we run a one-time backfill pass on the existing ~N candidates/clients to catch any pre-existing messages we'd have dropped? Or only apply to people added going forward?
-3. **AI tagging on non-persisted messages**: do we still run Joe's classification on every webhook even when the sender isn't in the system (to catch e.g. an unknown person sending "I accept the offer" — implying they're a candidate we should add)? Cost vs catching edge cases.
-4. **Counterparty edge cases — group threads, forwards, distribution lists**: if a single email has multiple recipients and one matches a candidate, do we save the whole thread to that candidate, or just the messages where they were directly addressed? Default: save the thread, tagged to that candidate.
-5. **Default density**: Comfortable or Compact?
-6. **Focused vs Other criteria**: "Focused" = linked to a candidate/client (= everything persisted in Supabase). "Other" = live-fetched unknown senders. Confirm — or include sequences / open send-outs in Focused?
-7. **Snooze wake notification**: push notification when a snoozed thread wakes up, or silent re-appear in inbox? (Vote: silent + "Welcome back" banner.)
-8. **Search across unknown-sender history**: only the provider's own search (via a "Search inbox provider…" affordance), OR keep a 30-day rolling snapshot of all inbound for global search even if we don't permanently persist?
-9. **Existing 21k messages + 10k conversations cleanup**: leave as-is (forward-only change), or run a one-time cleanup script (delete messages where `candidate_id IS NULL AND contact_id IS NULL` + older than 6 months + no AI tags)?
-10. **Event log TTL**: `inbox_event_log` is debug-only — 7-day TTL OK, or longer?
+1. **Live-fetch cap of 100 — per channel or total?** Email last 100 + LinkedIn last 100 + Recruiter last 100 = up to 300 rows in the "Other" view. Or one combined cap of 100?
+2. **Auto-add default type**: defaulting to `candidate` when we send to an unknown email/LinkedIn. Right call, or default to `client` based on context (e.g. domain matches a known client company in `companies`)?
+3. **Auto-add from sent — what if the email is to e.g. `support@vendor.com` or my own teammates?** Suggest a deny-list (own domain, distribution lists, common service addresses). Confirm.
+4. **AI-guess classification on auto-add**: parse signature / domain / message context to guess candidate vs client and pre-fill the type? Reduces the "Needs classification" backlog.
+5. **Backfill lookback window**: default 24 months. Long enough? Some senior candidates have 3+ years of LinkedIn DM history.
+6. **Backfill on existing people**: when this ships, run a one-time backfill on existing candidates/clients to catch pre-existing messages we'd have dropped under the old behavior? Or forward-only?
+7. **AI tagging on non-persisted inbound**: still run Joe's classification on every inbound webhook even when the sender isn't in the system (to flag e.g. an unknown person saying "I accept the offer")? Cost vs catching edge cases.
+8. **Counterparty edge cases — group threads, forwards, dist lists**: if a single email has multiple recipients and one matches a candidate, save the whole thread tagged to that candidate? Default yes.
+9. **Default density**: Comfortable or Compact?
+10. **Focused vs Other criteria**: "Focused" = persisted threads (people in CRM). "Other" = live-fetched from unknown senders. Confirm.
+11. **Snooze wake notification**: push notification or silent re-appear with a "Welcome back" banner?
+12. **Search across unknown-sender history**: provider's own search only (via a "Search inbox provider…" affordance)? Or keep a 30-day rolling snapshot for global search?
+13. **Existing 21k messages cleanup**: leave as-is, or one-time cleanup of inbound rows where `candidate_id IS NULL AND contact_id IS NULL` + channel ∈ (email, linkedin, linkedin_recruiter) + older than 6 months?
+14. **Event log TTL**: 7 days OK for the debug-only `inbox_event_log`?
+15. **Audit scope for outbound persistence**: Phase 5 audits every send endpoint to ensure it persists. Do you want me to first do a read-only pass and report which send paths today already persist vs not, before changing anything?
 
 Once you answer these, I'll start Phase 1 (timestamps + list polish — biggest UX win, no DB risk).
