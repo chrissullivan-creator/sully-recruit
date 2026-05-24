@@ -3,7 +3,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
-import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Globe, MapPin, Briefcase, Building, ListTodo, MoreHorizontal, RefreshCw, Trash2, Eye, Rss } from 'lucide-react';
+import { authHeaders } from '@/lib/api-auth';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
@@ -35,6 +36,27 @@ const Companies = () => {
       invalidateCompanyScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update type');
+    }
+  };
+
+  const handleFetchPostings = async (companyId: string, companyName: string) => {
+    try {
+      const res = await fetch('/api/companies/fetch-job-postings', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ companyIds: [companyId] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Fetch failed');
+      const r = data.results?.[0];
+      if (!r?.ok) {
+        toast.error(`${companyName}: ${r?.error || 'no career URLs and no domain'}`);
+        return;
+      }
+      toast.success(`${companyName}: ${r.new_postings} new posting${r.new_postings === 1 ? '' : 's'}`);
+      queryClient.invalidateQueries({ queryKey: ['company_job_postings', companyId] });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fetch postings');
     }
   };
 
@@ -169,6 +191,9 @@ const Companies = () => {
                     <DropdownMenuContent align="end" className="w-44">
                       <DropdownMenuItem onClick={() => setTaskPanel({ id: company.id, name: company.name })}>
                         <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleFetchPostings(company.id, company.name)}>
+                        <Rss className="h-3.5 w-3.5 mr-2" /> Fetch postings
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuSub>
