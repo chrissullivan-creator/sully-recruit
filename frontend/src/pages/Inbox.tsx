@@ -19,7 +19,7 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
-  Star, Clock as ClockIcon,
+  Star, Clock as ClockIcon, Bell, Sun,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
@@ -37,6 +37,7 @@ import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/in
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
 import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
+import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -63,6 +64,9 @@ interface InboxThread {
   flagged?: boolean | null;
   snoozed_until?: string | null;
   follow_up_at?: string | null;
+  follow_up_at_set_at?: string | null;
+  follow_up_triggered_at?: string | null;
+  woke_from_snooze_at?: string | null;
   status?: 'awaiting_reply' | 'replied' | 'snoozed' | 'closed' | 'no_reply_needed' | null;
   candidate_id: string | null;
   candidate_name: string | null;
@@ -900,6 +904,60 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     invalidateCommsScope(queryClient);
   };
 
+  // Clear the "just woke from snooze" banner once the user opens the thread.
+  // The DB column stays as audit; the UI banner only shows when it's recent
+  // (< 1 day) AND we haven't dismissed it in this session.
+  const [wakeDismissed, setWakeDismissed] = useState(false);
+  useEffect(() => {
+    setWakeDismissed(false);
+  }, [threadId]);
+
+  const handleSetFollowUp = async (followUpAt: Date) => {
+    if (!threadId) return;
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        follow_up_at: followUpAt.toISOString(),
+        follow_up_at_set_at: new Date().toISOString(),
+        follow_up_triggered_at: null,
+      } as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Couldn't set reminder: ${error.message}`);
+      return;
+    }
+    toast.success('Reminder set');
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleClearFollowUp = async () => {
+    if (!threadId) return;
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        follow_up_at: null,
+        follow_up_at_set_at: null,
+        follow_up_triggered_at: null,
+      } as any)
+      .eq('id', threadId);
+    if (error) {
+      toast.error(`Couldn't clear reminder: ${error.message}`);
+      return;
+    }
+    toast.success('Reminder cleared');
+    invalidateCommsScope(queryClient);
+  };
+
+  const handleDismissWake = async () => {
+    if (!threadId) return;
+    setWakeDismissed(true);
+    await supabase
+      .from('conversations')
+      .update({ woke_from_snooze_at: null } as any)
+      .eq('id', threadId);
+    invalidateCommsScope(queryClient);
+  };
+
   // Auto-mark-read shortly after a thread is opened. 600ms delay so a
   // misclick during quick scanning doesn't flip the state — long
   // enough to feel intentional, short enough to feel automatic.
@@ -1194,6 +1252,21 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                   <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Read
                 </Button>
               )}
+              <FollowUpMenu
+                currentFollowUp={thread.follow_up_at ?? null}
+                onSet={handleSetFollowUp}
+                onClear={handleClearFollowUp}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title={thread.follow_up_at ? 'Edit follow-up reminder' : 'Remind me if no reply'}
+                    className={thread.follow_up_at ? 'text-accent' : ''}
+                  >
+                    <Bell className="h-4 w-4" />
+                  </Button>
+                }
+              />
               <Button
                 variant="ghost"
                 size="icon"
@@ -1256,6 +1329,45 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
               </button>{' '}
               to track them.
             </p>
+          </div>
+        )}
+
+        {/* Wake-from-snooze banner — shows when the cron fired in the last
+            24h and the user hasn't dismissed it in this session. */}
+        {!wakeDismissed && thread.woke_from_snooze_at && (Date.now() - new Date(thread.woke_from_snooze_at).getTime()) < 24 * 60 * 60 * 1000 && (
+          <div className="px-6 py-2.5 bg-[#7C3AED]/5 border-b border-[#7C3AED]/20 flex items-center gap-2">
+            <Sun className="h-3.5 w-3.5 text-[#7C3AED] shrink-0" />
+            <p className="text-xs text-[#7C3AED] flex-1">
+              <span className="font-medium">Welcome back —</span> this thread woke from snooze {formatSmartTimestamp(thread.woke_from_snooze_at)}.
+            </p>
+            <button
+              type="button"
+              onClick={handleDismissWake}
+              className="text-xs text-[#7C3AED] hover:text-[#7C3AED]/80"
+              title="Dismiss"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Follow-up triggered banner — shows when the reminder fired
+            because no reply came in. Cleared when user dismisses or sets
+            a new reminder. */}
+        {thread.follow_up_triggered_at && !thread.follow_up_at && (Date.now() - new Date(thread.follow_up_triggered_at).getTime()) < 7 * 24 * 60 * 60 * 1000 && (
+          <div className="px-6 py-2.5 bg-accent/5 border-b border-accent/20 flex items-center gap-2">
+            <Bell className="h-3.5 w-3.5 text-accent shrink-0" />
+            <p className="text-xs text-accent flex-1">
+              <span className="font-medium">Follow-up reminder —</span> no reply received since you set this.
+            </p>
+            <button
+              type="button"
+              onClick={handleClearFollowUp}
+              className="text-xs text-accent hover:text-accent/80"
+              title="Dismiss"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
 
