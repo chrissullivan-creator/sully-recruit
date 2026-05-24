@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { invalidateCommsScope } from '@/lib/invalidate';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
@@ -18,8 +18,11 @@ import {
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
-  CheckSquare, Square, MailOpen, Archive,
+  CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
+import { useInboxDensity, type InboxDensity } from '@/lib/use-inbox-density';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -110,12 +113,24 @@ const CHANNEL_COLORS: Record<string, string> = {
   call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
 };
 
+// ---------- Date group header ----------
+function DateGroupHeader({ label }: { label: string }) {
+  return (
+    <div className="sticky top-0 z-10 px-3 py-1.5 bg-background/95 backdrop-blur border-b border-border/60">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 // ---------- Thread Item ----------
 function ThreadItem({
   thread,
   isSelected,
   isChecked,
   selectionActive,
+  density,
   onClick,
   onToggleCheck,
 }: {
@@ -123,6 +138,7 @@ function ThreadItem({
   isSelected: boolean;
   isChecked: boolean;
   selectionActive: boolean;
+  density: InboxDensity;
   onClick: () => void;
   onToggleCheck: (shiftKey: boolean) => void;
 }) {
@@ -136,14 +152,16 @@ function ThreadItem({
   const previewText = thread.last_inbound_preview ?? thread.last_message_preview;
   const previewTime = thread.last_inbound_at ?? thread.last_message_at;
   const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
+  const isUnread = !thread.is_read;
+  const compact = density === 'compact';
 
   return (
     <div
       className={cn(
-        'group w-full text-left px-3 py-3.5 border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
-        isSelected && 'bg-accent/8 border-l-2 border-l-accent',
+        'group w-full text-left border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
+        compact ? 'px-3 py-2' : 'px-3 py-3.5',
+        isSelected && 'bg-accent/8',
         isChecked && 'bg-accent/12',
-        !thread.is_read && !isSelected && !isChecked && 'bg-muted/20'
       )}
       onClick={(e) => {
         // Cmd/Ctrl-click toggles selection; plain click opens
@@ -155,7 +173,15 @@ function ThreadItem({
         onClick();
       }}
     >
-      <div className="flex items-start gap-2">
+      {/* Accent bar on left — full-row height, marks unread or selected */}
+      <div
+        className={cn(
+          'absolute left-0 top-0 bottom-0 w-1 transition-colors',
+          isSelected ? 'bg-accent' : isUnread ? 'bg-accent/70' : 'bg-transparent'
+        )}
+        aria-hidden
+      />
+      <div className="flex items-start gap-2 pl-1">
         {/* Checkbox column — always reserves space when selection is active so
             the rest of the row doesn't jump around mid-select. */}
         <button
@@ -177,20 +203,33 @@ function ThreadItem({
             <Square className="h-4 w-4 text-muted-foreground" />
           )}
         </button>
-        <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
-          <Icon className="h-4 w-4" />
+        <div className={cn(
+          'mt-0.5 flex shrink-0 items-center justify-center rounded-full',
+          compact ? 'h-7 w-7' : 'h-8 w-8',
+          CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground',
+        )}>
+          <Icon className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">
             <div className="flex items-center gap-1.5 min-w-0">
               {entityName ? (
-                <span className={cn('text-sm truncate', !thread.is_read ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                <span className={cn(
+                  'truncate',
+                  compact ? 'text-sm' : 'text-[15px]',
+                  isUnread ? 'font-semibold text-foreground' : 'font-medium text-foreground/90',
+                )}>
                   {entityName}
                 </span>
               ) : (
-                <span className="text-sm font-medium text-warning italic">Unlinked</span>
+                <span className={cn(
+                  'font-medium italic flex items-center gap-1',
+                  compact ? 'text-sm' : 'text-[15px]',
+                  'text-muted-foreground',
+                )}>
+                  Unknown sender
+                </span>
               )}
-              {!thread.is_read && <Circle className="h-1.5 w-1.5 fill-accent text-accent shrink-0" />}
               {thread.has_attachments && (
                 <Paperclip
                   className="h-3 w-3 shrink-0 text-muted-foreground"
@@ -198,34 +237,81 @@ function ThreadItem({
                 />
               )}
             </div>
-            <span className="text-[10px] text-muted-foreground shrink-0">
-              {previewTime
-                ? formatDistanceToNow(new Date(previewTime), { addSuffix: true })
-                : ''}
-            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Hover actions — UI only in Phase 1; wired to handlers in Phase 4 */}
+              <div className="hidden group-hover:flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title="Mark unread (coming soon)"
+                  aria-label="Mark unread"
+                  disabled
+                >
+                  <MailOpen className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title="Archive (coming soon)"
+                  aria-label="Archive"
+                  disabled
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {previewTime ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={cn(
+                      'text-xs tabular-nums shrink-0 group-hover:hidden',
+                      isUnread ? 'font-semibold text-foreground/80' : 'font-medium text-muted-foreground',
+                    )}>
+                      {formatSmartTimestamp(previewTime)}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="text-xs">
+                    {formatAbsoluteTimestamp(previewTime)}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
           </div>
           {thread.subject && (
-            <p className={cn('text-xs truncate mb-0.5', !thread.is_read ? 'text-foreground/80 font-medium' : 'text-foreground/70')}>
+            <p className={cn(
+              'truncate mb-0.5',
+              compact ? 'text-xs' : 'text-sm',
+              isUnread ? 'text-foreground font-semibold' : 'text-foreground/80 font-medium',
+            )}>
               {thread.subject}
             </p>
           )}
-          <p className="text-xs text-muted-foreground truncate">
-            {awaitingReply ? (
-              <span className="italic opacity-70">Awaiting reply…</span>
-            ) : (
-              previewText || '—'
-            )}
-          </p>
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
-              {CHANNEL_LABELS[thread.channel] || thread.channel}
-            </Badge>
-            {!isLinked && (
-              <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide border-warning/40 text-warning">
-                Unlinked
+          {!compact && (
+            <p className="text-xs text-muted-foreground truncate">
+              {awaitingReply ? (
+                <span className="italic opacity-70">Awaiting reply…</span>
+              ) : (
+                previewText || '—'
+              )}
+            </p>
+          )}
+          {!compact && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Badge variant="outline" className="text-[9px] uppercase h-4 px-1.5 tracking-wide">
+                {CHANNEL_LABELS[thread.channel] || thread.channel}
               </Badge>
-            )}
-          </div>
+              {!isLinked && (
+                <span
+                  className="text-[10px] text-muted-foreground/70"
+                  title="No person linked"
+                  aria-label="No person linked"
+                >
+                  ?
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1104,12 +1190,14 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
 
                 return (
                   <div key={msg.id}>
-                    {/* Date divider */}
+                    {/* Date divider — smart format: Today / Yesterday / weekday / full date */}
                     {showDateSep && (
                       <div className="flex items-center gap-3 py-4 my-2">
                         <div className="flex-1 h-px bg-border/60" />
                         <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">
-                          {format(new Date(msgTime), 'MMMM d')}
+                          {getDateGroup(msgTime).label === 'Today' || getDateGroup(msgTime).label === 'Yesterday'
+                            ? getDateGroup(msgTime).label
+                            : format(new Date(msgTime), 'EEEE, MMMM d')}
                         </span>
                         <div className="flex-1 h-px bg-border/60" />
                       </div>
@@ -1164,9 +1252,16 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                               {isOutbound ? (msg.sender_name || 'You') : (msg.sender_name || entityName || 'Sender')}
                             </span>
                             <span className="text-[10px] text-muted-foreground/50">·</span>
-                            <span className="text-[10px] text-muted-foreground/70">
-                              {format(new Date(msgTime), 'h:mm a')}
-                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="text-[10px] text-muted-foreground/70 cursor-default">
+                                  {formatThreadTimestamp(msgTime)}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {formatAbsoluteTimestamp(msgTime)}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         )}
                       </div>
@@ -1436,6 +1531,7 @@ export default function Inbox() {
   const [lastCheckedId, setLastCheckedId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [density, setDensity] = useInboxDensity();
   const queryClient = useQueryClient();
 
   // Get current user for permission check
@@ -1579,7 +1675,7 @@ export default function Inbox() {
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
         {/* Left: Thread List */}
         <div className="w-96 border-r border-border flex flex-col bg-background">
-          {/* Search + Compose */}
+          {/* Search + Density toggle + Compose */}
           <div className="p-3 border-b border-border/60 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -1590,6 +1686,26 @@ export default function Inbox() {
                 className="pl-8 h-8 text-xs"
               />
             </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDensity(density === 'comfortable' ? 'compact' : 'comfortable')}
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Toggle list density"
+                >
+                  {density === 'comfortable' ? (
+                    <Rows3 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Rows2 className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {density === 'comfortable' ? 'Switch to compact' : 'Switch to comfortable'}
+              </TooltipContent>
+            </Tooltip>
             <Button
               variant="gold"
               size="icon"
@@ -1754,35 +1870,54 @@ export default function Inbox() {
               </div>
             ) : (
               <div>
-                {filtered.map((thread) => (
-                  <ThreadItem
-                    key={thread.id}
-                    thread={thread}
-                    isSelected={selectedId === thread.id}
-                    isChecked={checkedIds.has(thread.id)}
-                    selectionActive={checkedIds.size > 0}
-                    onClick={() => setSelectedId(thread.id)}
-                    onToggleCheck={(shiftKey) => {
-                      const next = new Set(checkedIds);
-                      // Shift-click: select range from lastCheckedId to this id.
-                      if (shiftKey && lastCheckedId) {
-                        const startIdx = filtered.findIndex((t) => t.id === lastCheckedId);
-                        const endIdx = filtered.findIndex((t) => t.id === thread.id);
-                        if (startIdx >= 0 && endIdx >= 0) {
-                          const [a, b] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-                          for (let i = a; i <= b; i++) next.add(filtered[i].id);
+                {(() => {
+                  // Render with sticky date-group headers. Threads are
+                  // already sorted by sort_at desc upstream; we just emit
+                  // a header whenever the bucket changes.
+                  const now = new Date();
+                  let lastBucket: string | null = null;
+                  const items: React.ReactNode[] = [];
+                  filtered.forEach((thread) => {
+                    const ts = thread.last_inbound_at ?? thread.last_message_at;
+                    const group = getDateGroup(ts, now);
+                    if (group.key !== lastBucket) {
+                      items.push(
+                        <DateGroupHeader key={`hdr-${group.key}-${group.label}`} label={group.label} />,
+                      );
+                      lastBucket = group.key;
+                    }
+                    items.push(
+                      <ThreadItem
+                        key={thread.id}
+                        thread={thread}
+                        density={density}
+                        isSelected={selectedId === thread.id}
+                        isChecked={checkedIds.has(thread.id)}
+                        selectionActive={checkedIds.size > 0}
+                        onClick={() => setSelectedId(thread.id)}
+                        onToggleCheck={(shiftKey) => {
+                          const next = new Set(checkedIds);
+                          if (shiftKey && lastCheckedId) {
+                            const startIdx = filtered.findIndex((t) => t.id === lastCheckedId);
+                            const endIdx = filtered.findIndex((t) => t.id === thread.id);
+                            if (startIdx >= 0 && endIdx >= 0) {
+                              const [a, b] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+                              for (let i = a; i <= b; i++) next.add(filtered[i].id);
+                              setCheckedIds(next);
+                              setLastCheckedId(thread.id);
+                              return;
+                            }
+                          }
+                          if (next.has(thread.id)) next.delete(thread.id);
+                          else next.add(thread.id);
                           setCheckedIds(next);
                           setLastCheckedId(thread.id);
-                          return;
-                        }
-                      }
-                      if (next.has(thread.id)) next.delete(thread.id);
-                      else next.add(thread.id);
-                      setCheckedIds(next);
-                      setLastCheckedId(thread.id);
-                    }}
-                  />
-                ))}
+                        }}
+                      />,
+                    );
+                  });
+                  return items;
+                })()}
               </div>
             )}
           </ScrollArea>
