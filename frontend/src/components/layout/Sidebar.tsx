@@ -61,6 +61,7 @@ const navigation = [
   { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
   { name: 'Calls',      href: '/calls',      icon: Phone           },
   { name: 'Reports',    href: '/reports',    icon: BarChart3       },
+  { name: 'Data Cleanup', href: '/admin/data-cleanup', icon: AlertTriangle },
   { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Collisions', href: '/admin/collisions', icon: AlertTriangle },
   { name: 'Settings',   href: '/settings',   icon: Settings        },

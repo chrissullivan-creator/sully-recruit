@@ -48,6 +48,7 @@ const Source = lazy(() => import("./pages/Source"));
 const SourceProject = lazy(() => import("./pages/SourceProject"));
 const DuplicatesReview = lazy(() => import("./pages/DuplicatesReview"));
 const CollisionReview = lazy(() => import("./pages/CollisionReview"));
+const DataCleanup = lazy(() => import("./pages/DataCleanup"));
 
 const queryClient = new QueryClient();
 
@@ -108,6 +109,7 @@ const App = () => (
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />
             <Route path="/admin/collisions" element={<ProtectedRoute><CollisionReview /></ProtectedRoute>} />
+            <Route path="/admin/data-cleanup" element={<ProtectedRoute><DataCleanup /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

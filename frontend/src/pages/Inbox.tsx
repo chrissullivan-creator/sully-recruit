@@ -24,6 +24,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
 import { useInboxDensity, type InboxDensity } from '@/lib/use-inbox-density';
+import { parseSearchQuery, matchesParsedQuery } from '@/lib/parse-search-query';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -2056,16 +2057,12 @@ export default function Inbox() {
       // Views not yet backed by data — render empty list:
       if (view === 'drafts') return false;
 
-      // Search
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          t.subject?.toLowerCase().includes(q) ||
-          t.last_message_preview?.toLowerCase().includes(q) ||
-          t.last_inbound_preview?.toLowerCase().includes(q) ||
-          t.candidate_name?.toLowerCase().includes(q) ||
-          t.contact_name?.toLowerCase().includes(q)
-        );
+      // Search — supports operators (from:, to:, channel:, is:, has:, before:, after:)
+      // plus free text matching across subject, preview, sender name, and the
+      // linked person's name.
+      if (searchQuery.trim()) {
+        const parsed = parseSearchQuery(searchQuery);
+        if (!matchesParsedQuery(t, parsed)) return false;
       }
       return true;
     });
@@ -2149,9 +2146,18 @@ export default function Inbox() {
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search messages, names..."
+                placeholder="Search messages, names... (try from:bob is:unread channel:email)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                title={
+                  'Operators:\n' +
+                  '  from:bob@acme.com or from:"bob smith"\n' +
+                  '  to:jane@x.com\n' +
+                  '  channel:email | linkedin | recruiter | sms\n' +
+                  '  is:unread | is:flagged | is:snoozed | is:archived | is:awaiting\n' +
+                  '  has:attachment\n' +
+                  '  before:2026-05-01 | after:2026-05-01'
+                }
                 className="pl-8 h-8 text-xs"
               />
             </div>
