@@ -14,7 +14,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
-  UserCheck, Target, Send, Loader2, MoreVertical, Check,
+  UserCheck, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
@@ -28,10 +28,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
+import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
@@ -1521,9 +1522,31 @@ function BulkActionBar({
 export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState('all');
   const [composeOpen, setComposeOpen] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
+
+  // URL-synced state for sidebar nav: ?tab=focused|other &view=unread|archive|... &channel=email|...
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: 'focused' | 'other' = searchParams.get('tab') === 'other' ? 'other' : 'focused';
+  const view: InboxView = ((): InboxView => {
+    const v = searchParams.get('view');
+    const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification'];
+    return (valid as string[]).includes(v ?? '') ? (v as InboxView) : 'all';
+  })();
+  const channel: InboxChannel = ((): InboxChannel => {
+    const c = searchParams.get('channel');
+    const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms'];
+    return (valid as string[]).includes(c ?? '') ? (c as InboxChannel) : 'all';
+  })();
+  const updateParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === 'all' || (key === 'tab' && value === 'focused')) {
+      next.delete(key);
+    } else {
+      next.set(key, value);
+    }
+    setSearchParams(next, { replace: true });
+  };
   // Bulk-select state: thread IDs the user has checked. The toolbar
   // appears whenever this is non-empty. lastCheckedId enables shift-click
   // range selection on long inbox lists.
@@ -1631,21 +1654,36 @@ export default function Inbox() {
     },
   });
 
-  const filtered = allThreads.filter((t) => {
-    // Admin owner filter — restrict to selected team member's accounts
+  // Threads visible after admin-team filter — used as the base for everything
+  // else (counts, tab split, view filter, channel filter, search).
+  const teamScoped = allThreads.filter((t) => {
     if (isAdmin && ownerFilter !== 'all') {
       const member = teamMembers.find((m: any) => m.key === ownerFilter);
       if (member && !member.accountIds.includes(t.integration_account_id)) return false;
     }
+    return true;
+  });
 
-    // Channel filters
-    if (filterTab === 'email' && t.channel !== 'email') return false;
-    if (filterTab === 'sms' && t.channel !== 'sms') return false;
-    if (filterTab === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
-    if (filterTab === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
-    if (filterTab === 'candidates' && !t.candidate_id) return false;
-    if (filterTab === 'contacts' && !t.contact_id) return false;
-    if (filterTab === 'unlinked' && (t.candidate_id || t.contact_id)) return false;
+  // Focused = threads tagged to a person in the CRM. Other = unlinked.
+  const focusedThreads = teamScoped.filter((t) => t.candidate_id || t.contact_id);
+  const otherThreads = teamScoped.filter((t) => !t.candidate_id && !t.contact_id);
+  const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
+
+  const filtered = tabPool.filter((t) => {
+    // Channel filter
+    if (channel === 'email' && t.channel !== 'email') return false;
+    if (channel === 'sms' && t.channel !== 'sms') return false;
+    if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
+    if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
+
+    // View filter (sidebar)
+    if (view === 'unread' && t.is_read) return false;
+    if (view === 'archive' && !t.is_archived) return false;
+    if (view === 'awaiting_reply' && !(!t.last_inbound_at && !!t.last_message_at)) return false;
+    // Views not yet backed by data — render empty list:
+    if (view === 'starred' || view === 'snoozed' || view === 'sent' || view === 'drafts' || view === 'needs_classification') {
+      return false;
+    }
 
     // Search
     if (searchQuery) {
@@ -1661,7 +1699,14 @@ export default function Inbox() {
     return true;
   });
 
-  const unreadCount = allThreads.filter((t) => !t.is_read).length;
+  const unreadCount = teamScoped.filter((t) => !t.is_read).length;
+
+  const sidebarCounts = {
+    all: tabPool.length,
+    unread: tabPool.filter((t) => !t.is_read).length,
+    archive: tabPool.filter((t) => t.is_archived).length,
+    awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
+  };
 
   return (
     <MainLayout>
@@ -1673,8 +1718,32 @@ export default function Inbox() {
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
 
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
-        {/* Left: Thread List */}
-        <div className="w-96 border-r border-border flex flex-col bg-background">
+        {/* Inbox-internal sidebar — views + channels */}
+        <InboxSidebar
+          view={view}
+          channel={channel}
+          counts={sidebarCounts}
+          onSelectView={(v) => updateParam('view', v)}
+          onSelectChannel={(c) => updateParam('channel', c)}
+          footer={
+            isAdmin && teamMembers.length > 0 ? (
+              <select
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+                className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
+                aria-label="Team member filter"
+              >
+                <option value="all">All team</option>
+                {teamMembers.map((m: any) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </select>
+            ) : null
+          }
+        />
+
+        {/* Thread list */}
+        <div className="w-80 border-r border-border flex flex-col bg-background">
           {/* Search + Density toggle + Compose */}
           <div className="p-3 border-b border-border/60 flex gap-2">
             <div className="relative flex-1">
@@ -1717,72 +1786,42 @@ export default function Inbox() {
             </Button>
           </div>
 
-          {/* Record type filters */}
-          <div className="px-3 pt-2.5">
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { key: 'all', label: 'All', count: allThreads.length },
-                { key: 'candidates', label: 'Candidates' },
-                { key: 'contacts', label: 'Contacts' },
-                { key: 'unlinked', label: 'Unlinked' },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setFilterTab(tab.key)}
-                  className={cn(
-                    'text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors',
-                    filterTab === tab.key
-                      ? 'bg-accent text-accent-foreground border-accent'
-                      : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-                  )}
-                >
-                  {tab.label}
-                  {tab.count !== undefined && (
-                    <span className="ml-1 opacity-70">{tab.count}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Channel filters */}
-          <div className="px-3 pt-1.5 pb-2.5">
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { key: 'email', label: 'Email', Icon: Mail },
-                { key: 'sms', label: 'SMS', Icon: MessageSquare },
-                { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
-                { key: 'recruiter', label: 'Recruiter', Icon: Target },
-              ].map(({ key, label, Icon: Ico }) => (
-                <button
-                  key={key}
-                  onClick={() => setFilterTab(filterTab === key ? 'all' : key)}
-                  className={cn(
-                    'flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors',
-                    filterTab === key
-                      ? 'bg-accent text-accent-foreground border-accent'
-                      : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
-                  )}
-                >
-                  <Ico className="h-3 w-3" />
-                  {label}
-                </button>
-              ))}
-
-              {/* Admin user filter */}
-              {isAdmin && teamMembers.length > 0 && (
-                <select
-                  value={ownerFilter}
-                  onChange={(e) => setOwnerFilter(e.target.value)}
-                  className="text-[11px] font-medium px-2 py-1 rounded-full border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer ml-auto"
-                >
-                  <option value="all">All team</option>
-                  {teamMembers.map((m: any) => (
-                    <option key={m.key} value={m.key}>{m.label}</option>
-                  ))}
-                </select>
+          {/* Focused / Other tab strip */}
+          <div className="px-3 pt-2.5 pb-1.5 flex items-center gap-4 border-b border-border/40">
+            <button
+              type="button"
+              onClick={() => updateParam('tab', 'focused')}
+              className={cn(
+                'relative pb-2 text-xs font-medium transition-colors',
+                tab === 'focused'
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
               )}
-            </div>
+              title="Threads tied to a candidate or client in the CRM"
+            >
+              Focused
+              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{focusedThreads.length}</span>
+              {tab === 'focused' && (
+                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => updateParam('tab', 'other')}
+              className={cn(
+                'relative pb-2 text-xs font-medium transition-colors',
+                tab === 'other'
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              title="Threads from people not yet in the CRM"
+            >
+              Other
+              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{otherThreads.length}</span>
+              {tab === 'other' && (
+                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
+              )}
+            </button>
           </div>
 
           {/* Bulk-action toolbar — only shown while at least one row is checked. */}
