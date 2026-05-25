@@ -61,6 +61,11 @@ import {
 import { reextractCallIntel } from "./lib/inngest/functions/reextract-call-intel.js";
 import { wakeSnoozedThreads } from "./lib/inngest/functions/wake-snoozed-threads.js";
 import { processFollowUps } from "./lib/inngest/functions/process-follow-ups.js";
+import {
+  indexCommunicationMessage,
+  indexCommunicationCall,
+} from "./lib/inngest/functions/index-communication.js";
+import { backfillCommunicationIndex } from "./lib/inngest/functions/backfill-communication-index.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -133,5 +138,8 @@ export default serve({
     reextractCallIntel,
     wakeSnoozedThreads,
     processFollowUps,
+    indexCommunicationMessage,
+    indexCommunicationCall,
+    backfillCommunicationIndex,
   ],
 });

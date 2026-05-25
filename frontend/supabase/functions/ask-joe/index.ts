@@ -47,6 +47,8 @@ Valid person statuses: new | reached_out | engaged. Never filter by back_of_resu
 
 You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications).
 
+Use search_communications for questions about what someone said, agreed to, complained about, asked for, or talked about on a call — e.g. "who mentioned a non-compete" or "find any message about compensation expectations" or "did we talk to anyone about FX volumes last week". It searches across all saved emails, LinkedIn messages, SMS texts, and call summaries.
+
 When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people.`;
 
 const TOOLS = [
@@ -144,6 +146,21 @@ const TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "search_communications",
+    description:
+      "Semantic + keyword search across ALL saved messages (emails, LinkedIn DMs, Recruiter InMails, SMS) and call notes. Use to answer 'who said X', 'find any message about Y', 'when did someone mention Z', 'did we talk to anyone about FX volumes'. Returns excerpts plus the linked person, channel, direction, and date.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Natural-language search across all communications." },
+        person_id: { type: "string", description: "Optional uuid to restrict to one person's conversations." },
+        channel: { type: "string", enum: ["email", "linkedin", "linkedin_recruiter", "sms", "call"], description: "Optional channel filter." },
+        limit: { type: "number", description: "Max results (1-20). Default 8." },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 const OPENAI_TOOLS = TOOLS.map((t) => ({
@@ -181,6 +198,7 @@ function statusFromToolCall(name: string, input: any): string {
     case "list_jobs": return "Joe is searching jobs…";
     case "get_job_detail": return "Joe is pulling the job…";
     case "search_companies": return "Joe is searching companies…";
+    case "search_communications": return `Joe is searching messages and calls for "${String(input?.query ?? "").slice(0, 50)}"…`;
     default: return `Joe is running ${name}…`;
   }
 }
@@ -443,6 +461,106 @@ async function toolSearchCompanies(supabase: any, input: any): Promise<string> {
   return JSON.stringify({ items: data ?? [] });
 }
 
+async function toolSearchCommunications(supabase: any, input: any): Promise<string> {
+  const q = String(input?.query ?? "").trim();
+  if (!q) return JSON.stringify({ error: "query required" });
+  const limit = Math.min(Math.max(Number(input?.limit) || 8, 1), 20);
+  const personId: string | null = input?.person_id ?? null;
+  const channelFilter: string | null = input?.channel ?? null;
+
+  const filterKinds = ["message", "call"];
+  const results: any[] = [];
+
+  // Vector search
+  const embedding = await embedQuery(q);
+  if (embedding) {
+    const { data: vectorHits } = await supabase.rpc("match_search_documents", {
+      query_embedding: embedding,
+      filter_kinds: filterKinds,
+      match_count: limit * 2,
+      min_similarity: 0.3,
+    });
+    if (vectorHits) {
+      for (const h of vectorHits) {
+        results.push({ ...h, _score_vector: h.similarity ?? 0 });
+      }
+    }
+  }
+
+  // FTS search
+  const { data: ftsHits } = await supabase.rpc("search_search_documents", {
+    search_query: q.split(/\s+/).join(" & "),
+    filter_kinds: filterKinds,
+    match_count: limit * 2,
+  });
+  if (ftsHits) {
+    for (const h of ftsHits) {
+      const existing = results.find((r) => r.id === h.id);
+      if (existing) {
+        existing._score_fts = h.rank ?? 0;
+      } else {
+        results.push({ ...h, _score_fts: h.rank ?? 0 });
+      }
+    }
+  }
+
+  // Reciprocal Rank Fusion
+  const k = 60;
+  const scored = results.map((r) => {
+    const rrf =
+      (r._score_vector ? 1 / (k + (r._score_vector_rank ?? 1)) : 0) +
+      (r._score_fts ? 1 / (k + (r._score_fts_rank ?? 1)) : 0);
+    return { ...r, _rrf: rrf };
+  });
+  // Simpler: just sort by highest combined raw scores
+  scored.sort((a, b) => {
+    const sa = (a._score_vector || 0) + (a._score_fts || 0) * 5;
+    const sb = (b._score_vector || 0) + (b._score_fts || 0) * 5;
+    return sb - sa;
+  });
+
+  // Apply post-fetch filters
+  let filtered = scored;
+  if (personId) {
+    filtered = filtered.filter(
+      (r) => r.person_id === personId || r.candidate_id === personId || r.contact_id === personId,
+    );
+  }
+  if (channelFilter) {
+    filtered = filtered.filter(
+      (r) => r.metadata?.channel === channelFilter,
+    );
+  }
+
+  const top = filtered.slice(0, limit);
+
+  // Resolve person names for the results
+  const personIds = [...new Set(top.map((r) => r.person_id || r.candidate_id || r.contact_id).filter(Boolean))];
+  const nameMap: Record<string, string> = {};
+  if (personIds.length > 0) {
+    const { data: people } = await supabase
+      .from("people")
+      .select("id, full_name")
+      .in("id", personIds);
+    for (const p of people ?? []) {
+      if (p.full_name) nameMap[p.id] = p.full_name;
+    }
+  }
+
+  const items = top.map((r) => ({
+    source_kind: r.source_kind,
+    person: nameMap[r.person_id || r.candidate_id || r.contact_id || ""] || null,
+    person_id: r.person_id || r.candidate_id || r.contact_id || null,
+    channel: r.metadata?.channel || null,
+    direction: r.metadata?.direction || null,
+    date: r.metadata?.sent_at || r.source_updated_at || null,
+    title: r.title,
+    excerpt: (r.body || "").slice(0, 400),
+  }));
+
+  return JSON.stringify({ query: q, items });
+}
+
 async function runTool(supabase: any, name: string, input: any): Promise<string> {
   const exec = async (): Promise<string> => {
     switch (name) {
@@ -454,6 +572,7 @@ async function runTool(supabase: any, name: string, input: any): Promise<string>
       case "list_jobs": return await toolListJobs(supabase, input);
       case "get_job_detail": return await toolGetJobDetail(supabase, input);
       case "search_companies": return await toolSearchCompanies(supabase, input);
+      case "search_communications": return await toolSearchCommunications(supabase, input);
       default: return JSON.stringify({ error: `unknown tool ${name}` });
     }
   };
