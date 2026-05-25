@@ -308,7 +308,7 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
   }
 
   const conversationId = data.conversation_id || data.thread_id || `unipile_email_${match.entityId}`;
-  const { error: insertErr } = await supabase.from("messages").insert({
+  const { data: insertedEmailMsg, error: insertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [match.entityColumn]: match.entityId,
     channel: "email",
@@ -321,9 +321,12 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     provider: "unipile",
     external_message_id: externalId,
     is_read: data.is_read ?? false,
-  } as any);
+  } as any).select("id").single();
   if (insertErr && !/duplicate key|23505/.test(insertErr.message)) {
     logger.warn("Unipile email insert failed", { error: insertErr.message });
+  }
+  if (insertedEmailMsg?.id) {
+    await inngest.send({ name: "messages/indexed.requested", data: { messageId: insertedEmailMsg.id } }).catch(() => {});
   }
 
   const table = match.entityType === "candidate" ? "candidates" : "contacts";
@@ -511,7 +514,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
     }
 
-    const { error: unlinkedInsertErr } = await supabase.from("messages").insert({
+    const { data: unlinkedInsertedMsg, error: unlinkedInsertErr } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       candidate_id: null,
       contact_id: null,
@@ -532,7 +535,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       is_read: direction === "outbound",
       needs_link: true,
       link_attempted_at: new Date().toISOString(),
-    } as any);
+    } as any).select("id").single();
+    if (unlinkedInsertedMsg?.id) {
+      await inngest.send({ name: "messages/indexed.requested", data: { messageId: unlinkedInsertedMsg.id } }).catch(() => {});
+    }
     // Idempotency backstop: the partial UNIQUE index on
     // (provider, external_message_id) fires 23505 on re-delivery races
     // that slipped past the pre-insert check above.
@@ -559,7 +565,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
   }
 
-  const { error: linkedInsertErr } = await supabase.from("messages").insert({
+  const { data: linkedInsertedMsg, error: linkedInsertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
     integration_account_id: integrationAccountId,
@@ -580,8 +586,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     needs_link: false,
     link_method: linkMethod ? `webhook:${linkMethod}` : null,
     link_attempted_at: new Date().toISOString(),
-  } as any);
-  // Idempotency backstop — see comment on the unlinked-path insert above.
+  } as any).select("id").single();
+  if (linkedInsertedMsg?.id) {
+    await inngest.send({ name: "messages/indexed.requested", data: { messageId: linkedInsertedMsg.id } }).catch(() => {});
+  }
   if (linkedInsertErr && (linkedInsertErr as any).code === "23505") {
     return { action: "skipped", reason: "duplicate_unique_violation", entityId, channel, direction, type: "linkedin_message" };
   }
@@ -708,7 +716,7 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
 
     await advanceOnConnectionAccepted(supabase, entityColumn, entityId, receivedAt, logger);
 
-    await supabase.from("messages").insert({
+    const { data: connAcceptMsg } = await supabase.from("messages").insert({
       conversation_id: `li_${entityId}`,
       [entityColumn]: entityId,
       channel: "linkedin",
@@ -717,7 +725,10 @@ async function processConnectionUpdate(supabase: any, event: any, receivedAt: st
       message_type: "connection_accepted",
       sent_at: receivedAt,
       provider: "unipile",
-    } as any);
+    } as any).select("id").single();
+    if (connAcceptMsg?.id) {
+      await inngest.send({ name: "messages/indexed.requested", data: { messageId: connAcceptMsg.id } }).catch(() => {});
+    }
 
     logger.info("Connection accepted", { entityId, entityType });
     return { action: "connection_accepted", entityId, entityType };

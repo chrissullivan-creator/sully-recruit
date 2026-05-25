@@ -423,6 +423,12 @@ Field rules:
     if (entityId) { clUpdate.linked_entity_type = entityType; clUpdate.linked_entity_id = entityId; }
     await supabase.from("call_logs").update(clUpdate).eq("id", cl.id);
 
+    // Index call for RAG search — non-blocking.
+    try {
+      const { inngest: inngestClient } = await import("../../api/lib/inngest/client.js");
+      await inngestClient.send({ name: "calls/indexed.requested", data: { callLogId: cl.id } });
+    } catch { /* best-effort */ }
+
     if (entityType === "candidate" && entityId) {
       const updates: Record<string, any> = { updated_at: now };
       // Status flip at ≥60s — a substantive call earns "engaged".

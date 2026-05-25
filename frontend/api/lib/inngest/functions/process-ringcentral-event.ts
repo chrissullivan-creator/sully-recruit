@@ -109,7 +109,7 @@ export const processRingcentralEvent = inngest.createFunction(
     }
 
     if (isSmsEvent) {
-      await supabase.from("messages").insert({
+      const { data: rcInsertedMsg } = await supabase.from("messages").insert({
         conversation_id: `rc_sms_${match.entityId}`,
         [match.entityColumn]: match.entityId,
         channel: "sms",
@@ -120,7 +120,10 @@ export const processRingcentralEvent = inngest.createFunction(
         sent_at: eventBody.creationTime || payload.receivedAt,
         provider: "ringcentral",
         external_message_id: eventBody.id?.toString(),
-      } as any);
+      } as any).select("id").single();
+      if (rcInsertedMsg?.id) {
+        await inngest.send({ name: "messages/indexed.requested", data: { messageId: rcInsertedMsg.id } }).catch(() => {});
+      }
 
       const smsBody = eventBody.subject || eventBody.text || "";
 

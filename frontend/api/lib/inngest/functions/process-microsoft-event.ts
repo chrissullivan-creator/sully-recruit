@@ -524,7 +524,7 @@ async function processEmailMessage(
     ? await fetchAndUploadAttachments(supabase, resourceUrl, accessToken, conversationId, externalId || "", logger)
     : [];
 
-  await supabase.from("messages").insert({
+  const { data: msInsertedMsg } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [match.entityColumn]: match.entityId,
     channel: "email",
@@ -538,7 +538,10 @@ async function processEmailMessage(
     external_message_id: externalId,
     is_read: message.isRead || false,
     attachments: attachmentsForDb,
-  } as any);
+  } as any).select("id").single();
+  if (msInsertedMsg?.id) {
+    await inngest.send({ name: "messages/indexed.requested", data: { messageId: msInsertedMsg.id } }).catch(() => {});
+  }
 
   await supabase
     .from("conversations")

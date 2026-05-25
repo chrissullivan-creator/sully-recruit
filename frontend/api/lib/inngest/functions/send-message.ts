@@ -118,7 +118,7 @@ export const sendMessage = inngest.createFunction(
         throw new Error(`Unsupported channel: ${channel}`);
     }
 
-    const { error: msgError } = await supabase.from("messages").insert({
+    const { data: insertedMsg, error: msgError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       candidate_id: resolvedCandidateId,
       contact_id: resolvedContactId,
@@ -137,11 +137,18 @@ export const sendMessage = inngest.createFunction(
             ? "ringcentral"
             : "unipile",
       owner_id: userId,
-    } as any);
+    } as any).select("id").single();
 
     if (msgError) {
       logger.error("Failed to log message", { error: msgError.message });
-      // Message was sent but logging failed — don't throw (already delivered)
+    }
+
+    if (insertedMsg?.id) {
+      try {
+        await inngest.send({ name: "messages/indexed.requested", data: { messageId: insertedMsg.id } });
+      } catch (err: any) {
+        logger.warn("RAG index event failed (non-blocking)", { error: err?.message });
+      }
     }
 
     if (conversationId) {
