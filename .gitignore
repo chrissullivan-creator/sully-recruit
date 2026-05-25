@@ -171,3 +171,4 @@ credentials.json
 *.pem
 *.key
 .credentials
+.claude/
