@@ -19,7 +19,7 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
-  Star, Clock as ClockIcon, Bell, Sun,
+  Star, Clock as ClockIcon, Bell, Sun, Menu,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
@@ -43,6 +43,9 @@ import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
 import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationList';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { useMobileLayout } from '@/lib/use-mobile-layout';
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 
 // ---------- Types ----------
 interface MessageAttachment {
@@ -829,7 +832,7 @@ function clearDraft(threadId: string): void {
   }
 }
 
-function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDeleted?: () => void }) {
+function MessagePane({ threadId, onDeleted, isMobile, onBack }: { threadId: string | null; onDeleted?: () => void; isMobile?: boolean; onBack?: () => void }) {
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
   const [replyHtml, setReplyHtml] = useState('');
@@ -1223,6 +1226,11 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
         <div className="sticky top-0 z-20 bg-background border-b border-border">
           {/* Identity bar */}
           <div className="px-6 py-3 flex items-center gap-3">
+            {isMobile && onBack && (
+              <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0 -ml-2" aria-label="Back to thread list">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
             <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
               <Icon className="h-4 w-4" />
             </div>
@@ -1688,11 +1696,20 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
         </div>}
       </div>
 
-      {/* Entity side panel */}
-      {showEntity && (
-        <div className="w-72 border-l border-border overflow-hidden">
-          <EntityPanel thread={thread} messages={messages} />
-        </div>
+      {/* Entity side panel — inline on desktop, sheet on mobile */}
+      {isMobile ? (
+        <Sheet open={showEntity} onOpenChange={setShowEntity}>
+          <SheetContent side="right" className="w-[85vw] max-w-sm p-0 overflow-y-auto">
+            <VisuallyHidden.Root><SheetTitle>Contact details</SheetTitle></VisuallyHidden.Root>
+            <EntityPanel thread={thread} messages={messages} />
+          </SheetContent>
+        </Sheet>
+      ) : (
+        showEntity && (
+          <div className="w-72 border-l border-border overflow-hidden">
+            <EntityPanel thread={thread} messages={messages} />
+          </div>
+        )
       )}
 
       {/* Add Person Wizard (from badge, banner, or sidebar) */}
@@ -1856,6 +1873,8 @@ export default function Inbox() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [density, setDensity] = useInboxDensity();
+  const isMobile = useMobileLayout();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const queryClient = useQueryClient();
 
   // Get current user for permission check
@@ -2132,34 +2151,82 @@ export default function Inbox() {
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
 
       <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
-        {/* Inbox-internal sidebar — views + channels */}
-        <InboxSidebar
-          view={view}
-          channel={channel}
-          counts={sidebarCounts}
-          onSelectView={(v) => updateParam('view', v)}
-          onSelectChannel={(c) => updateParam('channel', c)}
-          footer={
-            isAdmin && teamMembers.length > 0 ? (
-              <select
-                value={ownerFilter}
-                onChange={(e) => setOwnerFilter(e.target.value)}
-                className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
-                aria-label="Team member filter"
-              >
-                <option value="all">All team</option>
-                {teamMembers.map((m: any) => (
-                  <option key={m.key} value={m.key}>{m.label}</option>
-                ))}
-              </select>
-            ) : null
-          }
-        />
+        {/* Mobile sidebar Sheet */}
+        {isMobile && (
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetContent side="left" className="w-64 p-0 [&>aside]:w-full [&>aside]:border-r-0">
+              <VisuallyHidden.Root><SheetTitle>Navigation</SheetTitle></VisuallyHidden.Root>
+              <InboxSidebar
+                view={view}
+                channel={channel}
+                counts={sidebarCounts}
+                onSelectView={(v) => { updateParam('view', v); setMobileSidebarOpen(false); }}
+                onSelectChannel={(c) => { updateParam('channel', c); setMobileSidebarOpen(false); }}
+                footer={
+                  isAdmin && teamMembers.length > 0 ? (
+                    <select
+                      value={ownerFilter}
+                      onChange={(e) => setOwnerFilter(e.target.value)}
+                      className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
+                      aria-label="Team member filter"
+                    >
+                      <option value="all">All team</option>
+                      {teamMembers.map((m: any) => (
+                        <option key={m.key} value={m.key}>{m.label}</option>
+                      ))}
+                    </select>
+                  ) : null
+                }
+              />
+            </SheetContent>
+          </Sheet>
+        )}
 
-        {/* Thread list */}
-        <div className="w-80 border-r border-border flex flex-col bg-background">
+        {/* Inbox-internal sidebar — desktop only (mobile uses Sheet above) */}
+        {!isMobile && (
+          <InboxSidebar
+            view={view}
+            channel={channel}
+            counts={sidebarCounts}
+            onSelectView={(v) => updateParam('view', v)}
+            onSelectChannel={(c) => updateParam('channel', c)}
+            footer={
+              isAdmin && teamMembers.length > 0 ? (
+                <select
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
+                  aria-label="Team member filter"
+                >
+                  <option value="all">All team</option>
+                  {teamMembers.map((m: any) => (
+                    <option key={m.key} value={m.key}>{m.label}</option>
+                  ))}
+                </select>
+              ) : null
+            }
+          />
+        )}
+
+        {/* Thread list — full-width on mobile, fixed w-80 on desktop. Hidden on mobile when reading a thread. */}
+        <div className={cn(
+          'border-r border-border flex flex-col bg-background',
+          isMobile ? (selectedId ? 'hidden' : 'flex-1') : 'w-80',
+        )}>
           {/* Search + Density toggle + Compose */}
           <div className="p-3 border-b border-border/60 flex gap-2">
+            {/* Hamburger for mobile sidebar */}
+            {isMobile && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setMobileSidebarOpen(true)}
+                className="h-8 w-8 shrink-0"
+                aria-label="Open navigation"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+            )}
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
@@ -2400,9 +2467,17 @@ export default function Inbox() {
           </ScrollArea>
         </div>
 
-        {/* Right: Message pane */}
-        <div className="flex-1 min-w-0">
-          <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
+        {/* Right: Message pane — hidden on mobile when no thread selected */}
+        <div className={cn(
+          'flex-1 min-w-0',
+          isMobile && !selectedId && 'hidden',
+        )}>
+          <MessagePane
+            threadId={selectedId}
+            onDeleted={() => setSelectedId(null)}
+            isMobile={isMobile}
+            onBack={() => setSelectedId(null)}
+          />
         </div>
       </div>
 
