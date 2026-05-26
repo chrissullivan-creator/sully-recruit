@@ -65,20 +65,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const v2Id = row?.metadata?.unipile_account_id_v2;
     if (v2Id) targetAccountId = v2Id;
   }
+  // v2 /auth/intent: cookies go inside credentials object, provider lowercase
+  const credentials: Record<string, string> = { access_token: li_at.trim() };
+  if (li_a?.trim()) credentials.premium_access_token = li_a.trim();
+
   const body: Record<string, any> = {
-    provider: "LINKEDIN",
-    access_token: li_at.trim(),
+    provider: "linkedin",
+    credentials,
     config: {
       products: ["classic", "recruiter"],
     },
-    user_agent: user_agent.trim(),
   };
-  if (li_a?.trim()) body.premium_access_token = li_a.trim();
-  if (proxy_country?.trim()) body.country = proxy_country.trim().toUpperCase();
-
-  // v2: POST /v2/auth/intent (cookie auth flow)
-  // If reconnecting an existing account, include the account_id in the body.
-  if (targetAccountId) body.account_id = targetAccountId;
+  if (user_agent?.trim()) body.user_agent = user_agent.trim();
+  if (proxy_country?.trim()) body.proxy = { country: proxy_country.trim().toUpperCase() };
+  if (targetAccountId) body.reconnect_account_id = targetAccountId;
   const resp = await fetch(
     `${config.v2Base}/auth/intent`,
     {

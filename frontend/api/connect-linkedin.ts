@@ -73,8 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (v2Id) account_id = v2Id;
   }
 
-  // 10-minute expiry per Unipile's hosted-auth example.
-  const expires_on = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  // v2 auth/link uses camelCase `expiresOn` with .sssZ millisecond format.
+  const expiresOn = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const connectState = encodeLinkedinConnectState({
     accountLabel: account_label || null,
     contractName: contract_name || null,
@@ -88,11 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   notifyUrl.searchParams.set("token", config.notifyToken);
 
   const body: Record<string, any> = {
-    // "reconnect" preserves the existing account_id when the user
-    // re-authenticates; "create" provisions a new account.
-    type: account_id ? "reconnect" : "create",
     providers: "LINKEDIN",
-    expires_on,
+    expiresOn,
     success_redirect_url: `${origin}/settings?linkedin_connected=1`,
     failure_redirect_url: `${origin}/settings?linkedin_error=1`,
     notify_url: notifyUrl.toString(),
@@ -104,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     },
   };
-  if (account_id) body.reconnect_account = account_id;
+  if (account_id) body.reconnect_account_id = account_id;
   if (contract_name) {
     body.config.linkedin.contract_name = contract_name;
   }
