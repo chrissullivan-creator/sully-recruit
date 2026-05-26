@@ -48,10 +48,49 @@
  */
 
 export interface UnipileBases {
-  /** Tenant DSN, e.g. https://api19.unipile.com:14926/api/v1 — for all LinkedIn / messaging / email calls. */
+  /** Tenant DSN, e.g. https://api19.unipile.com:14926/api/v1 — LEGACY, being migrated to v2. */
   v1Base: string;
-  /** Tenant API key — pairs with v1Base. */
+  /** v1 API key — pairs with v1Base. LEGACY. */
   apiKey: string;
+}
+
+// ── v2 helpers ──────────────────────────────────────────────────────
+// v2 base: https://api.unipile.com/v2
+// v2 routes put account_id in the PATH: /v2/{accountId}/resource
+// v2 uses UNIPILE_API_KEY_V2, NOT the v1 key.
+
+export interface UnipileV2Bases {
+  v2Base: string;
+  apiKeyV2: string;
+}
+
+/**
+ * Build a v2 URL. Account-scoped routes: /v2/{accountId}/path.
+ * Non-account routes (auth, webhooks): /v2/path.
+ */
+export function v2Url(
+  bases: UnipileV2Bases,
+  accountId: string | null,
+  path: string,
+  query: Record<string, string | number | undefined> = {},
+): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const acctSegment = accountId ? `/${accountId}` : "";
+  const qsStr = qs.toString();
+  return `${bases.v2Base}${acctSegment}${cleanPath}${qsStr ? `?${qsStr}` : ""}`;
+}
+
+export function v2Headers(bases: UnipileV2Bases, contentType?: string): Record<string, string> {
+  const h: Record<string, string> = {
+    "X-API-KEY": bases.apiKeyV2,
+    Accept: "application/json",
+  };
+  if (contentType) h["Content-Type"] = contentType;
+  return h;
 }
 
 /**

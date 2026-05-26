@@ -223,6 +223,7 @@ export async function loadUnipileConfig(supabase: any): Promise<UnipileConfig> {
 
   return {
     apiKey,
+    apiKeyV2: rows.get("UNIPILE_API_KEY_V2") || apiKey,
     notifyToken: createNotifyToken(notifySeed),
     v1Base,
     v2Base,

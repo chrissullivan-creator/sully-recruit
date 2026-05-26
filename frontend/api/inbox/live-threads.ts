@@ -50,19 +50,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   })();
 
   const [{ data: baseRow }, { data: keyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
   ]);
-  const v1Base = (baseRow?.value || "").replace(/\/+$/, "") || "https://api19.unipile.com:14926/api/v1";
+  const v2Base = (baseRow?.value || "").replace(/\/+$/, "") || "https://api.unipile.com/v2";
   const apiKey = keyRow?.value;
-  if (!apiKey) return res.status(500).json({ error: "Unipile config missing" });
+  if (!apiKey) return res.status(500).json({ error: "Unipile v2 config missing" });
 
   // Pick integration accounts. Default scope: the calling user's own
   // accounts. (Team-wide view is delegated to the existing inbox UI
   // admin dropdown — keep this endpoint simple.)
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, unipile_account_id, account_type, email_address, owner_user_id")
+    .select("id, unipile_account_id, account_type, email_address, owner_user_id, metadata")
     .in("account_type", accountTypeFilter)
     .eq("owner_user_id", user.id)
     .eq("is_active", true)
@@ -92,18 +92,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // For each account, fetch the most recent threads in parallel.
   await Promise.all(
     accounts.map(async (acct: any) => {
-      const accountId = acct.unipile_account_id as string;
+      // Prefer the v2 account ID; fall back to the v1 ID if v2 isn't set.
+      const accountId = (acct.metadata?.unipile_account_id_v2 || acct.unipile_account_id) as string;
       const isEmail = acct.account_type === "email";
 
-      const qs = new URLSearchParams({
-        account_id: accountId,
-        limit: String(limitParam),
-      });
+      // v2: account_id in path, not query param.
+      const qs = new URLSearchParams({ limit: String(limitParam) });
       if (cursorParam) qs.set("cursor", cursorParam);
 
-      // /chats for LinkedIn/Recruiter, /emails for email — both v1.
-      const path = isEmail ? "/emails" : "/chats";
-      const url = `${v1Base}${path}?${qs.toString()}`;
+      // /chats for LinkedIn classic, /linkedin/recruiter/chats for Recruiter, /emails for email.
+      const path = isEmail
+        ? `/${accountId}/emails`
+        : acct.account_type === "linkedin_recruiter"
+          ? `/${accountId}/linkedin/recruiter/chats`
+          : `/${accountId}/chats`;
+      const url = `${v2Base}${path}?${qs.toString()}`;
 
       try {
         const r = await fetch(url, {

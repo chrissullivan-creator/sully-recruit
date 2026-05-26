@@ -81,30 +81,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // re-authenticates; "create" provisions a new account.
     type: account_id ? "reconnect" : "create",
     providers: "LINKEDIN",
-    api_url: config.v1Base.replace(/\/api\/v1$/, ""),
     expires_on,
     success_redirect_url: `${origin}/settings?linkedin_connected=1`,
     failure_redirect_url: `${origin}/settings?linkedin_error=1`,
     notify_url: notifyUrl.toString(),
-    // Unipile returns `name` to notify_url. We use the owner_user_id as
-    // the fallback matcher if the query-string state is absent.
     name: owner_user_id || user.id,
-    // Per Unipile docs the provider-specific block lives under config.<provider>.
     config: {
       linkedin: {
-        // Cookies are docs-recommended for Recruiter — credentials sometimes
-        // can't reach the Recruiter session even when the seat exists.
         allow_methods: ["credentials", "cookies"],
         products: ["classic", "recruiter"],
       },
     },
   };
   if (account_id) body.reconnect_account = account_id;
+  if (contract_name) {
+    body.config.linkedin.contract_name = contract_name;
+  }
 
-  const resp = await fetch(`${config.v1Base}/hosted/accounts/link`, {
+  // v2 auth/link — uses the v2 API key + v2 base URL.
+  const resp = await fetch(`${config.v2Base}/auth/link`, {
     method: "POST",
     headers: {
-      "X-API-KEY": config.apiKey,
+      "X-API-KEY": config.apiKeyV2,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
