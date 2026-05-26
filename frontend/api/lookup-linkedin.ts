@@ -4,13 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * POST /api/lookup-linkedin
  *
- * Fetches a LinkedIn profile via the Unipile **v1** API and normalizes
+ * Fetches a LinkedIn profile via the Unipile **v2** API and normalizes
  * it to form-compatible fields for the Add Person wizard.
  *
- *   v1 paths (account_id is a query parameter, not a path segment):
- *     GET /api/v1/users/{slug-or-provider-id}?account_id=X
- *     GET /api/v1/chats/{chat_id}?account_id=X
- *     GET /api/v1/chats/{chat_id}/attendees?account_id=X
+ *   v2 paths (account_id in path):
+ *     GET /v2/{account_id}/linkedin/users/{slug-or-provider-id}
+ *     GET /v2/{account_id}/chats/{chat_id}
  *
  * Resolution order (first hit wins):
  *   1. unipile_id           — direct user fetch

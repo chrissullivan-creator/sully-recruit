@@ -2,49 +2,34 @@
  * Unipile URL helpers — single source of truth.
  *
  * ─────────────────────────────────────────────────────────────────────
- *  Unipile API surface (as of May 2026, verified against
- *  https://api.unipile.com/v2/docs/json and direct DSN probes)
+ *  Unipile API surface (May 2026)
  * ─────────────────────────────────────────────────────────────────────
  *
- *  v2 — global host (api.unipile.com/v2), uses UNIPILE_API_KEY_V2
- *    /v2/accounts/                  POST   create connected account
- *    /v2/accounts/{id}              GET PATCH DELETE
- *    /v2/auth/checkpoint            POST   solve checkpoint
- *    /v2/auth/intent                POST   start auth intent
- *    /v2/auth/link                  POST   hosted-auth link
- *    /v2/webhooks/conversations/    GET POST
- *    /v2/webhooks/endpoints/        GET POST
- *    /v2/webhooks/endpoints/{id}    GET PATCH DELETE
+ *  All calls now use v2 — global host (api.unipile.com/v2),
+ *  uses UNIPILE_API_KEY_V2. Account-scoped routes put account_id
+ *  in the path: /v2/{accountId}/resource.
  *
- *  Everything else lives on v1 (DSN-hosted), uses UNIPILE_API_KEY.
- *  v2 has NO linkedin/recruiter/messaging/email/search endpoints.
- *  (This is Unipile's design, not ours — we cannot move LinkedIn
- *  endpoints to v2 because Unipile hasn't built them there yet.)
+ *  v2 routes:
+ *    /v2/accounts/                                          POST   create account
+ *    /v2/accounts/{id}                                      GET PATCH DELETE
+ *    /v2/auth/checkpoint                                    POST   solve checkpoint
+ *    /v2/auth/intent                                        POST   cookie auth
+ *    /v2/auth/link                                          POST   hosted-auth link
+ *    /v2/{acct}/linkedin/users/{slug}                       GET    profile lookup
+ *    /v2/{acct}/linkedin/recruiter/projects                 GET    hiring projects
+ *    /v2/{acct}/linkedin/recruiter/projects/{id}            GET    project detail
+ *    /v2/{acct}/linkedin/recruiter/search/candidates        POST   recruiter search
+ *    /v2/{acct}/linkedin/recruiter/search-parameters        POST   search params
+ *    /v2/{acct}/linkedin/jobs                               GET    job postings
+ *    /v2/{acct}/linkedin/jobs/{id}/applicants               POST   applicants
+ *    /v2/{acct}/linkedin/contracts                          GET    contracts
+ *    /v2/{acct}/chats                                       GET/POST  messaging
+ *    /v2/{acct}/emails                                      GET/POST  email
+ *    /v2/{acct}/calendars/events                            GET    calendar
+ *    /v2/{acct}/users/me/relation-requests                  GET    invitations
  *
- *  v1 — tenant DSN (api19.unipile.com:14926/api/v1), uses UNIPILE_API_KEY
- *    /api/v1/accounts                                 GET POST DELETE
- *    /api/v1/accounts/{account_id}                    GET
- *    /api/v1/linkedin/projects                        GET   list hiring projects
- *    /api/v1/linkedin/projects/{project_id}           GET   project detail
- *    /api/v1/linkedin/jobs                            GET   list job postings
- *    /api/v1/linkedin/jobs/{job_id}                   GET   job posting detail
- *    /api/v1/linkedin/jobs/{job_id}/applicants        GET   applicants for a job
- *    /api/v1/linkedin/jobs/applicants/{applicant_id}  GET   applicant detail
- *    /api/v1/linkedin/jobs/applicants/{aid}/resume    GET   applicant resume (PDF)
- *    /api/v1/linkedin/contracts                       GET   recruiter contracts
- *    /api/v1/linkedin/search                          POST  unified search
- *    /api/v1/linkedin/search/parameters               POST  resolve search params
- *    All v1 LinkedIn endpoints take ?account_id=X as a query parameter.
- *
- *  Reasoning recap for future readers:
- *    - The old code referenced /v2/{acct}/linkedin/recruiter/...
- *      which never existed at any Unipile host. The 401 "Invalid
- *      API Key" we got was Unipile's misleading way of reporting
- *      "wrong route", not auth failure.
- *    - The tenant DSN does NOT serve /api/v2 — probed and confirmed
- *      to return 404 "Cannot GET /api/v2/..."
- *    - api.unipile.com only handles the 8 v2 lifecycle endpoints
- *      above; it returns 404 "Route Not Found" for everything else.
+ *  v1 helpers below are kept for backward compatibility but marked
+ *  @deprecated. New code should use linkedinV2 named routes.
  */
 
 export interface UnipileBases {

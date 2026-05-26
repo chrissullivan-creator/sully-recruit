@@ -33,7 +33,7 @@ export const syncInmailCredits = inngest.createFunction(
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id, account_label")
+      .select("id, unipile_account_id, metadata, account_label")
       .eq("account_type", "linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null);
@@ -50,9 +50,11 @@ export const syncInmailCredits = inngest.createFunction(
     for (const acct of accounts) {
       checked++;
       try {
+        // Prefer v2 acc_xxx account ID
+        const v2AccountId = (acct.metadata?.unipile_account_id_v2 || acct.unipile_account_id) as string;
         const data: any = await unipileFetch(
           supabase,
-          acct.unipile_account_id!,
+          v2AccountId,
           `linkedin/recruiter/inmail-credits`,
           { method: "GET" },
         );

@@ -3,9 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * Resolve one person's LinkedIn URL → Unipile provider_id immediately
- * after insert, instead of waiting for the every-2h cron. Uses the v1
- * tenant DSN at /api/v1/users/{slug}?account_id=X — our v2 app key
- * returns 403 on the v2 equivalent (/v2/{acct}/linkedin/users/{slug}).
+ * after insert, instead of waiting for the every-2h cron. Uses v2:
+ *   GET /v2/{account_id}/linkedin/users/{slug}
  *
  * On success writes provider_id back to people.unipile_provider_id and
  * sets unipile_resolve_status='resolved'. On failure flips the status

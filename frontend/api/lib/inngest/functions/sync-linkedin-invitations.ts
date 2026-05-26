@@ -36,7 +36,7 @@ export const syncLinkedinInvitations = inngest.createFunction(
 
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id, owner_user_id, account_type, account_label")
+      .select("id, unipile_account_id, metadata, owner_user_id, account_type, account_label")
       .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null);
@@ -52,10 +52,12 @@ export const syncLinkedinInvitations = inngest.createFunction(
 
     for (const acct of accounts) {
       try {
-        // v1: GET /api/v1/users/invite/received?account_id=X
+        // Prefer v2 acc_xxx account ID
+        const v2AccountId = (acct.metadata?.unipile_account_id_v2 || acct.unipile_account_id) as string;
+        // v2: GET /v2/{account_id}/users/me/relation-requests?type=received
         const data: any = await unipileFetch(
           supabase,
-          acct.unipile_account_id!,
+          v2AccountId,
           `users/invite/received`,
           { method: "GET", query: { limit: 50 } },
         );

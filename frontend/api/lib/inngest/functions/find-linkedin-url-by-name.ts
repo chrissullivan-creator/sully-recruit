@@ -165,8 +165,10 @@ export const findLinkedinUrlByName = inngest.createFunction(
     }
 
     let hits: SearchHit[];
+    // Prefer v2 acc_xxx account ID
+    const v2AccountId = (account.metadata?.unipile_account_id_v2 || account.unipile_account_id) as string;
     try {
-      hits = await runRecruiterSearch(supabase, account.unipile_account_id, fullName, person.current_company);
+      hits = await runRecruiterSearch(supabase, v2AccountId, fullName, person.current_company);
     } catch (err: any) {
       logger.warn("find-linkedin-url: search threw", { person_id, error: err?.message });
       await stampAttempted(supabase, person_id, "failed");
@@ -275,10 +277,10 @@ function buildFullName(person: any): string | null {
 
 async function pickRecruiterAccount(
   supabase: any,
-): Promise<{ id: string; unipile_account_id: string; account_type: string } | null> {
+): Promise<{ id: string; unipile_account_id: string; metadata?: any; account_type: string } | null> {
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, unipile_account_id, account_type")
+    .select("id, unipile_account_id, metadata, account_type")
     .or("account_type.eq.linkedin_recruiter,account_type.eq.linkedin_classic,account_type.eq.linkedin")
     .eq("is_active", true)
     .not("unipile_account_id", "is", null)
@@ -294,8 +296,7 @@ async function runRecruiterSearch(
   fullName: string,
   currentCompany: string | null,
 ): Promise<SearchHit[]> {
-  // v1 path: POST /api/v1/linkedin/search?account_id=X&limit=10
-  // body: { api: 'recruiter', category: 'people', keywords }
+  // v2 path: POST /v2/{account_id}/linkedin/recruiter/search/candidates
   // Keywords is the broadest filter and accepts free text. Append
   // company as a hint to bias ranking when we have it.
   const keywords = currentCompany
@@ -313,7 +314,7 @@ async function runRecruiterSearch(
         "Content-Type": "application/json",
         "X-UNIPILE-CLIENT": "sully-recruit",
       },
-      body: JSON.stringify({ api: "recruiter", category: "people", keywords }),
+      body: JSON.stringify({ keywords }),
     },
   );
 

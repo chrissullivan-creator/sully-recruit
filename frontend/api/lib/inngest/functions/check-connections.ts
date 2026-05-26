@@ -115,7 +115,7 @@ export const checkConnections = inngest.createFunction(
 
         const { data: account } = await supabase
           .from("integration_accounts")
-          .select("unipile_account_id")
+          .select("unipile_account_id, metadata")
           .eq("id", channel.account_id)
           .not("unipile_account_id", "is", null)
           .single();
@@ -125,13 +125,15 @@ export const checkConnections = inngest.createFunction(
           continue;
         }
 
-        // v1: GET /api/v1/users/{provider_id}?account_id=X
-        // (unipileFetch translates `linkedin/users/...` → v1 `users/...`)
+        // Prefer v2 acc_xxx format account ID
+        const v2AccountId = (account.metadata?.unipile_account_id_v2 || account.unipile_account_id) as string;
+
+        // v2: GET /v2/{account_id}/linkedin/users/{provider_id}
         let profile: any;
         try {
           profile = await unipileFetch(
             supabase,
-            account.unipile_account_id,
+            v2AccountId,
             `linkedin/users/${encodeURIComponent(channel.provider_id)}`,
             { method: "GET" },
           );
