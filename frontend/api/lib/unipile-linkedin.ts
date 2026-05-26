@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 interface UnipileConfig {
   apiKey: string;
+  apiKeyV2: string;
   notifyToken: string;
   v1Base: string;
   v2Base: string;
@@ -212,6 +213,7 @@ export async function loadUnipileConfig(supabase: any): Promise<UnipileConfig> {
   const v1Base = (rows.get("UNIPILE_BASE_URL") || "https://api19.unipile.com:14926/api/v1").replace(/\/+$/, "");
   const v2Base = (rows.get("UNIPILE_BASE_V2_URL") || "https://api.unipile.com/v2").replace(/\/+$/, "");
   const apiKey = rows.get("UNIPILE_API_KEY") || rows.get("UNIPILE_API_KEY_V2") || "";
+  const apiKeyV2 = rows.get("UNIPILE_API_KEY_V2") || apiKey;
   if (!apiKey) throw new Error("UNIPILE_API_KEY missing");
 
   const notifySeed =
@@ -223,6 +225,7 @@ export async function loadUnipileConfig(supabase: any): Promise<UnipileConfig> {
 
   return {
     apiKey,
+    apiKeyV2,
     notifyToken: createNotifyToken(notifySeed),
     v1Base,
     v2Base,
