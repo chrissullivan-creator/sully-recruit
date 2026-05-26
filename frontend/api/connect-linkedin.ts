@@ -62,6 +62,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const config = await loadUnipileConfig(supabase);
   const origin = (req.headers.origin as string) || `https://${req.headers.host}` || "https://sullyrecruit.app";
 
+  // The frontend may pass the v1 short-form account_id. v2 needs acc_xxx.
+  if (account_id && !account_id.startsWith("acc_")) {
+    const { data: row } = await supabase
+      .from("integration_accounts")
+      .select("metadata")
+      .eq("unipile_account_id", account_id)
+      .maybeSingle();
+    const v2Id = row?.metadata?.unipile_account_id_v2;
+    if (v2Id) account_id = v2Id;
+  }
+
   // 10-minute expiry per Unipile's hosted-auth example.
   const expires_on = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const connectState = encodeLinkedinConnectState({

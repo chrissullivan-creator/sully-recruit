@@ -53,7 +53,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const config = await loadUnipileConfig(supabase);
-  const targetAccountId = account_id?.trim() || null;
+  let targetAccountId = account_id?.trim() || null;
+
+  // The frontend may pass the v1 short-form ID. v2 needs acc_xxx format.
+  if (targetAccountId && !targetAccountId.startsWith("acc_")) {
+    const { data: row } = await supabase
+      .from("integration_accounts")
+      .select("metadata")
+      .eq("unipile_account_id", targetAccountId)
+      .maybeSingle();
+    const v2Id = row?.metadata?.unipile_account_id_v2;
+    if (v2Id) targetAccountId = v2Id;
+  }
   const body: Record<string, any> = {
     provider: "LINKEDIN",
     access_token: li_at.trim(),
