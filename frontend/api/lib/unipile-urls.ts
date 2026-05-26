@@ -124,6 +124,7 @@ export function unipileHeaders(bases: UnipileBases, contentType?: string): Recor
 // ── Named route builders (kept here so all LinkedIn URLs are
 //    visible in one place) ────────────────────────────────────────
 
+/** @deprecated Use linkedinV2 instead — v1 routes are being retired. */
 export const linkedinV1 = {
   listProjects: (b: UnipileBases, accountId: string, q: Record<string, string | number | undefined> = {}) =>
     v1Url(b, "/linkedin/projects", { account_id: accountId, ...q }),
@@ -160,4 +161,55 @@ export const linkedinV1 = {
 
   listAccounts: (b: UnipileBases, q: Record<string, string | number | undefined> = {}) =>
     v1Url(b, "/accounts", q),
+};
+
+/**
+ * v2 named route builders. Account ID goes in the path, not query params.
+ * Uses UNIPILE_API_KEY_V2 and acc_xxx format IDs.
+ */
+export const linkedinV2 = {
+  listProjects: (b: UnipileV2Bases, accountId: string, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, "/linkedin/recruiter/projects", q),
+
+  projectDetail: (b: UnipileV2Bases, accountId: string, projectId: string) =>
+    v2Url(b, accountId, `/linkedin/recruiter/projects/${encodeURIComponent(projectId)}`),
+
+  listJobs: (b: UnipileV2Bases, accountId: string, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, "/linkedin/jobs", q),
+
+  jobDetail: (b: UnipileV2Bases, accountId: string, jobId: string) =>
+    v2Url(b, accountId, `/linkedin/jobs/${encodeURIComponent(jobId)}`),
+
+  jobApplicants: (b: UnipileV2Bases, accountId: string, jobId: string, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, `/linkedin/jobs/${encodeURIComponent(jobId)}/applicants`, q),
+
+  applicantDetail: (b: UnipileV2Bases, accountId: string, jobId: string, applicantId: string) =>
+    v2Url(b, accountId, `/linkedin/jobs/${encodeURIComponent(jobId)}/applicants/${encodeURIComponent(applicantId)}`),
+
+  applicantResume: (b: UnipileV2Bases, accountId: string, jobId: string, applicantId: string) =>
+    v2Url(b, accountId, `/linkedin/jobs/${encodeURIComponent(jobId)}/applicants/${encodeURIComponent(applicantId)}/resume`),
+
+  contracts: (b: UnipileV2Bases, accountId: string) =>
+    v2Url(b, accountId, "/linkedin/contracts"),
+
+  searchParameters: (b: UnipileV2Bases, accountId: string) =>
+    v2Url(b, accountId, "/linkedin/recruiter/search-parameters"),
+
+  searchCandidates: (b: UnipileV2Bases, accountId: string, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, "/linkedin/recruiter/search/candidates", q),
+
+  searchPeople: (b: UnipileV2Bases, accountId: string, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, "/linkedin/search/people", q),
+
+  userProfile: (b: UnipileV2Bases, accountId: string, slug: string) =>
+    v2Url(b, accountId, `/linkedin/users/${encodeURIComponent(slug)}`),
+
+  accountDetail: (b: UnipileV2Bases, accountId: string) =>
+    v2Url(b, null, `/accounts/${encodeURIComponent(accountId)}`),
+
+  listAccounts: (b: UnipileV2Bases, q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, null, "/accounts", q),
+
+  relationRequests: (b: UnipileV2Bases, accountId: string, type: "received" | "sent", q: Record<string, string | number | undefined> = {}) =>
+    v2Url(b, accountId, "/users/me/relation-requests", { type, ...q }),
 };

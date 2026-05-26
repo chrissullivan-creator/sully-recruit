@@ -123,23 +123,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!account_id) return res.status(400).json({ error: "Missing account_id" });
 
   try {
-    // Pull both base URLs + both keys. v2 is the canonical for new code;
-    // Per Unipile's v2 OpenAPI spec (api.unipile.com/v2/docs/json), v2
-    // only exposes 8 endpoints: /accounts, /auth/*, /webhooks/*. All
-    // LinkedIn / Recruiter / messaging endpoints live exclusively on
-    // /api/v1 on the tenant DSN. UNIPILE_BASE_V2_URL is intentionally
-    // unused here — the only v2 calls we make (account create, hosted
-    // auth link) live in connect-linkedin*.ts, not in this file.
-    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    // v2 base URL + key for all Unipile calls.
+    const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     ]);
 
-    const v1Base = (v1Row?.value || "").replace(/\/+$/, "");
-    const apiKey = v1KeyRow?.value;
+    const v2Base = (v2Row?.value || "").replace(/\/+$/, "") || "https://api.unipile.com/v2";
+    const apiKey = v2KeyRow?.value;
 
-    if (!v1Base || !apiKey) {
-      return res.status(500).json({ error: "Unipile config missing (UNIPILE_BASE_URL or UNIPILE_API_KEY)" });
+    if (!v2Base || !apiKey) {
+      return res.status(500).json({ error: "Unipile config missing (UNIPILE_BASE_V2_URL or UNIPILE_API_KEY_V2)" });
     }
 
     const headers: Record<string, string> = {
@@ -149,12 +143,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const acct = encodeURIComponent(account_id);
 
     // ── list_accounts ─────────────────────────────────────────────
-    // Diagnostic. Still on v1 — Unipile's account routes haven't moved.
+    // Diagnostic. v2: GET /v2/accounts (not account-scoped).
     if (action === "list_accounts") {
-      // v1 still serves the diagnostic /accounts route; fall back to the
-      // dedicated DSN if the v1 setting was unset.
-      const v1FromDsn = "https://api19.unipile.com:14926/api/v1";
-      const resp = await fetch(`${v1Base || v1FromDsn}/accounts`, { headers });
+      const resp = await fetch(`${v2Base}/accounts`, { headers });
       if (!resp.ok) {
         return res.status(resp.status).json({ error: `Unipile error: ${resp.status}`, detail: (await resp.text()).slice(0, 500) });
       }
@@ -169,23 +160,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // candidates under each project. We probe a few candidate paths
     // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
-      // Per Unipile docs + direct probe: hiring projects live at
-      //   GET {dsn}/api/v1/linkedin/projects?account_id={acct}&...
-      // The /v2/{acct}/linkedin/recruiter/projects pattern we used to
-      // call hit api.unipile.com/v2 which isn't a Unipile host (returns
-      // 'Route Not Found'). The 401 'Invalid API Key' was a misleading
-      // error code, not a real auth failure.
+      // v2: GET /v2/{account_id}/linkedin/recruiter/projects
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
-      // v1 sort_by enum is NAME / FAVORITE / CREATED_TIME / ACCESSED_TIME
-      // / ENGAGED_TIME / ENGAGEMENT_COUNT. v2-only values like
-      // LAST_USED_BY_ME 400. ACCESSED_TIME + DESCENDING gives the same
-      // 'most-recently-used first' default the UI expects.
       qs.set("sort_by", "ACCESSED_TIME");
       qs.set("sort_order", "DESCENDING");
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const url = `${v1Base}/linkedin/projects?${qs.toString()}`;
+      const url = `${v2Base}/${acct}/linkedin/recruiter/projects?${qs.toString()}`;
       const resp = await fetch(url, { headers });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const body = await resp.text();
@@ -225,14 +206,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── download_resume ──────────────────────────────────────────
-    // v1 route confirmed via probe:
-    //   GET /v1/linkedin/jobs/applicants/{applicant_id}/resume?account_id=X
-    // Returns PDF bytes (or sometimes JSON for non-PDF resumes).
+    // v2: GET /v2/{account_id}/linkedin/jobs/{job_id}/applicants/{applicant_id}/resume
+    // Note: job_id is required on v2. If not provided, fall back to applicant-only path.
     if (action === "download_resume") {
       if (!applicant_id) {
         return res.status(400).json({ error: "Missing applicant_id" });
       }
-      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?account_id=${encodeURIComponent(account_id)}`;
+      const resumePath = job_id
+        ? `${v2Base}/${acct}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}/resume`
+        : `${v2Base}/${acct}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume`;
+      const url = resumePath;
       const resp = await fetch(url, { headers });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       if (!resp.ok) {
@@ -272,11 +255,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // v1 route confirmed via probe:
-    //   GET /v1/linkedin/jobs/applicants/{applicant_id}?account_id=X
+    // v2: GET /v2/{account_id}/linkedin/jobs/{job_id}/applicants/{applicant_id}
     if (action === "get_applicant") {
       if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id" });
-      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}?account_id=${encodeURIComponent(account_id)}`;
+      const applicantPath = job_id
+        ? `${v2Base}/${acct}/linkedin/jobs/${encodeURIComponent(job_id)}/applicants/${encodeURIComponent(applicant_id)}`
+        : `${v2Base}/${acct}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}`;
+      const url = applicantPath;
       const resp = await fetch(url, { headers });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const text = await resp.text();
@@ -313,7 +298,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
 
-      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
+      // v2: GET /v2/{account_id}/linkedin/recruiter/projects/{id}
+      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
       const projResp = await fetch(projUrl, { headers });
       if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       let projectData: any = null;
@@ -331,11 +317,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
-      const appResp = await fetch(appUrl, { headers });
+      const qsStr = qs.toString();
+      // v2: POST /v2/{account_id}/linkedin/jobs/{job_id}/applicants
+      const appUrl = `${v2Base}/${acct}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants${qsStr ? `?${qsStr}` : ""}`;
+      const appResp = await fetch(appUrl, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({}) });
       if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const appText = await appResp.text();
       const appData = appText ? JSON.parse(appText) : null;
@@ -353,14 +340,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // v1 route confirmed via probe:
-    //   GET /v1/linkedin/projects/{id}?account_id=X       -> project detail
-    //   GET /v1/linkedin/jobs/{job_posting_id}/applicants -> applicants list
+    // v2: GET /v2/{account_id}/linkedin/recruiter/projects/{id}
+    //     POST /v2/{account_id}/linkedin/jobs/{job_posting_id}/applicants
     if (action === "list_job_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       const projectId = encodeURIComponent(job_id);
 
-      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
+      const projUrl = `${v2Base}/${acct}/linkedin/recruiter/projects/${projectId}`;
       const projResp = await fetch(projUrl, { headers });
       if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       if (!projResp.ok) {
@@ -382,11 +368,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
-      const appResp = await fetch(appUrl, { headers });
+      const qsStr2 = qs.toString();
+      // v2: POST /v2/{account_id}/linkedin/jobs/{job_posting_id}/applicants
+      const appUrl = `${v2Base}/${acct}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants${qsStr2 ? `?${qsStr2}` : ""}`;
+      const appResp = await fetch(appUrl, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({}) });
       if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const appText = await appResp.text();
       const appData = appText ? JSON.parse(appText) : null;
@@ -405,14 +392,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // v1 route confirmed via probe:
-    //   POST /v1/linkedin/search/parameters?account_id=X
-    //   body: { type: 'LOCATION'|'COMPANY'|..., keywords }
+    // v2: GET /v2/{account_id}/linkedin/recruiter/search-parameters
     if (action === "search_parameters") {
       if (!search || typeof search !== "object") {
         return res.status(400).json({ error: "Missing search body" });
       }
-      const url = `${v1Base}/linkedin/search/parameters?account_id=${encodeURIComponent(account_id)}`;
+      const url = `${v2Base}/${acct}/linkedin/recruiter/search-parameters`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -435,19 +420,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // v1 route confirmed via probe:
-    //   POST /v1/linkedin/search?account_id=X&limit=Y&cursor=Z
-    //   body: { api: 'recruiter', category: 'people', ...filters }
+    // v2: POST /v2/{account_id}/linkedin/recruiter/search/candidates
     if (action === "search_people") {
       if (!search || typeof search !== "object") {
         return res.status(400).json({ error: "Missing search body" });
       }
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
       if (cursor) qs.set("cursor", String(cursor));
       if (limit) qs.set("limit", String(limit));
-      const url = `${v1Base}/linkedin/search?${qs.toString()}`;
-      const body = { api: "recruiter", category: "people", ...(search as Record<string, any>) };
+      const qsStr3 = qs.toString();
+      const url = `${v2Base}/${acct}/linkedin/recruiter/search/candidates${qsStr3 ? `?${qsStr3}` : ""}`;
+      const body = { ...(search as Record<string, any>) };
       const resp = await fetch(url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -512,15 +495,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // `pipeline` source is currently a no-op (Phase 2: route via v2 once
       // Unipile enables the Recruiter scope on our v2 app).
       if (source === 'pipeline') {
+        // v2 now supports pipeline candidates via recruiter projects
+        // TODO: Implement pipeline candidate fetch when confirmed working
         return res.status(200).json({
           processed: 0, created: 0, updated: 0, errors: [],
           next_cursor: null, total_count: 0,
-          note: 'pipeline candidates not available on v1; awaiting Unipile v2 Recruiter scope',
+          note: 'pipeline candidates fetch via v2 pending implementation',
         });
       }
 
+      // v2: GET /v2/{account_id}/linkedin/recruiter/projects/{id}
       const projResp = await fetch(
-        `${v1Base}/linkedin/projects/${projId}?account_id=${encodeURIComponent(account_id)}`,
+        `${v2Base}/${acct}/linkedin/recruiter/projects/${projId}`,
         { headers },
       );
       if (!projResp.ok) {
@@ -539,12 +525,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       const qs = new URLSearchParams();
-      qs.set('account_id', account_id);
       qs.set('limit', String(batchLimit));
       if (cursor) qs.set('cursor', String(cursor));
-      const unipileUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
+      const qsBackfill = qs.toString();
+      // v2: POST /v2/{account_id}/linkedin/jobs/{job_posting_id}/applicants
+      const unipileUrl = `${v2Base}/${acct}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants${qsBackfill ? `?${qsBackfill}` : ""}`;
 
-      const batchResp = await fetch(unipileUrl, { headers });
+      const batchResp = await fetch(unipileUrl, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({}) });
       if (batchResp.status === 429) return res.status(429).json({ error: 'Unipile rate limit reached.' });
       if (!batchResp.ok) {
         return res.status(batchResp.status).json({

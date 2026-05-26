@@ -65,16 +65,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (li_a?.trim()) body.premium_access_token = li_a.trim();
   if (proxy_country?.trim()) body.country = proxy_country.trim().toUpperCase();
 
+  // v2: POST /v2/auth/intent (cookie auth flow)
+  // If reconnecting an existing account, include the account_id in the body.
+  if (targetAccountId) body.account_id = targetAccountId;
   const resp = await fetch(
-    targetAccountId
-      ? `${config.v1Base}/accounts/${encodeURIComponent(targetAccountId)}`
-      : `${config.v1Base}/accounts`,
+    `${config.v2Base}/auth/intent`,
     {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-API-KEY": config.apiKey,
+        "X-API-KEY": config.apiKeyV2,
       },
       body: JSON.stringify(body),
     },

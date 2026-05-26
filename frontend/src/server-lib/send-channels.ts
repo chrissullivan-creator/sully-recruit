@@ -336,15 +336,24 @@ export async function sendSms(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Resolve the v2 account ID for Unipile calls. Prefers the acc_xxx format
+ * stored in metadata.unipile_account_id_v2, falling back to unipile_account_id.
+ */
+function resolveV2AccountId(row: any): string | null {
+  return (row?.metadata?.unipile_account_id_v2 || row?.unipile_account_id) as string | null;
+}
+
+/**
  * Find the Unipile API key and account ID for a specific user.
  * API key comes from app_settings (global), account ID from integration_accounts (per-user).
+ * Returns the v2-compatible account ID (acc_xxx format preferred).
  */
 async function getUnipileApiKey(
   supabase: any,
   userId?: string,
   accountId?: string,
 ): Promise<{ apiKey: string; accountId: string }> {
-  const apiKey = await getAppSetting("UNIPILE_API_KEY");
+  const apiKey = await getAppSetting("UNIPILE_API_KEY_V2");
 
   // 1. Try explicit accountId. Filter for active + non-null
   //    unipile_account_id — without these, a stale or unconfigured row
@@ -355,13 +364,14 @@ async function getUnipileApiKey(
   if (accountId) {
     const { data: account } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id, is_active, account_type")
+      .select("id, unipile_account_id, metadata, is_active, account_type")
       .eq("id", accountId)
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .maybeSingle();
-    if (account?.unipile_account_id) {
-      return { apiKey, accountId: account.unipile_account_id };
+    const v2Id = resolveV2AccountId(account);
+    if (v2Id) {
+      return { apiKey, accountId: v2Id };
     }
     await notifyError({
       taskId: "send-channels.getUnipileApiKey",
@@ -377,29 +387,31 @@ async function getUnipileApiKey(
   if (userId) {
     const { data: accounts } = await supabase
       .from("integration_accounts")
-      .select("id, unipile_account_id")
+      .select("id, unipile_account_id, metadata")
       .eq("owner_user_id", userId)
       .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
       .eq("is_active", true)
       .not("unipile_account_id", "is", null)
       .limit(1);
 
-    if (accounts?.[0]) {
-      return { apiKey, accountId: accounts[0].unipile_account_id || accounts[0].id };
+    const v2Id = resolveV2AccountId(accounts?.[0]);
+    if (v2Id) {
+      return { apiKey, accountId: v2Id };
     }
   }
 
   // 3. Auto-discover any active LinkedIn account
   const { data: accounts } = await supabase
     .from("integration_accounts")
-    .select("id, unipile_account_id")
+    .select("id, unipile_account_id, metadata")
     .or("account_type.eq.linkedin,account_type.eq.linkedin_classic,account_type.eq.linkedin_recruiter")
     .eq("is_active", true)
     .not("unipile_account_id", "is", null)
     .limit(1);
 
-  if (accounts?.[0]) {
-    return { apiKey, accountId: accounts[0].unipile_account_id || accounts[0].id };
+  const v2Id = resolveV2AccountId(accounts?.[0]);
+  if (v2Id) {
+    return { apiKey, accountId: v2Id };
   }
 
   throw new Error("No active LinkedIn/Unipile account found");
@@ -513,19 +525,16 @@ async function sendViaInboxEndpoint(
  * Verify that the Unipile account is still connected and healthy.
  * Throws if the account is disconnected or the API is unreachable.
  *
- * v1 route confirmed via probe:
- *   GET /api/v1/accounts/{account_id}
- * (account_id is in the path here because /accounts is a meta route
- * scoped by id, not by query.)
+ * v2 route: GET /v2/accounts/{acc_id}
  */
 async function verifyUnipileAccountHealth(supabase: any, accountId: string): Promise<void> {
-  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+  const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
   ]);
-  const base = (v1Row?.value || "").replace(/\/+$/, "")
-    || "https://api19.unipile.com:14926/api/v1";
-  const apiKey = v1KeyRow?.value;
+  const base = (v2Row?.value || "").replace(/\/+$/, "")
+    || "https://api.unipile.com/v2";
+  const apiKey = v2KeyRow?.value;
   if (!base || !apiKey) throw new Error("Unipile config missing");
   try {
     const resp = await fetch(`${base}/accounts/${encodeURIComponent(accountId)}`, {

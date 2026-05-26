@@ -38,40 +38,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
 
   try {
-    // Resolve v1 tenant DSN + key. Our v2 app key returns 403 on
-    // /linkedin/users/{slug}, so we use the v1 surface where the
-    // equivalent route is /users/{slug}?account_id=X.
-    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    // Resolve v2 base URL + key.
+    const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     ]);
-    const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
-      || "https://api19.unipile.com:14926/api/v1";
-    const apiKey = v1KeyRow?.value;
-    if (!v1Base || !apiKey) {
-      console.error("Unipile v1 config not found in app_settings");
+    const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
+      || "https://api.unipile.com/v2";
+    const apiKey = v2KeyRow?.value;
+    if (!v2Base || !apiKey) {
+      console.error("Unipile v2 config not found in app_settings");
       return res.status(200).json({});
     }
 
-    // Resolve a Unipile account ID — prefer the one associated with this thread's
-    // integration_account, falling back to any active account.
+    // Resolve a Unipile account ID (prefer v2 acc_xxx from metadata).
     let acctId = account_id;
     if (!acctId && integration_account_id) {
       const { data: ia } = await supabase
         .from("integration_accounts")
-        .select("unipile_account_id")
+        .select("unipile_account_id, metadata")
         .eq("id", integration_account_id)
         .maybeSingle();
-      acctId = ia?.unipile_account_id ?? undefined;
+      acctId = (ia?.metadata?.unipile_account_id_v2 || ia?.unipile_account_id) ?? undefined;
     }
     if (!acctId) {
       const { data: accounts } = await supabase
         .from("integration_accounts")
-        .select("unipile_account_id")
+        .select("unipile_account_id, metadata")
         .not("unipile_account_id", "is", null)
         .eq("is_active", true)
         .limit(1);
-      acctId = accounts?.[0]?.unipile_account_id;
+      const row = accounts?.[0];
+      acctId = (row?.metadata?.unipile_account_id_v2 || row?.unipile_account_id) ?? undefined;
     }
     if (!acctId) {
       console.warn("No active Unipile account found");
@@ -83,51 +81,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let profileData: any = null;
     let attendeeData: any = null;
 
-    // Try direct fetch by Unipile ID — v1: /users/{id}?account_id=X
+    // Try direct fetch by Unipile ID — v2: GET /v2/{acct}/linkedin/users/{id}
     if (unipile_id) {
       const r = await fetch(
-        `${v1Base}/users/${encodeURIComponent(unipile_id)}?account_id=${acctParam}`,
+        `${v2Base}/${acctParam}/linkedin/users/${encodeURIComponent(unipile_id)}`,
         { headers: uniHeaders },
       );
       if (r.ok) profileData = await r.json();
     }
 
-    // Try resolving by LinkedIn URL slug — v1: /users/{slug}?account_id=X
+    // Try resolving by LinkedIn URL slug — v2: GET /v2/{acct}/linkedin/users/{slug}
     if (!profileData && linkedin_url) {
       const match = linkedin_url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/);
       const slug = match?.[1];
       if (slug) {
         const r = await fetch(
-          `${v1Base}/users/${encodeURIComponent(slug)}?account_id=${acctParam}`,
+          `${v2Base}/${acctParam}/linkedin/users/${encodeURIComponent(slug)}`,
           { headers: uniHeaders },
         );
         if (r.ok) profileData = await r.json();
       }
     }
 
-    // Try resolving via chat attendees — used when the inbound message has no
-    // LinkedIn URL (common: backfill-populated LinkedIn threads store only the
-    // Unipile provider_id, not a URL).
-    //   v1: /chats/{id}?account_id=X and /chats/{id}/attendees?account_id=X
+    // Try resolving via chat attendees — v2: GET /v2/{acct}/chats/{id}
+    // (attendees are inline in the v2 chat response)
     if (!profileData && chat_id) {
       let attendees: any[] = [];
       const chatResp = await fetch(
-        `${v1Base}/chats/${encodeURIComponent(chat_id)}?account_id=${acctParam}`,
+        `${v2Base}/${acctParam}/chats/${encodeURIComponent(chat_id)}`,
         { headers: uniHeaders },
       );
       if (chatResp.ok) {
         const chatJson: any = await chatResp.json();
         attendees = chatJson.attendees ?? chatJson.members ?? chatJson.participants ?? [];
-      }
-      if (attendees.length === 0) {
-        const attResp = await fetch(
-          `${v1Base}/chats/${encodeURIComponent(chat_id)}/attendees?account_id=${acctParam}`,
-          { headers: uniHeaders },
-        );
-        if (attResp.ok) {
-          const attJson: any = await attResp.json();
-          attendees = attJson.items ?? attJson.attendees ?? [];
-        }
       }
 
       const other = attendees.find(
@@ -139,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const providerId = other.provider_id ?? other.id;
         if (providerId) {
           const r = await fetch(
-            `${v1Base}/users/${encodeURIComponent(providerId)}?account_id=${acctParam}`,
+            `${v2Base}/${acctParam}/linkedin/users/${encodeURIComponent(providerId)}`,
             { headers: uniHeaders },
           );
           if (r.ok) profileData = await r.json();

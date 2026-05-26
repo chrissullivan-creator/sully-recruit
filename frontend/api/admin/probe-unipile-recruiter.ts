@@ -43,23 +43,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const config = await loadUnipileConfig(supabase);
 
-  const v1 = config.v1Base.replace(/\/+$/, "");
+  const v2 = config.v2Base.replace(/\/+$/, "");
   const candidates = (acct: string) => {
     const a = encodeURIComponent(acct);
     return [
-      // Meta: account is alive
-      { name: "v1-account-get",      url: `${v1}/accounts/${a}` },
+      // Meta: account is alive — v2: GET /v2/accounts/{acc_id}
+      { name: "v2-account-get",      url: `${v2}/accounts/${a}` },
       // LinkedIn Recruiter contracts
-      { name: "v1-contracts",        url: `${v1}/linkedin/contracts?account_id=${a}` },
-      // Hiring projects (project list + first project detail can't be
-      // probed here without a project id, so just list)
-      { name: "v1-projects",         url: `${v1}/linkedin/projects?account_id=${a}&limit=1` },
-      // LinkedIn job postings (Talent Hub)
-      { name: "v1-jobs",             url: `${v1}/linkedin/jobs?account_id=${a}&limit=1` },
+      { name: "v2-contracts",        url: `${v2}/${a}/linkedin/contracts` },
+      // Hiring projects
+      { name: "v2-projects",         url: `${v2}/${a}/linkedin/recruiter/projects?limit=1` },
+      // LinkedIn job postings
+      { name: "v2-jobs",             url: `${v2}/${a}/linkedin/jobs?limit=1` },
       // InMail credits remaining
-      { name: "v1-inmail-credits",   url: `${v1}/linkedin/inmail-credits?account_id=${a}` },
+      { name: "v2-inmail-credits",   url: `${v2}/${a}/linkedin/recruiter/inmail-credits` },
       // Inbound invitations
-      { name: "v1-invite-received",  url: `${v1}/users/invite/received?account_id=${a}&limit=1` },
+      { name: "v2-invite-received",  url: `${v2}/${a}/users/me/relation-requests?type=received&limit=1` },
     ];
   };
 
@@ -69,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const c of candidates(acct)) {
       try {
         const resp = await fetch(c.url, {
-          headers: { Accept: "application/json", "X-API-KEY": config.apiKey },
+          headers: { Accept: "application/json", "X-API-KEY": config.apiKeyV2 },
         });
         const text = await resp.text();
         attempts.push({

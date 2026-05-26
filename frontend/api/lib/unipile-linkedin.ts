@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 interface UnipileConfig {
   apiKey: string;
+  apiKeyV2: string;
   notifyToken: string;
   v1Base: string;
   v2Base: string;
@@ -238,16 +239,17 @@ async function parseUnipileResponse(resp: Response): Promise<{ data: any; text: 
   };
 }
 
-async function fetchUnipileV1(
+async function fetchUnipileV2(
   config: UnipileConfig,
   path: string,
   init: RequestInit = {},
 ): Promise<{ data: any; status: number }> {
-  const resp = await fetch(`${config.v1Base}${path.startsWith("/") ? "" : "/"}${path}`, {
+  const base = config.v2Base.replace(/\/+$/, "");
+  const resp = await fetch(`${base}${path.startsWith("/") ? "" : "/"}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
-      "X-API-KEY": config.apiKey,
+      "X-API-KEY": config.apiKeyV2,
       ...(init.headers || {}),
     },
   });
@@ -260,7 +262,8 @@ async function fetchUnipileV1(
 }
 
 export async function fetchUnipileAccount(config: UnipileConfig, accountId: string): Promise<any> {
-  const { data } = await fetchUnipileV1(config, `/accounts/${encodeURIComponent(accountId)}`);
+  // v2: GET /v2/accounts/{acc_id}
+  const { data } = await fetchUnipileV2(config, `/accounts/${encodeURIComponent(accountId)}`);
   return data;
 }
 
@@ -268,21 +271,15 @@ export async function verifyRecruiterProjectsAccess(
   config: UnipileConfig,
   accountId: string,
 ): Promise<RecruiterAccessCheck> {
-  // Per Unipile docs and direct probe: Recruiter hiring projects live
-  // at /api/v1/linkedin/projects?account_id=... on the tenant DSN.
-  // The older /v2/{acct}/linkedin/recruiter/projects pattern we used
-  // hits api.unipile.com/v2 which returns "Route Not Found" (not a real
-  // host) — and even when we tried it on the DSN, /api/v2 doesn't
-  // exist either. The 401 'Invalid API Key' was Unipile's confusing
-  // way of saying the route was wrong.
-  const url = new URL(`${config.v1Base}/linkedin/projects`);
-  url.searchParams.set("account_id", accountId);
+  // v2: GET /v2/{account_id}/linkedin/recruiter/projects?limit=1
+  const base = config.v2Base.replace(/\/+$/, "");
+  const url = new URL(`${base}/${encodeURIComponent(accountId)}/linkedin/recruiter/projects`);
   url.searchParams.set("limit", "1");
 
   const resp = await fetch(url.toString(), {
     headers: {
       Accept: "application/json",
-      "X-API-KEY": config.apiKey,
+      "X-API-KEY": config.apiKeyV2,
     },
   });
   const { text } = await parseUnipileResponse(resp);
@@ -325,9 +322,10 @@ export async function listLinkedinContracts(
   config: UnipileConfig,
   accountId: string,
 ): Promise<ContractMatch[]> {
-  const { data } = await fetchUnipileV1(
+  // v2: GET /v2/{account_id}/linkedin/contracts
+  const { data } = await fetchUnipileV2(
     config,
-    `/linkedin/contracts?account_id=${encodeURIComponent(accountId)}`,
+    `/${encodeURIComponent(accountId)}/linkedin/contracts`,
   );
 
   const items = Array.isArray(data)
@@ -362,18 +360,19 @@ export async function selectLinkedinContractByName(
     || contracts.find((item) => target.includes(item.name.toLowerCase()));
   if (!match) return null;
 
-  const path = `/linkedin/contracts/${encodeURIComponent(match.id)}/select?account_id=${encodeURIComponent(accountId)}`;
+  // v2: POST /v2/{account_id}/linkedin/contracts/{contract_id}/select
+  const path = `/${encodeURIComponent(accountId)}/linkedin/contracts/${encodeURIComponent(match.id)}/select`;
   try {
-    await fetchUnipileV1(config, path, { method: "POST" });
+    await fetchUnipileV2(config, path, { method: "POST" });
     return match;
   } catch {
-    await fetchUnipileV1(
+    await fetchUnipileV2(
       config,
-      `/linkedin/contracts/${encodeURIComponent(match.id)}/select`,
+      path,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: accountId }),
+        body: JSON.stringify({}),
       },
     );
     return match;

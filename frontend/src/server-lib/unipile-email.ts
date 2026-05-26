@@ -1,11 +1,11 @@
 /**
- * Unipile v1 email send. Mirrors the shape we use for Microsoft Graph
+ * Unipile v2 email send. Mirrors the shape we use for Microsoft Graph
  * sendMail so the call sites can flip between providers via the
  * USE_UNIPILE_EMAIL flag in app_settings without changing their
  * argument order.
  *
- * Endpoint (v1 tenant DSN, account_id as query parameter):
- *   POST {UNIPILE_BASE_URL}/emails?account_id={account_id}
+ * Endpoint (v2, account_id in path):
+ *   POST https://api.unipile.com/v2/{account_id}/emails
  *
  * Body shape (multipart when there are attachments, JSON otherwise):
  *   - subject          string
@@ -15,13 +15,12 @@
  *   - reply_to         email message id of the previous send (threading)
  *   - attachments      file fields (multipart only)
  *
- * Auth: X-API-KEY = UNIPILE_API_KEY (v1 key). Our v2 app key returns
- * 403 on /emails because emails aren't in its scope set.
+ * Auth: X-API-KEY = UNIPILE_API_KEY_V2
  *
  * The Unipile account_id for the sender mailbox lives on
- * integration_accounts.unipile_account_id, looked up by the sender's
- * email address. If we don't have one, throw so the caller can fall
- * back to the Graph path.
+ * integration_accounts (prefers metadata.unipile_account_id_v2, falls
+ * back to unipile_account_id). Looked up by the sender's email address.
+ * If we don't have one, throw so the caller can fall back to the Graph path.
  */
 import { logger } from "./logger.js";
 import { getAppSetting } from "./supabase.js";
@@ -47,15 +46,15 @@ export interface UnipileSendResult {
 }
 
 async function resolveBaseAndKey(supabase: any) {
-  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+  const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
   ]);
-  const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
-    || "https://api19.unipile.com:14926/api/v1";
-  const apiKey = v1KeyRow?.value;
-  if (!v1Base || !apiKey) throw new Error("Unipile config missing");
-  return { v1Base, apiKey };
+  const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
+    || "https://api.unipile.com/v2";
+  const apiKey = v2KeyRow?.value;
+  if (!v2Base || !apiKey) throw new Error("Unipile config missing");
+  return { v2Base, apiKey };
 }
 
 async function resolveUnipileAccountId(supabase: any, fromEmail: string): Promise<string | null> {
@@ -64,15 +63,17 @@ async function resolveUnipileAccountId(supabase: any, fromEmail: string): Promis
   // Pin account_type='email' since this helper is the email-send path
   // — without it we sometimes get back a linkedin_recruiter account_id
   // and Unipile rejects the send.
+  // Prefer v2 acc_xxx from metadata.unipile_account_id_v2.
   const { data } = await supabase
     .from("integration_accounts")
-    .select("unipile_account_id, unipile_provider")
+    .select("unipile_account_id, metadata, unipile_provider")
     .eq("email_address", fromEmail.toLowerCase())
     .eq("account_type", "email")
     .not("unipile_account_id", "is", null)
     .limit(1)
     .maybeSingle();
-  return (data?.unipile_account_id as string | null) ?? null;
+  if (!data) return null;
+  return (data.metadata?.unipile_account_id_v2 || data.unipile_account_id) as string | null;
 }
 
 function toRecipients(input: UnipileSendInput["to"]) {
@@ -100,11 +101,12 @@ export async function unipileSendEmail(
   supabase: any,
   input: UnipileSendInput,
 ): Promise<UnipileSendResult> {
-  const { v1Base, apiKey } = await resolveBaseAndKey(supabase);
+  const { v2Base, apiKey } = await resolveBaseAndKey(supabase);
   const acct = await resolveUnipileAccountId(supabase, input.fromEmail);
   if (!acct) throw new Error(`No Unipile account for ${input.fromEmail}`);
 
-  const url = `${v1Base}/emails?account_id=${encodeURIComponent(acct)}`;
+  // v2: POST /v2/{account_id}/emails
+  const url = `${v2Base}/${encodeURIComponent(acct)}/emails`;
   const headers: Record<string, string> = {
     "X-API-KEY": apiKey,
     Accept: "application/json",

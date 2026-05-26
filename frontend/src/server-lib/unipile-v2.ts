@@ -2,28 +2,14 @@
  * Central Unipile client. Every server-side caller routes through here
  * so the URL shape and key resolution are defined in one place.
  *
- * Why this file is still named "unipile-v2.ts": it used to target
- * api.unipile.com/v2 (where account_id was a path segment). That host
- * exists for our tenant but our v2 app key returns 403 Insufficient
- * permissions on every LinkedIn/Recruiter/messaging call (Unipile-side
- * scope gate), AND v2 requires `acc_xxx`-format account IDs that we
- * don't store. Per Unipile's published v2 OpenAPI spec, the v2 host
- * only exposes 8 endpoints anyway: /accounts, /auth/*, /webhooks/*.
- * All LinkedIn / messaging / email endpoints live exclusively on
- * /api/v1 on the tenant DSN, take account_id as a query parameter,
- * and use the v1 API key.
+ * This module now routes ALL calls to Unipile v2:
+ *   - Base URL: https://api.unipile.com/v2
+ *   - Auth: X-API-KEY = UNIPILE_API_KEY_V2
+ *   - Account targeting: account_id in the URL path (/v2/{accountId}/resource)
+ *   - Account IDs: acc_xxx format (from integration_accounts.metadata->>'unipile_account_id_v2')
  *
- * So we keep this module's NAME (too many imports to chase) but it now
- * routes to v1. The path translation rules are below in
- * `translatePathToV1`.
- *
- * Lifecycle endpoints (POST /v2/auth/link, POST /v2/auth/checkpoint,
- * POST /v2/accounts) are intentionally NOT routed through here. They
- * live in connect-linkedin*.ts and call api.unipile.com/v2 directly
- * with UNIPILE_API_KEY_V2 — that surface is the only part of v2 that
- * actually works for us.
- *
- * Auth: X-API-KEY = UNIPILE_API_KEY (v1 key).
+ * The path translation below converts caller-facing path strings into
+ * v2-shaped paths (account_id in path, not query param).
  */
 import { logger } from "./logger.js";
 
@@ -40,92 +26,108 @@ async function resolveConfig(supabase: any): Promise<ResolvedConfig> {
   if (_cachedConfig && now - _cachedConfig.fetchedAt < CONFIG_TTL_MS) {
     return _cachedConfig.value;
   }
-  const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+  const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
   ]);
-  // The v1 DSN is the only Unipile host that serves LinkedIn /
-  // messaging / email endpoints for our tenant. Default to the known
-  // DSN value so callers without an explicit setting still work.
-  const base = (v1Row?.value || "").replace(/\/+$/, "")
-    || "https://api19.unipile.com:14926/api/v1";
-  const apiKey = v1KeyRow?.value;
-  if (!base || !apiKey) throw new Error("Unipile config missing (UNIPILE_BASE_URL or UNIPILE_API_KEY)");
+  const base = (v2Row?.value || "").replace(/\/+$/, "")
+    || "https://api.unipile.com/v2";
+  const apiKey = v2KeyRow?.value;
+  if (!base || !apiKey) throw new Error("Unipile config missing (UNIPILE_BASE_V2_URL or UNIPILE_API_KEY_V2)");
   const value = { base, apiKey };
   _cachedConfig = { value, fetchedAt: now };
   return value;
 }
 
 /**
- * Translate a path that was written for the old v2 shape
- * (`linkedin/users/{slug}`, `chats`, `inboxes/{id}/chats/send` etc.)
- * into the equivalent v1 path. Every v1 LinkedIn / messaging route
- * takes account_id as a QUERY parameter, not a path segment, so the
- * account_id is added by `unipileFetch` separately.
+ * Translate a caller-facing path into the canonical v2 path shape.
+ * v2 puts account_id in the URL path (added by `unipileFetch`), so
+ * these translations just normalize the resource path.
  *
- * Returns null when the caller hit a v2-only shape with no v1
- * equivalent — caller should 501 or fall back gracefully.
+ * Returns null when there is no v2 equivalent (caller should 501).
  */
-export function translatePathToV1(path: string): string | null {
+export function translatePathToV2(path: string): string | null {
   const clean = path.replace(/^\/+/, "");
 
   // ── LinkedIn user lookups ─────────────────────────────────────────
-  // v2: linkedin/users/{slug}      → v1: users/{slug}
-  // v2: linkedin/users/invite      → v1: users/invite
+  // Caller: linkedin/users/{slug} → v2: linkedin/users/{slug}
+  // Caller: linkedin/users/invite → v2: users/me/relation-requests (POST)
   if (clean.startsWith("linkedin/users/invitations/")) {
-    // v2: linkedin/users/invitations/received → v1: users/invite/received
-    // Probed: v1 exposes /api/v1/users/invite/received (or sent).
+    // linkedin/users/invitations/received → users/me/relation-requests?type=received
     const rest = clean.replace(/^linkedin\/users\/invitations\//, "");
-    return `users/invite/${rest}`;
+    return `users/me/relation-requests?type=${rest}`;
   }
-  if (clean.startsWith("linkedin/users/invite")) {
-    return clean.replace(/^linkedin\/users\/invite/, "users/invite");
+  if (clean === "linkedin/users/invite" || clean.startsWith("linkedin/users/invite?")) {
+    return "users/me/relation-requests";
   }
   if (clean.startsWith("linkedin/users/")) {
-    return clean.replace(/^linkedin\/users\//, "users/");
+    // linkedin/users/{slug} → linkedin/users/{slug} (same on v2)
+    return clean;
   }
   if (clean.startsWith("users/invitations/")) {
-    // legacy form some callers used (no `linkedin/` prefix)
     const rest = clean.replace(/^users\/invitations\//, "");
-    return `users/invite/${rest}`;
+    return `users/me/relation-requests?type=${rest}`;
+  }
+  if (clean === "users/invite/received" || clean === "users/invite/sent") {
+    const type = clean.endsWith("received") ? "received" : "sent";
+    return `users/me/relation-requests?type=${type}`;
+  }
+  if (clean === "users/invite" || clean.startsWith("users/invite?")) {
+    return "users/me/relation-requests";
   }
 
   // ── LinkedIn search ───────────────────────────────────────────────
-  // v2: linkedin/recruiter/search/people → v1: linkedin/search (body
-  //     selects api='recruiter')
+  // Caller: linkedin/search → v2: linkedin/search/people (classic)
+  //   OR linkedin/recruiter/search/candidates (recruiter — body decides)
+  if (clean === "linkedin/search" || clean.startsWith("linkedin/search?")) {
+    // Body { api:'recruiter' } → recruiter path; default → classic
+    // We use a single path and let the body determine — caller should
+    // switch to the recruiter path if needed. Default to recruiter search.
+    return "linkedin/recruiter/search/candidates";
+  }
   if (clean === "linkedin/recruiter/search/people"
-    || clean.startsWith("linkedin/recruiter/search/people?")) {
-    return "linkedin/search";
+    || clean.startsWith("linkedin/recruiter/search/people?")
+    || clean === "linkedin/recruiter/search/candidates") {
+    return "linkedin/recruiter/search/candidates";
   }
 
-  // ── Inbox-scoped recruiter send (v2-only — no v1 equivalent) ─────
-  // v2: inboxes/{id}/chats/send → null (caller should fall back to /chats)
-  if (clean.startsWith("inboxes/")) {
-    // The /api/v1 surface has no inbox concept; v1 routes top-level
-    // /chats and /messages with account_id as query. Return null so
-    // the caller knows to use the legacy /chats path or 501 itself.
-    return null;
+  // ── LinkedIn search parameters ────────────────────────────────────
+  if (clean === "linkedin/search/parameters" || clean.startsWith("linkedin/search/parameters?")) {
+    return "linkedin/recruiter/search-parameters";
   }
 
   // ── Recruiter InMail credits ──────────────────────────────────────
-  // v2: linkedin/recruiter/inmail-credits → v1: linkedin/inmail-credits
-  if (clean === "linkedin/recruiter/inmail-credits") {
-    return "linkedin/inmail-credits";
+  // TODO: v2 does not have a direct /inmail-credits endpoint; check account detail instead
+  if (clean === "linkedin/recruiter/inmail-credits" || clean === "linkedin/inmail-credits") {
+    return "linkedin/recruiter/inmail-credits";
   }
 
-  // ── Recruiter projects/jobs (already v1-shaped) ──────────────────
-  if (clean.startsWith("linkedin/projects")
-    || clean.startsWith("linkedin/jobs")
-    || clean.startsWith("linkedin/contracts")
-    || clean.startsWith("linkedin/search")
-    || clean.startsWith("linkedin/inmail-credits")) {
-    return clean;
+  // ── Recruiter projects ────────────────────────────────────────────
+  if (clean === "linkedin/projects" || clean.startsWith("linkedin/projects?")) {
+    return "linkedin/recruiter/projects";
+  }
+  if (clean.match(/^linkedin\/projects\/[^/]+$/)) {
+    const id = clean.replace(/^linkedin\/projects\//, "");
+    return `linkedin/recruiter/projects/${id}`;
   }
 
-  // ── Messaging (top-level on v1) ───────────────────────────────────
-  // v2: chats, chats/{id}, chats/{id}/messages → v1: same path
-  // v2: messages, messages/{id} → v1: same path
-  // v2: emails → v1: same path
+  // ── LinkedIn jobs + applicants ────────────────────────────────────
+  if (clean.startsWith("linkedin/jobs")) {
+    return clean; // v2 keeps the same path shape
+  }
+
+  // ── LinkedIn contracts ────────────────────────────────────────────
+  if (clean.startsWith("linkedin/contracts")) {
+    return clean; // v2 keeps the same path shape
+  }
+
+  // ── Inbox-scoped recruiter send ───────────────────────────────────
+  if (clean.startsWith("inboxes/")) {
+    return null; // No direct equivalent; caller falls back to /chats
+  }
+
+  // ── Messaging ─────────────────────────────────────────────────────
+  // v2: chats, chats/{id}, emails → same resource paths under /{accountId}/
   if (clean.startsWith("chats")
     || clean.startsWith("messages")
     || clean.startsWith("emails")
@@ -134,13 +136,11 @@ export function translatePathToV1(path: string): string | null {
   }
 
   // ── Proxy config ─────────────────────────────────────────────────
-  // v2: proxy → no v1 equivalent (proxy is a v2-only concept).
   if (clean === "proxy") {
     return null;
   }
 
-  // Pass-through anything we don't recognise — caller will see the
-  // raw v1 URL and we'll fix the rule when we hit a 404.
+  // Pass-through anything we don't recognise.
   return clean;
 }
 
@@ -149,25 +149,23 @@ export interface UnipileFetchInit extends Omit<RequestInit, "headers"> {
   /** Extra headers merged on top of auth/Accept defaults. */
   headers?: Record<string, string>;
   /**
-   * Legacy v2-era flag. Ignored on v1 — every v1 LinkedIn / messaging
-   * route already takes account_id as a query parameter. Kept here so
-   * existing call sites don't have to be touched.
+   * Legacy flag. On v2, when true, omits account_id from the path
+   * (for non-account-scoped routes like /accounts, /auth, /webhooks).
    */
   topLevel?: boolean;
 }
 
 /**
- * Fetch any Unipile endpoint scoped to a single account_id. Throws on
- * non-2xx with the response body in the message.
+ * Fetch any Unipile endpoint scoped to a single account_id via v2.
+ * Throws on non-2xx with the response body in the message.
  *
- * Callers historically wrote v2-shaped paths
- * (e.g. `linkedin/users/{slug}`, `chats`, `inboxes/.../chats/send`).
- * Those paths are translated to their v1 equivalents below and
- * account_id is added as a query parameter (NOT a path segment).
+ * v2 URL shape: {v2Base}/{accountId}/{path}
+ *   - account_id is in the PATH, not a query parameter
+ *   - Auth: X-API-KEY = UNIPILE_API_KEY_V2
  *
  * Example:
- *   await unipileFetch(supabase, accountId, "linkedin/users/jane-doe")
- *   →  GET {v1Base}/users/jane-doe?account_id={accountId}
+ *   await unipileFetch(supabase, "acc_xxx", "linkedin/users/jane-doe")
+ *   →  GET https://api.unipile.com/v2/acc_xxx/linkedin/users/jane-doe
  */
 export async function unipileFetch<T = any>(
   supabase: any,
@@ -176,26 +174,26 @@ export async function unipileFetch<T = any>(
   init: UnipileFetchInit = {},
 ): Promise<T> {
   if (!accountId) throw new Error("unipileFetch: accountId required");
-  const v1Path = translatePathToV1(path);
-  if (v1Path === null) {
+  const v2Path = translatePathToV2(path);
+  if (v2Path === null) {
     throw new Error(
-      `unipileFetch: no v1 equivalent for "${path}". `
-      + `This endpoint was v2-only and our v2 app lacks the scope. `
-      + `Caller should 501 or fall back to a v1 route.`,
+      `unipileFetch: no v2 equivalent for "${path}". `
+      + `Caller should 501 or fall back gracefully.`,
     );
   }
 
   const { base, apiKey } = await resolveConfig(supabase);
-  const cleanPath = v1Path.replace(/^\/+/, "");
+  const cleanPath = v2Path.replace(/^\/+/, "");
 
-  // Preserve a query string the caller embedded in `path`.
+  // Preserve a query string the caller embedded in the translated path.
   const [pathPart, embeddedQs = ""] = cleanPath.split("?");
-  const url = new URL(`${base}/${pathPart}`);
+  // v2: account_id goes in the path segment
+  const acctSegment = init.topLevel ? "" : `/${accountId}`;
+  const url = new URL(`${base}${acctSegment}/${pathPart}`);
   if (embeddedQs) {
     const parsed = new URLSearchParams(embeddedQs);
     for (const [k, v] of parsed.entries()) url.searchParams.set(k, v);
   }
-  url.searchParams.set("account_id", accountId);
   if (init.query) {
     for (const [k, v] of Object.entries(init.query)) {
       if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));

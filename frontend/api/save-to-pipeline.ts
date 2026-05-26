@@ -111,19 +111,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── 2. Unipile config + helpers ─────────────────────────────
-    // v1 tenant DSN — the only host that serves LinkedIn endpoints for our
-    // tenant. The previous code targeted api.unipile.com/v2/{acct}/linkedin/
-    // recruiter/... which never worked: our v2 app key 403s on Recruiter
-    // scope, and v2 doesn't accept our short-form account_ids. The v1
-    // endpoints we still need (project detail for stage discovery, resume
-    // download) take account_id as a query parameter, not a path segment.
-    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    // v2 base URL + key for all Unipile calls.
+    const [{ data: v2Row }, { data: v2KeyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     ]);
-    const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
-      || "https://api19.unipile.com:14926/api/v1";
-    const apiKey = v1KeyRow?.value;
+    const v2Base = (v2Row?.value || "").replace(/\/+$/, "")
+      || "https://api.unipile.com/v2";
+    const apiKey = v2KeyRow?.value;
     if (!apiKey) return res.status(500).json({ error: "Unipile API key not configured" });
     const unipileHeaders: Record<string, string> = {
       "X-API-KEY": apiKey,
@@ -134,10 +129,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Project detail lists pipeline.stages in display order; the first
     // stage that accepts candidates is the entry point ("Sourced" /
     // "Uncontacted" depending on the recruiter's template).
-    // v1 route:  GET /v1/linkedin/projects/{project_id}?account_id=X
+    // v2: GET /v2/{account_id}/linkedin/recruiter/projects/{project_id}
     const projUrl =
-      `${v1Base}/linkedin/projects/${encodeURIComponent(project_id)}` +
-      `?account_id=${encodeURIComponent(account_id)}`;
+      `${v2Base}/${encodeURIComponent(account_id)}/linkedin/recruiter/projects/${encodeURIComponent(project_id)}`;
     const projResp = await fetch(projUrl, { headers: unipileHeaders });
     if (!projResp.ok) {
       return res.status(projResp.status).json({
@@ -316,13 +310,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let resumeQueued = false;
     if (has_resume && candidateId) {
       try {
-        // v1 route confirmed via probe:
-        //   GET /v1/linkedin/jobs/applicants/{applicant_id}/resume?account_id=X
-        // Only available for job-posting applicants (not arbitrary search
-        // results); returns PDF bytes (or sometimes JSON for non-PDF).
+        // v2: GET /v2/{account_id}/linkedin/jobs/applicants/{applicant_id}/resume
         const resumeUrl =
-          `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume` +
-          `?account_id=${encodeURIComponent(account_id)}`;
+          `${v2Base}/${encodeURIComponent(account_id)}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume`;
         const rResp = await fetch(resumeUrl, { headers: unipileHeaders });
         if (rResp.ok) {
           const contentType = rResp.headers.get("content-type") || "application/pdf";
