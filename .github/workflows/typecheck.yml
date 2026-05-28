@@ -1,0 +1,44 @@
+name: Typecheck
+
+# Why: `tsc --noEmit` would have caught the `Illegal break` syntax error
+# (TS1116) that broke /api/inngest in production on 2026-05-12, taking
+# every webhook + every scheduled Inngest function offline for 24h+.
+# This workflow runs on every PR and every push to main so a parse-level
+# bug can never reach production again.
+#
+# Scope: frontend/ only (the only Node/TS package; supabase/functions are
+# Deno and not part of this typecheck).
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/typecheck.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+  workflow_dispatch: {}
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Typecheck api/ (Vercel serverless functions)
+        # Catches the bug class that took prod down on 2026-05-12:
+        # api/lib/inngest/functions/*.ts wasn't covered by any tsconfig,
+        # so an illegal top-level `break` (TS1116) shipped to prod and
+        # killed every Inngest invocation. tsconfig.api.json covers this
+        # tree explicitly.
+        working-directory: frontend
+        run: npx tsc --noEmit -p tsconfig.api.json
