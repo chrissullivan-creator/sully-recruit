@@ -11,9 +11,10 @@ import { createClient } from "@supabase/supabase-js";
  * cuts the bundle's module graph to only node_modules + this file,
  * which is the configuration we know loads cleanly.
  *
- * Strategy: extract raw text via pdf-parse / mammoth / TextDecoder
- * (dynamic imports — failures fall through to "" and the AI gets a
- * useful error), then run Gemini → OpenAI for structured JSON.
+ * Strategy: extract raw text via Mistral OCR → pdf-parse / mammoth /
+ * TextDecoder (dynamic imports — failures fall through to "" and the AI
+ * gets a useful error), then run the OpenAI-first cascade (OpenAI →
+ * Claude → Gemini → OpenRouter) for structured JSON.
  *
  * Body: { filePath: string, fileName: string }
  * Auth: Supabase JWT (from logged-in user)
@@ -122,7 +123,7 @@ ${rawText.slice(0, 60_000)}`;
     const systemPrompt =
       "You parse résumés into strict JSON matching the requested shape. Output null when a field is missing — never invent values.";
 
-    const { text, via } = await callClaudeThenOpenAIThenGemini({
+    const { text, via } = await callOpenAIThenClaudeThenGemini({
       anthropicKey, openaiKey, geminiKey, openRouterKey,
       systemPrompt, userContent: userPrompt,
       maxTokens: 2048,
@@ -276,8 +277,42 @@ interface CallOpts {
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
 
-async function callClaudeThenOpenAIThenGemini(opts: CallOpts): Promise<{ text: string; via: "claude" | "openai" | "gemini" | "openrouter" }> {
-  // Claude first — strongest reasoning + structured-extraction for the
+async function callOpenAIThenClaudeThenGemini(opts: CallOpts): Promise<{ text: string; via: "claude" | "openai" | "gemini" | "openrouter" }> {
+  // OpenAI first for resume parsing — cheap, fast, reliable JSON-mode on
+  // gpt-4o-mini. Claude is the first fallback for its stronger structured
+  // extraction; Gemini then OpenRouter backstop after that.
+  if (opts.openaiKey) {
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          temperature: 0,
+          max_tokens: opts.maxTokens,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: opts.systemPrompt },
+            { role: "user", content: opts.userContent },
+          ],
+        }),
+      });
+      if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      if (!text) throw new Error("OpenAI returned no text content");
+      return { text, via: "openai" };
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      if (!FALLBACK_REGEX.test(msg) || (!opts.anthropicKey && !opts.geminiKey && !opts.openRouterKey)) throw err;
+      console.warn("OpenAI failed, falling back to Claude:", msg);
+    }
+  }
+
+  // Claude fallback — strongest reasoning + structured-extraction for the
   // recruiting domain. JSON-mode is honored via the system prompt.
   if (opts.anthropicKey) {
     try {
@@ -307,40 +342,8 @@ async function callClaudeThenOpenAIThenGemini(opts: CallOpts): Promise<{ text: s
       return { text, via: "claude" };
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      if (!FALLBACK_REGEX.test(msg) || (!opts.openaiKey && !opts.geminiKey && !opts.openRouterKey)) throw err;
-      console.warn("Claude failed, falling back to OpenAI:", msg);
-    }
-  }
-
-  // OpenAI fallback.
-  if (opts.openaiKey) {
-    try {
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${opts.openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0,
-          max_tokens: opts.maxTokens,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: opts.systemPrompt },
-            { role: "user", content: opts.userContent },
-          ],
-        }),
-      });
-      if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
-      const data = await resp.json();
-      const text = data.choices?.[0]?.message?.content || "";
-      if (!text) throw new Error("OpenAI returned no text content");
-      return { text, via: "openai" };
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
       if (!FALLBACK_REGEX.test(msg) || (!opts.geminiKey && !opts.openRouterKey)) throw err;
-      console.warn("OpenAI failed, falling back to Gemini:", msg);
+      console.warn("Claude failed, falling back to Gemini:", msg);
     }
   }
 
@@ -409,5 +412,5 @@ async function callClaudeThenOpenAIThenGemini(opts: CallOpts): Promise<{ text: s
     return { text, via: "openrouter" };
   }
 
-  throw new Error("callGeminiThenOpenAI: no provider keys supplied");
+  throw new Error("callOpenAIThenClaudeThenGemini: no provider keys supplied");
 }

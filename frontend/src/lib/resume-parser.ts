@@ -1,11 +1,10 @@
 /**
  * Single source of truth for resume parsing.
  *
- * Strategy: extract raw text locally (pdf-parse / mammoth / TextDecoder)
- * and run it through the unified AI cascade (Gemini → Claude → OpenAI;
- * see lib/ai-fallback.ts). For parser callers we typically pass only
- * gemini + openai keys, which collapses the cascade to Gemini → OpenAI.
- * Affinda / Eden AI is retired.
+ * Strategy: extract raw text locally (Mistral OCR → pdf-parse / mammoth /
+ * TextDecoder) and run it through the caller-supplied AI cascade. Resume
+ * callers pass RESUME_PARSE_ORDER (OpenAI → Claude → Gemini → OpenRouter;
+ * see lib/ai-fallback.ts). Affinda / Eden AI is retired.
  *
  * Used by:
  *   - frontend/api/parse-resume.ts                       (Vercel — interactive AddCandidate)

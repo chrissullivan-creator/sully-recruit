@@ -14,7 +14,7 @@ import {
 import { classifyEmail, normalizeEmail } from "../../../../src/lib/email-classifier.js";
 import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
 import { extractResumeText } from "../../../../src/lib/resume-parser.js";
-import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
+import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-fallback.js";
 
 interface ResumeIngestionPayload {
   resumeId: string;
@@ -25,8 +25,9 @@ interface ResumeIngestionPayload {
 
 /**
  * Parse a single resume: download from Supabase Storage → Mistral OCR
- * (with pdf-parse fallback) → Gemini-or-OpenAI structured extraction →
- * stamp the candidate row → embed with Voyage → fire `ai/joe-says.requested`.
+ * (with pdf-parse fallback) → OpenAI-first AI cascade (OpenAI → Claude →
+ * Gemini → OpenRouter) → stamp the candidate row → embed with Voyage →
+ * fire `ai/joe-says.requested`.
  *
  * Re-points to an existing candidate when the parsed email or LinkedIn
  * URL already belongs to someone else (forwards from cloudflare-email +
@@ -134,6 +135,7 @@ ${rawText.slice(0, 60000)}`;
         openaiKey: openaiKey || undefined,
         geminiKey: geminiKey || undefined,
         openRouterKey: openRouterKey || undefined,
+        order: RESUME_PARSE_ORDER,
         systemPrompt: "You parse resumes into strict JSON matching the requested shape. Output null when a field is missing — never invent values.",
         userContent: userPrompt,
         maxTokens: 2048,

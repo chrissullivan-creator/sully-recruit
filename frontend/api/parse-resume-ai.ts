@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { callAIWithFallback } from "./lib/ai-fallback.js";
+import { callAIWithFallback, RESUME_PARSE_ORDER } from "./lib/ai-fallback.js";
 import { requireAuth } from "./lib/auth.js";
 
 /**
  * POST /api/parse-resume-ai
- * Parses raw resume text via Gemini → OpenAI fallback and returns
- * structured JSON.
+ * Parses raw resume text via the OpenAI-first cascade (OpenAI → Claude →
+ * Gemini → OpenRouter) and returns structured JSON.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -24,8 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Pull keys from env first, falling back to app_settings so the
     // function works regardless of which deployment surface stored
-    // them. Cascade order is Claude → OpenAI → Gemini → OpenRouter
-    // (see ai-fallback.ts) so all four keys feed into the helper.
+    // them. Resume parsing leads with OpenAI (RESUME_PARSE_ORDER:
+    // OpenAI → Claude → Gemini → OpenRouter) so all four keys feed in.
     let anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key || "";
     let openaiKey = process.env.OPENAI_API_KEY || "";
     let geminiKey = process.env.GEMINI_API_KEY || "";
@@ -85,6 +85,7 @@ ${resume_text}`;
       openaiKey: openaiKey || undefined,
       geminiKey: geminiKey || undefined,
       openRouterKey: openRouterKey || undefined,
+      order: RESUME_PARSE_ORDER,
       systemPrompt: "You parse resumes into structured JSON.",
       userContent: userPrompt,
       maxTokens: 2048,

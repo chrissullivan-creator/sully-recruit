@@ -14,13 +14,13 @@ import {
   delay,
 } from "../../../../src/server-lib/resume-parsing.js";
 import { parseResume } from "../../../../src/lib/resume-parser.js";
-import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
+import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-fallback.js";
 
 /**
  * Re-parse resumes that have a candidate_id but no raw_text. Downloads
- * from Supabase storage, parses via the Mistral OCR + Gemini→OpenAI
- * cascade, backfills missing candidate fields, and embeds the result
- * with Voyage.
+ * from Supabase storage, parses via Mistral OCR + the OpenAI-first AI
+ * cascade (OpenAI → Claude → Gemini → OpenRouter), backfills missing
+ * candidate fields, and embeds the result with Voyage.
  *
  * Every minute. Ported from `src/trigger/reparse-resumes.ts` —
  * Inngest is the only scheduler now.
@@ -112,6 +112,7 @@ export const reparseResumes = inngest.createFunction(
               openaiKey: openaiKey || undefined,
               geminiKey: geminiKey || undefined,
               openRouterKey: openRouterKey || undefined,
+              order: RESUME_PARSE_ORDER,
             }),
           log: logger,
         });

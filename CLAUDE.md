@@ -28,7 +28,7 @@ Read these before making changes:
 
 ## Key Rules
 
-- AI cascade lives in `frontend/src/lib/ai-fallback.ts:callAIWithFallback`. Four providers in order, opt in by passing the matching key: **Claude → OpenAI → Gemini → OpenRouter**. All surfaces (resume parsing, email-signature parsing, drafting, chat, sentiment, matching) pass all four keys. `parse-resume.ts` is self-contained (its own inlined cascade with the same Claude → OpenAI → Gemini → OpenRouter order — Vercel bundler can't follow the shared import). No Eden AI, no Lovable gateway.
+- AI cascade lives in `frontend/src/lib/ai-fallback.ts:callAIWithFallback`. Four providers, opt in by passing the matching key; default order **Claude → OpenAI → Gemini → OpenRouter**, overridable per call via `order`. **Resume parsing leads with OpenAI** (`RESUME_PARSE_ORDER` = OpenAI → Claude → Gemini → OpenRouter) — applied in `parse-resume-ai.ts`, `resume-ingestion.ts`, `reparse-resumes.ts`, `reconcile-orphaned-resumes.ts`. All surfaces (resume parsing, email-signature parsing, drafting, chat, sentiment, matching) pass all four keys. `parse-resume.ts` is self-contained (its own inlined cascade, OpenAI → Claude → Gemini → OpenRouter for resumes — Vercel bundler can't follow the shared import). No Eden AI, no Lovable gateway.
 - Unipile API key comes from `app_settings` table via `getAppSetting("UNIPILE_API_KEY")` — NOT from `integration_accounts.access_token`
 - Edge function secrets: `ANTHROPIC_API_KEY` (check lowercase fallback `anthropic_api_key`)
 - Frontend env vars must be `VITE_*` prefixed

@@ -23,7 +23,7 @@ import {
   delay,
 } from "../../../../src/server-lib/resume-parsing.js";
 import { parseResume } from "../../../../src/lib/resume-parser.js";
-import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
+import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-fallback.js";
 
 type Verdict = "matched" | "created" | "failed" | "skipped";
 interface ResumeOutcome {
@@ -276,6 +276,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
           openaiKey: openaiKey || undefined,
           geminiKey: geminiKey || undefined,
           openRouterKey: openRouterKey || undefined,
+          order: RESUME_PARSE_ORDER,
         }),
       log: logger,
     };

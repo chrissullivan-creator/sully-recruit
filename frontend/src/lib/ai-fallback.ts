@@ -1,17 +1,20 @@
 /**
- * Unified AI cascade: Claude → OpenAI → Gemini → OpenRouter.
+ * Unified AI cascade. Default order: Claude → OpenAI → Gemini →
+ * OpenRouter, overridable per call via `order` (resume parsing runs
+ * OpenAI-first — see RESUME_PARSE_ORDER).
  *
  * Drops in anywhere we call an LLM. Tries each provider whose key is
- * supplied, in the listed order. On a fallback-able failure (credit
- * balance, 429, 401/403, model overload, etc.) it falls through to
- * the next provider; any other error is re-thrown so the caller's
- * retry policy still applies.
+ * supplied, in `order`. On a fallback-able failure (credit balance,
+ * 429, 401/403, model overload, etc.) it falls through to the next
+ * provider; any other error is re-thrown so the caller's retry policy
+ * still applies.
  *
  * All AI surfaces (resume parsing, drafting, chat, sentiment, matching)
- * pass all four keys — Claude leads because it's the strongest model
- * for the recruiting-specific reasoning, structured-extraction, and
- * tone-matching work, and because it natively handles PDF/image doc
- * blocks the other providers can't accept.
+ * pass all four keys. Most lead with Claude — the strongest model for
+ * recruiting-specific reasoning, structured-extraction, and tone-matching
+ * work, and the only one that natively handles PDF/image doc blocks the
+ * other providers can't accept. Resume parsing overrides this to lead
+ * with OpenAI (RESUME_PARSE_ORDER).
  *
  * Usable from both Vercel serverless functions and Trigger.dev tasks —
  * both run Node 20 with global fetch.
@@ -25,17 +28,25 @@
  *     wrapper with no fallback.
  */
 
+export type AIProvider = "claude" | "openai" | "gemini" | "openrouter";
+
 export interface CallAIOptions {
-  /** Anthropic API key. Tried first when set. */
+  /** Anthropic API key. Tried first by default (see `order`). */
   anthropicKey?: string;
-  /** OpenAI API key. Tried second. */
+  /** OpenAI API key. Tried second by default. */
   openaiKey?: string;
-  /** Gemini API key. Tried third. */
+  /** Gemini API key. Tried third by default. */
   geminiKey?: string;
-  /** OpenRouter API key. Tried last — gateway to many providers in one
-   *  account, used as the final escape hatch when every other provider
-   *  fails open. */
+  /** OpenRouter API key. Tried last by default — gateway to many providers
+   *  in one account, used as the final escape hatch when every other
+   *  provider fails open. */
   openRouterKey?: string;
+  /**
+   * Provider order. Defaults to ['claude','openai','gemini','openrouter'].
+   * Each provider still runs only when its key is supplied; non-text
+   * (PDF/image) content always routes to Claude regardless of order.
+   */
+  order?: AIProvider[];
   systemPrompt: string;
   /**
    * Either a plain string (user message) or an array of Anthropic-shaped
@@ -65,13 +76,22 @@ export interface CallAIOptions {
 export interface CallAIResult {
   text: string;
   /** Which provider actually produced the answer. */
-  via: "claude" | "openai" | "gemini" | "openrouter";
+  via: AIProvider;
 }
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
+
+/** Default cascade order. */
+const DEFAULT_ORDER: AIProvider[] = ["claude", "openai", "gemini", "openrouter"];
+
+/**
+ * Resume parsing leads with OpenAI, then falls back to Claude → Gemini →
+ * OpenRouter. Pass as `order` from the resume-parsing call sites.
+ */
+export const RESUME_PARSE_ORDER: AIProvider[] = ["openai", "claude", "gemini", "openrouter"];
 
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
@@ -216,48 +236,28 @@ export async function callAIWithFallback(opts: CallAIOptions): Promise<CallAIRes
   const isText = userContentIsTextOnly(opts.userContent);
   let lastError: unknown = null;
 
-  // ── Stage 1: Claude (handles both text and PDF/image doc blocks)
-  if (opts.anthropicKey) {
+  // Per-provider config. `textOnly` providers are skipped when the user
+  // content carries PDF/image doc blocks — only Claude accepts those.
+  const providers: Record<
+    AIProvider,
+    { key: string | undefined; textOnly: boolean; run: (o: CallAIOptions) => Promise<string> }
+  > = {
+    claude: { key: opts.anthropicKey, textOnly: false, run: tryClaude },
+    openai: { key: opts.openaiKey, textOnly: true, run: tryOpenAI },
+    gemini: { key: opts.geminiKey, textOnly: true, run: tryGemini },
+    openrouter: { key: opts.openRouterKey, textOnly: true, run: tryOpenRouter },
+  };
+
+  for (const name of opts.order ?? DEFAULT_ORDER) {
+    const provider = providers[name];
+    if (!provider?.key) continue;
+    if (provider.textOnly && !isText) continue;
     try {
-      const text = await tryClaude(opts);
-      return { text, via: "claude" };
+      const text = await provider.run(opts);
+      return { text, via: name };
     } catch (err) {
       lastError = err;
       if (!isFallbackable(err)) throw err;
-    }
-  }
-
-  // ── Stage 2: OpenAI (text-only — doc blocks skip)
-  if (opts.openaiKey && isText) {
-    try {
-      const text = await tryOpenAI(opts);
-      return { text, via: "openai" };
-    } catch (err) {
-      lastError = err;
-      if (!isFallbackable(err)) throw err;
-    }
-  }
-
-  // ── Stage 3: Gemini (text-only — doc blocks skip)
-  if (opts.geminiKey && isText) {
-    try {
-      const text = await tryGemini(opts);
-      return { text, via: "gemini" };
-    } catch (err) {
-      lastError = err;
-      if (!isFallbackable(err)) throw err;
-    }
-  }
-
-  // ── Stage 4: OpenRouter (text-only). Final escape hatch when every
-  //               other provider has fallen open.
-  if (opts.openRouterKey && isText) {
-    try {
-      const text = await tryOpenRouter(opts);
-      return { text, via: "openrouter" };
-    } catch (err) {
-      lastError = err;
-      throw err;
     }
   }
 
