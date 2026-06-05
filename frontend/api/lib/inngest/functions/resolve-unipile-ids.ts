@@ -7,7 +7,7 @@ import { normalizeLinkedIn } from "../../../../src/server-lib/resume-parsing.js"
  * Resolver v2 — cold LinkedIn profile lookups for people whose IDs we
  * still don't have after Tier-1 chat-participant resolution.
  *
- * Why this got rebuilt: the old resolver ran `*/15 * * * *` with
+ * Why this got rebuilt: the old resolver ran every 15 minutes with
  * `BATCH_SIZE=200` (19.2k/day ceiling) against LinkedIn's ~80-150
  * profile-view-per-day ceiling — ~150× over budget. LinkedIn throttled,
  * Unipile returned errors, and the legacy code's `catch` block bucketed
