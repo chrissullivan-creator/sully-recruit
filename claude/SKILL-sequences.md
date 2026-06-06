@@ -114,13 +114,13 @@ phone                   Call log/script
 
 Sales Navigator is NOT a separate bucket — `canonicalChannel()` folds it into `linkedin`.
 
-### Send shape (Unipile v2)
-For all LinkedIn sends, `sendLinkedIn` uses:
+### Send shape (Unipile v1)
+For all LinkedIn sends, `sendLinkedIn` uses v1:
 ```
-POST /api/v2/{account_id}/chats
+POST /api/v1/chats?account_id={account_id}
 body: { attendees_ids: [providerId], text, linkedin?: { api: 'recruiter' } }
 ```
-The `linkedin: { api: 'recruiter' }` flag routes through Recruiter InMail. Omit it for Classic DMs. Do NOT use `message_type: "INMAIL"` (that was v1).
+`account_id` is a **query param** (never a path segment). The `linkedin: { api: 'recruiter' }` flag routes through Recruiter InMail; omit it for Classic DMs. Do NOT use `message_type: "INMAIL"`. There is no inbox-scoped / v2 send path — that scaffolding was removed.
 
 ### InMail credit guard
 `sendLinkedIn` reads `integration_accounts.inmail_credits_remaining` for the resolved account before any InMail send. Throws fast when 0 ("InMail credits exhausted on …") so the step doesn't waste a send. Successful InMails decrement the cache locally; `sync-inmail-credits` re-syncs hourly.

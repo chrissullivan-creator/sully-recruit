@@ -4,23 +4,23 @@
 
 | Channel | Provider | Webhook Receiver | Account Owner |
 |---|---|---|---|
-| LinkedIn | Unipile **v2** | `/api/webhooks/unipile` (Vercel) → `process-unipile-event` (Trigger.dev) | Chris (recruiter), Nancy (recruiter), Ashley (classic) |
-| Email | Microsoft Graph / Outlook + Unipile v2 (parallel) | `/api/webhooks/microsoft` + `process-unipile-event` email branch | Chris, Nancy, Ashley, House |
+| LinkedIn | Unipile **v1** methods (v2 only for account connection) | `/api/webhooks/unipile` (Vercel) → `process-unipile-event` (Inngest) | Chris (recruiter), Nancy (recruiter), Ashley (classic) |
+| Email | Microsoft Graph / Outlook (primary) + Unipile v1 email (optional, `USE_UNIPILE_EMAIL`) | `/api/webhooks/microsoft` + `process-unipile-event` email branch | Chris, Nancy, Ashley, House |
 | SMS | RingCentral | `webhook-ringcentral` Trigger.dev task | Chris, Nancy (NOT Ashley) |
 
 ---
 
-## Unipile v2 (LinkedIn + Outlook)
+## Unipile (LinkedIn + Outlook)
 
-We migrated everything off v1. **Use `frontend/src/trigger/lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)`** — it handles auth + the v2 path shape (`/api/v2/{account_id}/...`) and pulls config from `app_settings`.
+**All methods run on v1.** Use `frontend/src/server-lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)` — the file name is historical; its `unipileFetch` translates the old v2-shaped paths to their **v1** equivalents (tenant DSN `…/api/v1`, `UNIPILE_API_KEY`, `account_id` as a **query param**). Our v2 app key 403s on every LinkedIn/Recruiter/messaging call, so v2 is used **only** for account-connection lifecycle (`connect-linkedin*.ts` → `api.unipile.com/v2/auth/link` with `UNIPILE_API_KEY_V2`) and webhook registration. See `CLAUDE.md` for the full v1/v2 split.
 
-### API path conventions (v2)
-- Profile: `linkedin/users/{slug-or-provider-id}`
-- Connection invite: `POST linkedin/users/invite`
-- Send (Classic OR InMail): `POST chats` — body is `{ attendees_ids: [providerId], text, linkedin?: { api: 'recruiter'|'classic', inmail?: true } }`. **Don't** use `message_type: "INMAIL"` (v1 shape).
-- Recruiter projects: `linkedin/recruiter/projects` (and `/talent-pool/applicants` is POST in v2)
+### API path conventions (callers write these; `unipileFetch` maps to v1)
+- Profile: `linkedin/users/{slug-or-provider-id}` → v1 `users/{slug}`
+- Connection invite: `POST linkedin/users/invite` → v1 `users/invite`
+- Send (Classic OR InMail): `POST chats?account_id=X` — body `{ attendees_ids: [providerId], text, linkedin?: { api: 'recruiter' } }` (omit `linkedin` for Classic). **Don't** use `message_type: "INMAIL"`.
 - Chat list / messages: `chats`, `chats/{chat_id}/messages`
-- Account meta (for health checks): `accounts/{id}` — same in both versions
+- Account meta (for health checks): `accounts/{id}`
+- Recruiter pipeline save / create-project are **v2-only** and currently 403 → those endpoints return **501** (see `save-to-pipeline.ts`, `source-projects.ts`).
 
 ### Inbound classification (`webhook-unipile.ts`)
 The chat object's `content_type === 'inmail'` OR `folder` array including `'INBOX_LINKEDIN_RECRUITER'` → bucket as `linkedin_recruiter`. Everything else → `linkedin`. **Don't** fall back to `integration_account.account_type` alone — a Recruiter seat handles BOTH InMails and Classic DMs, so account_type tagged every Chris message as Recruiter.
