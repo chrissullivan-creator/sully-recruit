@@ -40,7 +40,7 @@ const EXTRACTION_PROMPT = `You are analyzing an inbound message from a recruitin
 
 Return ONLY valid JSON:
 {
-  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|do_not_contact|ooo",
+  "sentiment": "interested|positive|maybe|neutral|negative|not_interested|ooo",
   "summary": "one sentence summary of the message",
   "ooo_return_date": "YYYY-MM-DD or null if not OOO",
   "extracted_fields": {
@@ -64,7 +64,7 @@ Return ONLY valid JSON:
 
 Rules:
 - Use "ooo" sentiment ONLY for auto-reply / out-of-office messages
-- Use "do_not_contact" if they explicitly ask to stop all outreach
+- Use "negative" if they're not interested or ask to stop outreach (there is no separate do_not_contact category)
 - Only populate extracted_fields with info EXPLICITLY stated in the message — never infer
 - Set fields to null if not mentioned
 - skills_mentioned should be an empty array if none mentioned
@@ -175,45 +175,6 @@ export async function applyExtractedIntel(
       last_sequence_sentiment_note: intel.summary,
     } as any)
     .eq("id", entityId);
-
-  // ── do_not_contact: compliance hard-stop ────────────────────────────
-  // When Haiku classifies the reply as an explicit opt-out, stop EVERY
-  // active enrollment for this person with a distinct, auditable reason
-  // (not just the generic "reply_received"). Runs for both candidates and
-  // contacts, on every channel that funnels through here (email + SMS +
-  // LinkedIn). The last_sequence_sentiment stamp above is what the
-  // enrollment path checks to block future re-enrollment.
-  if (intel.sentiment === "do_not_contact") {
-    const { data: active } = await supabase
-      .from("sequence_enrollments")
-      .select("id")
-      .eq(entityColumn, entityId)
-      .eq("status", "active");
-
-    for (const e of active ?? []) {
-      await supabase
-        .from("sequence_enrollments")
-        .update({
-          status: "stopped",
-          stop_trigger: "do_not_contact",
-          stop_reason: "do_not_contact",
-          stopped_at: new Date().toISOString(),
-        } as any)
-        .eq("id", e.id);
-      await supabase
-        .from("sequence_step_logs")
-        .update({ status: "cancelled" } as any)
-        .eq("enrollment_id", e.id)
-        .in("status", ["scheduled", "pending_connection"]);
-    }
-
-    logger.warn("do_not_contact — hard-stopped active enrollments (compliance)", {
-      entityId,
-      entityType,
-      channel,
-      count: active?.length ?? 0,
-    });
-  }
 
   // Build update object with only non-null extracted fields
   const updates: Record<string, any> = {};
