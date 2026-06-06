@@ -34,6 +34,42 @@ export async function embedQuery(text: string): Promise<number[]> {
   return data.data[0].embedding;
 }
 
+/**
+ * Embed one or more documents for INDEXING (input_type "document").
+ * Use this when writing to search_documents — `embedQuery` uses
+ * input_type "query" and is for the read side. Voyage accepts up to 128
+ * inputs per call; callers should keep batches modest. Returns one
+ * 1024-dim vector per input, in order.
+ */
+export async function embedDocuments(texts: string[]): Promise<number[][]> {
+  const apiKey = process.env.VOYAGE_API_KEY;
+  if (!apiKey) throw new Error("VOYAGE_API_KEY not configured");
+  if (texts.length === 0) return [];
+
+  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: VOYAGE_MODEL,
+      input: texts.map((t) => (t || "").slice(0, 8000)),
+      input_type: "document",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Voyage ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  // Voyage preserves input order in data[].index, but sort defensively.
+  return (data.data as any[])
+    .sort((a, b) => a.index - b.index)
+    .map((d) => d.embedding as number[]);
+}
+
 export interface ResumeMatch {
   candidate_id: string;
   resume_id: string | null;
