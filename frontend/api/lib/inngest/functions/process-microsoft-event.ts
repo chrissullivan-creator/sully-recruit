@@ -488,8 +488,73 @@ async function processEmailMessage(
   const match = await matchByEmail(supabase, senderEmail);
 
   if (!match) {
-    logger.info("No matching entity for email", { email: senderEmail });
-    return { action: "no_match", email: senderEmail };
+    // 30-day retention rule: inbound from an unknown sender is persisted
+    // as unlinked so it shows in the inbox's "Other" view and is
+    // searchable. The purge-unlinked-messages cron deletes unlinked rows
+    // older than 30 days; if the person is later added, backfill re-links
+    // their history. Attachments are skipped for unknown senders to save
+    // storage/cost — they get fetched on backfill once the person exists.
+    const unlinkedExtId = message.id || message.internetMessageId;
+    if (unlinkedExtId) {
+      const { data: existing } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("external_message_id", unlinkedExtId)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        return { action: "skipped", reason: "duplicate" };
+      }
+    }
+
+    const unlinkedConvId =
+      `graph_unlinked_${senderEmail.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80)}`;
+    const { data: existingUnlinkedConv } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", unlinkedConvId)
+      .maybeSingle();
+    if (!existingUnlinkedConv) {
+      await supabase.from("conversations").insert({
+        id: unlinkedConvId,
+        channel: "email",
+        subject: message.subject || null,
+        last_message_at: receivedAt,
+        last_message_preview: (message.bodyPreview || "").substring(0, 100),
+        is_read: false,
+      } as any);
+    }
+
+    await supabase.from("messages").insert({
+      conversation_id: unlinkedConvId,
+      candidate_id: null,
+      contact_id: null,
+      channel: "email",
+      direction: "inbound",
+      subject: message.subject || null,
+      body: message.body?.content || message.bodyPreview || "",
+      sender_address: senderEmail,
+      recipient_address: message.toRecipients?.[0]?.emailAddress?.address || "",
+      sent_at: message.receivedDateTime || receivedAt,
+      provider: "microsoft_graph",
+      external_message_id: unlinkedExtId,
+      is_read: message.isRead || false,
+      needs_link: true,
+      link_attempted_at: new Date().toISOString(),
+    } as any);
+
+    await supabase
+      .from("conversations")
+      .update({
+        last_message_at: receivedAt,
+        last_message_preview: (message.bodyPreview || "").substring(0, 100),
+        is_read: false,
+      } as any)
+      .eq("id", unlinkedConvId);
+
+    logger.info("Email from unknown sender — persisted as unlinked (30-day retention)", {
+      email: senderEmail,
+    });
+    return { action: "logged_unlinked", email: senderEmail, type: "email" };
   }
 
   const externalId = message.id || message.internetMessageId;

@@ -24,6 +24,7 @@ import { syncOutlookEvents } from "./lib/inngest/functions/sync-outlook-events.j
 import { syncPeopleToOutlook } from "./lib/inngest/functions/sync-people-to-outlook.js";
 import { syncConversations } from "./lib/inngest/functions/sync-conversations.js";
 import { purgeMarketingEmails } from "./lib/inngest/functions/purge-marketing-emails.js";
+import { purgeUnlinkedMessages } from "./lib/inngest/functions/purge-unlinked-messages.js";
 import { backfillEmails } from "./lib/inngest/functions/backfill-emails.js";
 import { backfillLinkedinMessages } from "./lib/inngest/functions/backfill-linkedin-messages.js";
 import { drainCallQueue } from "./lib/inngest/functions/drain-call-queue.js";
@@ -98,6 +99,7 @@ export default serve({
     syncPeopleToOutlook,
     syncConversations,
     purgeMarketingEmails,
+    purgeUnlinkedMessages,
     backfillEmails,
     backfillLinkedinMessages,
     drainCallQueue,

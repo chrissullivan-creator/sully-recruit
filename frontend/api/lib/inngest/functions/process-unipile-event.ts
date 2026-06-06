@@ -476,27 +476,16 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   }
 
   if (!entityId) {
-    // Phase 5 rule: inbound from unknown LinkedIn senders is NOT persisted.
-    // The live inbox UI will fetch the last 100 LinkedIn messages from
-    // Unipile directly for the "Other" view; once the user adds the
-    // person, the person.created webhook backfills the history.
-    // Outbound from us to a non-CRM recipient still persists (it's our
-    // work product) — auto-add of the recipient happens upstream in the
-    // send path.
-    if (direction === "inbound") {
-      logger.info("Dropping inbound LinkedIn from unknown sender (Phase 5 rule)", {
-        senderId,
-        external_message_id: unipileMessageId,
-      });
-      return {
-        action: "dropped",
-        reason: "unknown_sender_inbound",
-        senderId,
-        type: "linkedin_message",
-      };
-    }
-
-    logger.info("Outbound LinkedIn to non-CRM recipient — persisting as unlinked", { senderId });
+    // 30-day retention rule: messages from/to a non-CRM party (inbound
+    // from an unknown sender, or outbound to a recipient not yet in the
+    // CRM) are persisted as unlinked so they surface in the inbox's
+    // "Other" view and are searchable. The purge-unlinked-messages cron
+    // deletes unlinked rows older than 30 days; once the person is added,
+    // the person.created backfill re-links their history.
+    logger.info("LinkedIn from/to non-CRM party — persisting as unlinked (30-day retention)", {
+      senderId,
+      direction,
+    });
 
     const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
     const senderAddress =
