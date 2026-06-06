@@ -118,9 +118,27 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
   if (recipientId) {
     const { data: person } = await supabase
       .from("people")
-      .select("type, primary_email, work_email, personal_email, phone, linkedin_url")
+      .select("type, primary_email, work_email, personal_email, phone, linkedin_url, last_sequence_sentiment")
       .eq("id", recipientId)
       .maybeSingle();
+
+    // Compliance guard: never (re-)enroll a person who has opted out.
+    // Haiku stamps last_sequence_sentiment='do_not_contact' on any
+    // explicit opt-out reply; stop this enrollment before scheduling a
+    // single step instead of letting it fire and stop on first reply.
+    if ((person as any)?.last_sequence_sentiment === "do_not_contact") {
+      await supabase
+        .from("sequence_enrollments")
+        .update({
+          status: "stopped",
+          stop_trigger: "do_not_contact",
+          stop_reason: "do_not_contact",
+          stopped_at: new Date().toISOString(),
+        } as any)
+        .eq("id", payload.enrollmentId);
+      return { action: "stopped", reason: "do_not_contact" };
+    }
+
     if (person) {
       recipientEmail =
         person.type === "candidate"
