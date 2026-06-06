@@ -248,6 +248,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update(updates as any)
         .eq("id", existing.id);
       if (upErr) throw upErr;
+
+      // Stamp where this person came from — but only if they don't already
+      // have a source. Source is first-touch attribution: a person who was
+      // originally a referral / inbound shouldn't get relabeled just because
+      // we later saved them from a LinkedIn Recruiter project.
+      await supabase
+        .from("people")
+        .update({ source: "linkedin_hiring_project", source_detail: project_id } as any)
+        .eq("id", existing.id)
+        .is("source", null);
     } else {
       const payload: Record<string, any> = {
         first_name: firstName || null,
