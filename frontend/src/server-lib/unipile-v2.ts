@@ -305,4 +305,147 @@ export function canonicalChannel(channel: string | null | undefined): string {
   return c || "unknown";
 }
 
+// ─────────────────────────────────────────────────────────────────────
+//  Unipile v2 (api.unipile.com/v2) — LinkedIn Recruiter migration.
+//
+//  Unlike v1 (this file's legacy default), v2:
+//    - is hosted at UNIPILE_BASE_V2_URL (https://api.unipile.com/v2)
+//    - authenticates with UNIPILE_API_KEY_V2
+//    - takes account_id as a PATH SEGMENT: /v2/{acc_xxx}/<resource>
+//    - requires the canonical acc_xxx id (NOT the short v1 id), stored in
+//      integration_accounts.unipile_account_id_v2
+//
+//  Everything here is gated by the UNIPILE_LINKEDIN_V2 app_setting so the
+//  working v1 path is unaffected until the v2 Recruiter scope is proven.
+// ─────────────────────────────────────────────────────────────────────
+
+interface ResolvedConfigV2 {
+  v2Base: string;
+  apiKeyV2: string;
+}
+
+let _cachedConfigV2: { value: ResolvedConfigV2; fetchedAt: number } | null = null;
+
+async function resolveConfigV2(supabase: any): Promise<ResolvedConfigV2> {
+  const now = Date.now();
+  if (_cachedConfigV2 && now - _cachedConfigV2.fetchedAt < CONFIG_TTL_MS) {
+    return _cachedConfigV2.value;
+  }
+  const [{ data: baseRow }, { data: keyRow }, { data: v1KeyRow }] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+  ]);
+  const v2Base = (baseRow?.value || "").replace(/\/+$/, "") || "https://api.unipile.com/v2";
+  // Fall back to the v1 key only so calls fail with a clear 401 rather than a
+  // config error; the v2 surface really wants UNIPILE_API_KEY_V2.
+  const apiKeyV2 = keyRow?.value || v1KeyRow?.value;
+  if (!apiKeyV2) throw new Error("Unipile v2 config missing (UNIPILE_API_KEY_V2)");
+  const value = { v2Base, apiKeyV2 };
+  _cachedConfigV2 = { value, fetchedAt: now };
+  return value;
+}
+
+/**
+ * Is the LinkedIn-Recruiter-on-v2 flag enabled? Cached briefly. Defaults to
+ * false (legacy v1) when the row is missing or unparseable.
+ */
+let _cachedV2Flag: { value: boolean; fetchedAt: number } | null = null;
+export async function isLinkedinV2Enabled(supabase: any): Promise<boolean> {
+  const now = Date.now();
+  if (_cachedV2Flag && now - _cachedV2Flag.fetchedAt < CONFIG_TTL_MS) {
+    return _cachedV2Flag.value;
+  }
+  const { data } = await supabase
+    .from("app_settings").select("value").eq("key", "UNIPILE_LINKEDIN_V2").maybeSingle();
+  const raw = String(data?.value ?? "").trim().toLowerCase();
+  const value = raw === "true" || raw === "1" || raw === "yes" || raw === "on";
+  _cachedV2Flag = { value, fetchedAt: now };
+  return value;
+}
+
+/**
+ * Fetch a Unipile **v2** endpoint scoped to a canonical acc_xxx id. Mirrors
+ * unipileFetch() but builds `${v2Base}/${acctV2Id}/${path}` with account_id
+ * as a path segment and authenticates with UNIPILE_API_KEY_V2.
+ *
+ * Example:
+ *   await unipileFetchV2(supabase, "acc_123", "linkedin/recruiter/projects",
+ *     { method: "POST", body: JSON.stringify({ name, visibility }) })
+ *   →  POST {v2Base}/acc_123/linkedin/recruiter/projects
+ */
+export async function unipileFetchV2<T = any>(
+  supabase: any,
+  acctV2Id: string,
+  path: string,
+  init: UnipileFetchInit = {},
+): Promise<T> {
+  if (!acctV2Id) throw new Error("unipileFetchV2: acctV2Id (acc_xxx) required");
+  const { v2Base, apiKeyV2 } = await resolveConfigV2(supabase);
+  const cleanPath = path.replace(/^\/+/, "");
+  const [pathPart, embeddedQs = ""] = cleanPath.split("?");
+  const url = new URL(`${v2Base}/${encodeURIComponent(acctV2Id)}/${pathPart}`);
+  if (embeddedQs) {
+    const parsed = new URLSearchParams(embeddedQs);
+    for (const [k, v] of parsed.entries()) url.searchParams.set(k, v);
+  }
+  if (init.query) {
+    for (const [k, v] of Object.entries(init.query)) {
+      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+    }
+  }
+  const headers: Record<string, string> = {
+    "X-API-KEY": apiKeyV2,
+    Accept: "application/json",
+    ...(init.headers || {}),
+  };
+  if (typeof init.body === "string" && !headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const resp = await fetch(url.toString(), { ...init, headers });
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Unipile v2 ${resp.status} ${path}: ${text.slice(0, 300)}`);
+  }
+  if (!text) return {} as T;
+  try { return JSON.parse(text) as T; } catch { return text as unknown as T; }
+}
+
+/**
+ * Resolve the canonical v2 account id (acc_xxx) for a Sully user + provider.
+ * Returns null when not yet captured — callers must fall back to v1 or
+ * trigger a backfill (GET {v2Base}/accounts).
+ */
+export async function getUnipileAccountV2IdForUser(
+  supabase: any,
+  ownerUserId: string,
+  provider: "LINKEDIN" | "OUTLOOK" | "GMAIL" | string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("integration_accounts")
+    .select("unipile_account_id_v2")
+    .eq("owner_user_id", ownerUserId)
+    .eq("unipile_provider", provider)
+    .not("unipile_account_id_v2", "is", null)
+    .limit(1)
+    .maybeSingle();
+  return data?.unipile_account_id_v2 ?? null;
+}
+
+/** Resolve the v2 acc_xxx id from the short-form v1 id we already store. */
+export async function getUnipileAccountV2IdByV1Id(
+  supabase: any,
+  shortV1Id: string,
+): Promise<string | null> {
+  if (!shortV1Id) return null;
+  const { data } = await supabase
+    .from("integration_accounts")
+    .select("unipile_account_id_v2")
+    .eq("unipile_account_id", shortV1Id)
+    .not("unipile_account_id_v2", "is", null)
+    .limit(1)
+    .maybeSingle();
+  return data?.unipile_account_id_v2 ?? null;
+}
+
 void logger; // tree-shake guard for the import

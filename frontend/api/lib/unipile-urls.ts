@@ -122,3 +122,24 @@ export const linkedinV1 = {
   listAccounts: (b: UnipileBases, q: Record<string, string | number | undefined> = {}) =>
     v1Url(b, "/accounts", q),
 };
+
+// ── Unipile v2 (api.unipile.com/v2) path templates ───────────────────
+// v2 takes account_id as a PATH segment, so these are the *suffix* placed
+// after `${v2Base}/${acc_xxx}/`. Pass them to unipileFetchV2() in
+// src/server-lib/unipile-v2.ts (which prepends the base + acc_xxx + key).
+//
+// Recruiter project/pipeline/search shapes follow Unipile's published v2
+// recruiter controller. They are NOT yet confirmed live against our app —
+// run /api/admin/probe-unipile-recruiter (v2 section) to verify status
+// codes and exact paths before flipping UNIPILE_LINKEDIN_V2 on.
+export const recruiterV2 = {
+  projects: () => "linkedin/recruiter/projects",
+  projectDetail: (projectId: string) =>
+    `linkedin/recruiter/projects/${encodeURIComponent(projectId)}`,
+  pipelineSave: (projectId: string) =>
+    `linkedin/recruiter/projects/${encodeURIComponent(projectId)}/pipeline/candidate/save`,
+  talentPoolApplicants: (projectId: string) =>
+    `linkedin/recruiter/projects/${encodeURIComponent(projectId)}/talent-pool/applicants`,
+  inmailCredits: () => "linkedin/recruiter/inmail-credits",
+  searchPeople: () => "linkedin/recruiter/search/people",
+};
