@@ -37,6 +37,7 @@ import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDial
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { EnrichButton } from '@/components/shared/EnrichButton';
+import { CallButton } from '@/components/shared/CallButton';
 import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -1067,9 +1068,12 @@ const CandidateDetail = () => {
             ) : null;
           })()}
           {candidate.phone && (
-            <a href={`tel:${candidate.phone}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={candidate.phone}>
-              <Phone className="h-4 w-4" />
-            </a>
+            <CallButton
+              phone={candidate.phone}
+              candidateId={candidate.id}
+              iconOnly
+              title={`Call ${candidate.phone} (RingCentral RingOut)`}
+            />
           )}
           {candidate.linkedin_url && (
             <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
@@ -1636,10 +1640,13 @@ const CandidateDetail = () => {
                     if (to) { window.location.href = `mailto:${to}`; }
                     else { toast.error('No email address on file'); }
                   }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
-                  <Button variant="outline" size="sm" onClick={() => {
-                    if (candidate.phone) { window.location.href = `tel:${candidate.phone}`; }
-                    else { toast.error('No phone number on file'); }
-                  }}><Phone className="h-3.5 w-3.5 mr-1" /> Call</Button>
+                  {candidate.phone ? (
+                    <CallButton phone={candidate.phone} candidateId={candidate.id} />
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={() => toast.error('No phone number on file')}>
+                      <Phone className="h-3.5 w-3.5 mr-1" /> Call
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => {
                     if (candidate.linkedin_url) { window.open(candidate.linkedin_url, '_blank'); }
                     else { toast.error('No LinkedIn URL on file'); }

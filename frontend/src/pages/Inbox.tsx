@@ -41,6 +41,7 @@ import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
 import { FollowUpMenu } from '@/components/inbox/FollowUpMenu';
 import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationList';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
+import { CallButton } from '@/components/shared/CallButton';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
 
 // ---------- Types ----------
@@ -520,6 +521,14 @@ function EntityPanel({ thread, messages }: { thread: InboxThread | null; message
                 <div className="flex items-center gap-2 text-xs text-foreground/80">
                   <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span>{entity.phone}</span>
+                  <CallButton
+                    phone={entity.phone}
+                    candidateId={entityType === 'candidate' ? thread.candidate_id : null}
+                    contactId={entityType === 'contact' ? thread.contact_id : null}
+                    iconOnly
+                    className="ml-auto p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    title={`Call ${entity.phone} (RingCentral RingOut)`}
+                  />
                 </div>
               )}
               {entity.linkedin_url && (
