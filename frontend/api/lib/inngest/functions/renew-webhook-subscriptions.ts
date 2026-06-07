@@ -47,44 +47,84 @@ export const renewWebhookSubscriptions = inngest.createFunction(
       if (!tokenResp.ok) throw new Error(`Token error: ${await tokenResp.text()}`);
       const { access_token } = await tokenResp.json();
 
+      // List existing subs so we renew what's live and only create what's missing.
       const listResp = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
         headers: { Authorization: `Bearer ${access_token}` },
       });
+      const existing: any[] = listResp.ok ? ((await listResp.json()).value || []) : [];
 
-      if (listResp.ok) {
-        const { value: subscriptions } = await listResp.json();
-        const expirationDateTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+      // Self-heal. Graph subscriptions expire every ~3 days; the previous
+      // version only PATCHed whatever already existed and merely *warned*
+      // when the list was empty — so once every sub lapsed, nothing ever
+      // recreated them and inbound mail + calendar silently stopped flowing.
+      // Now we ensure every team mailbox has a live mail + calendar sub,
+      // mirroring the create-or-renew in /api/setup/webhook-subscriptions
+      // (keep the two resource shapes in sync if either changes).
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("email, full_name")
+        .not("email", "is", null);
 
-        for (const sub of subscriptions || []) {
+      const expirationDateTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      for (const profile of profiles || []) {
+        const email = profile.email;
+        const userName = profile.full_name || email;
+        const resources = [
+          { resource: `users/${email}/messages`, changeType: "created", label: "mail" },
+          { resource: `users/${email}/events`, changeType: "created,updated,deleted", label: "calendar" },
+        ];
+
+        for (const res of resources) {
+          const match = existing.find((s: any) => s.resource === res.resource);
           try {
-            const renewResp = await fetch(
-              `https://graph.microsoft.com/v1.0/subscriptions/${sub.id}`,
-              {
-                method: "PATCH",
-                headers: {
-                  Authorization: `Bearer ${access_token}`,
-                  "Content-Type": "application/json",
+            if (match) {
+              const renewResp = await fetch(
+                `https://graph.microsoft.com/v1.0/subscriptions/${match.id}`,
+                {
+                  method: "PATCH",
+                  headers: {
+                    Authorization: `Bearer ${access_token}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ expirationDateTime }),
                 },
-                body: JSON.stringify({ expirationDateTime }),
-              },
-            );
+              );
+              if (renewResp.ok) {
+                results.push({ service: "graph", user: `${userName} (${res.label})`, status: "renewed" });
+                logger.info("Renewed Graph subscription", { id: match.id, resource: res.resource });
+                continue;
+              }
+              logger.warn("Graph renew failed — recreating", { resource: res.resource, status: renewResp.status });
+            }
 
-            if (renewResp.ok) {
-              results.push({ service: "graph", user: sub.resource, status: "renewed" });
-              logger.info("Renewed Graph subscription", { id: sub.id, resource: sub.resource });
+            const createResp = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${access_token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                changeType: res.changeType,
+                notificationUrl: `${WEBHOOK_BASE_URL}/api/webhooks/microsoft-graph`,
+                resource: res.resource,
+                expirationDateTime,
+                clientState: "sullyrecruit_graph_webhook",
+              }),
+            });
+
+            if (createResp.ok) {
+              const sub = await createResp.json();
+              results.push({ service: "graph", user: `${userName} (${res.label})`, status: match ? "recreated" : "created" });
+              logger.info("Created Graph subscription", { id: sub.id, resource: res.resource });
             } else {
-              const errText = await renewResp.text();
-              results.push({ service: "graph", user: sub.resource, status: "error", error: errText });
-              logger.warn("Failed to renew Graph subscription", { id: sub.id, error: errText });
+              const errText = await createResp.text();
+              results.push({ service: "graph", user: `${userName} (${res.label})`, status: "error", error: errText });
+              logger.warn("Failed to create Graph subscription", { resource: res.resource, error: errText });
             }
           } catch (err: any) {
-            results.push({ service: "graph", user: sub.resource, status: "error", error: err.message });
+            results.push({ service: "graph", user: `${userName} (${res.label})`, status: "error", error: err.message });
           }
-        }
-
-        if (!subscriptions || subscriptions.length === 0) {
-          logger.warn("No Graph subscriptions found — run /api/setup/webhook-subscriptions to create them");
-          results.push({ service: "graph", user: "none", status: "error", error: "No subscriptions found" });
         }
       }
     } catch (err: any) {

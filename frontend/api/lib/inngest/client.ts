@@ -246,6 +246,28 @@ export type EnrichCompanyViaApolloRequested = {
   data: { company_id: string };
 };
 
+/**
+ * One-off historical email backfill straight from Microsoft Graph (app-only).
+ * Walks each mailbox's Exchange history newest→oldest within [since, until],
+ * keeps only mail whose counterparty is an existing candidate/client, and
+ * ingests via the same conversation/message shape as the Unipile backfill.
+ * `dryRun` (default true) probes Graph access + reports match counts without
+ * writing; `until` doubles as the resumable date cursor; `depth` guards the
+ * self-continuation. See backfill-graph-email-history.ts.
+ */
+export type BackfillGraphEmailRequested = {
+  name: "ops/backfill-graph-email.requested";
+  data: {
+    since?: string;
+    until?: string;
+    mailboxes?: string[];
+    pageSize?: number;
+    maxPages?: number;
+    dryRun?: boolean;
+    depth?: number;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -263,4 +285,5 @@ export type AllInngestEvents =
   | FetchEntityHistoryRequested
   | RecoverOrphanResumesRequested
   | FindLinkedinUrlRequested
-  | EnrichCompanyViaApolloRequested;
+  | EnrichCompanyViaApolloRequested
+  | BackfillGraphEmailRequested;

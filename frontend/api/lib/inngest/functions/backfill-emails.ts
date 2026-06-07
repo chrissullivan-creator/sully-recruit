@@ -2,7 +2,7 @@ import { inngest } from "../client.js";
 import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
 import { normalizeEmail } from "../../../../src/server-lib/resume-parsing.js";
 import { isMarketingEmail } from "../../../../src/server-lib/marketing-blocklist.js";
-import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
+import { unipileFetch, unipileFetchV2 } from "../../../../src/server-lib/unipile-v2.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
 
 /**
@@ -307,6 +307,199 @@ async function processAccount(
   return { inserted, skipped, unmatched, errors, pages };
 }
 
+/**
+ * v2 variant of processAccount. The OUTLOOK mailboxes were re-linked onto the
+ * Unipile **v2** app (api.unipile.com/v2), so the v1 DSN workspace this cron
+ * used returns an empty account list and every pull 404'd — that's what
+ * silently froze inbound email. This pulls from
+ * `GET {v2Base}/{acc_xxx}/emails` via unipileFetchV2 and maps the v2 Email
+ * shape ({ from:[{email,display_name}], to:[], cc:[], subject, body, snippet,
+ * date, message_id, thread_id, is_unread }) onto the exact same dedup +
+ * conversation/message contract as the v1 path. v2 returns newest-first, so we
+ * page until we cross the dateFrom cutoff.
+ */
+async function processAccountV2(
+  supabase: any,
+  account: any,
+  emailLookup: Map<string, { type: "candidate" | "contact"; id: string; owner_user_id: string | null }>,
+  dateFrom: string,
+  dateTo: string,
+  pageLimit: number,
+  logger: any,
+): Promise<{ inserted: number; skipped: number; unmatched: number; errors: number; pages: number }> {
+  let inserted = 0,
+    skipped = 0,
+    unmatched = 0,
+    errors = 0,
+    pages = 0;
+  const accountEmail = normalizeEmail(account.email_address);
+  const acctV2: string | null = account.unipile_account_id_v2;
+  if (!accountEmail || !acctV2) return { inserted, skipped, unmatched, errors, pages };
+  const cutoffMs = new Date(dateFrom).getTime();
+
+  let cursor: string | undefined;
+  let reachedCutoff = false;
+  while (pages < pageLimit && !reachedCutoff) {
+    let payload: any;
+    try {
+      payload = await unipileFetchV2(supabase, acctV2, "emails", {
+        method: "GET",
+        query: { limit: 50, ...(cursor ? { cursor } : {}) },
+      });
+    } catch (err: any) {
+      logger.error(`Unipile v2 emails fetch failed for ${account.email_address}`, { error: err.message });
+      const m = String(err?.message || "").match(/Unipile v2 (\d{3})/);
+      const status = m ? Number(m[1]) : null;
+      const is5xx = status !== null && status >= 500 && status <= 599;
+      if (!is5xx) {
+        await notifyError({
+          taskId: "backfill-emails",
+          severity: "ERROR",
+          error: err,
+          context: { accountId: account.id, email: account.email_address, api: "v2", status },
+        });
+      }
+      break;
+    }
+    pages++;
+    const items: any[] = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload)
+        ? payload
+        : (payload?.items ?? []);
+    if (items.length === 0) break;
+
+    const pageMessageIds = items.map((m) => m.message_id || m.id).filter(Boolean) as string[];
+    const existingIds = new Set<string>();
+    if (pageMessageIds.length > 0) {
+      const { data: existing } = await supabase
+        .from("messages")
+        .select("external_message_id")
+        .in("external_message_id", pageMessageIds);
+      for (const row of existing ?? []) {
+        if (row.external_message_id) existingIds.add(row.external_message_id);
+      }
+    }
+
+    for (const msg of items) {
+      try {
+        const dateStr: string | null = msg.date ?? null;
+        // newest-first → once we cross the window, stop paging.
+        if (dateStr && new Date(dateStr).getTime() < cutoffMs) {
+          reachedCutoff = true;
+          continue;
+        }
+        const externalMessageId = msg.message_id || msg.id;
+        if (!externalMessageId) {
+          skipped++;
+          continue;
+        }
+        if (existingIds.has(externalMessageId)) {
+          skipped++;
+          continue;
+        }
+
+        const externalConversationId = pickStr(msg.thread_id, externalMessageId) || externalMessageId;
+        const subject = msg.subject ?? null;
+        const fromObj = Array.isArray(msg.from) ? msg.from[0] : msg.from;
+        const senderEmail = normalizeEmail(fromObj?.email ?? fromObj?.identifier ?? "");
+        const senderName = pickStr(fromObj?.display_name);
+        const toEmails = [
+          ...(msg.to ?? []).map((r: any) => normalizeEmail(r?.email ?? r?.identifier ?? "")),
+          ...(msg.cc ?? []).map((r: any) => normalizeEmail(r?.email ?? r?.identifier ?? "")),
+        ].filter(Boolean) as string[];
+
+        const isOutbound = !!senderEmail && senderEmail === accountEmail;
+        const matchEmail = isOutbound ? toEmails[0] : senderEmail;
+        if (!matchEmail) {
+          skipped++;
+          continue;
+        }
+        if (!isOutbound && senderEmail === "messages-noreply@linkedin.com") {
+          skipped++;
+          continue;
+        }
+        if (isMarketingEmail(isOutbound ? null : senderEmail)) {
+          skipped++;
+          continue;
+        }
+
+        const entity = emailLookup.get(matchEmail);
+        const candidateId = entity?.type === "candidate" ? entity.id : null;
+        const contactId = entity?.type === "contact" ? entity.id : null;
+        if (!entity) unmatched++;
+
+        const bodyText = stripHtml(msg.body ?? msg.snippet ?? "");
+        const preview = (msg.snippet ?? bodyText ?? "").slice(0, 500);
+
+        let { data: conversation } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("external_conversation_id", externalConversationId)
+          .eq("integration_account_id", account.id)
+          .maybeSingle();
+        if (!conversation) {
+          const { data: created } = await supabase
+            .from("conversations")
+            .insert({
+              candidate_id: candidateId,
+              contact_id: contactId,
+              channel: "email",
+              integration_account_id: account.id,
+              external_conversation_id: externalConversationId,
+              subject,
+              last_message_preview: preview,
+              last_message_at: dateStr,
+              is_read: true,
+              is_archived: false,
+              assigned_user_id: entity?.owner_user_id ?? account.owner_user_id,
+            })
+            .select("id")
+            .single();
+          conversation = created;
+        }
+        if (!conversation) {
+          errors++;
+          continue;
+        }
+
+        const { error: msgErr } = await supabase.from("messages").insert({
+          conversation_id: conversation.id,
+          candidate_id: candidateId,
+          contact_id: contactId,
+          channel: "email",
+          direction: isOutbound ? "outbound" : "inbound",
+          message_type: "email",
+          external_message_id: externalMessageId,
+          external_conversation_id: externalConversationId,
+          subject,
+          body: bodyText,
+          sender_name: senderName,
+          sender_address: isOutbound ? accountEmail : senderEmail || null,
+          recipient_address: isOutbound ? matchEmail : accountEmail,
+          sent_at: dateStr,
+          received_at: dateStr,
+          integration_account_id: account.id,
+          provider: "unipile",
+          is_read: msg.is_unread === true ? false : true,
+        });
+        if (msgErr) {
+          errors++;
+          continue;
+        }
+        inserted++;
+      } catch (err: any) {
+        logger.error("v2 message processing error", { error: err.message });
+        errors++;
+      }
+    }
+
+    cursor = payload?.next_cursor || payload?.cursor || undefined;
+    if (!cursor) break;
+  }
+  return { inserted, skipped, unmatched, errors, pages };
+}
+
 export const backfillEmails = inngest.createFunction(
   { id: "backfill-emails", name: "Backfill emails from Unipile (Inngest)" },
   { cron: "1-56/5 * * * *" },
@@ -334,10 +527,10 @@ export const backfillEmails = inngest.createFunction(
 
     const { data: accounts, error: acctErr } = await supabase
       .from("integration_accounts")
-      .select("id, email_address, owner_user_id, unipile_account_id, unipile_provider")
+      .select("id, email_address, owner_user_id, unipile_account_id, unipile_account_id_v2, unipile_provider")
       .eq("account_type", "email")
       .eq("is_active", true)
-      .not("unipile_account_id", "is", null);
+      .or("unipile_account_id.not.is.null,unipile_account_id_v2.not.is.null");
 
     if (acctErr) {
       logger.error("Account lookup failed", { error: acctErr.message });
@@ -352,15 +545,11 @@ export const backfillEmails = inngest.createFunction(
     const results = [];
     for (const account of accounts) {
       try {
-        const result = await processAccount(
-          supabase,
-          account,
-          emailLookup,
-          dateFrom,
-          dateTo,
-          maxPages,
-          logger,
-        );
+        // Route to v2 when the mailbox has a canonical acc_xxx (the OUTLOOK
+        // boxes live on the v2 Unipile app now; the v1 workspace is empty).
+        const result = account.unipile_account_id_v2
+          ? await processAccountV2(supabase, account, emailLookup, dateFrom, dateTo, maxPages, logger)
+          : await processAccount(supabase, account, emailLookup, dateFrom, dateTo, maxPages, logger);
         results.push({ email: account.email_address, ...result });
         logger.info(`Processed ${account.email_address}`, result);
       } catch (err: any) {
