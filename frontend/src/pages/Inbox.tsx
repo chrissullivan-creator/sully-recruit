@@ -19,8 +19,9 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
-  Star, Clock as ClockIcon, Bell, Sun,
+  Star, Clock as ClockIcon, Bell, Sun, CalendarClock,
 } from 'lucide-react';
+import { authHeaders } from '@/lib/api-auth';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSmartTimestamp, formatAbsoluteTimestamp, formatThreadTimestamp, getDateGroup } from '@/lib/format-time';
 import { useInboxDensity, type InboxDensity } from '@/lib/use-inbox-density';
@@ -834,6 +835,24 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
   const [sending, setSending] = useState(false);
   const [showEntity, setShowEntity] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  // The signed-in recruiter's booking-link slug, so the reply composer can
+  // insert a prefilled /book/{slug} URL. Fetched once; null = no link yet.
+  const [bookingSlug, setBookingSlug] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/schedule-links', { headers: await authHeaders() });
+        const data = await res.json();
+        if (!cancelled && res.ok && Array.isArray(data.links) && data.links[0]?.active) {
+          setBookingSlug(data.links[0].slug);
+        }
+      } catch {
+        // no booking link configured — button stays hidden
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Restore the persisted draft when the thread changes. Sets the
   // contenteditable's innerHTML on the next tick so the React state +
@@ -1636,6 +1655,34 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                     if (threadId) saveDraft(threadId, template.body, text);
                   }}
                 />
+                {bookingSlug && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    title="Insert booking link"
+                    className="h-[36px] w-[36px]"
+                    onClick={() => {
+                      const origin = window.location.origin;
+                      const qs = new URLSearchParams();
+                      if (personId) qs.set('person', personId);
+                      if (senderName) qs.set('name', senderName);
+                      if (senderAddress.includes('@')) qs.set('email', senderAddress);
+                      const q = qs.toString();
+                      const url = `${origin}/book/${bookingSlug}${q ? `?${q}` : ''}`;
+                      const linkHtml = `<a href="${url}">Book a time with me</a>`;
+                      const nextHtml = replyHtml ? `${replyHtml}<br/>${linkHtml}` : linkHtml;
+                      setReplyHtml(nextHtml);
+                      const tmp = document.createElement('div');
+                      tmp.innerHTML = nextHtml;
+                      const text = tmp.textContent || '';
+                      setReplyText(text);
+                      if (editorRef.current) editorRef.current.innerHTML = nextHtml;
+                      if (threadId) saveDraft(threadId, nextHtml, text);
+                    }}
+                  >
+                    <CalendarClock className="h-4 w-4" />
+                  </Button>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"

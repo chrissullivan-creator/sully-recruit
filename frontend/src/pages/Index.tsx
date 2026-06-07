@@ -330,7 +330,7 @@ const Dashboard = () => {
             <MetricCard label="Submission"  value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/send-outs?stage=submitted')} />
             <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interview')} />
             <MetricCard label="Offer"       value={isLoading ? '…' : offers}      icon={<Award className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=offer')} />
-            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=withdrawn')} />
+            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=rejected')} />
           </div>
         </div>
 
@@ -388,7 +388,7 @@ const Dashboard = () => {
             defaultOpen={interviewList.length > 0}
           >
             {interviewList.map((so: any) => {
-              const intDate = so.interview_at || so.updated_at;
+              const intDate = so.scheduled_at || so.updated_at;
               return (
                 <SendOutRow
                   key={so.id}
