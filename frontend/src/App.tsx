@@ -40,6 +40,7 @@ const Reports = lazy(() => import("./pages/Reports"));
 const AuditLog = lazy(() => import("./pages/AuditLog"));
 const Trash = lazy(() => import("./pages/Trash"));
 const Status = lazy(() => import("./pages/Status"));
+const Book = lazy(() => import("./pages/Book"));
 const Settings = lazy(() => import("./pages/Settings"));
 const MicrosoftCallback = lazy(() => import("./pages/MicrosoftCallback"));
 const ResumeSearch = lazy(() => import("./pages/ResumeSearch").then((m) => ({ default: m.ResumeSearch })));
@@ -104,6 +105,10 @@ const App = () => (
                 who can't sign in can still tell whether the system or their session
                 is the problem. */}
             <Route path="/status" element={<Status />} />
+            {/* /book/:slug is the PUBLIC self-scheduling page — invitees
+                aren't authenticated, so it lives outside ProtectedRoute
+                alongside /status. */}
+            <Route path="/book/:slug" element={<Book />} />
             <Route path="/resume-search" element={<ProtectedRoute><ResumeSearch /></ProtectedRoute>} />
             <Route path="/linkedin-search" element={<ProtectedRoute><LinkedInSearch /></ProtectedRoute>} />
             <Route path="/duplicates" element={<ProtectedRoute><DuplicatesReview /></ProtectedRoute>} />
