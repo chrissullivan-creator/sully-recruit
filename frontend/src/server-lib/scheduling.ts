@@ -24,6 +24,8 @@ export interface SchedulingLinkConfig {
   buffer_min: number;
   min_notice_hours: number;
   max_days_out: number;
+  /** When set, cap the horizon to N business days (days with working windows). */
+  max_business_days?: number | null;
 }
 
 export interface Slot {
@@ -148,6 +150,41 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): b
 }
 
 /**
+ * The UTC instant at the END (local midnight) of the Nth business day from
+ * `now`, in `tz`. A "business day" is any calendar day with at least one valid
+ * working window in `workingHours`. Returns null when no working days exist
+ * (so no business-day cap can be derived).
+ */
+function nthBusinessDayEndUtc(
+  now: Date,
+  tz: string,
+  workingHours: WorkingHours,
+  n: number,
+): Date | null {
+  if (!n || n < 1) return null;
+  let cursor = localDateParts(now, tz);
+  let counted = 0;
+  for (let iter = 0; iter < 366; iter++) {
+    const windows = workingHours?.[DAY_KEYS[cursor.weekday]] || [];
+    const hasWindow = windows.some((w) => {
+      const s = parseHHMM(w.start);
+      const e = parseHHMM(w.end);
+      return s !== null && e !== null && e > s;
+    });
+    if (hasWindow) {
+      counted++;
+      if (counted >= n) {
+        // End of this business day = local midnight starting the next day.
+        return localWallClockToUtc(cursor.y, cursor.m, cursor.d, 24 * 60, tz);
+      }
+    }
+    const noonProbe = localWallClockToUtc(cursor.y, cursor.m, cursor.d, 12 * 60, tz);
+    cursor = localDateParts(new Date(noonProbe.getTime() + 24 * 3600_000), tz);
+  }
+  return null;
+}
+
+/**
  * Compute open booking slots across [from, to] for a link, subtracting the
  * owner's busy intervals AND already-booked slots. Returns slots grouped by
  * local calendar day, each as a UTC ISO start/end.
@@ -169,11 +206,16 @@ export function computeOpenSlots(
   const duration = Math.max(5, link.duration_min || 30);
   const buffer = Math.max(0, link.buffer_min || 0);
 
-  // Effective window: clamp to notice + horizon.
+  // Effective window: clamp to notice + horizon (calendar + optional business-day cap).
   const earliest = new Date(now.getTime() + (link.min_notice_hours || 0) * 3600_000);
   const horizon = new Date(now.getTime() + (link.max_days_out || 21) * 86_400_000);
   const windowStart = new Date(Math.max(fromUtc.getTime(), earliest.getTime()));
-  const windowEnd = new Date(Math.min(toUtc.getTime(), horizon.getTime()));
+  let windowEndMs = Math.min(toUtc.getTime(), horizon.getTime());
+  if (link.max_business_days) {
+    const bizEnd = nthBusinessDayEndUtc(now, tz, link.working_hours || {}, link.max_business_days);
+    if (bizEnd) windowEndMs = Math.min(windowEndMs, bizEnd.getTime());
+  }
+  const windowEnd = new Date(windowEndMs);
   if (windowStart >= windowEnd) return [];
 
   // Pre-parse busy + bookings into ms ranges (padded by buffer).

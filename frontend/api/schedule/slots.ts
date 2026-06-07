@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: link, error: linkErr } = await supabase
       .from("scheduling_links")
       .select(
-        "id, integration_account_id, slug, title, duration_min, meeting_type, location, timezone, working_hours, buffer_min, min_notice_hours, max_days_out, max_per_day, active",
+        "id, integration_account_id, slug, title, duration_min, meeting_type, location, timezone, working_hours, buffer_min, min_notice_hours, max_days_out, max_per_day, max_business_days, active",
       )
       .eq("slug", slug)
       .maybeSingle();
@@ -108,6 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         buffer_min: link.buffer_min || 0,
         min_notice_hours: link.min_notice_hours || 0,
         max_days_out: link.max_days_out || 21,
+        max_business_days: link.max_business_days ?? null,
       },
       fromUtc,
       toUtc,

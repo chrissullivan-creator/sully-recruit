@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS public.scheduling_links (
   max_days_out integer NOT NULL DEFAULT 21,
   -- Cap on confirmed bookings per local calendar day (null = unlimited).
   max_per_day integer,
+  -- Cap the booking horizon to N business days / working days (null = use max_days_out).
+  max_business_days integer,
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
