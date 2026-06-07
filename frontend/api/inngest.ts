@@ -26,6 +26,7 @@ import { syncConversations } from "./lib/inngest/functions/sync-conversations.js
 import { purgeMarketingEmails } from "./lib/inngest/functions/purge-marketing-emails.js";
 import { backfillEmails } from "./lib/inngest/functions/backfill-emails.js";
 import { backfillGraphEmailHistory } from "./lib/inngest/functions/backfill-graph-email-history.js";
+import { reconcileUnipileAccounts } from "./lib/inngest/functions/reconcile-unipile-accounts.js";
 import { backfillLinkedinMessages } from "./lib/inngest/functions/backfill-linkedin-messages.js";
 import { drainCallQueue } from "./lib/inngest/functions/drain-call-queue.js";
 import { pipelineHealthDigest } from "./lib/inngest/functions/pipeline-health-digest.js";
@@ -101,6 +102,7 @@ export default serve({
     purgeMarketingEmails,
     backfillEmails,
     backfillGraphEmailHistory,
+    reconcileUnipileAccounts,
     backfillLinkedinMessages,
     drainCallQueue,
     pipelineHealthDigest,
