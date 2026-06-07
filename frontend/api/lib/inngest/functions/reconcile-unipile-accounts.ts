@@ -14,7 +14,8 @@ import { notifyError } from "../../../../src/server-lib/alerting.js";
  * → every pull 404'd → email quietly stopped with no alert.
  *
  * Every 15 minutes this:
- *   1. Lists the LIVE Unipile accounts (GET {v1Base}/accounts).
+ *   1. Lists the LIVE Unipile accounts (GET {v2Base}/accounts — the mailboxes
+ *      live on the v2 app; the v1 DSN workspace is empty).
  *   2. For each email mailbox in integration_accounts:
  *      - stored id still live  → just check health; alert if it's unhealthy
  *        (CREDENTIALS/STOPPED/etc. — the "needs reconnect" case).
@@ -92,12 +93,15 @@ export const reconcileUnipileAccounts = inngest.createFunction(
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
+    // The mailboxes live on the Unipile **v2** app (the v1 DSN workspace is
+    // empty), so reconcile against v2 /accounts with the v2 key and heal the
+    // canonical acc_xxx into integration_accounts.unipile_account_id_v2.
     const base =
-      ((await getAppSetting("UNIPILE_BASE_URL")) || "").replace(/\/+$/, "") ||
-      "https://api19.unipile.com:14926/api/v1";
-    const apiKey = await getAppSetting("UNIPILE_API_KEY");
+      ((await getAppSetting("UNIPILE_BASE_V2_URL")) || "").replace(/\/+$/, "") ||
+      "https://api.unipile.com/v2";
+    const apiKey = (await getAppSetting("UNIPILE_API_KEY_V2")) || (await getAppSetting("UNIPILE_API_KEY"));
     if (!apiKey) {
-      logger.error("reconcile-unipile-accounts: UNIPILE_API_KEY missing");
+      logger.error("reconcile-unipile-accounts: UNIPILE_API_KEY_V2 missing");
       return { error: "no_api_key" };
     }
 
@@ -134,7 +138,7 @@ export const reconcileUnipileAccounts = inngest.createFunction(
 
     const { data: rows, error } = await supabase
       .from("integration_accounts")
-      .select("id, email_address, unipile_account_id, is_active")
+      .select("id, email_address, unipile_account_id_v2, is_active")
       .eq("account_type", "email");
     if (error) {
       logger.error("reconcile-unipile-accounts: db read failed", { error: error.message });
@@ -148,7 +152,7 @@ export const reconcileUnipileAccounts = inngest.createFunction(
 
     for (const row of rows ?? []) {
       const email = normalizeEmail(row.email_address || "");
-      const stored: string | null = row.unipile_account_id;
+      const stored: string | null = row.unipile_account_id_v2;
 
       // Stored id still exists on Unipile → only worry about health.
       if (stored && liveIds.has(stored)) {
@@ -174,7 +178,7 @@ export const reconcileUnipileAccounts = inngest.createFunction(
       if (match) {
         const { error: upErr } = await supabase
           .from("integration_accounts")
-          .update({ unipile_account_id: match.id, is_active: true, updated_at: new Date().toISOString() })
+          .update({ unipile_account_id_v2: match.id, is_active: true, updated_at: new Date().toISOString() })
           .eq("id", row.id);
         if (upErr) {
           logger.error("reconcile-unipile-accounts: heal update failed", {
