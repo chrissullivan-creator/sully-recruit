@@ -481,12 +481,11 @@ export function AddPersonWizard({
     const li = (f.linkedin_url ?? '').trim();
     if (first.length <= 1) errors.first_name = 'First name must be more than 1 letter';
     if (last.length <= 1) errors.last_name = 'Last name must be more than 1 letter';
-    if (type === 'candidate') {
-      if (!li) errors.linkedin_url = 'LinkedIn URL is required for candidates';
-      else if (!/^https?:\/\/(?:[\w.-]+\.)?linkedin\.com\/(?:in|pub)\//i.test(li)) {
-        errors.linkedin_url = 'Must be a linkedin.com/in/ URL';
-      }
-    } else if (li && !/^https?:\/\/(?:[\w.-]+\.)?linkedin\.com\/(?:in|pub)\//i.test(li)) {
+    // LinkedIn URL is optional. It used to be required for candidates, which
+    // silently blocked adding anyone from an email/SMS thread (no URL to find).
+    // If one IS provided it must be a real linkedin.com/in/ URL; a missing one
+    // gets backfilled async by name via the find-linkedin-url-by-name job.
+    if (li && !/^https?:\/\/(?:[\w.-]+\.)?linkedin\.com\/(?:in|pub)\//i.test(li)) {
       errors.linkedin_url = 'Must be a linkedin.com/in/ URL';
     }
     return errors;
@@ -878,9 +877,7 @@ export function AddPersonWizard({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">
-                  LinkedIn URL{personType === 'candidate' && <span className="text-[#D4AF37]"> *</span>}
-                </Label>
+                <Label className="text-xs">LinkedIn URL</Label>
                 <Input
                   value={form.linkedin_url}
                   onChange={(e) => update('linkedin_url', e.target.value)}
