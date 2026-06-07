@@ -37,30 +37,39 @@ Read these before making changes:
 - Pipeline stage tables: `pitches`, `send_outs`, `submissions`, `interviews`, `placements`, `rejections`
 - Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley
 
-## Unipile API — the v1/v2 split (read before touching LinkedIn/messaging code)
+## Unipile API — v1 (methods) + v2 (lifecycle **and** Recruiter writes) — updated June 7 2026
 
-Unipile publishes two API spec scopes; they are NOT interchangeable. The whole codebase calls **v1** for behavior and v2 for lifecycle. Centralized helper: `frontend/api/lib/unipile-urls.ts` (the file header is the canonical reference).
+Unipile has now shipped the full **v2 Methods API** (LinkedIn, Recruiter, messaging, email, calendar). We are migrating **incrementally**. **Today: LinkedIn Recruiter project-create + pipeline-save run on v2 (flag-gated, flag is ON); everything else still runs on v1.** Centralized helpers:
+- `frontend/api/lib/unipile-urls.ts` — v1 builders (`linkedinV1`) + v2 templates (`recruiterV2`)
+- `frontend/src/server-lib/unipile-v2.ts` — `unipileFetch()` = **v1**, `unipileFetchV2()` = **v2**, `isLinkedinV2Enabled()`, `getUnipileAccountV2IdByV1Id()`
 
-| Concern | API | Host | API key | Pattern |
+| Concern | API | Host | Key | account_id |
 |---|---|---|---|---|
-| **Methods** (LinkedIn, Recruiter, messaging, email, calendar, search, contracts) | **v1** | tenant DSN (`api19.unipile.com:14926/api/v1`) | `UNIPILE_API_KEY` | `${v1Base}/<path>?account_id=X` — account_id is a **query param**, never a path segment |
-| **Lifecycle** (account create via Hosted Auth, auth checkpoint, webhooks) | v2 | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | `${v2Base}/<path>` |
+| Most methods — messaging, email, calendar, search, jobs, project/applicant **reads**, contracts | **v1** | tenant DSN `api19.unipile.com:14926/api/v1` | `UNIPILE_API_KEY` | **query param** `?account_id=<short_id>` |
+| Recruiter **writes** — create project, save candidate to pipeline | **v2** | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | **path segment** `/v2/<acc_xxx>/...` |
+| Lifecycle — hosted auth, checkpoint, webhooks, accounts | v2 | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | — |
 
-### Common mistakes to avoid
+### v2 Recruiter migration status (verified live June 7 2026)
 
-- **Do NOT call `api.unipile.com/v2/{acct}/linkedin/...`.** The v2 Methods API exists in Unipile's published docs but our app `app_01kr071epafvjsg64xdb2edgfz` gets **403 "Insufficient permissions"** on every Recruiter call. Open a Unipile support ticket if you want this unblocked. Until then, every LinkedIn call must hit v1.
-- **Do NOT swap the API keys.** `UNIPILE_API_KEY` (v1) gets 401 on the v2 host; `UNIPILE_API_KEY_V2` gets 401 on the v1 DSN. They're scoped to different applications.
-- **Do NOT use `acc_xxx` IDs against v1.** v1 returns 404 "Account not found" for canonical `acc_xxx` IDs. v1 uses the SHORT format (e.g. `1Ti3bx-8RrC0B91qxp_9ww`); v2 uses `acc_xxx`. Same underlying account, different ID per API. DB stores both:
-  - `integration_accounts.unipile_account_id` = short-form (for v1)
-  - `integration_accounts.metadata.unipile_account_id_v2` = canonical `acc_xxx` (for the future v2 flip)
-- **The old `${v2Base}/${acct}/linkedin/recruiter/...` pattern in our code never worked.** Don't reintroduce it. The 401 "Invalid API Key" it threw was Unipile's misleading shorthand for "wrong route" — not auth failure.
+- ✅ **The old `403 "Insufficient permissions"` is RESOLVED.** App `app_01kr071epafvjsg64xdb2edgfz` now has v2 Recruiter scope — confirmed live: `GET /v2/<acc_xxx>/linkedin/recruiter/projects` → **200** with a real hiring project. Chris's LinkedIn account reports `products_connection_status.recruiter = running`.
+- ✅ Migration `20260606000000_add_unipile_account_id_v2.sql` added the **`integration_accounts.unipile_account_id_v2`** column (canonical `acc_xxx`) + seeded the `UNIPILE_LINKEDIN_V2` flag in `app_settings`.
+- ✅ `UNIPILE_LINKEDIN_V2 = true` (ENABLED). `source-projects.ts` `create_project`/`save_candidate` call `unipileFetchV2`; all read actions stay on v1.
+- ✅ `acc_xxx` backfilled: Chris `acc_01ktfd159mfk1bj8vc6a1g2jxb`, Ashley `acc_01kr0nd2qgend81n5tekmksrsx`. **Nancy's LinkedIn is NOT on the v2 app (only her Outlook is) — needs a reconnect to source on v2.**
+- ⚠️ **create/save v2 POST body shapes are NOT confirmed yet.** A `{name, visibility}` create body returns `400 api/invalid_parameters`. Pull the real schema from Unipile's Recruiter API reference and fix the `recruiterV2` request bodies in `source-projects.ts` before relying on writes.
+- ⚠️ **acc_xxx storage inconsistency to reconcile:** `unipile-v2.ts` reads the **top-level column** `unipile_account_id_v2`; `connect-linkedin*.ts` reads **`metadata.unipile_account_id_v2`**. Standardize on the column (or write both on connect).
 
-### Confirmed v1 routes (probed against live API, May 2026)
+### Key gotchas (still true)
+
+- v1 uses the **short** id (`1Ti3bx-8RrC0B91qxp_9ww`); v2 uses **`acc_xxx`**. Same account, different id per API. v1 returns 404 for `acc_xxx`; v2 returns 404 for short ids. `getUnipileAccountV2IdByV1Id()` maps short → `acc_xxx`.
+- **Do NOT swap keys.** `UNIPILE_API_KEY` (v1) 401s on the v2 host; `UNIPILE_API_KEY_V2` 401s on the v1 DSN. They're scoped to different Unipile apps.
+- `api.unipile.com/v2/docs/json` is the **lifecycle-only** OpenAPI (~8 endpoints: accounts/auth/webhooks). The **Methods** reference lives on `developer.unipile.com` (it bot-blocks WebFetch → 403; fetch it server-side via Supabase `pg_net`, or read the Node SDK).
+
+### Confirmed v1 routes (still in use for everything except Recruiter writes)
 
 ```
 GET  /api/v1/accounts                         list connected accounts
 GET  /api/v1/accounts/{short_id}              account detail
-GET  /api/v1/linkedin/projects?account_id=X   Recruiter hiring projects
+GET  /api/v1/linkedin/projects?account_id=X   Recruiter hiring projects (LIST/read)
 GET  /api/v1/linkedin/projects/{id}?account_id=X
 GET  /api/v1/linkedin/jobs?account_id=X
 GET  /api/v1/linkedin/jobs/{job_id}?account_id=X
@@ -79,19 +88,16 @@ GET  /api/v1/emails?account_id=X
 POST /api/v1/emails?account_id=X              send email
 ```
 
-### What does NOT exist on v1 (and is gated on v2)
+### v2 Recruiter routes (path segment + `UNIPILE_API_KEY_V2`)
 
-- Recruiter pipeline candidates (`/linkedin/recruiter/projects/{id}/pipeline`) — exists in v2 spec, 403 from our v2 app
-- Save candidate to Recruiter pipeline (`/linkedin/recruiter/projects/{id}/pipeline/candidate/save`) — same
-- Create Recruiter project programmatically — same
-- Proxy country override (`PATCH /v2/{acct}/proxy`) — v2-only; throws as non-fatal warning today
+```
+GET  /v2/{acc_xxx}/linkedin/recruiter/projects                         ✅ confirmed 200
+POST /v2/{acc_xxx}/linkedin/recruiter/projects                         ⚠️ body shape TBD (400 on {name,visibility})
+POST /v2/{acc_xxx}/linkedin/recruiter/projects/{id}/pipeline/candidate/save   ⚠️ body shape TBD
+GET  /v2/{acc_xxx}/linkedin/recruiter/inmail-credits
+POST /v2/{acc_xxx}/linkedin/recruiter/search/people
+```
 
-These actions return 501 from our API with a comment pointing to the Phase 2 v2 unblock. Don't try to re-implement them on v1; the routes don't exist.
+### Still on v1, NOT yet migrated (v2 equivalents exist per Unipile's v2 Methods matrix, just not wired)
 
-### Phase 2 — flipping to v2 (future)
-
-When Unipile unblocks v2 Recruiter scope on app `app_01kr071epafvjsg64xdb2edgfz`:
-1. Swap the URL builders in `unipile-urls.ts` to use `${v2Base}/${metadata.unipile_account_id_v2}/<path>` (path segment, not query param)
-2. Swap the API key to `UNIPILE_API_KEY_V2`
-3. The DB already has the `acc_xxx` IDs in `metadata.unipile_account_id_v2` — no re-connection needed
-
+Messaging + InMail, email send/receive, calendar, people/company search, job applicants, profile lookups. Migrate these the same way Recruiter writes were: add v2 templates to `unipile-urls.ts`, route through `unipileFetchV2`, gate behind a flag, verify the body shape against the v2 reference before flipping on.
