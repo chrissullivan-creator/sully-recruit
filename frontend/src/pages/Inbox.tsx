@@ -35,6 +35,7 @@ import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
+import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
 import { SnoozeMenu } from '@/components/inbox/SnoozeMenu';
@@ -1869,6 +1870,10 @@ export default function Inbox() {
     const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms'];
     return (valid as string[]).includes(c ?? '') ? (c as InboxChannel) : 'all';
   })();
+  // Calls is a sibling Hub section tracked via ?section=calls, independent of
+  // the view/channel message filters. When active, the Hub swaps the thread
+  // list/detail for the embedded CallsPanel.
+  const callsActive = searchParams.get('section') === 'calls';
   const updateParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(searchParams);
     if (!value || value === 'all' || (key === 'tab' && value === 'focused')) {
@@ -1876,6 +1881,26 @@ export default function Inbox() {
     } else {
       next.set(key, value);
     }
+    setSearchParams(next, { replace: true });
+  };
+  // Selecting a normal view/channel always leaves the Calls section.
+  const updateViewParam = (value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    if (!value || value === 'all') next.delete('view');
+    else next.set('view', value);
+    setSearchParams(next, { replace: true });
+  };
+  const updateChannelParam = (value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    if (!value || value === 'all') next.delete('channel');
+    else next.set('channel', value);
+    setSearchParams(next, { replace: true });
+  };
+  const selectCalls = () => {
+    const next = new URLSearchParams(searchParams);
+    next.set('section', 'calls');
     setSearchParams(next, { replace: true });
   };
   // Bulk-select state: thread IDs the user has checked. The toolbar
@@ -2159,7 +2184,13 @@ export default function Inbox() {
     <MainLayout>
       <PageHeader
         title="Communication Hub"
-        description={unreadCount > 0 ? `${unreadCount} unread · All channels` : 'All channels · Unified'}
+        description={
+          callsActive
+            ? 'Calls · Logged across the team'
+            : unreadCount > 0
+              ? `${unreadCount} unread · All channels`
+              : 'All channels · Unified'
+        }
       />
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
@@ -2170,8 +2201,10 @@ export default function Inbox() {
           view={view}
           channel={channel}
           counts={sidebarCounts}
-          onSelectView={(v) => updateParam('view', v)}
-          onSelectChannel={(c) => updateParam('channel', c)}
+          callsActive={callsActive}
+          onSelectView={(v) => updateViewParam(v)}
+          onSelectChannel={(c) => updateChannelParam(c)}
+          onSelectCalls={selectCalls}
           footer={
             isAdmin && teamMembers.length > 0 ? (
               <select
@@ -2189,6 +2222,14 @@ export default function Inbox() {
           }
         />
 
+        {callsActive ? (
+          /* Calls section — replaces the thread list + message pane with the
+             shared CallsPanel (single source of truth with the /calls page). */
+          <div className="flex-1 min-w-0">
+            <CallsPanel embedded />
+          </div>
+        ) : (
+        <>
         {/* Thread list */}
         <div className="w-80 border-r border-border flex flex-col bg-background">
           {/* Search + Density toggle + Compose */}
@@ -2428,6 +2469,8 @@ export default function Inbox() {
         <div className="flex-1 min-w-0">
           <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
         </div>
+        </>
+        )}
       </div>
 
       {/* Bulk-delete confirm */}

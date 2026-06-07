@@ -11,6 +11,7 @@ import {
   FileEdit,
   Archive as ArchiveIcon,
   HelpCircle,
+  Phone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -68,6 +69,12 @@ export interface InboxSidebarProps {
   counts: InboxSidebarCounts;
   onSelectView: (view: InboxView) => void;
   onSelectChannel: (channel: InboxChannel) => void;
+  // Calls is a sibling section of the Hub, not a message view/channel — so it
+  // stays out of the InboxView/InboxChannel unions and rides on its own props.
+  // When active, the Hub swaps the thread list/detail for the embedded
+  // CallsPanel; selecting any view/channel deactivates it (handled by Inbox).
+  callsActive?: boolean;
+  onSelectCalls?: () => void;
   footer?: React.ReactNode;
 }
 
@@ -77,6 +84,8 @@ export function InboxSidebar({
   counts,
   onSelectView,
   onSelectChannel,
+  callsActive = false,
+  onSelectCalls,
   footer,
 }: InboxSidebarProps) {
   const navItems: NavItem[] = [
@@ -107,7 +116,7 @@ export function InboxSidebar({
               label={item.label}
               Icon={item.Icon}
               count={item.count}
-              active={view === item.key}
+              active={!callsActive && view === item.key}
               disabled={item.comingSoon}
               onClick={() => onSelectView(item.key)}
               hint={item.comingSoon ? 'Coming soon' : undefined}
@@ -120,7 +129,7 @@ export function InboxSidebar({
           <NavRow
             label="All channels"
             Icon={InboxIcon}
-            active={channel === 'all'}
+            active={!callsActive && channel === 'all'}
             onClick={() => onSelectChannel('all')}
           />
           {CHANNEL_ITEMS.map((c) => (
@@ -128,11 +137,25 @@ export function InboxSidebar({
               key={c.key}
               label={c.label}
               Icon={c.Icon}
-              active={channel === c.key}
+              active={!callsActive && channel === c.key}
               onClick={() => onSelectChannel(c.key)}
             />
           ))}
         </nav>
+
+        {onSelectCalls && (
+          <>
+            <SectionLabel className="mt-4">Calls</SectionLabel>
+            <nav className="px-2 space-y-0.5">
+              <NavRow
+                label="Call log"
+                Icon={Phone}
+                active={callsActive}
+                onClick={onSelectCalls}
+              />
+            </nav>
+          </>
+        )}
       </div>
       {footer ? <div className="p-2 border-t border-border/60">{footer}</div> : null}
     </aside>

@@ -59,7 +59,9 @@ const navigation = [
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
   { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
   { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
-  { name: 'Calls',      href: '/calls',      icon: Phone           },
+  // Calls now lives as a section inside the Communication Hub. The /calls
+  // route stays registered for deep links, but the nav points into the Hub.
+  { name: 'Calls',      href: '/inbox?section=calls', icon: Phone    },
   { name: 'Reports',    href: '/reports',    icon: BarChart3       },
   { name: 'Duplicates', href: '/duplicates', icon: Copy            },
   { name: 'Collisions', href: '/admin/collisions', icon: AlertTriangle },
@@ -74,7 +76,16 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Close drawer when route changes (so tapping a nav item dismisses it).
-  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
+  // Keyed on search too so Hub → Calls (same /inbox path, ?section differs)
+  // still dismisses the mobile drawer.
+  useEffect(() => { setMobileOpen(false); }, [location.pathname, location.search]);
+
+  // The Communication Hub and its Calls section share the /inbox path,
+  // distinguished by ?section=calls. Track it so each nav item lights up
+  // only for its own URL.
+  const onCallsSection = location.pathname === '/inbox'
+    && new URLSearchParams(location.search).get('section') === 'calls';
+
   const badgeFor = (href: string): number | null => {
     if (href === '/inbox') return inboxUnread > 0 ? inboxUnread : null;
     if (href === '/tasks') return tasksOpen > 0 ? tasksOpen : null;
@@ -142,10 +153,14 @@ export function Sidebar() {
           const isActive =
             item.href === '/'
               ? location.pathname === '/'
-              : item.href === '/people'
-                ? ['/people', '/candidates', '/contacts'].some(p =>
-                    location.pathname === p || location.pathname.startsWith(p + '/'))
-                : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+              : item.href === '/inbox'
+                ? location.pathname === '/inbox' && !onCallsSection
+                : item.href === '/inbox?section=calls'
+                  ? onCallsSection
+                  : item.href === '/people'
+                    ? ['/people', '/candidates', '/contacts'].some(p =>
+                        location.pathname === p || location.pathname.startsWith(p + '/'))
+                    : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
 
           return (
             <Link
