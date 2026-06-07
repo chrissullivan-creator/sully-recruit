@@ -60,6 +60,13 @@ export interface ApolloPerson {
   email_status: string | null;
   organization_name: string | null;
   organization_domain: string | null;
+  /**
+   * Best-effort direct/work phone. Apollo exposes phones under several
+   * shapes (`phone_numbers[]`, `sanitized_phone`, `organization.phone`);
+   * we surface the first usable one. Often null without
+   * `reveal_phone_number`, which we don't request.
+   */
+  phone: string | null;
   photo_url: string | null;
   raw: any;
 }
@@ -72,6 +79,12 @@ export interface PeopleMatchInput {
   domain?: string | null;
   email?: string | null;
   linkedin_url?: string | null;
+  /**
+   * Apollo only returns personal emails when this is explicitly true.
+   * We default it to false so the match stays business/work-email
+   * focused (and avoids the extra personal-email credit cost).
+   */
+  reveal_personal_emails?: boolean;
 }
 
 export async function apolloMatchPerson(
@@ -86,6 +99,7 @@ export async function apolloMatchPerson(
   if (input.domain) body.domain = input.domain;
   if (input.email) body.email = input.email;
   if (input.linkedin_url) body.linkedin_url = input.linkedin_url;
+  body.reveal_personal_emails = input.reveal_personal_emails === true;
 
   const resp = await fetch(`${config.baseUrl}/people/match`, {
     method: "POST",
@@ -105,6 +119,17 @@ export async function apolloMatchPerson(
   if (!person) return null;
 
   const org = person.organization || {};
+  const phoneFromArray = Array.isArray(person.phone_numbers)
+    ? person.phone_numbers.find((p: any) => p?.sanitized_number || p?.raw_number)
+    : null;
+  const phone =
+    phoneFromArray?.sanitized_number ??
+    phoneFromArray?.raw_number ??
+    person.sanitized_phone ??
+    org.sanitized_phone ??
+    org.phone ??
+    null;
+
   return {
     id: person.id ?? null,
     organization_id: org.id ?? person.organization_id ?? null,
@@ -118,6 +143,7 @@ export async function apolloMatchPerson(
     email_status: person.email_status ?? null,
     organization_name: org.name ?? null,
     organization_domain: org.primary_domain ?? null,
+    phone,
     photo_url: person.photo_url ?? null,
     raw: person,
   };
