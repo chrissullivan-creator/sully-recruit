@@ -547,6 +547,15 @@ export async function syncLinkedinIntegrationAccount(
     proxy_country: proxyCountry || existing?.metadata?.proxy_country || null,
   };
 
+  // Opportunistically capture the canonical v2 id (acc_xxx) if any source
+  // exposes it. The hosted-auth callback / account detail may carry it; if
+  // not, it stays null until the GET {v2Base}/accounts backfill populates it.
+  const unipileAccountIdV2 =
+    [params.unipileAccountId, account?.id, account?.account_id, account?.unipile_account_id]
+      .find((v: any) => typeof v === "string" && /^acc_/.test(v))
+    || existing?.unipile_account_id_v2
+    || null;
+
   const payload = {
     account_label: accountLabel,
     account_type: recruiterEnabled ? "linkedin_recruiter" : "linkedin_classic",
@@ -559,6 +568,7 @@ export async function syncLinkedinIntegrationAccount(
     owner_user_id: params.ownerUserId,
     provider: "linkedin",
     unipile_account_id: params.unipileAccountId,
+    unipile_account_id_v2: unipileAccountIdV2,
     unipile_provider: "LINKEDIN",
     updated_at: now,
     user_id: params.ownerUserId,

@@ -1,6 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
+import {
+  isLinkedinV2Enabled,
+  unipileFetchV2,
+  getUnipileAccountV2IdByV1Id,
+} from "../src/server-lib/unipile-v2.js";
+import { recruiterV2 } from "./lib/unipile-urls.js";
 
 // Map a LinkedIn recruiter pipeline stage name → our 4-stage sourcing
 // funnel. LinkedIn lets recruiters customise stage labels, so the match
@@ -254,22 +260,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── create_project ──────────────────────────────────────────
-    // POST /linkedin/recruiter/projects — body must include name + visibility.
+    // Creating a Recruiter hiring project has no v1 route. On v2 it is
+    //   POST {v2Base}/{acc_xxx}/linkedin/recruiter/projects
+    // Gated by UNIPILE_LINKEDIN_V2 + requires the canonical acc_xxx id.
     if (action === "create_project") {
       if (!name) return res.status(400).json({ error: "Missing name" });
       if (!visibility) return res.status(400).json({ error: "Missing visibility" });
       if (visibility !== "PRIVATE" && visibility !== "PUBLIC") {
         return res.status(400).json({ error: "visibility must be PRIVATE or PUBLIC" });
       }
-      // No Unipile v1 endpoint for creating a Recruiter hiring project.
-      // The v2 endpoint /v2/{acct}/linkedin/recruiter/projects POST exists
-      // in the spec but our v2 app currently returns 403 for Recruiter
-      // calls (Unipile-side scope gate — see Phase 2 plan).
-      return res.status(501).json({
-        error: "create_project is not available — Unipile has no v1 route for it and our v2 app lacks the Recruiter scope. Create the project in LinkedIn Recruiter UI and re-list.",
-        name,
-        visibility,
-      });
+      if (!(await isLinkedinV2Enabled(supabase))) {
+        return res.status(501).json({
+          error: "create_project requires Unipile v2. Set UNIPILE_LINKEDIN_V2=true once the v2 Recruiter scope probe passes; no v1 route exists. Until then, create the project in LinkedIn Recruiter UI and re-list.",
+          name,
+          visibility,
+        });
+      }
+      const acctV2 = await getUnipileAccountV2IdByV1Id(supabase, account_id);
+      if (!acctV2) {
+        return res.status(409).json({
+          error: "No Unipile v2 account id (acc_xxx) stored for this account yet — reconnect the account or run the v2 backfill before creating projects on v2.",
+          account_id,
+        });
+      }
+      try {
+        const data = await unipileFetchV2(supabase, acctV2, recruiterV2.projects(), {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            visibility,
+            ...(description ? { description } : {}),
+            ...(company ? { company } : {}),
+            ...(job_title ? { job_title } : {}),
+            ...(location ? { location } : {}),
+            ...(seniority_level ? { seniority_level } : {}),
+          }),
+        });
+        return res.status(200).json(data);
+      } catch (err: any) {
+        const msg = String(err?.message || err);
+        const code = /Unipile v2 (\d{3})/.exec(msg)?.[1];
+        return res.status(code ? Number(code) : 502).json({ error: msg.slice(0, 600), account_id });
+      }
     }
 
     // v1 route confirmed via probe:
@@ -290,14 +322,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     }
 
-    // save_candidate — pushes a candidate into a Recruiter project's
-    // pipeline stage. No v1 endpoint exists for this; v2 has
-    // /v2/{acct}/linkedin/recruiter/projects/{id}/pipeline/candidate/save
-    // but our v2 app currently 403s on Recruiter scope (Phase 2 unblock).
+    // save_candidate — pushes a candidate into a Recruiter project's pipeline
+    // stage. No v1 route exists. On v2:
+    //   POST {v2Base}/{acc_xxx}/linkedin/recruiter/projects/{id}/pipeline/candidate/save
+    // Gated by UNIPILE_LINKEDIN_V2 + requires the canonical acc_xxx id.
     if (action === "save_candidate") {
-      return res.status(501).json({
-        error: "save_candidate is not available — no v1 route and v2 Recruiter scope is gated. Save via LinkedIn Recruiter UI for now.",
-      });
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      if (!candidate_id) return res.status(400).json({ error: "Missing candidate_id" });
+      if (!(await isLinkedinV2Enabled(supabase))) {
+        return res.status(501).json({
+          error: "save_candidate requires Unipile v2. Set UNIPILE_LINKEDIN_V2=true once the v2 Recruiter scope probe passes; no v1 route exists. Until then, save via LinkedIn Recruiter UI.",
+        });
+      }
+      const acctV2 = await getUnipileAccountV2IdByV1Id(supabase, account_id);
+      if (!acctV2) {
+        return res.status(409).json({
+          error: "No Unipile v2 account id (acc_xxx) stored for this account yet — reconnect the account or run the v2 backfill before saving candidates on v2.",
+          account_id,
+        });
+      }
+      try {
+        const data = await unipileFetchV2(supabase, acctV2, recruiterV2.pipelineSave(job_id), {
+          method: "POST",
+          body: JSON.stringify({
+            candidate_id,
+            ...(stage_id ? { stage_id } : {}),
+          }),
+        });
+        return res.status(200).json(data);
+      } catch (err: any) {
+        const msg = String(err?.message || err);
+        const code = /Unipile v2 (\d{3})/.exec(msg)?.[1];
+        return res.status(code ? Number(code) : 502).json({ error: msg.slice(0, 600) });
+      }
     }
 
     // ── list_pipeline ───────────────────────────────────────────
