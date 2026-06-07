@@ -6,13 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
+import { authHeaders } from '@/lib/api-auth';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useMemo, useState, useRef } from 'react';
@@ -25,7 +26,7 @@ import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
-  Mailbox,
+  Mailbox, Linkedin, Copy,
 } from 'lucide-react';
 import { JobSourceTab } from '@/components/source/SourceTabs';
 import {
@@ -401,6 +402,41 @@ const JobDetail = () => {
   const [savingMove, setSavingMove] = useState(false);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const { data: kanbanRows = [] } = useJobKanbanRows(id ?? '');
+
+  // ── LinkedIn job post generator ───────────────────────────────────────────
+  const [liPostOpen, setLiPostOpen] = useState(false);
+  const [liPost, setLiPost] = useState('');
+  const [generatingPost, setGeneratingPost] = useState(false);
+
+  const handleGenerateLinkedInPost = async () => {
+    if (!id) return;
+    setLiPostOpen(true);
+    setGeneratingPost(true);
+    try {
+      const resp = await fetch('/api/generate-linkedin-job-post', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ job_id: id }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Failed to generate post');
+      setLiPost(data.post || '');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate LinkedIn post');
+      setLiPostOpen(false);
+    } finally {
+      setGeneratingPost(false);
+    }
+  };
+
+  const handleCopyLinkedInPost = async () => {
+    try {
+      await navigator.clipboard.writeText(liPost);
+      toast.success('Copied');
+    } catch {
+      toast.error('Failed to copy');
+    }
+  };
 
   const handleSendOutNotesConfirm = async (note: string) => {
     if (!pendingMove) return;
@@ -1004,6 +1040,15 @@ const JobDetail = () => {
             title="Copy link to this job"
           >
             <ExternalLink className="h-3.5 w-3.5" /> Share
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGenerateLinkedInPost}
+            className="border-card-border gap-1.5"
+            title="Generate a candidate-facing LinkedIn job post"
+          >
+            <Linkedin className="h-3.5 w-3.5" /> Generate LinkedIn post
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
             <ListTodo className="h-3.5 w-3.5 mr-1" /> Tasks
@@ -1910,6 +1955,55 @@ const JobDetail = () => {
         candidateName={pendingWithdrawal?.row.candidate?.full_name ?? undefined}
         jobTitle={job?.title ?? undefined}
       />
+
+      {/* ── LinkedIn job post generator ──────────────────────────────────── */}
+      <Dialog open={liPostOpen} onOpenChange={(v) => { if (!generatingPost) setLiPostOpen(v); }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Linkedin className="h-4 w-4" /> LinkedIn Job Post
+            </DialogTitle>
+            <DialogDescription>
+              A candidate-facing post for “{job?.title}”. Edit it, then copy and paste it into LinkedIn.
+            </DialogDescription>
+          </DialogHeader>
+
+          {generatingPost ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Generating post…
+            </div>
+          ) : (
+            <Textarea
+              value={liPost}
+              onChange={(e) => setLiPost(e.target.value)}
+              rows={16}
+              className="resize-none font-sans text-sm leading-relaxed"
+              placeholder="Generated post will appear here…"
+            />
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={handleGenerateLinkedInPost}
+              disabled={generatingPost}
+              className="gap-1.5"
+            >
+              {generatingPost
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Sparkles className="h-3.5 w-3.5" />}
+              Regenerate
+            </Button>
+            <Button
+              onClick={handleCopyLinkedInPost}
+              disabled={generatingPost || !liPost.trim()}
+              className="gap-1.5"
+            >
+              <Copy className="h-3.5 w-3.5" /> Copy to clipboard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };

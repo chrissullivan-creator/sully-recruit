@@ -9,7 +9,7 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
-  Send, Martini, Calendar, BarChart3, Menu, X, AlertTriangle,
+  Send, Martini, Calendar, BarChart3, Menu, X, AlertTriangle, Upload,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -54,6 +54,7 @@ const navigation = [
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
   { name: 'People',     href: '/people',     icon: Users2          },
   { name: 'Companies',  href: '/companies',  icon: Building2       },
+  { name: 'Import CSV', href: '/import',     icon: Upload          },
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
   { name: 'Send Outs',  href: '/send-outs',  icon: Send            },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
