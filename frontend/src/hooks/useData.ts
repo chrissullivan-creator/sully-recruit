@@ -484,16 +484,23 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
       const applyOwner = (q: any) =>
         ownedCandidateIds ? q.in('candidate_id', ownedCandidateIds) : q;
 
-      // Helper: exact COUNT of candidates (NOT clients) with a given status whose
-      // row was last updated inside the range. Uses head+count:'exact' because the
-      // reached_out bucket (~9.5k rows) blows past the 1000-row select cap.
-      const peopleStatusCount = (status: string) => {
+      // Weekly activity counts. The dashboard's People cards are a per-period
+      // scoreboard (default range = This Week, so they reset every Monday),
+      // counted off the REAL event timestamp for each metric rather than a
+      // status flag:
+      //   New         → created_at         (people added this period)
+      //   Reached Out → last_contacted_at  (people we contacted this period)
+      //   Engaged     → last_responded_at  (people who responded this period)
+      // This replaces the old status-by-updated_at count, which collapsed
+      // "Reached Out" to whatever rows were merely touched in the window
+      // (~1k) instead of a meaningful weekly number. head+count:'exact' to
+      // dodge the 1000-row select cap on large buckets.
+      const peopleActivityCount = (column: 'created_at' | 'last_contacted_at' | 'last_responded_at') => {
         let q = supabase.from('people')
           .select('id', { count: 'exact', head: true })
           .eq('type', 'candidate')
           .is('deleted_at', null)
-          .eq('status', status)
-          .gte('updated_at', fromIso).lte('updated_at', toIso);
+          .gte(column, fromIso).lte(column, toIso);
         if (ownerUserId) q = q.eq('owner_user_id', ownerUserId);
         return q;
       };
@@ -552,10 +559,10 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
           return q;
         })(),
 
-        // Person status counts (exact) — updated in range, candidates only
-        peopleStatusCount('new'),
-        peopleStatusCount('reached_out'),
-        peopleStatusCount('engaged'),
+        // Weekly activity counts (per-period, candidates only)
+        peopleActivityCount('created_at'),        // New: added this period
+        peopleActivityCount('last_contacted_at'), // Reached Out: contacted this period
+        peopleActivityCount('last_responded_at'), // Engaged: responded this period
         // Engaged list (rows) for the detail panel
         peopleByStatus('engaged'),
 

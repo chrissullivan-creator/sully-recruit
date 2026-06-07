@@ -114,8 +114,10 @@ const presets: { key: string; label: string; build: () => DashboardRange }[] = [
   },
 ];
 
+// Default to the current calendar week (resets every Monday) so the People
+// cards read as a fresh weekly scoreboard rather than a rolling 7-day window.
 export const defaultDashboardRange = (): DashboardRange =>
-  presets.find((p) => p.key === 'last7')!.build();
+  presets.find((p) => p.key === 'week')!.build();
 
 export const formatRangeLabel = (range: DashboardRange): string => {
   if (range.label && range.label !== 'Custom') return range.label;
