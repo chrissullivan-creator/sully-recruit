@@ -133,6 +133,19 @@ const TOOLS = [
     },
   },
   {
+    name: "match_candidates_to_job",
+    description:
+      "Given a job id, find the candidates in our database who best fit it. Loads the job (title, company, description), runs semantic search over resume_embeddings, and returns the top ranked candidates with id, name, title, company, match_score, and an excerpt. Candidates we've already spoken to (call history) are flagged vetted:true and ranked first. Use this for questions like \"who do we have for this role?\", \"match candidates to job X\", or \"who should we submit?\".",
+    input_schema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "uuid of the job to match candidates against" },
+        limit: { type: "number", description: "Max candidates to return (1-50). Default 20." },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
     name: "search_companies",
     description: "Find companies by name. Returns id, name, domain, industry.",
     input_schema: {
@@ -180,6 +193,7 @@ function statusFromToolCall(name: string, input: any): string {
     case "list_send_outs": return "Joe is reviewing the pipeline…";
     case "list_jobs": return "Joe is searching jobs…";
     case "get_job_detail": return "Joe is pulling the job…";
+    case "match_candidates_to_job": return "Joe is matching candidates to the job…";
     case "search_companies": return "Joe is searching companies…";
     default: return `Joe is running ${name}…`;
   }
@@ -430,6 +444,96 @@ async function toolGetJobDetail(supabase: any, input: any): Promise<string> {
   return JSON.stringify({ job: d, send_outs_by_stage: stageCounts });
 }
 
+async function toolMatchCandidatesToJob(supabase: any, input: any): Promise<string> {
+  const jobId = String(input?.job_id ?? "").trim();
+  if (!jobId) return JSON.stringify({ error: "job_id required" });
+  const limit = Math.min(Math.max(Number(input?.limit) || 20, 1), 50);
+
+  // Load the job (same query as get_job_detail) for the match text.
+  const { data: job, error: jobErr } = await supabase
+    .from("jobs")
+    .select("id, title, company_name, location, status, description")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jobErr || !job) return JSON.stringify({ error: jobErr?.message ?? "job_not_found" });
+
+  const matchText = [job.title, job.company_name, job.description]
+    .filter((s) => typeof s === "string" && s.trim())
+    .join(" ")
+    .slice(0, 8000);
+  if (!matchText.trim()) {
+    return JSON.stringify({ job: { id: job.id, title: job.title }, results: [], note: "job has no title/description to match on" });
+  }
+
+  // Same retrieval toolSearchPeople uses, candidate role only.
+  const embedding = await embedQuery(matchText);
+  if (!embedding) {
+    return JSON.stringify({ job: { id: job.id, title: job.title }, results: [], note: "embedding unavailable" });
+  }
+  const idScore = new Map<string, { score: number; via: string; excerpt?: string }>();
+  const { data: matches } = await supabase.rpc("match_resume_embeddings", {
+    query_embedding: embedding,
+    match_count: limit * 3,
+    min_similarity: 0.3,
+  });
+  for (const r of (matches as any[]) ?? []) {
+    if (!r.candidate_id) continue;
+    const prev = idScore.get(r.candidate_id);
+    if (!prev || prev.score < r.similarity) {
+      idScore.set(r.candidate_id, { score: r.similarity, via: "resume" });
+    }
+  }
+  if (idScore.size === 0) return JSON.stringify({ job: { id: job.id, title: job.title }, results: [], note: "no matches" });
+
+  const ids = [...idScore.keys()].slice(0, limit * 3);
+  const { data: rows } = await supabase
+    .from("candidates")
+    .select("id, full_name, current_title, current_company, location, status")
+    .in("id", ids)
+    .contains("roles", ["candidate"]);
+
+  // Flag candidates we've actually spoken to (call_logs or ai_call_notes) as
+  // vetted so Joe can favour and rank them first.
+  const candidateIds = ((rows as any[]) ?? []).map((r) => r.id).filter(Boolean);
+  const vettedIds = new Set<string>();
+  if (candidateIds.length > 0) {
+    const [logsRes, notesRes] = await Promise.all([
+      supabase.from("call_logs").select("candidate_id").in("candidate_id", candidateIds),
+      supabase.from("ai_call_notes").select("candidate_id").in("candidate_id", candidateIds),
+    ]);
+    for (const r of (logsRes.data as any[]) ?? []) if (r.candidate_id) vettedIds.add(r.candidate_id);
+    for (const r of (notesRes.data as any[]) ?? []) if (r.candidate_id) vettedIds.add(r.candidate_id);
+  }
+
+  const results = ((rows as any[]) ?? [])
+    .map((r) => {
+      const meta = idScore.get(r.id);
+      return {
+        id: r.id,
+        name: r.full_name,
+        title: r.current_title,
+        company: r.current_company,
+        location: r.location,
+        status: r.status,
+        match_score: meta ? Number(meta.score.toFixed(3)) : null,
+        match_via: meta?.via ?? "resume",
+        excerpt: meta?.excerpt ?? null,
+        vetted: vettedIds.has(r.id),
+      };
+    })
+    // Vetted (already spoken to) first, then by match score.
+    .sort((a: any, b: any) => {
+      if (a.vetted !== b.vetted) return a.vetted ? -1 : 1;
+      return (b.match_score ?? 0) - (a.match_score ?? 0);
+    })
+    .slice(0, limit);
+
+  return JSON.stringify({
+    job: { id: job.id, title: job.title, company: job.company_name },
+    results,
+  });
+}
+
 async function toolSearchCompanies(supabase: any, input: any): Promise<string> {
   const q = String(input?.query ?? "").trim();
   if (!q) return JSON.stringify({ error: "query required" });
@@ -453,6 +557,7 @@ async function runTool(supabase: any, name: string, input: any): Promise<string>
       case "list_send_outs": return await toolListSendOuts(supabase, input);
       case "list_jobs": return await toolListJobs(supabase, input);
       case "get_job_detail": return await toolGetJobDetail(supabase, input);
+      case "match_candidates_to_job": return await toolMatchCandidatesToJob(supabase, input);
       case "search_companies": return await toolSearchCompanies(supabase, input);
       default: return JSON.stringify({ error: `unknown tool ${name}` });
     }
