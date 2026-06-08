@@ -268,6 +268,26 @@ export type BackfillGraphEmailRequested = {
   };
 };
 
+/**
+ * Kicks off an AI candidate→job matching run for one job. Sent by
+ * /api/trigger-best-match (on-demand "Refresh" in the AI Matches tab) and
+ * by the hot-jobs cron (best-match-hot-jobs-cron) which fans one event out
+ * per `status='hot'` job. The handler lives in
+ * `api/lib/inngest/functions/best-match-job.ts`: it embeds the job, vector-
+ * searches resumes, blends in call intel, scores the top candidates with the
+ * AI cascade, and upserts `job_candidate_matches` for the run.
+ *
+ * `runId` is optional: on-demand callers pre-create a `job_match_runs` row and
+ * pass its id; the cron omits it and the handler creates the run row itself.
+ */
+export type BestMatchRequested = {
+  name: "job/best-match.requested";
+  data: {
+    jobId: string;
+    runId?: string;
+  };
+};
+
 export type AllInngestEvents =
   | BulkMigrateSequencesRequested
   | MigrateSequenceToInngestRequested
@@ -286,4 +306,5 @@ export type AllInngestEvents =
   | RecoverOrphanResumesRequested
   | FindLinkedinUrlRequested
   | EnrichCompanyViaApolloRequested
-  | BackfillGraphEmailRequested;
+  | BackfillGraphEmailRequested
+  | BestMatchRequested;

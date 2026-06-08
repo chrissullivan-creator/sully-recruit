@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { authHeaders } from "@/lib/api-auth";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface CandidateMatch {
   id: string;
@@ -12,6 +14,7 @@ interface CandidateMatch {
   vector_similarity: number;
   created_at: string;
   candidate_id: string;
+  has_call_history?: boolean;
   candidates: {
     id: string;
     full_name: string;
@@ -51,6 +54,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [actioning, setActioning] = useState<string | null>(null);
 
   const fetchMatches = useCallback(async (p: number) => {
     setLoading(true);
@@ -75,7 +79,7 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
     try {
       const triggerRes = await fetch("/api/trigger-best-match", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({ jobId }),
       });
       const { runId } = await triggerRes.json();
@@ -97,6 +101,44 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
       console.error("Refresh failed:", err);
     }
     setRefreshing(false);
+  };
+
+  // Send Out — mirrors addCandidateToSendOuts in JobDetail.tsx: insert a
+  // send_outs row at the 'submitted' stage for this (candidate, job).
+  const addToSendOut = async (candidateId: string) => {
+    setActioning(`send:${candidateId}`);
+    try {
+      const { error } = await supabase.from("send_outs").insert({
+        candidate_id: candidateId,
+        job_id: jobId,
+        stage: "submitted",
+      });
+      if (error) throw error;
+      toast.success("Candidate added to send outs");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to add to send outs");
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  // Add to pipeline — lightweight candidate_jobs tag via the shared endpoint.
+  const addToPipeline = async (candidateId: string) => {
+    setActioning(`pipe:${candidateId}`);
+    try {
+      const res = await fetch("/api/tag-candidate-job", {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({ candidate_id: candidateId, job_id: jobId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to add to pipeline");
+      toast.success(data?.duplicate ? "Already in pipeline" : "Added to pipeline");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to add to pipeline");
+    } finally {
+      setActioning(null);
+    }
   };
 
   const lastMatchedAt = matches[0]?.created_at;
@@ -226,6 +268,14 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
                         {c.full_name || "Unknown"}
                       </Link>
                       <ScoreBadge score={m.overall_score} />
+                      {m.has_call_history && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                          title="We've spoken to this candidate"
+                        >
+                          <span aria-hidden>📞</span> called
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 truncate">
                       {c.current_title}
@@ -236,10 +286,46 @@ export default function JobMatchesList({ jobId }: { jobId: string }) {
                         {m.reasoning}
                       </p>
                     )}
+                    {(m.strengths?.length > 0 || m.concerns?.length > 0) && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {(m.strengths || []).map((s, i) => (
+                          <span
+                            key={`s-${i}`}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          >
+                            {s}
+                          </span>
+                        ))}
+                        {(m.concerns || []).map((s, i) => (
+                          <span
+                            key={`c-${i}`}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                          >
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
                   <div className="shrink-0 flex items-center gap-1">
+                    <button
+                      onClick={() => addToSendOut(m.candidate_id)}
+                      disabled={actioning !== null}
+                      className="px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50"
+                      title="Add to send outs (submitted)"
+                    >
+                      {actioning === `send:${m.candidate_id}` ? "…" : "Send Out"}
+                    </button>
+                    <button
+                      onClick={() => addToPipeline(m.candidate_id)}
+                      disabled={actioning !== null}
+                      className="px-2 py-1 text-[11px] font-medium rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 disabled:opacity-50"
+                      title="Add to pipeline"
+                    >
+                      {actioning === `pipe:${m.candidate_id}` ? "…" : "Add to pipeline"}
+                    </button>
                     {c.linkedin_url && (
                       <a
                         href={c.linkedin_url}
