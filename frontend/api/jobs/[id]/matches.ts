@@ -71,8 +71,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: error.message });
   }
 
+  // Annotate each match with whether we've ACTUALLY spoken to the candidate
+  // (a row in call_logs or ai_call_notes) so the UI can show a "called" badge.
+  const candidateIds = (data || [])
+    .map((m: any) => m.candidate_id)
+    .filter(Boolean);
+
+  const calledIds = new Set<string>();
+  if (candidateIds.length > 0) {
+    const [{ data: logs }, { data: notes }] = await Promise.all([
+      supabase.from("call_logs").select("candidate_id").in("candidate_id", candidateIds),
+      supabase.from("ai_call_notes").select("candidate_id").in("candidate_id", candidateIds),
+    ]);
+    for (const r of logs || []) if (r.candidate_id) calledIds.add(r.candidate_id);
+    for (const r of notes || []) if (r.candidate_id) calledIds.add(r.candidate_id);
+  }
+
+  const matches = (data || []).map((m: any) => ({
+    ...m,
+    has_call_history: calledIds.has(m.candidate_id),
+  }));
+
   return res.status(200).json({
-    matches: data || [],
+    matches,
     total: count || 0,
     page,
     totalPages: Math.ceil((count || 0) / limit),
