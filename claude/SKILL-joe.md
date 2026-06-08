@@ -2,7 +2,7 @@
 
 ## Overview
 
-Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter persona — sharp, direct, sarcastic, zero fluff. Built on `claude-sonnet-4-20250514`.
+Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter persona — sharp, direct, sarcastic, zero fluff. Runs the Claude → OpenAI → Gemini → OpenRouter cascade in `ask-joe` (lead model `claude-sonnet-4-6`).
 
 ---
 
@@ -18,60 +18,46 @@ Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter pe
 
 ## Edge Function: `ask-joe`
 
+**File:** `frontend/supabase/functions/ask-joe/index.ts`
 **Endpoint:** `POST /functions/v1/ask-joe`
-**Auth:** Bearer session.access_token
-**Response:** SSE stream — parse `data: {"content": "..."}` chunks
+**Auth:** Bearer session.access_token (`verify_jwt: true`)
+**Response:** SSE stream — parse `data: {"content": "..."}` chunks (plus ephemeral `data: {"status": "..."}` lines shown while a tool runs)
+
+> **Deploy:** This is a Supabase edge function. It does NOT ship with the Vercel push. After editing `index.ts` you MUST run `supabase functions deploy ask-joe` (or deploy via the Supabase MCP) for changes to go live.
+
+### Provider cascade
+Claude → OpenAI → Gemini → OpenRouter. **Only Claude + OpenAI run with the tools enabled** (Claude reads `TOOLS`; OpenAI reads `OPENAI_TOOLS`, derived from `TOOLS`). Gemini + OpenRouter are text-only fallbacks hit only when both upstream providers fail. Models: Claude `claude-sonnet-4-6`, OpenAI `gpt-4o-mini`, Gemini `gemini-2.5-flash`, OpenRouter `openai/gpt-4o-mini`. Embeddings: Voyage `voyage-finance-2` (1024-dim).
 
 ### Request Shape
 ```json
 {
-  "mode": "chat" | "draft_message",
-  "context": {
-    "candidate_id": "uuid (optional)",
-    "contact_id": "uuid (optional)",
-    "job_id": "uuid (optional)",
-    "channel": "email | linkedin_message | sms | linkedin_connection",
-    "sender": "Chris Sullivan | Nancy Eberlein | Ashley Leichner"
-  },
   "messages": [
-    { "role": "user", "content": "Write a LinkedIn message for this candidate" }
+    { "role": "user", "content": "Who do we have for the rates trading role at Citadel?" }
   ]
 }
 ```
+The deployed function reads **only `messages`**. There is no `mode` or `context` field — Joe gets everything it needs through its tools. (Conversation history is passed as prior `messages`.)
 
-### Joe's Tools
-| Tool | When Joe Uses It |
+### Joe's Tools (all READ-ONLY; max 6 tool iterations/turn, 12s per tool)
+| Tool | What it does |
 |---|---|
-| `get_candidate_context` | Always before drafting about a candidate |
-| `get_contact_context` | Always before drafting about a contact |
-| `get_job_context` | Always before drafting for a specific role |
-| `search_candidates` | Structured filter search |
-| `semantic_search_candidates` | Natural language candidate search (Voyage Finance-2) |
+| `search_people` | Hybrid semantic + keyword search over candidates AND clients (resume embeddings + joe_says briefs + keyword ilike). Returns id, name, title, company, status, match_score, match_via, excerpt. Optional `role` (candidate\|client) / `status` filters. |
+| `get_person_detail` | Full joe_says brief + key profile fields for one person by id. |
+| `get_job_detail` | One job's full details + a per-stage count of send-outs against it. |
+| `match_candidates_to_job` | Given a `job_id`, finds the best-fit candidates: loads the job, embeds "{title} {company} {description}", runs `match_resume_embeddings` (candidate role only), and returns the top ~20 ranked candidates (id, name, title, company, match_score, excerpt). Candidates with call history (`call_logs`/`ai_call_notes`) are flagged `vetted:true` and ranked first. Use for "who do we have for <role>?", "match candidates to job X", "who should we submit?". |
+| `list_jobs` | Search jobs by title/company. Returns id, title, company, location, status. |
+| `list_notes` | Most recent recruiter notes for a person (created_at + plain-text note). |
+| `list_send_outs` | Pipeline rows; filter by person_id / job_id / stage. |
+| `list_recent_communications` | Most recent conversations + calls for a person across all channels. |
+| `search_companies` | Find companies by name. Returns id, name, domain, industry. |
 
-**Joe ALWAYS calls context tools when IDs are provided before writing a single word.**
+Joe chains tools when useful (e.g. `search_people` → `get_person_detail` → `list_recent_communications`, or `list_jobs` → `match_candidates_to_job`). When Joe references a person or job it includes the id in parentheses so the recruiter can jump to the page.
 
----
-
-## Draft Message Mode
-
-When `mode = "draft_message"`, Joe:
-1. Calls context tools immediately (candidate, job, sequence description)
-2. Writes in Emerald style (see below)
-3. Offers 1-2 variations after the draft
-4. Includes correct signature for sender
-
-### Signatures by Sender
-```
-Chris Sullivan | President | The Emerald Recruiting Group
-Nancy Eberlein | Managing Director | The Emerald Recruiting Group
-Ashley Leichner | Recruiter | The Emerald Recruiting Group
-The Emerald Recruiting Group Team  ← house account
-```
-Default to Chris if sender unknown.
+> **Note:** There is no `draft_message` mode and there are no `get_candidate_context` / `get_contact_context` / `get_job_context` / `search_candidates` / `semantic_search_candidates` tools in the deployed function — those were earlier designs that never shipped. The nine tools above are the live set.
 
 ---
 
-## Emerald Writing Style (baked into Joe)
+## Emerald Writing Style (Joe's voice)
 
 ### Voice
 - Confident but not arrogant. Warm without sycophantic.
@@ -108,17 +94,6 @@ Default to Chris if sender unknown.
 
 ---
 
-## Semantic Search Data Quality Display
-
-Joe always shows data quality badges on search results:
-- 📄✅ = Resume + LinkedIn (ready to submit)
-- 📄 = Resume only (submittable)
-- 🔗 = LinkedIn only (need resume before submitting)
-
-Lead with summary: "Found 12 candidates: 7 with resumes, 3 resume+LinkedIn, 2 LinkedIn only."
-
----
-
 ## Sentiment Classifications
 
 When analyzing inbound replies:
@@ -141,7 +116,7 @@ const response = await fetch(`${VITE_SUPABASE_URL}/functions/v1/ask-joe`, {
     apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify({ mode, context, messages }),
+  body: JSON.stringify({ messages }),
 });
 
 const reader = response.body.getReader();
