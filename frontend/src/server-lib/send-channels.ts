@@ -3,8 +3,30 @@ import { getAppSetting } from "./supabase.js";
 import { getMicrosoftAccessToken } from "./microsoft-graph.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 import { unipileSendEmail, shouldUseUnipileEmail } from "./unipile-email.js";
-import { unipileFetch } from "./unipile-v2.js";
+import {
+  unipileFetch,
+  unipileFetchV2,
+  isLinkedinV2SendEnabled,
+  getUnipileAccountV2IdByV1Id,
+} from "./unipile-v2.js";
 import { notifyError } from "./alerting.js";
+
+// Unipile v2 SEND path templates. The canonical copies live in
+// api/lib/unipile-urls.ts (`messagingV2`); they are inlined here to avoid a
+// src/server-lib → api/lib import (the only established cross-dir direction is
+// api/ → src/server-lib, and the Vercel bundler can't always follow the
+// reverse). Keep these in sync with `messagingV2`.
+//
+// READS at these paths are verified live (backfill-linkedin-messages-v2.ts).
+// The POST/SEND shapes are INFERRED and NOT yet confirmed against Unipile's
+// v2 Methods reference — every call site below carries a
+// `TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND)`.
+const linkedinV2SendPaths = {
+  chatMessages: (chatId: string) => `chats/${encodeURIComponent(chatId)}/messages`,
+  chats: () => "chats",
+  usersInvite: () => "users/invite",
+  user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
+};
 
 /**
  * Channel send helpers — routes to the correct per-user account.
@@ -549,6 +571,104 @@ async function verifyUnipileAccountHealth(supabase: any, accountId: string): Pro
   }
 }
 
+/**
+ * Unipile **v2** LinkedIn send path. Flag-gated (USE_LINKEDIN_V2_SEND) and
+ * only reached when the account has a canonical acc_xxx id. Mirrors the v1
+ * branch of sendLinkedIn (provider_id resolution, connection-invite vs
+ * classic DM vs Recruiter InMail, credit decrement) but routes through
+ * unipileFetchV2 against the v2 host.
+ *
+ * Health check: v2 has no /accounts/{id} equivalent wired here, and the v2
+ * READ path (backfill) already proves the account is reachable, so we skip
+ * the v1-style verifyUnipileAccountHealth on this path — a failed send
+ * surfaces the real Unipile error anyway.
+ *
+ * ⚠️ The v2 SEND request BODY SHAPES below are INFERRED, not verified. Every
+ * POST is annotated with TODO(verify v2 body shape before enabling
+ * USE_LINKEDIN_V2_SEND). Confirm them against Unipile's v2 Methods reference
+ * before flipping the flag on. No test sends were performed.
+ *
+ * Attachments are not yet supported on the v2 path (the v2 multipart shape is
+ * unverified); when files are present we send the text only and warn, so a
+ * step never silently drops its message.
+ */
+async function sendLinkedInV2(
+  supabase: any,
+  acctV2Id: string,
+  providerId: string,
+  body: string,
+  resolvedAccountId: string,
+  opts: {
+    isInMailChannel: boolean;
+    isConnectionRequest: boolean;
+    hasAttachments: boolean;
+  },
+): Promise<{ message_id: string; conversation_id: string }> {
+  // ── Connection request via v2 ───────────────────────────────────
+  // v1 equivalent: POST users/invite { provider_id, message }.
+  // TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND):
+  //   path `users/invite`, body { provider_id, message } — the v2 key
+  //   may be `identifier`/`recipient` and the field may be `body` not
+  //   `message`. Confirm against Unipile's v2 Methods reference.
+  if (opts.isConnectionRequest) {
+    const data: any = await unipileFetchV2(
+      supabase,
+      acctV2Id,
+      linkedinV2SendPaths.usersInvite(),
+      {
+        method: "POST",
+        body: JSON.stringify({ provider_id: providerId, message: body }),
+      },
+    );
+    return {
+      message_id: data.id || data.invitation_id || `invite_${Date.now()}`,
+      conversation_id: data.conversation_id || data.chat_id || "",
+    };
+  }
+
+  if (opts.hasAttachments) {
+    logger.warn("sendLinkedInV2: attachments not supported on v2 path yet — sending text only", {
+      channel: opts.isInMailChannel ? "linkedin_recruiter" : "linkedin",
+    });
+  }
+
+  // ── Regular message + InMail via v2 ─────────────────────────────
+  // v1 equivalent: POST chats { attendees_ids: [providerId], text,
+  // linkedin?: { api: 'recruiter' } }. The verified v2 READ shape uses a
+  // top-level `chats` collection, so a first message is a POST to it.
+  // TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND):
+  //   path `chats`, body { attendees_ids: [providerId], text, ... }.
+  //   v2 may want `recipients`/`attendees` instead of `attendees_ids`,
+  //   and the InMail selector (here `linkedin.api='recruiter'`) is the
+  //   single biggest unknown — Recruiter InMail may instead be a
+  //   recruiter/inbox-scoped route (e.g. an inmail/subject param, or a
+  //   /linkedin/recruiter/... path). Confirm both before enabling.
+  const sendPayload: any = { attendees_ids: [providerId], text: body };
+  if (opts.isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
+
+  try {
+    const data: any = await unipileFetchV2(
+      supabase,
+      acctV2Id,
+      linkedinV2SendPaths.chats(),
+      {
+        method: "POST",
+        body: JSON.stringify(sendPayload),
+      },
+    );
+    if (opts.isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
+    return {
+      message_id: data.id || data.message_id || `msg_${Date.now()}`,
+      conversation_id: data.chat_id || data.conversation_id || "",
+    };
+  } catch (err: any) {
+    if (opts.isInMailChannel && /\b422\b/.test(err.message)) {
+      throw new Error(`InMail ${err.message}`);
+    }
+    throw new Error(`Unipile v2 send error: ${err.message}`);
+  }
+}
+
 export async function sendLinkedIn(
   supabase: any,
   to: string,
@@ -574,8 +694,24 @@ export async function sendLinkedIn(
 ): Promise<{ message_id: string; conversation_id: string }> {
   const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
 
-  // Health check via v1: GET /api/v1/accounts/{id}.
-  await verifyUnipileAccountHealth(supabase, resolvedAccountId);
+  // ── v2 send routing decision ─────────────────────────────────────
+  // Take the v2 path ONLY when the USE_LINKEDIN_V2_SEND flag is on AND
+  // the resolved account has a canonical acc_xxx id. Either condition
+  // missing → fall through to the existing v1 path verbatim. Flag
+  // defaults off, so this is a no-op until someone flips it.
+  let acctV2Id: string | null = null;
+  if (await isLinkedinV2SendEnabled(supabase)) {
+    acctV2Id = await getUnipileAccountV2IdByV1Id(supabase, resolvedAccountId);
+  }
+  const useV2 = !!acctV2Id;
+
+  // Health check via v1: GET /api/v1/accounts/{id}. Skipped on the v2
+  // path — v2 has no /accounts/{id} equivalent wired here, and the v2
+  // READ path (backfill) already proves the account is reachable; a
+  // failed v2 send surfaces the real Unipile error anyway.
+  if (!useV2) {
+    await verifyUnipileAccountHealth(supabase, resolvedAccountId);
+  }
 
   // ── Resolve LinkedIn URL → provider_id via v1 ───────────────────
   // unipileFetch translates `linkedin/users/{slug}` → v1 `users/{slug}`
@@ -625,6 +761,22 @@ export async function sendLinkedIn(
         `Top up before re-running.`,
       );
     }
+  }
+
+  // ── v2 send dispatch ─────────────────────────────────────────────
+  // When the flag + acc_xxx are present, route the whole send (connection
+  // invite / classic DM / Recruiter InMail) through the v2 host. The credit
+  // guard above already ran (it reads our cached counter, API-agnostic). The
+  // v2 SEND body shapes are UNVERIFIED — see sendLinkedInV2's TODOs.
+  if (useV2 && acctV2Id) {
+    const hasAttachments = Array.isArray(attachmentUrls)
+      ? attachmentUrls.filter(Boolean).length > 0
+      : !!attachmentUrls;
+    return sendLinkedInV2(supabase, acctV2Id, providerId, body, resolvedAccountId, {
+      isInMailChannel,
+      isConnectionRequest,
+      hasAttachments,
+    });
   }
 
   // ── Connection request via v1 ───────────────────────────────────

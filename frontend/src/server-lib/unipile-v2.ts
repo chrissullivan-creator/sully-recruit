@@ -365,6 +365,31 @@ export async function isLinkedinV2Enabled(supabase: any): Promise<boolean> {
 }
 
 /**
+ * Is the LinkedIn-**send**-on-v2 flag enabled? Separate kill-switch from
+ * isLinkedinV2Enabled (which gates Recruiter project/pipeline writes): this
+ * one gates the outbound DM / connection-invite / Recruiter-InMail SEND path
+ * and the connection-status poll. Cached briefly. Defaults to false (legacy
+ * v1) when the row is missing or unparseable.
+ *
+ * NOTE: the v2 SEND body shapes this flag unlocks are NOT yet verified — do
+ * not flip app_settings.USE_LINKEDIN_V2_SEND on until they're confirmed
+ * against Unipile's v2 Methods reference.
+ */
+let _cachedV2SendFlag: { value: boolean; fetchedAt: number } | null = null;
+export async function isLinkedinV2SendEnabled(supabase: any): Promise<boolean> {
+  const now = Date.now();
+  if (_cachedV2SendFlag && now - _cachedV2SendFlag.fetchedAt < CONFIG_TTL_MS) {
+    return _cachedV2SendFlag.value;
+  }
+  const { data } = await supabase
+    .from("app_settings").select("value").eq("key", "USE_LINKEDIN_V2_SEND").maybeSingle();
+  const raw = String(data?.value ?? "").trim().toLowerCase();
+  const value = raw === "true" || raw === "1" || raw === "yes" || raw === "on";
+  _cachedV2SendFlag = { value, fetchedAt: now };
+  return value;
+}
+
+/**
  * Fetch a Unipile **v2** endpoint scoped to a canonical acc_xxx id. Mirrors
  * unipileFetch() but builds `${v2Base}/${acctV2Id}/${path}` with account_id
  * as a path segment and authenticates with UNIPILE_API_KEY_V2.
