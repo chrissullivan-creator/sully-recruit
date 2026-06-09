@@ -143,3 +143,27 @@ export const recruiterV2 = {
   inmailCredits: () => "linkedin/recruiter/inmail-credits",
   searchPeople: () => "linkedin/recruiter/search/people",
 };
+
+// ── Unipile v2 SEND/messaging path templates ─────────────────────────
+// Like `recruiterV2`, these are the *suffix* placed after
+// `${v2Base}/${acc_xxx}/` and are passed to unipileFetchV2() in
+// src/server-lib/unipile-v2.ts (which prepends base + acc_xxx + key).
+//
+// READS at these paths are verified live (see backfill-linkedin-messages-v2.ts:
+// GET inboxes, GET inboxes/{id}/chats, GET chats/{id}/messages). The SEND
+// (POST) shapes below are INFERRED from the v1 send bodies + the v2 read
+// shapes and are NOT yet confirmed against Unipile's v2 Methods reference.
+// Each call site that POSTs to one of these carries a
+// `TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND)` comment.
+// Verify status codes + body shapes before flipping USE_LINKEDIN_V2_SEND on.
+export const messagingV2 = {
+  /** Send a message into an existing chat: POST chats/{chat_id}/messages, body { text }. */
+  chatMessages: (chatId: string) =>
+    `chats/${encodeURIComponent(chatId)}/messages`,
+  /** Start a new chat / first message to a member: POST chats, body { attendees_ids|recipients, text }. */
+  chats: () => "chats",
+  /** Connection invitation: POST users/invite, body { provider_id|identifier, message }. */
+  usersInvite: () => "users/invite",
+  /** LinkedIn member lookup / connection status: GET users/{provider_id}. */
+  user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
+};

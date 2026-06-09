@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../client.js";
-import { unipileFetch } from "../../../../src/server-lib/unipile-v2.js";
+import {
+  unipileFetch,
+  unipileFetchV2,
+  isLinkedinV2SendEnabled,
+} from "../../../../src/server-lib/unipile-v2.js";
 import { calculatePostConnectionSendTime } from "../../../../src/server-lib/send-time-calculator.js";
 
 const BATCH_SIZE = 30;
@@ -76,6 +80,12 @@ export const checkConnections = inngest.createFunction(
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );
 
+    // Resolve the v2-send flag once per run. The per-enrollment poll uses
+    // the v2 connection-status endpoint only when this is on AND the account
+    // has a canonical acc_xxx id; otherwise it stays on v1 unchanged. Flag
+    // defaults off, so this is a no-op until someone flips it.
+    const v2SendEnabled = await isLinkedinV2SendEnabled(supabase);
+
     const { data: enrollments, error } = await supabase
       .from("sequence_enrollments")
       .select("id, candidate_id, enrolled_by")
@@ -115,7 +125,7 @@ export const checkConnections = inngest.createFunction(
 
         const { data: account } = await supabase
           .from("integration_accounts")
-          .select("unipile_account_id")
+          .select("unipile_account_id, unipile_account_id_v2")
           .eq("id", channel.account_id)
           .not("unipile_account_id", "is", null)
           .single();
@@ -125,27 +135,50 @@ export const checkConnections = inngest.createFunction(
           continue;
         }
 
-        // v1: GET /api/v1/users/{provider_id}?account_id=X
-        // (unipileFetch translates `linkedin/users/...` → v1 `users/...`)
+        // Poll connection status. v2 path (flag on + acc_xxx present):
+        //   GET /v2/{acc_xxx}/users/{provider_id}
+        // else v1 unchanged:
+        //   GET /api/v1/users/{provider_id}?account_id=X
+        //   (unipileFetch translates `linkedin/users/...` → v1 `users/...`)
+        const useV2 = v2SendEnabled && !!account.unipile_account_id_v2;
         let profile: any;
         try {
-          profile = await unipileFetch(
-            supabase,
-            account.unipile_account_id,
-            `linkedin/users/${encodeURIComponent(channel.provider_id)}`,
-            { method: "GET" },
-          );
+          profile = useV2
+            ? await unipileFetchV2(
+                supabase,
+                account.unipile_account_id_v2,
+                `users/${encodeURIComponent(channel.provider_id)}`,
+                { method: "GET" },
+              )
+            : await unipileFetch(
+                supabase,
+                account.unipile_account_id,
+                `linkedin/users/${encodeURIComponent(channel.provider_id)}`,
+                { method: "GET" },
+              );
         } catch {
           checked++;
           await delay(DELAY_MS);
           continue;
         }
 
+        // v1 reports is_connected / connection_status / relationship /
+        // distance. v2's user shape is UNVERIFIED here — read its likely
+        // `network_distance` (e.g. 1 or "DISTANCE_1"/"FIRST_DEGREE") plus
+        // is_connected defensively. Extra OR-clauses can't change the v1
+        // result (a v1 response won't carry these fields).
+        // TODO(verify v2 user/connection-status shape before enabling
+        //   USE_LINKEDIN_V2_SEND): confirm the v2 field name + values for
+        //   first-degree connection against Unipile's v2 Methods reference.
+        const networkDistance = profile.network_distance ?? profile.networkDistance;
         const isConnected =
           profile.is_connected === true ||
           profile.connection_status === "CONNECTED" ||
           profile.relationship === "CONNECTED" ||
-          profile.distance === 1;
+          profile.distance === 1 ||
+          networkDistance === 1 ||
+          networkDistance === "DISTANCE_1" ||
+          networkDistance === "FIRST_DEGREE";
 
         if (isConnected) {
           const now = new Date();
