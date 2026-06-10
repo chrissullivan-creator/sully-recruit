@@ -1,12 +1,12 @@
 /**
- * Centralised error alerting for Trigger.dev tasks.
+ * Centralised error alerting for Inngest background tasks.
  *
  * Reads two app_settings:
  *   - ALERT_RECIPIENTS  — comma-separated list of admin emails
  *   - ALERT_SENDER      — Microsoft Graph user to send from
  *
  * If either is missing, alerts are skipped (we still log the warning so
- * Trigger.dev's run log is the fallback record). Throttles per
+ * the function run log is the fallback record). Throttles per
  * (taskId, errorSignature) so a single bad inbound message doesn't
  * spam the inbox 100 times — same key only sends once per ALERT_TTL_MS.
  *
@@ -100,7 +100,25 @@ export async function notifyError(args: NotifyErrorArgs): Promise<void> {
   const now = Date.now();
   const cached = sentCache.get(cacheKey);
   if (cached && now - cached.lastSentAt < ALERT_TTL_MS) {
-    return; // throttle
+    return; // in-memory fast-path throttle
+  }
+  // Durable throttle. The in-memory cache above is per-lambda and resets on
+  // every serverless cold start, so on Vercel a recurring failure (e.g. a cron
+  // erroring every 5 min) would email on nearly every run. Back the 1/hour cap
+  // with a table so it actually holds across invocations. Best-effort: any DB
+  // hiccup falls through to sending (a dup alert beats a swallowed one).
+  try {
+    const { data: t } = await getSupabaseAdmin()
+      .from("alert_throttle")
+      .select("last_sent_at")
+      .eq("cache_key", cacheKey)
+      .maybeSingle();
+    if (t?.last_sent_at && now - new Date(t.last_sent_at).getTime() < ALERT_TTL_MS) {
+      sentCache.set(cacheKey, { signature: sig, lastSentAt: new Date(t.last_sent_at).getTime() });
+      return; // throttled (durable)
+    }
+  } catch {
+    // settings/table unreachable — fall through and send
   }
 
   // Always log first — that's the source-of-truth even if email fails.
@@ -121,7 +139,7 @@ export async function notifyError(args: NotifyErrorArgs): Promise<void> {
   const html = `
     <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px">
       <h2 style="margin:0 0 4px 0;color:#dc2626">${severity}: ${escapeHtml(taskId)}</h2>
-      <p style="color:#666;margin:0 0 12px 0">Trigger.dev task failure</p>
+      <p style="color:#666;margin:0 0 12px 0">Background task failure (Inngest)</p>
       <pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px">${escapeHtml(errMsg)}</pre>
       ${context ? `<h3 style="margin:16px 0 4px 0">Context</h3><pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;font-size:12px">${escapeHtml(JSON.stringify(context, null, 2))}</pre>` : ""}
       ${errStack ? `<h3 style="margin:16px 0 4px 0">Stack (truncated)</h3><pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;font-size:11px;color:#666">${escapeHtml(errStack.slice(0, 2000))}</pre>` : ""}
@@ -131,6 +149,14 @@ export async function notifyError(args: NotifyErrorArgs): Promise<void> {
   try {
     await sendInternalEmail(sender, recipients, subject, html);
     sentCache.set(cacheKey, { signature: sig, lastSentAt: now });
+    // Persist the throttle so other lambda instances honour the 1/hour cap.
+    try {
+      await getSupabaseAdmin()
+        .from("alert_throttle")
+        .upsert({ cache_key: cacheKey, last_sent_at: new Date(now).toISOString() }, { onConflict: "cache_key" });
+    } catch {
+      // best-effort — the in-memory cache still covers this instance
+    }
   } catch (mailErr: any) {
     logger.warn(`[${taskId}] alert email failed`, { error: mailErr?.message });
   }
