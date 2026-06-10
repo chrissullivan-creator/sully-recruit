@@ -13,11 +13,19 @@ const RC_SERVER = "https://platform.ringcentral.com";
  * For new completed calls (≥30s), inserts a `call_logs` row + fires
  * `call/transcribe.requested` so the Deepgram pipeline picks it up.
  *
+ * Scope: we poll the **account-level** call log (`/account/~/call-log`),
+ * which returns every extension's calls when the connected JWT is an
+ * account admin/owner — so one seat captures the whole company. Each call
+ * is attributed to the right person by matching its internal extension
+ * (top-level party or `legs`) against `metadata.rc_extension_id` on the
+ * integration_accounts rows. Calls whose internal extension isn't mapped to
+ * a tracked user are skipped (keeps unrelated company lines out). If the
+ * JWT isn't account-admin, we fall back to the per-extension call log
+ * (`/account/~/extension/~/call-log`) — the legacy single-seat behavior.
+ *
  * Ported from `src/trigger/poll-rc-calls.ts` — Inngest is the only
- * scheduler now. The transcription dispatch was previously a
- * Trigger.dev `processCallDeepgram.trigger(...)` call; it now sends
- * the canonical Inngest event so we don't need both engines to be
- * registered.
+ * scheduler now. The transcription dispatch sends the canonical Inngest
+ * `call/transcribe.requested` event.
  */
 
 async function findEntityByPhone(
@@ -102,6 +110,163 @@ async function getToken(supabase: any, acct: any, logger: any): Promise<string |
   return tok.access_token as string;
 }
 
+/**
+ * Find the tracked internal extension for a call. RC puts the internal
+ * party at the top level for outbound (`from`) but for inbound the answering
+ * extension only shows up in `legs`, so we scan every party and return the
+ * first extension that maps to a tracked user. Returns null when no tracked
+ * extension is involved (call belongs to an untracked line — skip it).
+ */
+function resolveOwnerExtension(call: any, knownExts: Set<string>): string | null {
+  const parties: any[] = [call.from, call.to];
+  for (const leg of call.legs ?? []) {
+    parties.push(leg.from, leg.to);
+  }
+  for (const p of parties) {
+    const ext = p?.extensionId ? String(p.extensionId) : null;
+    if (ext && knownExts.has(ext)) return ext;
+  }
+  return null;
+}
+
+/**
+ * Dedup + insert/reconcile a single RC call-log record under `ownerId`,
+ * queuing a transcription event for new (or freshly-lengthened) completed
+ * calls ≥30s. Returns counters so the caller can tally the run.
+ */
+async function processCall(
+  supabase: any,
+  call: any,
+  ownerId: string,
+  transcribeEvents: Array<{ name: "call/transcribe.requested"; data: { call_log_id: string } }>,
+  logger: any,
+): Promise<{ inserted: number; skipped: number; result?: any }> {
+  const callId = call.id ?? call.sessionId;
+  if (!callId) return { inserted: 0, skipped: 1 };
+
+  const duration = call.duration ?? 0;
+
+  // Reconciliation rule: the RC webhook fires while a call is still in
+  // progress (often `duration: 0` or a partial number), and call_logs gets
+  // stamped with that value. The poll runs later against the call-log REST
+  // API and has the *final* duration. If the existing row has a shorter
+  // duration than the polled one, update it (and stamp ended_at + status to
+  // match). Otherwise skip.
+  const { data: existing } = await supabase
+    .from("call_logs")
+    .select("id, duration_seconds, ended_at")
+    .eq("external_call_id", callId)
+    .maybeSingle();
+
+  if (existing) {
+    const existingDur = existing.duration_seconds ?? 0;
+    if (duration > existingDur || (!existing.ended_at && duration > 0)) {
+      const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
+      const endedAt =
+        startedAt && duration > 0
+          ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
+          : null;
+      let status = "completed";
+      if (call.result === "Missed") status = "missed";
+      else if (call.result === "Voicemail") status = "voicemail";
+      else if (duration === 0) status = "missed";
+      const { error: updateErr } = await supabase
+        .from("call_logs")
+        .update({
+          duration_seconds: duration,
+          ended_at: endedAt,
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (updateErr) {
+        logger.error(`Update error for call ${callId}`, { error: updateErr.message });
+        return { inserted: 0, skipped: 1 };
+      }
+      logger.info("Reconciled call duration", { callId, from: existingDur, to: duration });
+
+      // If the duration just crossed the transcription threshold (>=30s) AND
+      // the call is completed AND we haven't already produced ai_call_notes
+      // for it, dispatch transcription so the AI extraction + candidate
+      // auto-fill runs.
+      if (duration >= 30 && status === "completed" && existingDur < 30) {
+        const { data: existingNotes } = await supabase
+          .from("ai_call_notes")
+          .select("id")
+          .eq("external_call_id", callId)
+          .maybeSingle();
+        if (!existingNotes) {
+          transcribeEvents.push({ name: "call/transcribe.requested", data: { call_log_id: existing.id } });
+        }
+      }
+      return { inserted: 1, skipped: 0 };
+    }
+    return { inserted: 0, skipped: 1 };
+  }
+
+  const direction = (call.direction ?? "Outbound").toLowerCase();
+  const otherParty = direction === "outbound" ? call.to : call.from;
+  const otherPhone = otherParty?.phoneNumber ?? otherParty?.extensionNumber ?? null;
+  const entity = otherPhone ? await findEntityByPhone(supabase, otherPhone) : null;
+
+  let status = "completed";
+  if (call.result === "Missed") status = "missed";
+  else if (call.result === "Voicemail") status = "voicemail";
+  else if (duration === 0) status = "missed";
+
+  const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
+  const endedAt =
+    startedAt && duration > 0
+      ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
+      : null;
+
+  const { error: insertErr } = await supabase.from("call_logs").insert({
+    owner_id: ownerId,
+    phone_number: otherPhone,
+    direction,
+    duration_seconds: duration,
+    started_at: startedAt,
+    ended_at: endedAt,
+    status,
+    external_call_id: callId,
+    linked_entity_type: entity?.type ?? null,
+    linked_entity_id: entity?.id ?? null,
+    linked_entity_name: entity?.name ?? null,
+    notes: call.result ?? null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (insertErr) {
+    logger.error(`Insert error for call ${callId}`, { error: insertErr.message });
+    return { inserted: 0, skipped: 1 };
+  }
+
+  if (duration >= 30 && status === "completed") {
+    const { data: inserted } = await supabase
+      .from("call_logs")
+      .select("id")
+      .eq("external_call_id", callId)
+      .maybeSingle();
+    if (inserted?.id) {
+      transcribeEvents.push({ name: "call/transcribe.requested", data: { call_log_id: inserted.id } });
+    }
+  }
+
+  return {
+    inserted: 1,
+    skipped: 0,
+    result: {
+      call_id: callId,
+      direction,
+      duration,
+      status,
+      phone: otherPhone,
+      entity: entity?.name ?? "unlinked",
+    },
+  };
+}
+
 async function runPoll(lookbackMinutes: number, logger: any) {
   const supabase = getSupabaseAdmin();
 
@@ -116,6 +281,15 @@ async function runPoll(lookbackMinutes: number, logger: any) {
     logger.info("No RC accounts found");
     return { calls_scanned: 0, calls_inserted: 0, calls_skipped: 0, lookback_minutes: lookbackMinutes, results: [] };
   }
+
+  // extensionId → owner_user_id, so account-level calls land on the right
+  // person regardless of which seat's JWT did the polling.
+  const extToOwner = new Map<string, string>();
+  for (const a of accounts) {
+    const ext = a.metadata?.rc_extension_id;
+    if (ext && a.owner_user_id) extToOwner.set(String(ext), a.owner_user_id);
+  }
+  const knownExts = new Set(extToOwner.keys());
 
   const since = new Date(Date.now() - lookbackMinutes * 60 * 1000)
     .toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -132,6 +306,12 @@ async function runPoll(lookbackMinutes: number, logger: any) {
       continue;
     }
 
+    // Prefer the account-level log (captures every extension's calls with an
+    // admin JWT); fall back to the per-extension log if this JWT isn't
+    // account-admin. `account` scope attributes via the extension map;
+    // `extension` scope attributes everything to this seat's owner.
+    let scope: "account" | "extension" = "account";
+    let switchedToExtension = false;
     let page = 1;
     while (page <= 30) {
       const params = new URLSearchParams({
@@ -141,24 +321,44 @@ async function runPoll(lookbackMinutes: number, logger: any) {
         perPage: "100",
         page: String(page),
       });
+      const path =
+        scope === "account"
+          ? `/restapi/v1.0/account/~/call-log`
+          : `/restapi/v1.0/account/~/extension/~/call-log`;
 
-      const logRes = await fetch(
-        `${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log?${params}`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
-      );
+      const logRes = await fetch(`${RC_SERVER}${path}?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
 
       if (!logRes.ok) {
         const body = (await logRes.text()).slice(0, 300);
-        logger.error(`Call-log error ${logRes.status} for ${acct.account_label}`, { body });
-        // 401/403 means our token is rejected — almost always re-auth.
-        // Surface it so the user actually sees the breakage instead of
-        // calls quietly disappearing for days.
+        // A 401/403 on the first account-level page usually just means this
+        // JWT isn't account-admin — retry on the per-extension endpoint
+        // before giving up, and only alert if that fails too.
+        if (
+          scope === "account" &&
+          page === 1 &&
+          !switchedToExtension &&
+          (logRes.status === 401 || logRes.status === 403)
+        ) {
+          logger.warn(
+            `Account-level call-log ${logRes.status} for ${acct.account_label}; falling back to per-extension`,
+            { body },
+          );
+          scope = "extension";
+          switchedToExtension = true;
+          continue; // re-fetch page 1 against the extension endpoint
+        }
+        logger.error(`Call-log error ${logRes.status} for ${acct.account_label} (${scope})`, { body });
+        // 401/403 means our token is rejected on BOTH scopes — almost always
+        // re-auth. Surface it so calls don't quietly disappear for days.
         if (logRes.status === 401 || logRes.status === 403) {
           await notifyError({
             taskId: "poll-rc-calls",
             severity: "ERROR",
             error: new Error(`RC call-log ${logRes.status} for ${acct.account_label} — re-auth required: ${body}`),
-            context: { accountId: acct.id, accountLabel: acct.account_label, status: logRes.status },
+            context: { accountId: acct.id, accountLabel: acct.account_label, status: logRes.status, scope },
           });
         }
         break;
@@ -166,154 +366,29 @@ async function runPoll(lookbackMinutes: number, logger: any) {
 
       const logData = await logRes.json();
       const records = logData.records ?? [];
-      logger.info(`${acct.account_label} page ${page}: ${records.length} calls since ${since}`);
+      logger.info(`${acct.account_label} (${scope}) page ${page}: ${records.length} calls since ${since}`);
 
       for (const call of records) {
-        totalProcessed++;
-        const callId = call.id ?? call.sessionId;
-        if (!callId) {
-          totalSkipped++;
-          continue;
-        }
-
-        const duration = call.duration ?? 0;
-
-        // Reconciliation rule: the RC webhook fires while a call is
-        // still in progress (often `duration: 0` or a partial number),
-        // and call_logs gets stamped with that value. The poll runs
-        // later against the call-log REST API and has the *final*
-        // duration. We used to skip when a row already existed by
-        // external_call_id, which left every webhook-inserted call
-        // permanently stuck at its early-life duration — that's why
-        // every recent call was clustered under 120s.
-        //
-        // Now: if the existing row has a shorter duration than the
-        // polled one, update it (and stamp ended_at + status to match).
-        // Otherwise skip.
-        const { data: existing } = await supabase
-          .from("call_logs")
-          .select("id, duration_seconds, ended_at")
-          .eq("external_call_id", callId)
-          .maybeSingle();
-        if (existing) {
-          const existingDur = existing.duration_seconds ?? 0;
-          if (duration > existingDur || (!existing.ended_at && duration > 0)) {
-            const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
-            const endedAt =
-              startedAt && duration > 0
-                ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
-                : null;
-            let status = "completed";
-            if (call.result === "Missed") status = "missed";
-            else if (call.result === "Voicemail") status = "voicemail";
-            else if (duration === 0) status = "missed";
-            const { error: updateErr } = await supabase
-              .from("call_logs")
-              .update({
-                duration_seconds: duration,
-                ended_at: endedAt,
-                status,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", existing.id);
-            if (updateErr) {
-              logger.error(`Update error for call ${callId}`, { error: updateErr.message });
-              totalSkipped++;
-            } else {
-              logger.info("Reconciled call duration", {
-                callId,
-                from: existingDur,
-                to: duration,
-              });
-              totalInserted++;
-
-              // If the duration just crossed the transcription threshold
-              // (>=30s) AND the call is completed AND we haven't already
-              // produced ai_call_notes for it, dispatch transcription so
-              // the AI extraction + candidate auto-fill runs. Without
-              // this, webhook-inserted-then-reconciled long calls would
-              // sit forever with no summary / no field fills.
-              if (duration >= 30 && status === "completed" && existingDur < 30) {
-                const { data: existingNotes } = await supabase
-                  .from("ai_call_notes")
-                  .select("id")
-                  .eq("external_call_id", callId)
-                  .maybeSingle();
-                if (!existingNotes) {
-                  transcribeEvents.push({
-                    name: "call/transcribe.requested",
-                    data: { call_log_id: existing.id },
-                  });
-                }
-              }
-            }
-          } else {
+        // Whose call is it? In account scope, derive from the internal
+        // extension; skip calls on untracked lines. In extension scope every
+        // record belongs to this seat.
+        let ownerId: string | undefined;
+        if (scope === "account") {
+          const ext = resolveOwnerExtension(call, knownExts);
+          ownerId = ext ? extToOwner.get(ext) : undefined;
+          if (!ownerId) {
             totalSkipped++;
+            continue; // call on an extension we don't track
           }
-          continue;
-        }
-        const direction = (call.direction ?? "Outbound").toLowerCase();
-        const otherParty = direction === "outbound" ? call.to : call.from;
-        const otherPhone = otherParty?.phoneNumber ?? otherParty?.extensionNumber ?? null;
-        const entity = otherPhone ? await findEntityByPhone(supabase, otherPhone) : null;
-
-        let status = "completed";
-        if (call.result === "Missed") status = "missed";
-        else if (call.result === "Voicemail") status = "voicemail";
-        else if (duration === 0) status = "missed";
-
-        const startedAt = call.startTime ? new Date(call.startTime).toISOString() : null;
-        const endedAt =
-          startedAt && duration > 0
-            ? new Date(new Date(call.startTime).getTime() + duration * 1000).toISOString()
-            : null;
-
-        const { error: insertErr } = await supabase.from("call_logs").insert({
-          owner_id: acct.owner_user_id,
-          phone_number: otherPhone,
-          direction,
-          duration_seconds: duration,
-          started_at: startedAt,
-          ended_at: endedAt,
-          status,
-          external_call_id: callId,
-          linked_entity_type: entity?.type ?? null,
-          linked_entity_id: entity?.id ?? null,
-          linked_entity_name: entity?.name ?? null,
-          notes: call.result ?? null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-
-        if (insertErr) {
-          logger.error(`Insert error for call ${callId}`, { error: insertErr.message });
-          totalSkipped++;
         } else {
-          totalInserted++;
-          results.push({
-            call_id: callId,
-            direction,
-            duration,
-            status,
-            phone: otherPhone,
-            entity: entity?.name ?? "unlinked",
-            account: acct.account_label,
-          });
-
-          if (duration >= 30 && status === "completed") {
-            const { data: inserted } = await supabase
-              .from("call_logs")
-              .select("id")
-              .eq("external_call_id", callId)
-              .maybeSingle();
-            if (inserted?.id) {
-              transcribeEvents.push({
-                name: "call/transcribe.requested",
-                data: { call_log_id: inserted.id },
-              });
-            }
-          }
+          ownerId = acct.owner_user_id;
         }
+
+        totalProcessed++;
+        const r = await processCall(supabase, call, ownerId!, transcribeEvents, logger);
+        totalInserted += r.inserted;
+        totalSkipped += r.skipped;
+        if (r.result) results.push({ ...r.result, account: acct.account_label });
       }
 
       if (records.length < 100) break;
