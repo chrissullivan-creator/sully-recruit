@@ -136,10 +136,16 @@ export const reconcileUnipileAccounts = inngest.createFunction(
       }
     }
 
+    // Only reconcile mailboxes that are SUPPOSED to be connected. Accounts a
+    // human deactivated (e.g. the shared inbox / a rep who's off, inactive
+    // since May) are intentionally off — reconciling them would either wrongly
+    // reactivate them on an email match or alert "reconnect it" every 15 min
+    // forever. Skip them.
     const { data: rows, error } = await supabase
       .from("integration_accounts")
       .select("id, email_address, unipile_account_id_v2, is_active")
-      .eq("account_type", "email");
+      .eq("account_type", "email")
+      .eq("is_active", true);
     if (error) {
       logger.error("reconcile-unipile-accounts: db read failed", { error: error.message });
       return { error: error.message };
