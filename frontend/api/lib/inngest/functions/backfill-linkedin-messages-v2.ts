@@ -64,6 +64,25 @@ function isRateLimitError(err: any): boolean {
   return /Unipile v2 429\b/.test(String(err?.message || ""));
 }
 
+/** Classify a v2 chat into our channel bucket. v2 marks Recruiter InMail via
+ *  the chat id prefix ("RECRUITER_…"), the `folders` array, or the source
+ *  inbox — NOT via chat.type (which is just "1to1"). The old type/content_type
+ *  check is kept as a fallback. */
+function channelForChat(inboxId: string, chat: any): string {
+  const id = String(chat?.id ?? "").toUpperCase();
+  const folders = (Array.isArray(chat?.folders) ? chat.folders : []).map((f: any) =>
+    String(f).toUpperCase(),
+  );
+  const contentType = String(chat?.type ?? chat?.content_type ?? "").toLowerCase();
+  const isRecruiter =
+    inboxId.toUpperCase().startsWith("RECRUITER") ||
+    id.startsWith("RECRUITER_") ||
+    folders.some((f: string) => f.includes("RECRUITER")) ||
+    contentType === "inmail" ||
+    contentType.includes("recruiter");
+  return canonicalChannel(isRecruiter ? "linkedin_recruiter" : "linkedin");
+}
+
 /** Inboxes we pull from. CLASSIC_PRIMARY is the regular DM inbox; the others
  *  cover archived / other surfaces. We pull whatever is enabled (not
  *  `disabled`) but always include CLASSIC_PRIMARY when present. */
@@ -284,11 +303,9 @@ async function processAccountV2(
             }
           }
 
-          // Recruiter InMail vs Classic DM lives on the chat row (type/
-          // content_type). Default to classic 'linkedin'.
-          const contentType = String(chat.type ?? chat.content_type ?? "").toLowerCase();
-          const isInMail = contentType === "inmail" || contentType.includes("recruiter");
-          const channel = canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin");
+          // Recruiter InMail vs Classic DM: v2 marks recruiter via the chat id
+          // prefix / folders / source inbox, NOT chat.type (which is "1to1").
+          const channel = channelForChat(inboxId, chat);
 
           // Counterparty is chat.user (the 1:1 member). Fall back to
           // attendee-ish fields for non-standard shapes.
