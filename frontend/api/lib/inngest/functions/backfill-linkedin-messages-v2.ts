@@ -38,10 +38,31 @@ import { notifyError } from "../../../../src/server-lib/alerting.js";
  * per chat. Idempotent on external_message_id, so re-runs are safe.
  */
 
-const MAX_CHAT_PAGES = 2; // pages of chats per inbox per run
+const MAX_CHAT_PAGES = 1; // one page (25 newest chats) per inbox per run — v2 is rate-limited
 const CHATS_PER_PAGE = 25;
 const MESSAGES_PER_CHAT = 10;
 const RECENT_DAYS = 3; // only pull chats whose last message is within this window
+
+/**
+ * Unipile exposes ~14 LinkedIn inboxes per account: the CLASSIC_* set plus
+ * eight RECRUITER_* views (UNREAD / ACCEPTED / DECLINED / UNRESPONDED / …)
+ * that are just FILTERED subsets of RECRUITER_PRIMARY. Scanning all of them
+ * every run blew through Unipile's ~100-request/window cap (429
+ * api/too_many_requests); and because CLASSIC_* is iterated first, the
+ * recruiter inboxes were starved of budget — so Recruiter InMail never got
+ * ingested. Scan only the SUPERSET inboxes that hold distinct conversations.
+ */
+const INBOXES_TO_SCAN = new Set([
+  "CLASSIC_PRIMARY", // regular DMs
+  "CLASSIC_INMAIL", // classic InMail
+  "CLASSIC_ARCHIVED", // archived DMs
+  "RECRUITER_PRIMARY", // ALL recruiter chats (other RECRUITER_* are filtered views of this)
+]);
+
+/** A Unipile v2 429 (rate limit). unipileFetchV2 throws "Unipile v2 429 …". */
+function isRateLimitError(err: any): boolean {
+  return /Unipile v2 429\b/.test(String(err?.message || ""));
+}
 
 /** Inboxes we pull from. CLASSIC_PRIMARY is the regular DM inbox; the others
  *  cover archived / other surfaces. We pull whatever is enabled (not
@@ -171,7 +192,8 @@ async function processAccountV2(
     const m = String(err?.message || "").match(/Unipile v2 (\d{3})/);
     const status = m ? Number(m[1]) : null;
     const is5xx = status !== null && status >= 500 && status <= 599;
-    if (!is5xx) {
+    // 429 = rate-limited (expected backpressure), 5xx = transient — don't alert.
+    if (!is5xx && status !== 429) {
       await notifyError({
         taskId: "backfill-linkedin-messages-v2",
         severity: "ERROR",
@@ -186,13 +208,15 @@ async function processAccountV2(
     : Array.isArray(inboxPayload)
       ? inboxPayload
       : (inboxPayload?.items ?? []);
-  const enabledInboxes = inboxes.filter(isEnabledInbox);
+  const enabledInboxes = inboxes.filter((i) => isEnabledInbox(i) && INBOXES_TO_SCAN.has(i.id));
   // Always include CLASSIC_PRIMARY even if the list shape surprised us.
   if (!enabledInboxes.some((i) => i.id === "CLASSIC_PRIMARY")) {
     enabledInboxes.push({ id: "CLASSIC_PRIMARY" });
   }
 
+  let rateLimited = false;
   for (const inbox of enabledInboxes) {
+    if (rateLimited) break;
     const inboxId = inbox.id as string;
     if (!inboxId) continue;
     stats.inboxes++;
@@ -211,6 +235,11 @@ async function processAccountV2(
           { method: "GET", query: { limit: CHATS_PER_PAGE, ...(cursor ? { cursor } : {}) } },
         );
       } catch (err: any) {
+        if (isRateLimitError(err)) {
+          rateLimited = true;
+          logger.warn("v2 rate-limited fetching chats — backing off this run", { email: accountEmail, inbox: inboxId });
+          break;
+        }
         logger.warn("v2 chats fetch failed", { email: accountEmail, inbox: inboxId, error: err.message });
         stats.errors++;
         break;
@@ -239,6 +268,22 @@ async function processAccountV2(
         }
 
         try {
+          // Activity gate: skip the (rate-limited) messages fetch entirely when
+          // this chat has no new activity since we last ingested it. The DB
+          // lookup is free; the Unipile messages call is the scarce resource.
+          if (!Number.isNaN(lastMs)) {
+            const { data: lastStored } = await supabase
+              .from("messages")
+              .select("sent_at")
+              .eq("external_conversation_id", chatId)
+              .order("sent_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (lastStored?.sent_at && new Date(lastStored.sent_at).getTime() >= lastMs) {
+              continue; // nothing new in this chat
+            }
+          }
+
           // Recruiter InMail vs Classic DM lives on the chat row (type/
           // content_type). Default to classic 'linkedin'.
           const contentType = String(chat.type ?? chat.content_type ?? "").toLowerCase();
@@ -279,6 +324,11 @@ async function processAccountV2(
               { method: "GET", query: { limit: MESSAGES_PER_CHAT } },
             );
           } catch (err: any) {
+            if (isRateLimitError(err)) {
+              rateLimited = true;
+              logger.warn("v2 rate-limited fetching messages — backing off this run", { chat: chatId });
+              break;
+            }
             logger.warn("v2 messages fetch failed", { chat: chatId, error: err.message });
             stats.errors++;
             continue;
@@ -374,6 +424,7 @@ async function processAccountV2(
         }
       }
 
+      if (rateLimited) break;
       cursor = chatPayload?.cursor || chatPayload?.next_cursor || chatPayload?.next || undefined;
       if (!cursor) break;
     }
@@ -384,8 +435,11 @@ async function processAccountV2(
 
 export const backfillLinkedinMessagesV2 = inngest.createFunction(
   { id: "backfill-linkedin-messages-v2", name: "Backfill LinkedIn messages from Unipile v2 (Inngest)" },
-  // Offset from the v1 LinkedIn cron (*/5) and from backfill-emails (1-56/5).
-  { cron: "2-57/5 * * * *" },
+  // Every 15 min (offset from the other crons). Unipile v2 caps LinkedIn at
+  // ~100 requests/window per account and that budget is shared with the other
+  // LinkedIn crons; every-5-min runs across ~14 inboxes were tripping 429s.
+  // Real-time inbound still arrives via the Unipile webhook — this is the net.
+  { cron: "8-53/15 * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
 
