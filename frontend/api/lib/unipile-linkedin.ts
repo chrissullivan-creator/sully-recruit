@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { getUnipileAccountV2IdByV1Id } from "../../src/server-lib/unipile-v2.js";
 
 interface UnipileConfig {
   apiKey: string;
@@ -269,14 +270,31 @@ export async function fetchUnipileAccount(config: UnipileConfig, accountId: stri
 export async function verifyRecruiterProjectsAccess(
   config: UnipileConfig,
   accountId: string,
+  v2AccountId?: string | null,
 ): Promise<RecruiterAccessCheck> {
-  // Per Unipile docs and direct probe: Recruiter hiring projects live
-  // at /api/v1/linkedin/projects?account_id=... on the tenant DSN.
-  // The older /v2/{acct}/linkedin/recruiter/projects pattern we used
-  // hits api.unipile.com/v2 which returns "Route Not Found" (not a real
-  // host) — and even when we tried it on the DSN, /api/v2 doesn't
-  // exist either. The 401 'Invalid API Key' was Unipile's confusing
-  // way of saying the route was wrong.
+  // Prefer v2. The v1 DSN workspace is empty now (every LinkedIn account lives
+  // on the v2 app), so the legacy v1 /linkedin/projects probe 404s "Account
+  // not found" even when Recruiter is fully operational — which mislabels the
+  // seat as Classic in Settings. When we can resolve the canonical acc_xxx,
+  // probe the v2 Recruiter endpoint (confirmed 200 for a live seat); fall back
+  // to the v1 probe only when no acc_xxx is resolvable yet (fresh connect).
+  if (v2AccountId && config.v2Base && config.apiKeyV2) {
+    const v2url = new URL(
+      `${config.v2Base.replace(/\/+$/, "")}/${encodeURIComponent(v2AccountId)}/linkedin/recruiter/projects`,
+    );
+    v2url.searchParams.set("limit", "1");
+    const r = await fetch(v2url.toString(), {
+      headers: { Accept: "application/json", "X-API-KEY": config.apiKeyV2 },
+    });
+    const t = await r.text().catch(() => "");
+    if (r.ok) return { enabled: true, status: r.status };
+    if ([401, 403, 404].includes(r.status)) {
+      return { enabled: false, status: r.status, detail: t.slice(0, 400) };
+    }
+    throw new Error(`Recruiter verification (v2) failed (${r.status}): ${t.slice(0, 300)}`);
+  }
+
+  // Legacy v1 fallback — only reached when no acc_xxx is resolvable yet.
   const url = new URL(`${config.v1Base}/linkedin/projects`);
   url.searchParams.set("account_id", accountId);
   url.searchParams.set("limit", "1");
@@ -470,7 +488,8 @@ export async function syncLinkedinIntegrationAccount(
 
   let recruiterCheck: RecruiterAccessCheck = { enabled: false, status: 0 };
   try {
-    recruiterCheck = await verifyRecruiterProjectsAccess(config, params.unipileAccountId);
+    const v2AccountId = await getUnipileAccountV2IdByV1Id(supabase, params.unipileAccountId);
+    recruiterCheck = await verifyRecruiterProjectsAccess(config, params.unipileAccountId, v2AccountId);
   } catch (err: any) {
     warnings.push(err.message);
   }
