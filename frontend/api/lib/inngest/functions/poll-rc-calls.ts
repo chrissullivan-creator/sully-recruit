@@ -1,6 +1,7 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
+import { fetchRcCallLog } from "../../../../src/server-lib/rc-call-log.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -125,6 +126,16 @@ function resolveOwnerExtension(call: any, knownExts: Set<string>): string | null
   for (const p of parties) {
     const ext = p?.extensionId ? String(p.extensionId) : null;
     if (ext && knownExts.has(ext)) return ext;
+  }
+  return null;
+}
+
+/** Any internal extension id present on a call — for logging untracked lines. */
+function candidateInternalExt(call: any): string | null {
+  const parties: any[] = [call.from, call.to];
+  for (const leg of call.legs ?? []) parties.push(leg.from, leg.to);
+  for (const p of parties) {
+    if (p?.extensionId) return String(p.extensionId);
   }
   return null;
 }
@@ -299,6 +310,8 @@ async function runPoll(lookbackMinutes: number, logger: any) {
   const results: any[] = [];
   const transcribeEvents: Array<{ name: "call/transcribe.requested"; data: { call_log_id: string } }> = [];
 
+  const unmappedExts = new Set<string>();
+
   for (const acct of accounts) {
     const token = await getToken(supabase, acct, logger);
     if (!token) {
@@ -306,94 +319,62 @@ async function runPoll(lookbackMinutes: number, logger: any) {
       continue;
     }
 
-    // Prefer the account-level log (captures every extension's calls with an
-    // admin JWT); fall back to the per-extension log if this JWT isn't
-    // account-admin. `account` scope attributes via the extension map;
-    // `extension` scope attributes everything to this seat's owner.
-    let scope: "account" | "extension" = "account";
-    let switchedToExtension = false;
-    let page = 1;
-    while (page <= 30) {
-      const params = new URLSearchParams({
-        type: "Voice",
-        view: "Detailed",
-        dateFrom: since,
-        perPage: "100",
-        page: String(page),
+    // Account-level first (one admin JWT covers every extension), falling back
+    // to per-extension for a non-admin seat — see fetchRcCallLog. `account`
+    // scope attributes via the extension map; `extension` scope attributes
+    // everything to this seat's owner.
+    const { records, scope, authError } = await fetchRcCallLog(token, {
+      dateFrom: since,
+      label: `rc-poll:${acct.account_label}`,
+    });
+
+    if (authError) {
+      // Both account- and extension-scope rejected the token — genuine re-auth.
+      logger.error(
+        `Call-log ${authError.status} for ${acct.account_label} (account+extension both rejected)`,
+        { body: authError.body },
+      );
+      await notifyError({
+        taskId: "poll-rc-calls",
+        severity: "ERROR",
+        error: new Error(`RC call-log ${authError.status} for ${acct.account_label} — re-auth required: ${authError.body}`),
+        context: { accountId: acct.id, accountLabel: acct.account_label, status: authError.status },
       });
-      const path =
-        scope === "account"
-          ? `/restapi/v1.0/account/~/call-log`
-          : `/restapi/v1.0/account/~/extension/~/call-log`;
-
-      const logRes = await fetch(`${RC_SERVER}${path}?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(15_000),
-      });
-
-      if (!logRes.ok) {
-        const body = (await logRes.text()).slice(0, 300);
-        // A 401/403 on the first account-level page usually just means this
-        // JWT isn't account-admin — retry on the per-extension endpoint
-        // before giving up, and only alert if that fails too.
-        if (
-          scope === "account" &&
-          page === 1 &&
-          !switchedToExtension &&
-          (logRes.status === 401 || logRes.status === 403)
-        ) {
-          logger.warn(
-            `Account-level call-log ${logRes.status} for ${acct.account_label}; falling back to per-extension`,
-            { body },
-          );
-          scope = "extension";
-          switchedToExtension = true;
-          continue; // re-fetch page 1 against the extension endpoint
-        }
-        logger.error(`Call-log error ${logRes.status} for ${acct.account_label} (${scope})`, { body });
-        // 401/403 means our token is rejected on BOTH scopes — almost always
-        // re-auth. Surface it so calls don't quietly disappear for days.
-        if (logRes.status === 401 || logRes.status === 403) {
-          await notifyError({
-            taskId: "poll-rc-calls",
-            severity: "ERROR",
-            error: new Error(`RC call-log ${logRes.status} for ${acct.account_label} — re-auth required: ${body}`),
-            context: { accountId: acct.id, accountLabel: acct.account_label, status: logRes.status, scope },
-          });
-        }
-        break;
-      }
-
-      const logData = await logRes.json();
-      const records = logData.records ?? [];
-      logger.info(`${acct.account_label} (${scope}) page ${page}: ${records.length} calls since ${since}`);
-
-      for (const call of records) {
-        // Whose call is it? In account scope, derive from the internal
-        // extension; skip calls on untracked lines. In extension scope every
-        // record belongs to this seat.
-        let ownerId: string | undefined;
-        if (scope === "account") {
-          const ext = resolveOwnerExtension(call, knownExts);
-          ownerId = ext ? extToOwner.get(ext) : undefined;
-          if (!ownerId) {
-            totalSkipped++;
-            continue; // call on an extension we don't track
-          }
-        } else {
-          ownerId = acct.owner_user_id;
-        }
-
-        totalProcessed++;
-        const r = await processCall(supabase, call, ownerId!, transcribeEvents, logger);
-        totalInserted += r.inserted;
-        totalSkipped += r.skipped;
-        if (r.result) results.push({ ...r.result, account: acct.account_label });
-      }
-
-      if (records.length < 100) break;
-      page++;
+      continue;
     }
+
+    logger.info(`${acct.account_label} (${scope}) returned ${records.length} calls since ${since}`);
+
+    for (const call of records) {
+      // Whose call is it? On account scope, derive from the internal extension
+      // and skip untracked lines; on extension scope every record is this seat's.
+      let ownerId: string | undefined;
+      if (scope === "account") {
+        const ext = resolveOwnerExtension(call, knownExts);
+        ownerId = ext ? extToOwner.get(ext) : undefined;
+        if (!ownerId) {
+          totalSkipped++;
+          const cand = candidateInternalExt(call);
+          if (cand) unmappedExts.add(cand);
+          continue; // call on an extension we don't track
+        }
+      } else {
+        ownerId = acct.owner_user_id;
+      }
+
+      totalProcessed++;
+      const r = await processCall(supabase, call, ownerId!, transcribeEvents, logger);
+      totalInserted += r.inserted;
+      totalSkipped += r.skipped;
+      if (r.result) results.push({ ...r.result, account: acct.account_label });
+    }
+  }
+
+  if (unmappedExts.size > 0) {
+    logger.warn(
+      "poll-rc-calls: skipped calls on untracked RC extensions — set metadata.rc_extension_id on the matching integration_account to ingest them",
+      { extensions: [...unmappedExts] },
+    );
   }
 
   // Inngest's send accepts up to 5000 events per call. Chunk just to be safe.
