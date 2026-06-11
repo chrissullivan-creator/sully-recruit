@@ -13,6 +13,7 @@ import {
   matchPersonByEmail,
   classifyEmail,
 } from "../../../../src/server-lib/match-person-by-email.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Process Microsoft Graph notifications (email, calendar events).
@@ -61,9 +62,9 @@ export const processMicrosoftEvent = inngest.createFunction(
     }
 
     const resourceUrl = `https://graph.microsoft.com/v1.0/${notification.resource}`;
-    const resourceResp = await fetch(resourceUrl, {
+    const resourceResp = await fetchWithRetry(resourceUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, { label: "graph" });
 
     if (!resourceResp.ok) {
       if (resourceResp.status === 404) {
@@ -115,9 +116,9 @@ async function fetchAndUploadAttachments(
 ): Promise<Array<{ name: string; storage_path: string; mime_type: string | null; size: number | null }>> {
   let attachments: any[];
   try {
-    const resp = await fetch(`${resourceUrl}/attachments`, {
+    const resp = await fetchWithRetry(`${resourceUrl}/attachments`, {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, { label: "graph" });
     if (!resp.ok) {
       logger.warn("Could not fetch Graph attachments", { status: resp.status });
       return [];
@@ -197,9 +198,9 @@ async function processResumesInboxEmail(
   const sourceMessageId: string | null = message.id || message.internetMessageId || null;
   let attachments: any[] = [];
   try {
-    const resp = await fetch(`${resourceUrl}/attachments`, {
+    const resp = await fetchWithRetry(`${resourceUrl}/attachments`, {
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, { label: "graph" });
     if (!resp.ok) {
       logger.warn("Resumes inbox: could not list attachments", { status: resp.status });
       return { created: 0, skipped: 0 };
@@ -741,7 +742,7 @@ async function getMicrosoftAccessToken(logger: any): Promise<string | null> {
     const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
     const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-    const resp = await fetch(tokenUrl, {
+    const resp = await fetchWithRetry(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -750,7 +751,7 @@ async function getMicrosoftAccessToken(logger: any): Promise<string | null> {
         scope: "https://graph.microsoft.com/.default",
         grant_type: "client_credentials",
       }),
-    });
+    }, { label: "graph" });
 
     if (!resp.ok) {
       logger.error("Microsoft token error", { status: resp.status });

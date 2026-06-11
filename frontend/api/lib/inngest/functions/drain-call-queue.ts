@@ -1,5 +1,6 @@
 import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Drain the `call_processing_queue` — picks up `pending` calls and POSTs
@@ -49,7 +50,7 @@ export const drainCallQueue = inngest.createFunction(
 
     const promises = batch.map(async (item: any) => {
       try {
-        const res = await fetch(`${supabaseUrl}/functions/v1/process-call-recording`, {
+        const res = await fetchWithRetry(`${supabaseUrl}/functions/v1/process-call-recording`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

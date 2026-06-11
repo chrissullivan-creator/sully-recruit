@@ -8,6 +8,7 @@ import {
   getVoyageKey,
 } from "../../../../src/server-lib/supabase.js";
 import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 interface GenerateJoeSaysPayload {
   entityId: string;
@@ -197,7 +198,7 @@ export const generateJoeSays = inngest.createFunction(
     try {
       const voyageKey = await getVoyageKey().catch(() => "");
       if (voyageKey) {
-        const embedRes = await fetch("https://api.voyageai.com/v1/embeddings", {
+        const embedRes = await fetchWithRetry("https://api.voyageai.com/v1/embeddings", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${voyageKey}`,
@@ -208,7 +209,7 @@ export const generateJoeSays = inngest.createFunction(
             input: [summary.slice(0, 8000)],
             input_type: "document",
           }),
-        });
+        }, { label: "voyage" });
         if (embedRes.ok) {
           const embedData = await embedRes.json();
           const vec = embedData?.data?.[0]?.embedding;

@@ -2,6 +2,7 @@ import { inngest } from "../client.js";
 import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
 import { fetchRcCallLog } from "../../../../src/server-lib/rc-call-log.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -71,7 +72,7 @@ async function getToken(supabase: any, acct: any, logger: any): Promise<string |
     return null;
   }
 
-  const res = await fetch(`${RC_SERVER}/restapi/oauth/token`, {
+  const res = await fetchWithRetry(`${RC_SERVER}/restapi/oauth/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -81,7 +82,7 @@ async function getToken(supabase: any, acct: any, logger: any): Promise<string |
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
       assertion: jwt,
     }),
-  });
+  }, { label: "rc-token" });
   if (!res.ok) {
     const body = (await res.text()).slice(0, 300);
     logger.error("RC token refresh failed", { account: acct.account_label, status: res.status, body });

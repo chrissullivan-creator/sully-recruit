@@ -3,6 +3,7 @@ import {
   getSupabaseAdmin,
   getMicrosoftGraphCredentials,
 } from "../../../../src/server-lib/supabase.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 const WEBHOOK_BASE_URL = "https://www.sullyrecruit.app";
 
@@ -17,7 +18,9 @@ const WEBHOOK_BASE_URL = "https://www.sullyrecruit.app";
  *
  * Daily at 06:00 UTC. Ported from
  * `src/trigger/webhook-subscription-renewal.ts` — Inngest is the only
- * scheduler now.
+ * scheduler now. All external calls go through fetchWithRetry so a
+ * transient 429/5xx doesn't silently skip renewal (which would let
+ * webhooks lapse until the next day).
  */
 export const renewWebhookSubscriptions = inngest.createFunction(
   { id: "renew-webhook-subscriptions", name: "Renew Graph + RingCentral webhook subscriptions (Inngest)" },
@@ -30,7 +33,7 @@ export const renewWebhookSubscriptions = inngest.createFunction(
     try {
       const { clientId, clientSecret, tenantId } = await getMicrosoftGraphCredentials();
 
-      const tokenResp = await fetch(
+      const tokenResp = await fetchWithRetry(
         `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
         {
           method: "POST",
@@ -42,15 +45,18 @@ export const renewWebhookSubscriptions = inngest.createFunction(
             grant_type: "client_credentials",
           }),
         },
+        { label: "graph-token" },
       );
 
       if (!tokenResp.ok) throw new Error(`Token error: ${await tokenResp.text()}`);
       const { access_token } = await tokenResp.json();
 
       // List existing subs so we renew what's live and only create what's missing.
-      const listResp = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
+      const listResp = await fetchWithRetry(
+        "https://graph.microsoft.com/v1.0/subscriptions",
+        { headers: { Authorization: `Bearer ${access_token}` } },
+        { label: "graph-subs-list" },
+      );
       const existing: any[] = listResp.ok ? ((await listResp.json()).value || []) : [];
 
       // Self-heal. Graph subscriptions expire every ~3 days; the previous
@@ -79,7 +85,7 @@ export const renewWebhookSubscriptions = inngest.createFunction(
           const match = existing.find((s: any) => s.resource === res.resource);
           try {
             if (match) {
-              const renewResp = await fetch(
+              const renewResp = await fetchWithRetry(
                 `https://graph.microsoft.com/v1.0/subscriptions/${match.id}`,
                 {
                   method: "PATCH",
@@ -89,6 +95,7 @@ export const renewWebhookSubscriptions = inngest.createFunction(
                   },
                   body: JSON.stringify({ expirationDateTime }),
                 },
+                { label: "graph-sub-renew" },
               );
               if (renewResp.ok) {
                 results.push({ service: "graph", user: `${userName} (${res.label})`, status: "renewed" });
@@ -98,20 +105,24 @@ export const renewWebhookSubscriptions = inngest.createFunction(
               logger.warn("Graph renew failed — recreating", { resource: res.resource, status: renewResp.status });
             }
 
-            const createResp = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${access_token}`,
-                "Content-Type": "application/json",
+            const createResp = await fetchWithRetry(
+              "https://graph.microsoft.com/v1.0/subscriptions",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  changeType: res.changeType,
+                  notificationUrl: `${WEBHOOK_BASE_URL}/api/webhooks/microsoft-graph`,
+                  resource: res.resource,
+                  expirationDateTime,
+                  clientState: "sullyrecruit_graph_webhook",
+                }),
               },
-              body: JSON.stringify({
-                changeType: res.changeType,
-                notificationUrl: `${WEBHOOK_BASE_URL}/api/webhooks/microsoft-graph`,
-                resource: res.resource,
-                expirationDateTime,
-                clientState: "sullyrecruit_graph_webhook",
-              }),
-            });
+              { label: "graph-sub-create" },
+            );
 
             if (createResp.ok) {
               const sub = await createResp.json();
@@ -163,17 +174,21 @@ export const renewWebhookSubscriptions = inngest.createFunction(
         }
 
         try {
-          const authResp = await fetch(`${serverUrl}/restapi/oauth/token`, {
-            method: "POST",
-            headers: {
-              Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-              "Content-Type": "application/x-www-form-urlencoded",
+          const authResp = await fetchWithRetry(
+            `${serverUrl}/restapi/oauth/token`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: new URLSearchParams({
+                grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                assertion: jwt,
+              }),
             },
-            body: new URLSearchParams({
-              grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-              assertion: jwt,
-            }),
-          });
+            { label: "rc-token" },
+          );
 
           if (!authResp.ok) {
             results.push({
@@ -187,9 +202,11 @@ export const renewWebhookSubscriptions = inngest.createFunction(
 
           const { access_token } = await authResp.json();
 
-          const listResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
-            headers: { Authorization: `Bearer ${access_token}` },
-          });
+          const listResp = await fetchWithRetry(
+            `${serverUrl}/restapi/v1.0/subscription`,
+            { headers: { Authorization: `Bearer ${access_token}` } },
+            { label: "rc-subs-list" },
+          );
 
           if (!listResp.ok) {
             results.push({ service: "ringcentral", user: userLabel, status: "error", error: "List failed" });
@@ -205,12 +222,13 @@ export const renewWebhookSubscriptions = inngest.createFunction(
           );
 
           if (ourSub) {
-            const renewResp = await fetch(
+            const renewResp = await fetchWithRetry(
               `${serverUrl}/restapi/v1.0/subscription/${ourSub.id}/renew`,
               {
                 method: "POST",
                 headers: { Authorization: `Bearer ${access_token}` },
               },
+              { label: "rc-sub-renew" },
             );
 
             if (renewResp.ok) {
@@ -228,22 +246,34 @@ export const renewWebhookSubscriptions = inngest.createFunction(
           };
           if (rcWebhookToken) deliveryMode.verificationToken = rcWebhookToken;
 
-          const createResp = await fetch(`${serverUrl}/restapi/v1.0/subscription`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${access_token}`,
-              "Content-Type": "application/json",
+          const createResp = await fetchWithRetry(
+            `${serverUrl}/restapi/v1.0/subscription`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${access_token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                eventFilters: [
+                  // Account-level telephony so calls on EVERY extension fire a
+                  // webhook. The connected JWT is the account-owner extension
+                  // (which places no calls), so a per-extension `extension/~`
+                  // filter would miss the reps' calls — the same scope bug we
+                  // fixed in poll-rc-calls. message-store + voicemail have no
+                  // account-level filter, so they stay scoped to the
+                  // authenticated extension (SMS/voicemail real-time for other
+                  // reps would need per-extension subs — not the priority).
+                  "/restapi/v1.0/account/~/telephony/sessions",
+                  "/restapi/v1.0/account/~/extension/~/message-store",
+                  "/restapi/v1.0/account/~/extension/~/voicemail",
+                ],
+                deliveryMode,
+                expiresIn: 604800,
+              }),
             },
-            body: JSON.stringify({
-              eventFilters: [
-                "/restapi/v1.0/account/~/extension/~/telephony/sessions",
-                "/restapi/v1.0/account/~/extension/~/message-store",
-                "/restapi/v1.0/account/~/extension/~/voicemail",
-              ],
-              deliveryMode,
-              expiresIn: 604800,
-            }),
-          });
+            { label: "rc-sub-create" },
+          );
 
           if (createResp.ok) {
             results.push({ service: "ringcentral", user: userLabel, status: "created" });
