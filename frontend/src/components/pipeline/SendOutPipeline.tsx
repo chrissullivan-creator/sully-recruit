@@ -56,7 +56,7 @@ const statusLabels: Record<string, string> = {
   offer: 'Offer',
   placed: 'Placed',
   rejected: 'Rejected',
-  withdrawn: 'Withdrawn',
+  withdrawn: 'Rejected',
 };
 
 export const SendOutPipeline = ({

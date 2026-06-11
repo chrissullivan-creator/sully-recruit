@@ -169,9 +169,9 @@ export default function SendOuts() {
     await commitMove(row, nextK, 'advance');
   };
 
-  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string, withdrawnReason?: string, note?: string) => {
-    // Withdrawn requires a reason — defer the move until the dialog returns.
-    if (target === 'withdrawn' && !withdrawnReason) {
+  const commitMove = async (row: SendOutRow, target: CanonicalStage, source: string, withdrawnReason?: string, note?: string, rejectedByParty?: string) => {
+    // Rejected requires the responsible party — defer the move until the dialog returns.
+    if (target === 'withdrawn' && !rejectedByParty) {
       setPendingWithdrawal({ row, source });
       return;
     }
@@ -197,6 +197,7 @@ export default function SendOuts() {
       entityId: row.candidate?.id ?? null,
       entityType: 'send_out',
       withdrawnReason: withdrawnReason ?? null,
+      rejectedByParty: rejectedByParty ?? null,
       note: note ?? null,
     });
     if (!res.ok) {
@@ -380,11 +381,11 @@ export default function SendOuts() {
         onOpenChange={(v) => { if (!v) setPendingWithdrawal(null); }}
         candidateName={pendingWithdrawal?.row.candidate?.full_name ?? undefined}
         jobTitle={pendingWithdrawal?.row.job?.title ?? undefined}
-        onConfirm={async (reason) => {
+        onConfirm={async (party, reason) => {
           if (!pendingWithdrawal) return;
           const { row, source } = pendingWithdrawal;
           setPendingWithdrawal(null);
-          await commitMove(row, 'withdrawn', source, reason);
+          await commitMove(row, 'withdrawn', source, reason, undefined, party);
         }}
       />
 

@@ -167,11 +167,20 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [changingStage, setChangingStage] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [pendingRejectStage, setPendingRejectStage] = useState<string | null>(null);
 
   const contact = contacts.find((c: any) => c.id === sendOut.contact_id);
   const stageCfg = SEND_OUT_STAGES.find(s => s.value === sendOut.stage) ?? SEND_OUT_STAGES[0];
 
   const handleStageChange = async (newStage: string) => {
+    // Rejection requires the responsible party — defer to the reason dialog
+    // instead of stamping the terminal stage directly.
+    if (stageToCanonical(newStage) === 'withdrawn') {
+      setPendingRejectStage(newStage);
+      setRejectOpen(true);
+      return;
+    }
     setChangingStage(true);
     try {
       const updates: any = { stage: newStage };
@@ -187,6 +196,25 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
       toast.error(e.message);
     } finally {
       setChangingStage(false);
+    }
+  };
+
+  const handleRejectConfirm = async (party: string, reason: string) => {
+    const newStage = pendingRejectStage ?? 'rejected';
+    setChangingStage(true);
+    try {
+      const updates: any = { stage: newStage, withdrawn_by_party: party };
+      if (reason && reason.trim()) updates.withdrawn_reason = reason.trim();
+      const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOut.id);
+      if (error) throw error;
+      invalidateSendOutScope(queryClient);
+      toast.success('Marked as Rejected');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChangingStage(false);
+      setRejectOpen(false);
+      setPendingRejectStage(null);
     }
   };
 
@@ -273,6 +301,11 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
               ))}
             </SelectContent>
           </Select>
+          <WithdrawnReasonDialog
+            open={rejectOpen}
+            onOpenChange={(v) => { setRejectOpen(v); if (!v) setPendingRejectStage(null); }}
+            onConfirm={handleRejectConfirm}
+          />
           {expanded
             ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
             : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
@@ -450,11 +483,11 @@ const JobDetail = () => {
     }
   };
 
-  const handleWithdrawnConfirm = async (reason: string) => {
+  const handleWithdrawnConfirm = async (party: string, reason: string) => {
     if (!pendingWithdrawal) return;
     setSavingMove(true);
     try {
-      await commitKanbanMove(pendingWithdrawal.row, 'withdrawn', undefined, reason);
+      await commitKanbanMove(pendingWithdrawal.row, 'withdrawn', undefined, reason, party);
     } finally {
       setSavingMove(false);
       setWithdrawnReasonOpen(false);
@@ -462,7 +495,7 @@ const JobDetail = () => {
     }
   };
 
-  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage, note?: string, withdrawnReason?: string) => {
+  const commitKanbanMove = async (row: KanbanRow, target: CanonicalStage, note?: string, withdrawnReason?: string, rejectedByParty?: string) => {
     queryClient.setQueryData<KanbanRow[]>(['job_pipeline_kanban', id], (prev = []) =>
       prev.map((r) => (r.id === row.id ? { ...r, pipeline_stage: target } : r)),
     );
@@ -477,6 +510,7 @@ const JobDetail = () => {
           entityType: 'candidate_job',
           note,
           withdrawnReason,
+          rejectedByParty,
         })
       : await (async () => {
           const { error } = await supabase

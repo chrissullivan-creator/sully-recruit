@@ -15,6 +15,9 @@ export interface MoveStageInput {
   entityType?: 'candidate_job' | 'send_out';
   /** Reason text — stamped on send_outs.withdrawn_reason when toStage='withdrawn'. */
   withdrawnReason?: string | null;
+  /** Required party that drove the rejection (client/candidate/salesperson/recruiter)
+   *  — stamped on send_outs.withdrawn_by_party + candidate_jobs.withdrawn_by_party. */
+  rejectedByParty?: string | null;
   /** Round number — stamped on send_outs.interview_round when toStage='interview'. */
   interviewRound?: number | null;
   /** Optional note captured at the move. Persisted as a polymorphic
@@ -36,7 +39,7 @@ export interface MoveStageInput {
  * best-effort tail call — failing to log shouldn't break the move.
  */
 export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; error?: string }> {
-  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, interviewRound, note } = input;
+  const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, rejectedByParty, interviewRound, note } = input;
 
   const stageSpecificPatch: Record<string, any> = {};
   if (toStage === 'submitted')          stageSpecificPatch.sent_to_client_at = new Date().toISOString();
@@ -46,8 +49,9 @@ export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; e
 
   // Stage-shaped extra fields. Stamped only on the relevant transitions
   // so a later "edit reason" doesn't accidentally clear it on every move.
-  if (toStage === 'withdrawn' && withdrawnReason && withdrawnReason.trim()) {
-    stageSpecificPatch.withdrawn_reason = withdrawnReason.trim();
+  if (toStage === 'withdrawn') {
+    if (withdrawnReason && withdrawnReason.trim()) stageSpecificPatch.withdrawn_reason = withdrawnReason.trim();
+    if (rejectedByParty) stageSpecificPatch.withdrawn_by_party = rejectedByParty;
   }
   if (toStage === 'interview' && typeof interviewRound === 'number') {
     stageSpecificPatch.interview_round = interviewRound;
@@ -61,8 +65,9 @@ export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; e
 
   if (candidateJobId) {
     const cjPatch: Record<string, any> = { pipeline_stage: toStage, stage_updated_at: new Date().toISOString() };
-    if (toStage === 'withdrawn' && withdrawnReason && withdrawnReason.trim()) {
-      cjPatch.withdrawn_reason = withdrawnReason.trim();
+    if (toStage === 'withdrawn') {
+      if (withdrawnReason && withdrawnReason.trim()) cjPatch.withdrawn_reason = withdrawnReason.trim();
+      if (rejectedByParty) cjPatch.withdrawn_by_party = rejectedByParty;
     }
     if (toStage === 'interview' && typeof interviewRound === 'number') {
       cjPatch.interview_round = interviewRound;
