@@ -15,7 +15,10 @@ describe("sequenceBranches", () => {
     expect(branches[0].steps[0].actions[0].channel).toBe("email");
   });
 
-  it("keeps explicit branch metadata when hydrating nodes", () => {
+  it("collapses node branch metadata into a single lane (branch A)", () => {
+    // The editor is single-lane now: hydrateBranchesFromNodes folds every node
+    // into branch A ordered by node_order, regardless of its stored branch_id
+    // (branch B loads empty). See sequenceBranches.ts.
     const branches = hydrateBranchesFromNodes([
       {
         id: "node-b",
@@ -35,9 +38,14 @@ describe("sequenceBranches", () => {
       },
     ]);
 
+    expect(branches[0].id).toBe("branch_a");
+    expect(branches[0].steps).toHaveLength(2);
+    // Ordered by node_order (node-a #1, then node-b #2), all on branch A.
     expect(branches[0].steps[0].label).toBe("A lane");
-    expect(branches[1].steps[0].label).toBe("B lane");
-    expect(branches[1].steps[0].branchId).toBe("branch_b");
+    expect(branches[0].steps[1].label).toBe("B lane");
+    expect(branches[0].steps[0].branchId).toBe("branch_a");
+    expect(branches[1].id).toBe("branch_b");
+    expect(branches[1].steps).toHaveLength(0);
   });
 
   it("normalizes branch ordering and guarantees both branches", () => {
