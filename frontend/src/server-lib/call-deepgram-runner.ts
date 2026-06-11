@@ -2,6 +2,8 @@ import { getSupabaseAdmin, getAnthropicKey, getOpenAIKey, getAppSetting } from "
 import { callAIWithFallback } from "../lib/ai-fallback.js";
 import { sendInternalEmail } from "./microsoft-graph.js";
 import { notifyError } from "./alerting.js";
+import { fetchWithRetry } from "./fetch-retry.js";
+import { fetchRcCallLog } from "./rc-call-log.js";
 
 const RC_SERVER = "https://platform.ringcentral.com";
 
@@ -228,10 +230,10 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
     }
 
     logger.info("Downloading audio", { call: cl.external_call_id, duration: cl.duration_seconds });
-    const audioResp = await fetch(contentUri, {
+    const audioResp = await fetchWithRetry(contentUri, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(120000),
-    });
+    }, { label: "rc-recording" });
     if (!audioResp.ok) {
       logger.warn("Audio download failed", { status: audioResp.status });
       stats.no_transcript++;
@@ -600,23 +602,14 @@ async function getRCToken(supabase: any, ownerId: string): Promise<string | null
   return t.access_token;
 }
 
+// Locate the RC call records (to resolve each call's recording id) via the
+// shared helper: account-level first, so recordings for *any* extension's
+// calls are found. The old per-extension endpoint returned nothing for an
+// account-owner JWT, which left every account-attributed call un-transcribed
+// (silent no_rc_match). Falls back to per-extension for non-admin JWTs.
 async function fetchCallsInRange(token: string, dateFrom: string, dateTo: string): Promise<any[]> {
-  const all: any[] = [];
-  let page = 1;
-  while (page <= 30) {
-    const params = new URLSearchParams({ type: "Voice", view: "Detailed", dateFrom, dateTo, perPage: "100", page: String(page) });
-    const r = await fetch(`${RC_SERVER}/restapi/v1.0/account/~/extension/~/call-log?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!r.ok) break;
-    const d = await r.json();
-    const records = d.records ?? [];
-    all.push(...records);
-    if (records.length < 100) break;
-    page++;
-  }
-  return all;
+  const { records } = await fetchRcCallLog(token, { dateFrom, dateTo, label: "rc-deepgram-lookup" });
+  return records;
 }
 
 function buildLookup(records: any[]): Map<string, any> {
