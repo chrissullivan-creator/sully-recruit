@@ -22,11 +22,12 @@ export const pipelineHealthDigest = inngest.createFunction(
 
     let sender = "";
     let recipients: string[] = [];
-    try { sender = (await getAppSetting("ALERT_SENDER")) || ""; } catch {}
+    try { sender = (await getAppSetting("ALERT_SENDER")) || ""; }
+    catch (err: any) { logger.warn("Failed to load ALERT_SENDER", { error: err?.message }); }
     try {
       const raw = (await getAppSetting("ALERT_RECIPIENTS")) || "";
       recipients = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    } catch {}
+    } catch (err: any) { logger.warn("Failed to load ALERT_RECIPIENTS", { error: err?.message }); }
     if (!sender || recipients.length === 0) {
       logger.info("Digest skipped — sender/recipients not configured");
       return { skipped: true };

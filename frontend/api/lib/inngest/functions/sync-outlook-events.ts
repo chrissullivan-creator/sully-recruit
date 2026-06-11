@@ -28,7 +28,9 @@ async function runSyncOutlookEvents(logger: any) {
   let graphEmailsRaw = "";
   try {
     graphEmailsRaw = (await getAppSetting("MICROSOFT_GRAPH_ACCOUNT_EMAILS")) || "";
-  } catch {}
+  } catch (err: any) {
+    logger.warn("Failed to load MICROSOFT_GRAPH_ACCOUNT_EMAILS", { error: err?.message });
+  }
   const graphEmails = new Set(
     graphEmailsRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   );
