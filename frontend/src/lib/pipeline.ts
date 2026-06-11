@@ -93,9 +93,13 @@ export const CANONICAL_PIPELINE: CanonicalStageConfig[] = [
     dotColor: 'bg-emerald',
   },
   {
+    // Terminal exit. The internal key stays 'withdrawn' (and 'rejected'
+    // remains a synonym) for back-compat with existing data + the
+    // send_outs.stage / candidates.job_status CHECK constraints; the
+    // user-facing label is "Rejected".
     key: 'withdrawn',
-    label: 'Withdrawn',
-    shortLabel: 'Withdrawn',
+    label: 'Rejected',
+    shortLabel: 'Rejected',
     pipelineStageValues: ['withdrawn', 'withdrew', 'rejected', 'declined', 'reject'],
     color: 'bg-muted text-muted-foreground border-border',
     dotColor: 'bg-muted-foreground',
