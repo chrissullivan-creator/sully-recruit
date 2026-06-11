@@ -451,24 +451,56 @@ interface ScoredCandidate {
 }
 
 /** Tolerant JSON-array extraction (handles ```json fences / prose wrap). */
+// Pull the score array out of whatever shape the model returned: a bare array,
+// or an object wrapping it under any key. JSON-mode providers (OpenAI's
+// response_format=json_object) MUST return an object, so the array arrives as
+// e.g. {"candidates":[...]} or {"scores":[...]} — take the first array-valued
+// property.
+function firstScoreArray(value: unknown): ScoredCandidate[] | null {
+  if (Array.isArray(value)) return value as ScoredCandidate[];
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      if (Array.isArray(v)) return v as ScoredCandidate[];
+    }
+  }
+  return null;
+}
+
 function parseScores(text: string): ScoredCandidate[] {
   if (!text) return [];
   let raw = text.trim();
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) raw = fence[1].trim();
-  if (!raw.startsWith("[")) {
-    const start = raw.indexOf("[");
-    const end = raw.lastIndexOf("]");
-    if (start !== -1 && end !== -1 && end > start) raw = raw.slice(start, end + 1);
-  }
+
+  // Parse the whole payload first. This handles a bare array AND the
+  // object-wrapped shape JSON-mode providers must return. The old code sliced
+  // first-'[' to last-']', which corrupted object payloads whose items contain
+  // nested arrays (strengths/concerns) → JSON.parse threw → zero scores → the
+  // run failed with "AI returned no parseable scores".
   try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed as ScoredCandidate[];
-    if (parsed && Array.isArray((parsed as any).candidates)) return (parsed as any).candidates;
-    return [];
+    const direct = firstScoreArray(JSON.parse(raw));
+    if (direct) return direct;
   } catch {
-    return [];
+    /* fall through to substring extraction for prose-wrapped payloads */
   }
+
+  // Fallback: extract the outermost object, then the outermost array substring.
+  const attempts: string[] = [];
+  const objStart = raw.indexOf("{");
+  const objEnd = raw.lastIndexOf("}");
+  if (objStart !== -1 && objEnd > objStart) attempts.push(raw.slice(objStart, objEnd + 1));
+  const arrStart = raw.indexOf("[");
+  const arrEnd = raw.lastIndexOf("]");
+  if (arrStart !== -1 && arrEnd > arrStart) attempts.push(raw.slice(arrStart, arrEnd + 1));
+  for (const candidate of attempts) {
+    try {
+      const arr = firstScoreArray(JSON.parse(candidate));
+      if (arr) return arr;
+    } catch {
+      /* try next */
+    }
+  }
+  return [];
 }
 
 // ─── On-demand event handler ────────────────────────────────────────────────
