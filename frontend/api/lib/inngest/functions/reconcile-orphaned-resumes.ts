@@ -14,6 +14,7 @@ import {
   matchPersonByEmail,
   classifyEmail,
 } from "../../../../src/server-lib/match-person-by-email.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 import {
   looksLikeResume,
   getVoyageEmbedding,
@@ -291,7 +292,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         // in the system rather than dying in 'failed'.
         const runParse = async (): Promise<{ parsed: any; rawText: string | null }> => {
           const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-          const buf = await fetch(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
+          const buf = await fetchWithRetry(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }, { label: "resume-download" }).then((r: any) =>
             r.arrayBuffer(),
           );
           try {

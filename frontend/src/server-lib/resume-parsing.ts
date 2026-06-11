@@ -1,5 +1,6 @@
 import { logger } from "./logger.js";
 import { getVoyageKey } from "./supabase.js";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 const VOYAGE_MODEL = "voyage-finance-2";
 
@@ -41,14 +42,14 @@ export function looksLikeResume(fileName: string): boolean {
  */
 export async function getVoyageEmbedding(text: string): Promise<number[]> {
   const apiKey = await getVoyageKey();
-  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+  const res = await fetchWithRetry("https://api.voyageai.com/v1/embeddings", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ model: VOYAGE_MODEL, input: [text], input_type: "document" }),
-  });
+  }, { label: "voyage" });
   if (!res.ok) throw new Error(`Voyage ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()).data[0].embedding;
 }

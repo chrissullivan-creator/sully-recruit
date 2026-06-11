@@ -15,6 +15,7 @@ import {
 } from "../../../../src/server-lib/resume-parsing.js";
 import { parseResume } from "../../../../src/lib/resume-parser.js";
 import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-fallback.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Re-parse resumes that have a candidate_id but no raw_text. Downloads
@@ -100,7 +101,7 @@ export const reparseResumes = inngest.createFunction(
         const publicUrl = urlData?.publicUrl;
         if (!publicUrl) throw new Error("No public URL");
 
-        const buf = await fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).then((r: any) =>
+        const buf = await fetchWithRetry(publicUrl, { signal: AbortSignal.timeout(20_000) }, { label: "resume-download" }).then((r: any) =>
           r.arrayBuffer(),
         );
         const { parsed, rawText } = await parseResume(buf, resume.fileName, {

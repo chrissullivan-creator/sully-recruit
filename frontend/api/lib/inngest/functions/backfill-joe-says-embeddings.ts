@@ -3,6 +3,7 @@ import {
   getSupabaseAdmin,
   getVoyageKey,
 } from "../../../../src/server-lib/supabase.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Embed existing people.joe_says briefs into people.joe_says_embedding
@@ -45,7 +46,7 @@ export const backfillJoeSaysEmbeddings = inngest.createFunction(
     // Voyage accepts an array of inputs in a single request. Map the
     // index back to the row id so we can write each embedding.
     const inputs = rows.map((r: any) => String(r.joe_says ?? "").slice(0, 8000));
-    const resp = await fetch("https://api.voyageai.com/v1/embeddings", {
+    const resp = await fetchWithRetry("https://api.voyageai.com/v1/embeddings", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${voyageKey}`,
@@ -56,7 +57,7 @@ export const backfillJoeSaysEmbeddings = inngest.createFunction(
         input: inputs,
         input_type: "document",
       }),
-    });
+    }, { label: "voyage" });
     if (!resp.ok) {
       const body = (await resp.text()).slice(0, 400);
       throw new Error(`Voyage ${resp.status}: ${body}`);

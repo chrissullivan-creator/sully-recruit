@@ -2,6 +2,7 @@ import { inngest } from "../client.js";
 import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
 import { normalizeEmail } from "../../../../src/server-lib/resume-parsing.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
+import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Self-heal for Unipile account drift — the failure that silently froze
@@ -73,10 +74,10 @@ async function fetchLiveAccounts(base: string, apiKey: string): Promise<any[]> {
   let url: string | null = `${base}/accounts?limit=255`;
   let guard = 0;
   while (url && guard++ < 10) {
-    const resp = await fetch(url, {
+    const resp = await fetchWithRetry(url, {
       headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
-    });
+    }, { label: "unipile" });
     if (!resp.ok) throw new Error(`Unipile GET /accounts failed: HTTP ${resp.status}`);
     const data: any = await resp.json();
     const items: any[] = Array.isArray(data) ? data : (data.items ?? data.accounts ?? data.data ?? []);
