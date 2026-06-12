@@ -20,6 +20,8 @@ const PEOPLE_KEYS = [
   'candidate_send_outs', 'contact_send_outs', 'contact_jobs',
   'candidate_documents', 'candidate_education', 'candidate_work_history',
   'companies_autocomplete', 'companies_for_add_candidate',
+  // company-scoped people lists (person edits can change company membership)
+  'company_contacts', 'company_candidates',
 ];
 
 const SEND_OUT_KEYS = [
@@ -50,7 +52,7 @@ const TASKS_KEYS = [
 
 const DASHBOARD_KEYS = ['dashboard_metrics'];
 
-const COMPANY_KEYS = ['companies', 'company'];
+const COMPANY_KEYS = ['companies', 'company', 'company_contacts', 'company_candidates'];
 
 function bulk(qc: QueryClient, keys: string[]) {
   for (const k of keys) qc.invalidateQueries({ queryKey: [k] });

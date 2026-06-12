@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft, Building, Globe, MapPin, Briefcase, FileText, Upload,
-  Loader2, ExternalLink, Edit, Check, X, Linkedin, Users, Info, Plus,
+  Loader2, ExternalLink, Edit, Check, X, Linkedin, User, Users, Info, Plus,
   FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Sparkles,
   Rss,
 } from 'lucide-react';
@@ -344,14 +344,31 @@ const CompanyDetail = () => {
 
   const { data: contacts = [] } = useQuery({
     queryKey: ['company_contacts', id],
-    enabled: !!id && !!company?.name,
+    enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('company_name', company!.name)
+        .from('candidates')
+        .select('id, full_name, first_name, last_name, title, current_title, email, status, roles')
+        .eq('company_id', id!)
+        .contains('roles', ['client'])
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(200);
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: companyCandidates = [] } = useQuery({
+    queryKey: ['company_candidates', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('id, full_name, first_name, last_name, current_title, email, status, roles')
+        .eq('company_id', id!)
+        .contains('roles', ['candidate'])
+        .order('created_at', { ascending: false })
+        .limit(200);
       if (error) throw error;
       return data as any[];
     },
@@ -468,6 +485,10 @@ const CompanyDetail = () => {
                   <p className="text-[10px] text-muted-foreground">Contacts</p>
                 </div>
                 <div>
+                  <p className="text-base font-bold text-foreground">{companyCandidates.length}</p>
+                  <p className="text-[10px] text-muted-foreground">Candidates</p>
+                </div>
+                <div>
                   <p className="text-base font-bold text-foreground">{companyJobs.length}</p>
                   <p className="text-[10px] text-muted-foreground">Jobs</p>
                 </div>
@@ -519,7 +540,18 @@ const CompanyDetail = () => {
             <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-white border border-card-border">
                 <TabsTrigger value="jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Jobs</TabsTrigger>
-                <TabsTrigger value="contacts" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
+                <TabsTrigger value="contacts" className="gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> Contacts
+                  {contacts.length > 0 && (
+                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{contacts.length}</span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="candidates" className="gap-1.5">
+                  <User className="h-3.5 w-3.5" /> Candidates
+                  {companyCandidates.length > 0 && (
+                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{companyCandidates.length}</span>
+                  )}
+                </TabsTrigger>
                 <TabsTrigger value="contracts" className="gap-1.5">
                   <FolderOpen className="h-3.5 w-3.5" /> Contracts
                   {contracts.length > 0 && (
@@ -596,6 +628,43 @@ const CompanyDetail = () => {
                         <p className="text-xs text-muted-foreground">
                           {ct.title && <span>{ct.title}</span>}
                           {ct.email && <span className="ml-2">{ct.email}</span>}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Candidates tab */}
+              <TabsContent value="candidates" className="px-8 py-5 mt-0 space-y-4">
+                <div className="flex items-center gap-2">
+                  <User className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">Candidates</h2>
+                  <span className="text-xs text-muted-foreground">({companyCandidates.length})</span>
+                </div>
+                {companyCandidates.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <User className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No candidates</p>
+                    <p className="text-xs text-muted-foreground">Candidates working at this company will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {companyCandidates.map((cd: any) => (
+                      <div
+                        key={cd.id}
+                        className="rounded-lg border border-border bg-secondary/30 p-3 cursor-pointer hover:border-accent/40 transition-colors"
+                        onClick={() => navigate(`/candidates/${cd.id}`)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-foreground">{cd.full_name || `${cd.first_name ?? ''} ${cd.last_name ?? ''}`.trim() || 'Unknown'}</p>
+                          {cd.status && (
+                            <Badge variant="secondary" className="text-[10px] capitalize shrink-0">{cd.status.replace('_', ' ')}</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {cd.current_title && <span>{cd.current_title}</span>}
+                          {cd.email && <span className="ml-2">{cd.email}</span>}
                         </p>
                       </div>
                     ))}
