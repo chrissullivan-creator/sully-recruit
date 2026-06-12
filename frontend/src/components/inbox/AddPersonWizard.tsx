@@ -57,6 +57,8 @@ interface FormData {
   company: string;
   company_id: string;
   location: string;
+  headline: string;
+  photo: string;
   notes: string;
   current_salary: string;
   desired_salary: string;
@@ -66,7 +68,8 @@ interface FormData {
 const EMPTY_FORM: FormData = {
   first_name: '', last_name: '', email: '', phone: '',
   linkedin_url: '', title: '', company: '', company_id: '',
-  location: '', notes: '', current_salary: '', desired_salary: '',
+  location: '', headline: '', photo: '', notes: '',
+  current_salary: '', desired_salary: '',
   status: 'new',
 };
 
@@ -260,6 +263,7 @@ export function AddPersonWizard({
         (latest.last_name?.trim().length ?? 0) > 1;
       const hasIdentitySignal =
         !!latest.email || !!latest.title || !!latest.company ||
+        !!latest.headline || !!latest.photo ||
         /linkedin\.com\/(?:in|pub)\//i.test(latest.linkedin_url ?? '');
       setStep(goodName && hasIdentitySignal ? 'preview' : 'form');
       return latest;
@@ -310,6 +314,8 @@ export function AddPersonWizard({
         title: prev.title || profile.title || '',
         company: prev.company || profile.company_name || profile.company || '',
         location: prev.location || profile.location || '',
+        headline: prev.headline || profile.headline || '',
+        photo: prev.photo || profile.photo || '',
         linkedin_url: prev.linkedin_url || profile.linkedin_url || '',
       }));
     } else {
@@ -322,6 +328,8 @@ export function AddPersonWizard({
         title: profile.title || prev.title,
         company: profile.company_name || profile.company || prev.company,
         location: profile.location || prev.location,
+        headline: profile.headline || prev.headline,
+        photo: profile.photo || prev.photo,
         linkedin_url: profile.linkedin_url || prev.linkedin_url,
       }));
     }
@@ -666,9 +674,18 @@ export function AddPersonWizard({
               {/* Card mirrors the look of the matches list so confirming
                   feels visually consistent with "linking to existing". */}
               <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-                {personType === 'candidate'
-                  ? <UserCheck className="h-4 w-4 text-success shrink-0 mt-0.5" />
-                  : <Users className="h-4 w-4 text-info shrink-0 mt-0.5" />}
+                {form.photo ? (
+                  <img
+                    src={form.photo}
+                    alt=""
+                    className="h-10 w-10 shrink-0 rounded-full object-cover mt-0.5"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : personType === 'candidate' ? (
+                  <UserCheck className="h-4 w-4 text-success shrink-0 mt-0.5" />
+                ) : (
+                  <Users className="h-4 w-4 text-info shrink-0 mt-0.5" />
+                )}
                 <div className="flex-1 min-w-0 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-foreground truncate">
@@ -678,6 +695,11 @@ export function AddPersonWizard({
                       {personType}
                     </Badge>
                   </div>
+                  {form.headline && (
+                    <p className="text-xs italic text-muted-foreground/90 line-clamp-2">
+                      {form.headline}
+                    </p>
+                  )}
                   {(form.title || form.company) && (
                     <p className="text-xs text-muted-foreground truncate">
                       {[form.title, form.company].filter(Boolean).join(' @ ')}
