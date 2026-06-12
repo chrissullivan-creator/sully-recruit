@@ -142,7 +142,8 @@ interface AutoCreateArgs {
     | "outbound_linkedin"
     | "outbound_recruiter"
     | "outbound_sms"
-    | "group_thread";
+    | "group_thread"
+    | "recruiter_inmail";
 }
 
 /**
