@@ -275,26 +275,32 @@ export default function Source() {
     (async () => {
       setAccountsLoading(true);
       try {
-        // Hiring Projects only exist on LinkedIn Recruiter seats. Pin
-        // account_type='linkedin_recruiter' explicitly — without this
-        // we accidentally pick the recruiter's Outlook row (also
-        // unipile-wired now) and hit Unipile with an email account id.
+        // Pick each recruiter's LinkedIn account. Filter on
+        // provider='linkedin' — this already excludes the recruiter's
+        // Outlook row (provider='email'), which is the only thing the old
+        // account_type='linkedin_recruiter' pin was guarding against. That
+        // pin was wrong: Ashley and Nancy connect LinkedIn as
+        // 'linkedin_classic' (not 'linkedin_recruiter'), so it silently
+        // dropped them and left only Chris — and even Chris fell out
+        // because his stored label is "Christopher Sullivan", which
+        // '%Chris Sullivan%' never matched. Net effect: zero accounts
+        // resolved and Source showed nothing for everyone. Match on a
+        // label fragment that's actually present, and prefer a recruiter
+        // seat over a classic one when a person has both.
+        const pickLinkedIn = (labelFragment: string) =>
+          supabase.from('integration_accounts')
+            .select('unipile_account_id, owner_user_id, account_type')
+            .ilike('account_label', `%${labelFragment}%`)
+            .eq('provider', 'linkedin')
+            .eq('is_active', true)
+            .not('unipile_account_id', 'is', null)
+            .order('account_type', { ascending: false }) // linkedin_recruiter before linkedin_classic
+            .limit(1)
+            .maybeSingle();
         const [{ data: ashley }, { data: nancy }, { data: chris }] = await Promise.all([
-          supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Ashley%')
-            .eq('account_type', 'linkedin_recruiter')
-            .eq('is_active', true)
-            .not('unipile_account_id', 'is', null).maybeSingle(),
-          supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Nancy%')
-            .eq('account_type', 'linkedin_recruiter')
-            .eq('is_active', true)
-            .not('unipile_account_id', 'is', null).maybeSingle(),
-          supabase.from('integration_accounts').select('unipile_account_id, owner_user_id')
-            .ilike('account_label', '%Chris Sullivan%')
-            .eq('account_type', 'linkedin_recruiter')
-            .eq('is_active', true)
-            .not('unipile_account_id', 'is', null).maybeSingle(),
+          pickLinkedIn('Ashley'),
+          pickLinkedIn('Nancy'),
+          pickLinkedIn('Sullivan'),
         ]);
         setAccounts([
           { label: 'Ashley Leichner', mode: 'ashley', accountId: ashley?.unipile_account_id ?? null, ownerUserId: ashley?.owner_user_id ?? null },

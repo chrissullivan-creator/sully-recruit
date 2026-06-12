@@ -63,10 +63,10 @@ Map overall_score to tier EXACTLY:
 - score < 40 -> "worth_considering" (but you should generally drop these)
 
 Return ONLY a JSON array (no prose, no markdown fences) of at most 20 objects, best fit first, of the shape:
-[{"candidate_id":"<uuid>","overall_score":<int 0-100>,"tier":"strong|good|worth_considering","reasoning":"1-2 sharp sentences on why this fit, citing résumé AND call signal where available","strengths":["short phrase", ...],"concerns":["short phrase", ...]}]
+[{"ref":<the integer ref of the candidate>,"overall_score":<int 0-100>,"tier":"strong|good|worth_considering","reasoning":"1-2 sharp sentences on why this fit, citing résumé AND call signal where available","strengths":["short phrase", ...],"concerns":["short phrase", ...]}]
 
 Rules:
-- Use ONLY candidate_id values from the provided list. Never invent candidates.
+- Identify each candidate ONLY by their integer "ref" from the provided list (the candidate under "### ref: 3" is {"ref":3}). Never invent candidates or refs.
 - 2-4 strengths and 0-3 concerns per candidate, each a short phrase (not a sentence).
 - Be opinionated and specific. Drop candidates that clearly don't fit rather than padding the list.`;
 
@@ -278,6 +278,14 @@ async function runBestMatch(
       return (simById.get(b.id) ?? 0) - (simById.get(a.id) ?? 0);
     });
 
+    // Hand the model a short integer `ref` per candidate instead of the raw
+    // UUID. Models (especially smaller ones like gpt-4o-mini) reliably echo a
+    // 1-2 digit ref but frequently garble 36-char UUIDs, which used to drop
+    // every score on the floor ("AI scores did not match any retrieved
+    // candidate"). We map the ref back to the real candidate_id server-side.
+    const refToId = new Map<number, string>();
+    ordered.forEach((c, i) => refToId.set(i + 1, c.id));
+
     const jobContext = [
       `Title: ${job.title ?? "(not specified)"}`,
       job.company_name ? `Company: ${job.company_name}` : "Company: (confidential)",
@@ -290,14 +298,14 @@ async function runBestMatch(
       .join("\n");
 
     const candidateContext = ordered
-      .map((c) => {
+      .map((c, i) => {
         const sim = simById.get(c.id) ?? 0;
         const resume = (resumeById.get(c.id) || "").slice(0, 600);
         const intel = intelById.get(c.id);
         const vetted = hasCallHistory(c.id);
 
         const lines: string[] = [];
-        lines.push(`### candidate_id: ${c.id}`);
+        lines.push(`### ref: ${i + 1}`);
         lines.push(
           `${c.full_name || "Unknown"} | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location_text || "?"} | pipeline status: ${c.status || "?"} | résumé match: ${sim.toFixed(2)}`,
         );
@@ -366,35 +374,42 @@ ${candidateContext}`;
       return await fail(`AI returned no parseable scores (via ${via})`);
     }
 
-    // 6) Apply the vetted boost, clamp, validate ids, sort, cap, upsert.
-    const validIds = new Set(candidateIds);
+    // 6) Resolve each score's ref → real candidate_id, apply the vetted
+    //    boost, clamp, dedup (keep the best score per candidate so the
+    //    onConflict upsert can't touch the same row twice), sort, cap.
     const now = new Date().toISOString();
+    const byCandidate = new Map<string, Record<string, any>>();
 
-    const rows = scored
-      .filter((s) => s.candidate_id && validIds.has(s.candidate_id))
-      .map((s) => {
-        const base = clampScore(s.overall_score);
-        const boosted = hasCallHistory(s.candidate_id) ? Math.min(100, base + CALL_BOOST) : base;
-        return {
-          job_id: jobId,
-          candidate_id: s.candidate_id,
-          score: boosted,
-          overall_score: boosted,
-          tier: tierFor(boosted),
-          reasoning: (s.reasoning || "").slice(0, 2000),
-          strengths: Array.isArray(s.strengths) ? s.strengths.slice(0, 6).map(String) : [],
-          concerns: Array.isArray(s.concerns) ? s.concerns.slice(0, 6).map(String) : [],
-          vector_similarity: simById.get(s.candidate_id) ?? null,
-          run_id: runId,
-          matched_at: now,
-          updated_at: now,
-        };
-      })
+    for (const s of scored) {
+      const ref = coerceRef(s.ref);
+      const candidateId = ref != null ? refToId.get(ref) : undefined;
+      if (!candidateId) continue;
+      const base = clampScore(s.overall_score);
+      const boosted = hasCallHistory(candidateId) ? Math.min(100, base + CALL_BOOST) : base;
+      const row = {
+        job_id: jobId,
+        candidate_id: candidateId,
+        score: boosted,
+        overall_score: boosted,
+        tier: tierFor(boosted),
+        reasoning: (s.reasoning || "").slice(0, 2000),
+        strengths: Array.isArray(s.strengths) ? s.strengths.slice(0, 6).map(String) : [],
+        concerns: Array.isArray(s.concerns) ? s.concerns.slice(0, 6).map(String) : [],
+        vector_similarity: simById.get(candidateId) ?? null,
+        run_id: runId,
+        matched_at: now,
+        updated_at: now,
+      };
+      const existing = byCandidate.get(candidateId);
+      if (!existing || boosted > existing.overall_score) byCandidate.set(candidateId, row);
+    }
+
+    const rows = [...byCandidate.values()]
       .sort((a, b) => b.overall_score - a.overall_score)
       .slice(0, SCORE_LIMIT);
 
     if (rows.length === 0) {
-      return await fail("AI scores did not match any retrieved candidate");
+      return await fail(`AI returned scores but none mapped to a retrieved candidate (via ${via})`);
     }
 
     const { error: upsertErr } = await supabase
@@ -442,12 +457,26 @@ function tierFor(score: number): "strong" | "good" | "worth_considering" {
 }
 
 interface ScoredCandidate {
-  candidate_id: string;
+  ref?: number | string;
   overall_score: number;
   tier?: string;
   reasoning?: string;
   strengths?: unknown[];
   concerns?: unknown[];
+}
+
+/** Pull a positive integer ref out of whatever the model returned — a
+ *  number, a numeric string, or something like "ref 3" / "#3". */
+function coerceRef(v: unknown): number | null {
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  if (typeof v === "string") {
+    const m = v.match(/\d+/);
+    if (m) {
+      const n = parseInt(m[0], 10);
+      if (Number.isInteger(n) && n > 0) return n;
+    }
+  }
+  return null;
 }
 
 /** Tolerant JSON-array extraction (handles ```json fences / prose wrap). */

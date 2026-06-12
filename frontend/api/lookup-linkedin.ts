@@ -158,6 +158,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headline: attendeeData.headline ?? attendeeData.title ?? undefined,
         company: attendeeData.company ?? attendeeData.current_company ?? attendeeData.company_name ?? attendeeData.organization ?? undefined,
         location: attendeeData.location ?? undefined,
+        profile_picture_url:
+          attendeeData.profile_picture_url ?? attendeeData.picture_url ?? undefined,
         public_profile_url:
           attendeeData.public_profile_url ??
           attendeeData.profile_url ??
@@ -168,50 +170,82 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!profileData) return res.status(200).json({});
 
-    // Pull current title + company straight from Unipile's structured fields.
-    // Order: experience[0] / work_experience[0] (most-recent-first array) →
-    // flat current_* fields → flat title/company fields. We do NOT parse the
-    // headline string; the headline is a marketing tagline, not the job title.
-    const expArray =
+    // Extract structured profile fields. Mirrors the canonical enrichment
+    // logic in api/lib/linkedin-finder.ts so the manual "Add Person" path
+    // and the background Unipile resolver agree on title / company /
+    // location / headline / photo. We do NOT parse the headline string for
+    // a job title — the headline is a marketing tagline, not the position.
+    const expArray: any[] =
+      (Array.isArray(profileData.positions) && profileData.positions) ||
       (Array.isArray(profileData.experience) && profileData.experience) ||
       (Array.isArray(profileData.work_experience) && profileData.work_experience) ||
       [];
-    const currentExp = expArray.length > 0 ? expArray[0] : null;
-    const currentTitle =
-      currentExp?.title ||
-      currentExp?.position ||
-      profileData.current_position ||
-      profileData.current_title ||
-      profileData.title ||
-      "";
-    const currentCompany =
-      currentExp?.company ||
-      currentExp?.company_name ||
-      currentExp?.organization ||
-      profileData.current_company ||
-      profileData.company ||
-      profileData.company_name ||
-      "";
+    // Prefer the entry flagged current (or with no end date); most-recent-
+    // first ordering isn't guaranteed across Unipile account types.
+    const currentExp =
+      expArray.find(
+        (e: any) => e?.is_current || e?.current || (!e?.end_date && !e?.end && !e?.ends_at && !e?.to),
+      ) ?? expArray[0] ?? null;
+
+    const currentTitle = pickString(
+      currentExp?.title,
+      currentExp?.position,
+      currentExp?.role,
+      profileData.current_position,
+      profileData.current_title,
+      profileData.title,
+    );
+    const currentCompany = pickString(
+      typeof currentExp?.company === "string" ? currentExp.company : null,
+      currentExp?.company?.name,
+      currentExp?.company_name,
+      currentExp?.organization,
+      profileData.current_company,
+      profileData.company,
+      profileData.company_name,
+    );
+    const location = pickString(
+      profileData.location,
+      profileData.location?.name,
+      profileData.location?.display_name,
+      profileData.region,
+      profileData.location_name,
+    );
+    const headline = pickString(profileData.headline);
+    // picture_url / image_url are additional fallbacks for the same field
+    // (matches resolve-unipile-ids.ts + linkedin-finder.ts) so every path
+    // lands a consistent avatar.
+    const photo = pickString(
+      profileData.profile_picture_url,
+      profileData.profile_picture_url_large,
+      profileData.picture_url,
+      profileData.image_url,
+      profileData.photo_url,
+      profileData.avatar_url,
+    );
 
     // Normalize to form-compatible fields
     const result: Record<string, string> = {};
     if (profileData.first_name) result.first_name = profileData.first_name;
     if (profileData.last_name) result.last_name = profileData.last_name;
-    // Unipile returns contact_info.emails as an array for full profiles
-    const emailFromContact = Array.isArray(profileData?.contact_info?.emails)
-      ? profileData.contact_info.emails[0]
-      : null;
-    if (profileData.email || emailFromContact) {
-      result.email = profileData.email || emailFromContact;
-    }
-    if (profileData.phone || profileData.phone_number) {
-      result.phone = profileData.phone || profileData.phone_number;
-    }
+    // Unipile returns contact_info.emails / .phones as arrays (of strings
+    // or objects) for full profiles; fall back to flat fields otherwise.
+    const email = pickString(
+      profileData.email,
+      firstFromArray(profileData?.contact_info?.emails, ["email", "address"]),
+    );
+    if (email) result.email = email;
+    const phone = pickString(
+      profileData.phone,
+      profileData.phone_number,
+      firstFromArray(profileData?.contact_info?.phones, ["number", "phone"]),
+    );
+    if (phone) result.phone = phone;
     if (currentTitle) result.title = currentTitle;
     if (currentCompany) result.company_name = currentCompany;
-    if (profileData.location || profileData.region || profileData.location_name) {
-      result.location = profileData.location || profileData.region || profileData.location_name;
-    }
+    if (location) result.location = location;
+    if (headline) result.headline = headline;
+    if (photo) result.photo = photo;
     // Prefer a real URL over whatever the caller handed us; fall back to
     // constructing one from public_identifier if needed.
     if (profileData.public_profile_url) {
@@ -227,4 +261,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("LinkedIn lookup failed:", err);
     return res.status(200).json({});
   }
+}
+
+/** First non-empty trimmed string among the args (ignores non-strings, so
+ *  an object-shaped `location` falls through to the next candidate). */
+function pickString(...vals: unknown[]): string {
+  for (const v of vals) {
+    if (typeof v === "string") {
+      const t = v.trim();
+      if (t) return t;
+    }
+  }
+  return "";
+}
+
+/** First usable string from an array whose items may be plain strings or
+ *  objects carrying the value under one of `keys` (e.g. Unipile's
+ *  contact_info.emails / .phones). */
+function firstFromArray(arr: unknown, keys: string[]): string | null {
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) {
+    if (typeof item === "string" && item.trim()) return item.trim();
+    if (item && typeof item === "object") {
+      for (const k of keys) {
+        const v = (item as Record<string, unknown>)[k];
+        if (typeof v === "string" && v.trim()) return v.trim();
+      }
+    }
+  }
+  return null;
 }

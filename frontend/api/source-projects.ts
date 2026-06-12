@@ -1,12 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
-import {
-  isLinkedinV2Enabled,
-  unipileFetchV2,
-  getUnipileAccountV2IdByV1Id,
-} from "../src/server-lib/unipile-v2.js";
-import { recruiterV2 } from "./lib/unipile-urls.js";
 
 // Map a LinkedIn recruiter pipeline stage name → our 4-stage sourcing
 // funnel. LinkedIn lets recruiters customise stage labels, so the match
@@ -260,48 +254,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── create_project ──────────────────────────────────────────
-    // Creating a Recruiter hiring project has no v1 route. On v2 it is
-    //   POST {v2Base}/{acc_xxx}/linkedin/recruiter/projects
-    // Gated by UNIPILE_LINKEDIN_V2 + requires the canonical acc_xxx id.
+    // Unipile exposes NO programmatic "create hiring project" endpoint.
+    // Verified June 12 2026 against unipile-node-sdk@1.9.3 + the public
+    // reference: hiring projects are read-only via the API (the SDK has a
+    // LinkedinHiringProject *read* schema and a `hiring_project_id` tag on
+    // Recruiter InMail send, but no project-create and no pipeline-save).
+    // The old `{name,visibility}` 400 wasn't a wrong body — the endpoint
+    // doesn't exist. No UI wires this action; return an honest 501.
     if (action === "create_project") {
       if (!name) return res.status(400).json({ error: "Missing name" });
-      if (!visibility) return res.status(400).json({ error: "Missing visibility" });
-      if (visibility !== "PRIVATE" && visibility !== "PUBLIC") {
-        return res.status(400).json({ error: "visibility must be PRIVATE or PUBLIC" });
-      }
-      if (!(await isLinkedinV2Enabled(supabase))) {
-        return res.status(501).json({
-          error: "create_project requires Unipile v2. Set UNIPILE_LINKEDIN_V2=true once the v2 Recruiter scope probe passes; no v1 route exists. Until then, create the project in LinkedIn Recruiter UI and re-list.",
-          name,
-          visibility,
-        });
-      }
-      const acctV2 = await getUnipileAccountV2IdByV1Id(supabase, account_id);
-      if (!acctV2) {
-        return res.status(409).json({
-          error: "No Unipile v2 account id (acc_xxx) stored for this account yet — reconnect the account or run the v2 backfill before creating projects on v2.",
-          account_id,
-        });
-      }
-      try {
-        const data = await unipileFetchV2(supabase, acctV2, recruiterV2.projects(), {
-          method: "POST",
-          body: JSON.stringify({
-            name,
-            visibility,
-            ...(description ? { description } : {}),
-            ...(company ? { company } : {}),
-            ...(job_title ? { job_title } : {}),
-            ...(location ? { location } : {}),
-            ...(seniority_level ? { seniority_level } : {}),
-          }),
-        });
-        return res.status(200).json(data);
-      } catch (err: any) {
-        const msg = String(err?.message || err);
-        const code = /Unipile v2 (\d{3})/.exec(msg)?.[1];
-        return res.status(code ? Number(code) : 502).json({ error: msg.slice(0, 600), account_id });
-      }
+      return res.status(501).json({
+        error:
+          "Unipile has no API to create a LinkedIn hiring project — projects are read-only via the API. "
+          + "Create the project in LinkedIn Recruiter; it'll appear here in the projects list. "
+          + "To add a candidate to a project, send a Recruiter InMail tagged with the project (hiring_project_id).",
+        name,
+      });
     }
 
     // v1 route confirmed via probe:
@@ -322,39 +290,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     }
 
-    // save_candidate — pushes a candidate into a Recruiter project's pipeline
-    // stage. No v1 route exists. On v2:
-    //   POST {v2Base}/{acc_xxx}/linkedin/recruiter/projects/{id}/pipeline/candidate/save
-    // Gated by UNIPILE_LINKEDIN_V2 + requires the canonical acc_xxx id.
+    // save_candidate — Unipile has no "save candidate to pipeline" endpoint
+    // either (same finding as create_project, verified against the SDK +
+    // reference). The supported way to put someone into a project's pipeline
+    // is to send a Recruiter InMail tagged with the project's
+    // hiring_project_id. No UI wires this action; return an honest 501.
     if (action === "save_candidate") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
       if (!candidate_id) return res.status(400).json({ error: "Missing candidate_id" });
-      if (!(await isLinkedinV2Enabled(supabase))) {
-        return res.status(501).json({
-          error: "save_candidate requires Unipile v2. Set UNIPILE_LINKEDIN_V2=true once the v2 Recruiter scope probe passes; no v1 route exists. Until then, save via LinkedIn Recruiter UI.",
-        });
-      }
-      const acctV2 = await getUnipileAccountV2IdByV1Id(supabase, account_id);
-      if (!acctV2) {
-        return res.status(409).json({
-          error: "No Unipile v2 account id (acc_xxx) stored for this account yet — reconnect the account or run the v2 backfill before saving candidates on v2.",
-          account_id,
-        });
-      }
-      try {
-        const data = await unipileFetchV2(supabase, acctV2, recruiterV2.pipelineSave(job_id), {
-          method: "POST",
-          body: JSON.stringify({
-            candidate_id,
-            ...(stage_id ? { stage_id } : {}),
-          }),
-        });
-        return res.status(200).json(data);
-      } catch (err: any) {
-        const msg = String(err?.message || err);
-        const code = /Unipile v2 (\d{3})/.exec(msg)?.[1];
-        return res.status(code ? Number(code) : 502).json({ error: msg.slice(0, 600) });
-      }
+      return res.status(501).json({
+        error:
+          "Unipile has no API to save a candidate to a hiring-project pipeline. "
+          + "Add the candidate by sending a Recruiter InMail tagged with this project's hiring_project_id.",
+      });
     }
 
     // ── list_pipeline ───────────────────────────────────────────

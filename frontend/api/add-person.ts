@@ -135,6 +135,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // URL is provided.
         unipile_resolve_status: linkedinUrl ? "pending" : null,
       };
+
+      // Person-level LinkedIn enrichment from the Add-Person lookup (applies
+      // to candidates and clients alike). Photo lands in both
+      // profile_picture_url (raw store) and avatar_url (what the People /
+      // Candidates / Contacts list + detail UIs actually render). The
+      // background Unipile resolver refreshes these later.
+      const headline = data.headline?.trim() || null;
+      const photo = data.photo?.trim() || null;
+      if (headline) payload.linkedin_headline = headline;
+      if (photo) {
+        payload.profile_picture_url = photo;
+        payload.avatar_url = photo;
+      }
+
       if (role === "candidate") {
         payload.current_title = data.title?.trim() || null;
         payload.current_company = data.company?.trim() || null;

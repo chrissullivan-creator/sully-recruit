@@ -211,8 +211,14 @@ async function processAccountV2(
     const m = String(err?.message || "").match(/Unipile v2 (\d{3})/);
     const status = m ? Number(m[1]) : null;
     const is5xx = status !== null && status >= 500 && status <= 599;
-    // 429 = rate-limited (expected backpressure), 5xx = transient — don't alert.
-    if (!is5xx && status !== 429) {
+    // Don't page on expected/account-health failures:
+    //   429 = rate-limited (backpressure), 5xx = transient Unipile,
+    //   404 = this account isn't reachable on the v2 app (disconnected /
+    //         needs reconnect — e.g. a dead acc_xxx like a LinkedIn seat
+    //         that was re-auth'd elsewhere). That's an account state, not a
+    //         code bug. A genuine endpoint rename would 404 EVERY account
+    //         and show up as zero inserts in the daily pipeline-health digest.
+    if (!is5xx && status !== 429 && status !== 404) {
       await notifyError({
         taskId: "backfill-linkedin-messages-v2",
         severity: "ERROR",
