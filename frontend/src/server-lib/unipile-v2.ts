@@ -446,18 +446,24 @@ export async function getUnipileAccountV2IdForUser(
   ownerUserId: string,
   provider: "LINKEDIN" | "OUTLOOK" | "GMAIL" | string,
 ): Promise<string | null> {
+  // Read both the canonical column AND metadata: the connect flow
+  // (connect-linkedin*.ts) historically wrote the acc_xxx only into
+  // metadata.unipile_account_id_v2, so rows can have a null column but a
+  // populated metadata value. Don't filter on the column being non-null —
+  // coalesce the two in JS so metadata-only rows still resolve.
   const { data } = await supabase
     .from("integration_accounts")
-    .select("unipile_account_id_v2")
+    .select("unipile_account_id_v2, metadata")
     .eq("owner_user_id", ownerUserId)
     .eq("unipile_provider", provider)
-    .not("unipile_account_id_v2", "is", null)
     .limit(1)
     .maybeSingle();
-  return data?.unipile_account_id_v2 ?? null;
+  return data?.unipile_account_id_v2 ?? data?.metadata?.unipile_account_id_v2 ?? null;
 }
 
-/** Resolve the v2 acc_xxx id from the short-form v1 id we already store. */
+/** Resolve the v2 acc_xxx id from the short-form v1 id we already store.
+ *  Falls back to metadata.unipile_account_id_v2 when the canonical column
+ *  hasn't been backfilled (see getUnipileAccountV2IdForUser). */
 export async function getUnipileAccountV2IdByV1Id(
   supabase: any,
   shortV1Id: string,
@@ -465,12 +471,11 @@ export async function getUnipileAccountV2IdByV1Id(
   if (!shortV1Id) return null;
   const { data } = await supabase
     .from("integration_accounts")
-    .select("unipile_account_id_v2")
+    .select("unipile_account_id_v2, metadata")
     .eq("unipile_account_id", shortV1Id)
-    .not("unipile_account_id_v2", "is", null)
     .limit(1)
     .maybeSingle();
-  return data?.unipile_account_id_v2 ?? null;
+  return data?.unipile_account_id_v2 ?? data?.metadata?.unipile_account_id_v2 ?? null;
 }
 
 void logger; // tree-shake guard for the import
