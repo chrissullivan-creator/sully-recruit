@@ -4,18 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, Save, Rocket } from "lucide-react";
-import type { SequenceSetupData } from "./SequenceSetup";
+import { tzLabel, type SequenceSetupData } from "./SequenceSetup";
 import type { SequenceBranch } from "./FlowBuilder";
 import { getBranchStats, getBranchLabel } from "./sequenceBranches";
-
-const CHANNEL_LIMITS: Record<string, number> = {
-  linkedin_connection: 35,
-  linkedin_message: 40,
-  linkedin_inmail: 999,
-  email: 150,
-  sms: 999,
-  manual_call: 999,
-};
+import { useChannelLimits } from "@/hooks/useData";
 
 interface Props {
   setup: SequenceSetupData;
@@ -27,6 +19,11 @@ interface Props {
 }
 
 export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDraft, onActivate, saving }: Props) {
+  const { data: channelLimits } = useChannelLimits();
+  // Daily cap per channel, read from the same channel_limits table the engine
+  // enforces (editable under Settings → Send Limits). Missing/blank = no cap.
+  const dailyCap = (channel: string): number => channelLimits?.[channel]?.daily_max ?? Infinity;
+
   const stats = useMemo(() => {
     return getBranchStats(branches);
   }, [branches]);
@@ -40,7 +37,7 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
     // Check if day-1 sends would exceed caps
     if (enrollmentCount > 0) {
       for (const [channel, count] of Object.entries(stats.channelCounts)) {
-        const dailyMax = CHANNEL_LIMITS[channel] || 999;
+        const dailyMax = dailyCap(channel);
         const day1Sends = count * enrollmentCount;
         if (day1Sends > dailyMax) {
           warns.push(
@@ -51,18 +48,18 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
     }
 
     return warns;
-  }, [setup, stats, enrollmentCount]);
+  }, [setup, stats, enrollmentCount, channelLimits]);
 
   const suggestedSpread = useMemo(() => {
     if (enrollmentCount === 0) return null;
     let minPerDay = Infinity;
     for (const [channel, count] of Object.entries(stats.channelCounts)) {
-      const dailyMax = CHANNEL_LIMITS[channel] || 999;
+      const dailyMax = dailyCap(channel);
       const perDay = Math.floor(dailyMax / Math.max(count, 1));
       if (perDay < minPerDay) minPerDay = perDay;
     }
     return minPerDay === Infinity ? null : minPerDay;
-  }, [stats, enrollmentCount]);
+  }, [stats, enrollmentCount, channelLimits]);
 
   return (
     <Card>
@@ -82,7 +79,7 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
           </div>
           <div>
             <span className="text-muted-foreground">Send Window:</span>
-            <p className="font-medium">{setup.sendWindowStart} - {setup.sendWindowEnd} EST</p>
+            <p className="font-medium">{setup.sendWindowStart} - {setup.sendWindowEnd} {tzLabel(setup.timezone || "America/New_York")}</p>
           </div>
           <div>
             <span className="text-muted-foreground">Total Actions:</span>
@@ -104,7 +101,7 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
           <div className="flex flex-wrap gap-2">
             {Object.entries(stats.channelCounts).map(([channel, count]) => (
               <Badge key={channel} variant="secondary">
-                {channel}: {enrollmentCount > 0 ? `${count * enrollmentCount}/${CHANNEL_LIMITS[channel] || "∞"}` : `${count} per person`}
+                {channel}: {enrollmentCount > 0 ? `${count * enrollmentCount}/${dailyCap(channel) === Infinity ? "∞" : dailyCap(channel)}` : `${count} per person`}
               </Badge>
             ))}
           </div>

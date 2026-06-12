@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowLeft, Pause, SkipForward, Calendar } from "lucide-react";
 import { toast } from "sonner";
+import { useChannelLimits } from "@/hooks/useData";
 
 const CHANNEL_COLORS: Record<string, string> = {
   linkedin_connection: "bg-blue-200 text-blue-900",
@@ -20,11 +21,9 @@ const CHANNEL_COLORS: Record<string, string> = {
   manual_call: "bg-orange-100 text-orange-800",
 };
 
-const CHANNEL_DAILY_MAX: Record<string, number> = {
-  linkedin_connection: 35,
-  linkedin_message: 40,
-  email: 150,
-};
+// Channels surfaced as utilization bars, in display order. Caps come from the
+// live channel_limits table (Settings → Send Limits), not hardcoded numbers.
+const UTILIZATION_CHANNELS = ["email", "linkedin_connection", "linkedin_message"];
 
 interface ScheduledSend {
   id: string;
@@ -44,6 +43,7 @@ export default function SequenceScheduleView() {
   const [dailyCounts, setDailyCounts] = useState<Record<string, number>>({});
   const [view, setView] = useState<"day" | "week">("week");
   const [loading, setLoading] = useState(true);
+  const { data: channelLimits } = useChannelLimits();
 
   useEffect(() => {
     if (id) loadData();
@@ -173,9 +173,12 @@ export default function SequenceScheduleView() {
         <h1 className="text-2xl font-bold">{sequence?.name} — Schedule</h1>
       </div>
 
-      {/* Channel utilization bars */}
+      {/* Channel utilization bars — caps from the live channel_limits table */}
       <div className="grid grid-cols-3 gap-4">
-        {Object.entries(CHANNEL_DAILY_MAX).map(([channel, max]) => {
+        {UTILIZATION_CHANNELS
+          .map((channel) => ({ channel, max: channelLimits?.[channel]?.daily_max }))
+          .filter((c): c is { channel: string; max: number } => typeof c.max === "number" && c.max > 0)
+          .map(({ channel, max }) => {
           const current = dailyCounts[channel] || 0;
           const pct = Math.min((current / max) * 100, 100);
           return (

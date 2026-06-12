@@ -4,7 +4,7 @@
  * KEY CONCEPT: Delay hours tick ONLY during the send window ("business hours").
  * Hours outside the window don't count toward the delay.
  *
- * Example (window 6AM–9PM EST, 15 active hours/day):
+ * Example (window 6AM–9PM, 15 active hours/day):
  *   Enrolled 5 PM, 10h email delay:
  *     4h today (5PM→9PM) + 6h next day (6AM→noon) = fires at noon next day
  *
@@ -12,23 +12,37 @@
  *     Outside window → next open 6 AM + 5h35m = 11:35 AM
  *
  * LinkedIn connections ignore the window entirely — fire immediately 24/7.
+ *
+ * TIMEZONE: every calculation runs in an IANA timezone that the caller passes
+ * (`sequences.timezone`, settable in the builder). It defaults to
+ * `America/New_York` so existing sequences behave exactly as before. The zone
+ * is resolved through `Intl` so it is DST-correct year-round — there are no
+ * hardcoded UTC offsets anywhere in this file.
  */
 import { logger } from "./logger.js";
 
+/** Default zone when a sequence doesn't specify one. */
+export const DEFAULT_TZ = "America/New_York";
+
 // ─────────────────────────────────────────────────────────────────────────────
-// EST helpers
+// Timezone helpers (DST-correct via Intl)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Get EST date components from a Date. */
-function toEST(date: Date): { year: number; month: number; day: number; hours: number; minutes: number } {
+/** Get wall-clock date components for `date` in `tz`. */
+function toZoned(
+  date: Date,
+  tz: string,
+): { year: number; month: number; day: number; hours: number; minutes: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+    timeZone: tz,
     year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
   }).formatToParts(date);
 
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value || 0);
-  return { year: get("year"), month: get("month") - 1, day: get("day"), hours: get("hour"), minutes: get("minute") };
+  // hour can come back as "24" at midnight in some runtimes — normalise.
+  const hours = get("hour") % 24;
+  return { year: get("year"), month: get("month") - 1, day: get("day"), hours, minutes: get("minute") };
 }
 
 /** Parse "HH:MM" → minutes since midnight. */
@@ -38,37 +52,40 @@ function parseTimeToMinutes(timeStr: string): number {
 }
 
 /**
- * Create a Date for a specific EST time on a specific EST date.
- * Uses the offset trick: build a UTC date, then adjust by the EST offset for that moment.
+ * Create the UTC instant for a specific wall-clock time on a specific date in
+ * `tz`. DST-correct: we make a UTC guess, read it back in the zone, and correct
+ * for the residual offset (handles the ±1h DST shift automatically).
  */
-function estToUTC(year: number, month: number, day: number, hours: number, minutes: number): Date {
-  // Start with a rough UTC guess
-  const guess = new Date(Date.UTC(year, month, day, hours + 5, minutes)); // EST ≈ UTC-5
-  // Check actual EST offset for this moment
-  const actualEST = toEST(guess);
-  const diffH = hours - actualEST.hours;
-  const diffM = minutes - actualEST.minutes;
-  return new Date(guess.getTime() + diffH * 3600000 + diffM * 60000);
+function zonedToUTC(
+  year: number,
+  month: number,
+  day: number,
+  hours: number,
+  minutes: number,
+  tz: string,
+): Date {
+  const guess = new Date(Date.UTC(year, month, day, hours, minutes));
+  const back = toZoned(guess, tz);
+  const guessAsLocalMin =
+    Date.UTC(back.year, back.month, back.day, back.hours, back.minutes);
+  const wantMin = Date.UTC(year, month, day, hours, minutes);
+  return new Date(guess.getTime() + (wantMin - guessAsLocalMin));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core: addWindowHours — counts delay only during send window
+// Core: addWindowMinutes — counts delay only during send window
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Add delay minutes counting only time within the send window.
  * Skips overnight hours. Returns the UTC timestamp when the delay expires.
- *
- * @param startTime  The reference time (enrollment or connection accepted)
- * @param delayMinutes  Total delay in minutes (hours * 60 + minutes)
- * @param windowStartStr  "HH:MM" EST when the window opens
- * @param windowEndStr    "HH:MM" EST when the window closes
  */
 function addWindowMinutes(
   startTime: Date,
   delayMinutes: number,
   windowStartStr: string,
   windowEndStr: string,
+  tz: string,
 ): Date {
   const winStartMin = parseTimeToMinutes(windowStartStr);
   const winEndMin = parseTimeToMinutes(windowEndStr);
@@ -80,8 +97,8 @@ function addWindowMinutes(
   }
 
   let remaining = delayMinutes;
-  let est = toEST(startTime);
-  let currentMin = est.hours * 60 + est.minutes;
+  let z = toZoned(startTime, tz);
+  let currentMin = z.hours * 60 + z.minutes;
 
   // If zero delay, just clamp to window
   if (remaining <= 0) {
@@ -89,53 +106,47 @@ function addWindowMinutes(
       return startTime; // already inside window
     }
     if (currentMin < winStartMin) {
-      return estToUTC(est.year, est.month, est.day, Math.floor(winStartMin / 60), winStartMin % 60);
+      return zonedToUTC(z.year, z.month, z.day, Math.floor(winStartMin / 60), winStartMin % 60, tz);
     }
     // Past window close — next day
     const nextDay = new Date(startTime.getTime() + 86400000);
-    const nextEST = toEST(nextDay);
-    return estToUTC(nextEST.year, nextEST.month, nextEST.day, Math.floor(winStartMin / 60), winStartMin % 60);
+    const nz = toZoned(nextDay, tz);
+    return zonedToUTC(nz.year, nz.month, nz.day, Math.floor(winStartMin / 60), winStartMin % 60, tz);
   }
 
   // If outside window, jump to next window open
   if (currentMin < winStartMin) {
-    // Before window today — jump to window start
-    est = { ...est, hours: Math.floor(winStartMin / 60), minutes: winStartMin % 60 };
+    z = { ...z, hours: Math.floor(winStartMin / 60), minutes: winStartMin % 60 };
     currentMin = winStartMin;
   } else if (currentMin >= winEndMin) {
-    // After window close — jump to next day's window start
     const nextDay = new Date(startTime.getTime() + 86400000);
-    est = toEST(nextDay);
-    est.hours = Math.floor(winStartMin / 60);
-    est.minutes = winStartMin % 60;
+    z = toZoned(nextDay, tz);
+    z.hours = Math.floor(winStartMin / 60);
+    z.minutes = winStartMin % 60;
     currentMin = winStartMin;
   }
 
   // Count delay within windows, day by day
   for (let safety = 0; safety < 60; safety++) {
-    // How many minutes left in today's window?
     const availableToday = winEndMin - currentMin;
 
     if (availableToday >= remaining) {
-      // Delay finishes today
       const finalMin = currentMin + remaining;
-      return estToUTC(est.year, est.month, est.day, Math.floor(finalMin / 60), finalMin % 60);
+      return zonedToUTC(z.year, z.month, z.day, Math.floor(finalMin / 60), finalMin % 60, tz);
     }
 
-    // Use up today's remaining window time, roll to next day
     remaining -= availableToday;
-    const tomorrow = estToUTC(est.year, est.month, est.day + 1, Math.floor(winStartMin / 60), winStartMin % 60);
-    est = toEST(tomorrow);
+    const tomorrow = zonedToUTC(z.year, z.month, z.day + 1, Math.floor(winStartMin / 60), winStartMin % 60, tz);
+    z = toZoned(tomorrow, tz);
     currentMin = winStartMin;
   }
 
-  // Fallback — should never reach here
   logger.warn("addWindowMinutes exceeded 60-day loop", { delayMinutes });
   return new Date(startTime.getTime() + delayMinutes * 60000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Daily/hourly cap checking (unchanged from before)
+// Daily/hourly cap checking
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface CapCheckResult {
@@ -147,6 +158,7 @@ export async function checkDailyCap(
   accountId: string,
   channel: string,
   estDate: string,
+  tz: string = DEFAULT_TZ,
 ): Promise<CapCheckResult> {
   const { data: limit } = await supabase
     .from("channel_limits")
@@ -166,16 +178,12 @@ export async function checkDailyCap(
     .maybeSingle();
   const sentCount = log?.count || 0;
 
-  // Already-scheduled step_logs for this account+channel on this EST
-  // date. Without this, init scheduling 300 step-1s would all see
-  // "sentCount = 0" and pile onto the same day, overcommitting and
-  // forcing rate-limit retries to push them days forward at execute
-  // time. Counting them here lets calculateSendTime roll to the next
-  // day at init time, before they're queued.
-  //
-  // Date boundaries computed in EST so the cap aligns with the
-  // user-visible day; this matches incrementDailySend's send_date.
-  const dayStart = new Date(`${estDate}T00:00:00-05:00`); // EST UTC-5
+  // Already-scheduled step_logs for this account+channel on this local date.
+  // Without this, init scheduling 300 step-1s would all see "sentCount = 0"
+  // and pile onto the same day. Day boundaries are the local-midnight instants
+  // in `tz` (DST-correct), matching incrementDailySend's send_date key.
+  const [y, m, d] = estDate.split("-").map(Number);
+  const dayStart = zonedToUTC(y, (m || 1) - 1, d || 1, 0, 0, tz);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const { count: scheduledCount } = await supabase
     .from("sequence_step_logs")
@@ -238,6 +246,12 @@ export async function incrementDailySend(
   }
 }
 
+/** Local (tz) calendar date string "YYYY-MM-DD" for a UTC instant. */
+export function localDateString(date: Date, tz: string = DEFAULT_TZ): string {
+  const z = toZoned(date, tz);
+  return `${z.year}-${String(z.month + 1).padStart(2, "0")}-${String(z.day).padStart(2, "0")}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main: calculateSendTime (business-hours model)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,32 +262,31 @@ interface SendTimeInput {
   delayMinutes: number;        // additional minutes
   jiggleMinutes: number;       // random ± offset
   channel: string;
-  sendWindowStart: string;     // "HH:MM" EST
-  sendWindowEnd: string;       // "HH:MM" EST
+  sendWindowStart: string;     // "HH:MM"
+  sendWindowEnd: string;       // "HH:MM"
   accountId: string;
+  /** IANA timezone the window/caps are evaluated in. Defaults to America/New_York. */
+  timezone?: string;
   /** When true, Sat/Sun results roll forward to Monday at window open. */
   weekdaysOnly?: boolean;
 }
 
-/** Day-of-week in EST for a UTC date. 0=Sun, 6=Sat. */
-function estDayOfWeek(date: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-  }).formatToParts(date);
+/** Day-of-week in `tz` for a UTC date. 0=Sun, 6=Sat. */
+function zonedDayOfWeek(date: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).formatToParts(date);
   const wd = parts.find((p) => p.type === "weekday")?.value || "";
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
 }
 
-/** If weekdaysOnly and the date lands on Sat/Sun (EST), bump to Monday at window open. */
-function rollWeekendToMonday(date: Date, sendWindowStart: string): Date {
-  const dow = estDayOfWeek(date);
+/** If weekdaysOnly and the date lands on Sat/Sun (tz), bump to Monday at window open. */
+function rollWeekendToMonday(date: Date, sendWindowStart: string, tz: string): Date {
+  const dow = zonedDayOfWeek(date, tz);
   if (dow !== 0 && dow !== 6) return date;
   const daysToMonday = dow === 6 ? 2 : 1; // Sat → +2, Sun → +1
   const nextMonday = new Date(date.getTime() + daysToMonday * 86400000);
-  const monEST = toEST(nextMonday);
+  const monZ = toZoned(nextMonday, tz);
   const winStart = parseTimeToMinutes(sendWindowStart);
-  return estToUTC(monEST.year, monEST.month, monEST.day, Math.floor(winStart / 60), winStart % 60);
+  return zonedToUTC(monZ.year, monZ.month, monZ.day, Math.floor(winStart / 60), winStart % 60, tz);
 }
 
 /**
@@ -285,22 +298,23 @@ function rollWeekendToMonday(date: Date, sendWindowStart: string): Date {
  * - Daily/hourly caps roll forward
  */
 export async function calculateSendTime(supabase: any, input: SendTimeInput): Promise<Date> {
+  const tz = input.timezone || DEFAULT_TZ;
+
   // LinkedIn connections bypass everything — fire now
   if (input.channel === "linkedin_connection") {
     const result = new Date(input.startTime);
-    // Add small random offset (0-3 min) to avoid burst
     result.setMinutes(result.getMinutes() + Math.floor(Math.random() * 4));
     return result;
   }
 
   const totalDelayMinutes = input.delayHours * 60 + input.delayMinutes;
 
-  // Count delay within window hours
   let result = addWindowMinutes(
     input.startTime,
     totalDelayMinutes,
     input.sendWindowStart,
     input.sendWindowEnd,
+    tz,
   );
 
   // Apply jiggle
@@ -308,24 +322,21 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
     const jiggle = Math.floor(Math.random() * input.jiggleMinutes * 2) - input.jiggleMinutes;
     result = new Date(result.getTime() + jiggle * 60000);
 
-    // Re-clamp if jiggle pushed outside window
-    const est = toEST(result);
-    const currentMin = est.hours * 60 + est.minutes;
+    const z = toZoned(result, tz);
+    const currentMin = z.hours * 60 + z.minutes;
     const winStart = parseTimeToMinutes(input.sendWindowStart);
     const winEnd = parseTimeToMinutes(input.sendWindowEnd);
     if (currentMin < winStart || currentMin >= winEnd) {
-      result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
+      result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd, tz);
     }
   }
 
   // Check daily cap — roll forward if needed
   for (let attempts = 0; attempts < 14; attempts++) {
-    const est = toEST(result);
-    const estDate = `${est.year}-${String(est.month + 1).padStart(2, "0")}-${String(est.day).padStart(2, "0")}`;
-    const dailyCheck = await checkDailyCap(supabase, input.accountId, input.channel, estDate);
+    const estDate = localDateString(result, tz);
+    const dailyCheck = await checkDailyCap(supabase, input.accountId, input.channel, estDate, tz);
     if (dailyCheck.allowed) break;
-    // Roll to next day window start
-    result = addWindowMinutes(result, parseTimeToMinutes(input.sendWindowEnd) - parseTimeToMinutes(input.sendWindowStart) + 1, input.sendWindowStart, input.sendWindowEnd);
+    result = addWindowMinutes(result, parseTimeToMinutes(input.sendWindowEnd) - parseTimeToMinutes(input.sendWindowStart) + 1, input.sendWindowStart, input.sendWindowEnd, tz);
     logger.info("Daily cap hit, rolling to next day", { channel: input.channel });
   }
 
@@ -335,22 +346,15 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
     if (hourlyCheck.allowed) break;
     result = new Date(result.getTime() + 3600000);
     result.setMinutes(0, 0, 0);
-    // Re-clamp to window
-    result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd);
+    result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd, tz);
   }
 
-  // Roll Sat/Sun forward to Monday window-open if the sequence is set to
-  // weekdays-only. Done after the cap checks so we don't re-trigger them.
   if (input.weekdaysOnly) {
-    result = rollWeekendToMonday(result, input.sendWindowStart);
+    result = rollWeekendToMonday(result, input.sendWindowStart, tz);
   }
 
-  // Snap to a bursty hot-spot within the assigned hour. Each hour has 6
-  // deterministic hot-spots derived from the hour timestamp, so multiple
-  // enrollments landing in the same hour cluster around the same few moments
-  // instead of bunching at HH:00:XX (re-clamp / hour-roll bug) or spreading
-  // evenly (which looks robotic). ±90s jitter per send breaks ties.
-  result = snapToHotSpot(result, input.sendWindowEnd);
+  // Snap to a bursty hot-spot within the assigned hour.
+  result = snapToHotSpot(result, input.sendWindowEnd, tz);
 
   return result;
 }
@@ -369,7 +373,7 @@ function lcg(seed: number): () => number {
  * small ±90s jitter. Ensures bursty clustering across independently-scheduled
  * enrollments while keeping the result inside the send window.
  */
-function snapToHotSpot(result: Date, sendWindowEnd: string): Date {
+function snapToHotSpot(result: Date, sendWindowEnd: string, tz: string): Date {
   const hourStart = new Date(result.getTime());
   hourStart.setUTCMinutes(0, 0, 0);
 
@@ -381,8 +385,8 @@ function snapToHotSpot(result: Date, sendWindowEnd: string): Date {
   }
 
   const winEnd = parseTimeToMinutes(sendWindowEnd);
-  const finalEst = toEST(hourStart);
-  const hourStartMin = finalEst.hours * 60 + finalEst.minutes;
+  const finalZ = toZoned(hourStart, tz);
+  const hourStartMin = finalZ.hours * 60 + finalZ.minutes;
   const maxOffsetSec = Math.min(3540, Math.max(0, (winEnd - hourStartMin) * 60 - 30));
 
   const chosenSpot = hotSpots[Math.floor(Math.random() * hotSpots.length)];
@@ -405,8 +409,8 @@ export async function calculatePostConnectionSendTime(
   sendWindowStart: string,
   sendWindowEnd: string,
   accountId: string,
+  timezone: string = DEFAULT_TZ,
 ): Promise<Date> {
-  // 4h hardcoded minimum + additional delay, all in window hours
   const totalMinutes = 4 * 60 + additionalDelayHours * 60 + additionalDelayMinutes;
 
   return calculateSendTime(supabase, {
@@ -418,5 +422,6 @@ export async function calculatePostConnectionSendTime(
     sendWindowStart,
     sendWindowEnd,
     accountId,
+    timezone,
   });
 }

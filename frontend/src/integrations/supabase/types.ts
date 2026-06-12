@@ -3179,6 +3179,7 @@ export type Database = {
           department: string | null
           disqualified_by: string | null
           disqualified_reason: string | null
+          do_not_contact: boolean
           email_invalid: boolean
           email_invalid_at: string | null
           email_invalid_reason: string | null
@@ -3288,6 +3289,7 @@ export type Database = {
           department?: string | null
           disqualified_by?: string | null
           disqualified_reason?: string | null
+          do_not_contact?: boolean
           email_invalid?: boolean
           email_invalid_at?: string | null
           email_invalid_reason?: string | null
@@ -3397,6 +3399,7 @@ export type Database = {
           department?: string | null
           disqualified_by?: string | null
           disqualified_reason?: string | null
+          do_not_contact?: boolean
           email_invalid?: boolean
           email_invalid_at?: string | null
           email_invalid_reason?: string | null
@@ -4738,6 +4741,8 @@ export type Database = {
           linkedin_connection_accepted_at: string | null
           linkedin_connection_requested_at: string | null
           linkedin_connection_status: string | null
+          reply_sentiment: string | null
+          reply_sentiment_note: string | null
           role_context: string | null
           sequence_id: string | null
           staggered_at: string | null
@@ -4761,6 +4766,8 @@ export type Database = {
           linkedin_connection_accepted_at?: string | null
           linkedin_connection_requested_at?: string | null
           linkedin_connection_status?: string | null
+          reply_sentiment?: string | null
+          reply_sentiment_note?: string | null
           role_context?: string | null
           sequence_id?: string | null
           staggered_at?: string | null
@@ -4784,6 +4791,8 @@ export type Database = {
           linkedin_connection_accepted_at?: string | null
           linkedin_connection_requested_at?: string | null
           linkedin_connection_status?: string | null
+          reply_sentiment?: string | null
+          reply_sentiment_note?: string | null
           role_context?: string | null
           sequence_id?: string | null
           staggered_at?: string | null

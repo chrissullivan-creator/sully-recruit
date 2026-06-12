@@ -2,152 +2,209 @@
 
 ## Sequence Engine Overview
 
-The engine runs as the **`sequence-scheduler`** Trigger.dev task (NOT a cron edge function). It processes active enrollments. `send-message` is the per-channel send task.
+The engine runs on **Inngest** (not Trigger.dev — the `src/trigger/` name is a
+holdover; see CLAUDE.md). Three pieces:
 
-**Post Pass 5a unification:** `sequence_enrollments.candidate_id` and `.contact_id` BOTH now FK to `candidates(id)`. The engine handles both candidate-type and client-type enrollees uniformly — no special casing needed for clients. UI may still show separate "candidates" and "contacts" enrollment dropdowns; both write to the same underlying table.
+| Piece | Inngest function | Body (engine-neutral) |
+|---|---|---|
+| **Scheduler sweep** (every 3 min) | `sequence-sweep` (`frontend/api/lib/inngest/functions/sequence-sweep.ts`) | inline |
+| **Per-step executor** | `sequence-action-execute` | `runSequenceAction` (`frontend/src/server-lib/sequence-runner.ts`) |
+| **Enrollment init** (pre-schedules all steps) | `sequence-enrollment-init` | `runSequenceEnrollmentInit` (`frontend/src/server-lib/enrollment-init-runner.ts`) |
+
+**Flow:** enroll → `sequence/enrollment-init.requested` pre-schedules every
+`sequence_step_logs` row → `sequence-sweep` cron claims due rows
+(`scheduled` → `in_flight`) and fans out `sequence/action.execute.requested`
+→ `runSequenceAction` sends one step and re-anchors the next.
+
+The runner is engine-neutral so a legacy Trigger.dev path can share it; the
+live path is Inngest. `sequences.engine` (`'inngest'` | `'trigger'`)
+discriminates which sweep owns a sequence — `sequence-sweep` filters
+`engine='inngest'` so the two never race for the same row.
+
+**Unified person model:** `sequence_enrollments.candidate_id` and
+`.contact_id` BOTH FK to `candidates(id)`. The engine treats candidate- and
+client-type enrollees uniformly.
+
+---
+
+## Data Model
+
+```
+sequences ──< sequence_nodes ──< sequence_actions      (definition)
+sequences ──< sequence_enrollments ──< sequence_step_logs   (runtime)
+```
+
+- **`sequence_actions`** is the per-message unit (NOT the old `sequence_steps`).
+  Columns: `channel, message_body, subject_line, base_delay_hours,
+  delay_interval_minutes, jiggle_minutes, use_signature, reply_to_previous,
+  attachment_urls, sender_user_id, post_connect_delay_hours`.
+- **`sequence_nodes`** group actions and carry ordering
+  (`node_order`, plus `branch_id`/`branch_step_order` for A/B branches).
+- **`sequence_step_logs`** is the execution log — one row per action per
+  enrollment, pre-scheduled at init. Columns: `status, scheduled_at, sent_at,
+  channel, node_id, action_id, skip_reason, reply_received_at, reply_text,
+  sentiment, internet_message_id, opened_at, open_count`.
+
+### `sequence_step_logs.status`
+
+| status | meaning |
+|---|---|
+| `scheduled` | due to fire at `scheduled_at` |
+| `in_flight` | claimed by a sweep, mid-execute (auto-recovered after 10 min) |
+| `sent` | delivered |
+| `skipped` | pre-flight skip (no email/phone/LinkedIn, already connected, bounced) |
+| `cancelled` | enrollment stopped/paused before it fired |
+| `pending_connection` | LinkedIn message parked until the connection request is accepted |
+
+### `sequence_enrollments.status`
+
+| `status` | `stop_trigger` | meaning |
+|---|---|---|
+| `active` | — | running |
+| `paused` | — | sequence or enrollment manually paused |
+| `stopped` | `reply_received` / `email_bounced` / `calendar_booked` / … | terminated early |
+| `completed` | `completed` | all steps fired/skipped |
 
 ---
 
 ## Critical Rules
 
-### 1. Connection Request MUST precede LinkedIn Message
-- Hard UI guardrail — cannot add `linkedin_message` without prior `linkedin_connection` step
-- Engine enforces at runtime — skips `linkedin_message` for non-connections
-- **If you see empty `linkedin_message` sends — check for missing connection request step**
+### 1. Connection request MUST precede a LinkedIn message
+At init, `linkedin_message` is parked as `pending_connection` when the
+recipient isn't connected yet. The Unipile webhook promotes it to `scheduled`
+on acceptance (`post_connect_delay_hours`, default 24h, + jitter). If you see
+empty/early `linkedin_message` sends, check the connection step.
 
-### 2. Reply Detection Guard
-`hasRepliedSinceEnrollment()` checks BOTH:
-- `candidate_id` match on messages table
-- `sender_address` match (email address based)
+### 2. Reply guard stops everything
+`hasRepliedSinceEnrollment()` scans `messages` for an `inbound` row (excluding
+`message_type='connection_accepted'`) since `enrolled_at`, matching on
+`candidate_id`/`contact_id`. It runs both in the webhook handlers (which call
+`stopEnrollment`) and again inside `runSequenceAction` before any send.
+`stopEnrollment` flips status to `stopped` and cancels all remaining
+`scheduled` + `pending_connection` logs.
 
-Both checks must clear before any step fires. This prevents double-sending when candidate_id is null.
+### 3. Idempotency / no double-send
+`runSequenceAction` bails unless the step_log is still `in_flight` (the sweep
+is the only writer of that state), so a retry after a post-send crash can't
+re-send.
 
-### 3. LinkedIn Circuit Breaker
-`liLimitHit` — a `Set<string>` per account ID. When Unipile returns `limit_exceeded`, ALL LinkedIn steps for that account are skipped for the rest of that cron run.
-
-### 4. Connection Status Pre-flight
-Before every LinkedIn message step:
-- Check connection status via Unipile API
-- `already_connected` → fire the message immediately, log `linkedin_connection_status = 'already_connected'`
-- `pending` → park enrollment, set `waiting_for_connection_acceptance = true`, `next_step_at = null`
-- `not_connected` → if step is `linkedin_connection`, send request and park. If step is `linkedin_message`, skip.
-
----
-
-## Send Window
-
-**4:30 AM – 9:30 PM CST** for all message types.
-**Connection requests are EXEMPT** — fire 24/7.
-
-Enforced per step via `respect_send_window` flag on `sequence_steps`.
+### 4. Rate-limit & transient handling
+LinkedIn `limit_exceeded` / 429 → step rescheduled +2h (still `scheduled`).
+Transient infra errors (fetch failed, timeout, Unipile unreachable) →
+rescheduled +30 min. Neither marks the step failed.
 
 ---
 
-## Jitter
+## Send Window, Jitter, Caps
 
-- **Per enrollee:** 2–35 min randomized offset on `next_step_at` at enrollment time
-- **Per LinkedIn message:** ±43 min additional jitter when step fires
+All timing lives in `frontend/src/server-lib/send-time-calculator.ts`.
 
-This prevents burst sends that trigger spam detection.
+- **Timezone** is per-sequence (`sequences.timezone`, picked in the builder),
+  resolved through `Intl` so it's DST-correct. Defaults to `America/New_York`.
+  Every caller threads it in (`enrollment-init-runner`, `reanchorNextStep`,
+  the connection-accept handlers); there are **no hardcoded UTC offsets**.
+- **Send window** is per-sequence (`send_window_start` / `send_window_end`,
+  `"HH:MM"`, in the sequence timezone), default **09:00–18:00**. Delay hours
+  tick *only inside* the window. `weekdays_only` rolls Sat/Sun to Monday open.
+- **`linkedin_connection` bypasses the window** — fires immediately, 24/7
+  (+0–3 min anti-burst offset).
+- **Jitter:** per-action `jiggle_minutes` (±), re-clamped into the window;
+  plus deterministic per-hour "hot-spot" snapping so independently-scheduled
+  enrollments cluster like a human instead of bunching at HH:00.
+- **Caps:** `channel_limits` (daily/hourly per channel) + `daily_send_log`
+  counter. `calculateSendTime` rolls a step to the next day/hour when a cap is
+  hit, at init time, so steps don't pile onto one day. **Editable in the UI** at
+  Settings → Send Limits (`ChannelLimitsSettings`); the builder's "estimated
+  daily sends" warnings and the schedule view's utilization bars read the same
+  table via `useChannelLimits()` — no hardcoded cap numbers anywhere.
+
+> Note: the old doc claimed "4:30 AM–9:30 PM CST" — that was never the code.
+> The window is the per-sequence, timezone-aware window above.
+
+## Compliance — do_not_contact
+
+`people.do_not_contact` is a hard global suppression. When an inbound reply is
+classified `do_not_contact`, `intel-extraction` sets it. The engine then
+refuses to message that person again, on any sequence: `enrollment-init-runner`
+stops a new enrollment before scheduling, and `runSequenceAction` stops any
+in-flight enrollment at its pre-flight check (`stop_trigger='do_not_contact'`).
 
 ---
 
-## Webhook-Driven Connection Advancement
+## Channels
 
-1. Send connection request → set `waiting_for_connection_acceptance = true`, `next_step_at = null`
-2. Unipile fires webhook on acceptance → `unipile-webhook` advances enrollment to next step
-3. Next step fires after `post_connect_delay_hours` (default 24h) + jitter
-
-**`next_step_at = null` ≠ paused.** It means parked/waiting for an event.
-
----
-
-## `sequence_steps` Columns
+`sequence_actions.channel`:
 
 ```
-id, sequence_id, step_order, channel, step_type
-subject, content, account_id
-delay_days, delay_hours
-send_window_start, send_window_end  (hour 0-23)
-respect_send_window (boolean)
-jitter_min_minutes, jitter_max_minutes
-inter_message_jitter_minutes
-post_connect_delay_hours
-post_connect_jitter_min, post_connect_jitter_max
-wait_for_connection (boolean)
-is_reply (boolean)
-use_signature (boolean)
+email                Outlook via Microsoft Graph (or Unipile v2, kill-switch USE_UNIPILE_EMAIL)
+sms                  RingCentral (Chris + Nancy only — Ashley has no RingCentral)
+linkedin_connection  connection request (300-char limit, 24/7)
+linkedin_message     classic LinkedIn DM (requires prior connection)
+linkedin_inmail      Recruiter InMail (credit-guarded)
+manual_call          logged only, no send
 ```
+
+`canonicalChannel()` folds Sales Navigator into `linkedin`. LinkedIn sends go
+through `sendLinkedIn` in `send-channels.ts` (Unipile v2 when
+`USE_LINKEDIN_V2_SEND` + `acc_xxx` present, else v1). See CLAUDE.md for the
+v1/v2 split.
+
+### Recipient resolution
+Email column is role-aware: candidates → `personal_email` (falls back to
+`primary_email`), clients → `work_email`. Steps pre-skip when the recipient
+lacks the channel's contact field. `email_invalid` (hard bounce) is never
+re-attempted.
 
 ---
 
-## `sequence_enrollments` Key States
+## Replies, Sentiment & Intel
 
-| `status` | `next_step_at` | `waiting_for_connection` | Meaning |
-|---|---|---|---|
-| `active` | future timestamp | false | Normal — waiting to fire |
-| `active` | null | true | Parked — waiting for connection accept |
-| `paused` | null | false | Manually paused |
-| `stopped` | null | false | Reply received or manually stopped |
-| `completed` | null | false | All steps fired |
+On every inbound reply the webhook processors (`process-unipile-event`,
+`process-microsoft-event`, `process-ringcentral-event`) run
+`extractMessageIntel` + `applyExtractedIntel`
+(`frontend/src/server-lib/intel-extraction.ts`, Claude Haiku), which writes:
+
+- `reply_sentiment` table (per reply, with `enrollment_id`)
+- `sequence_enrollments.reply_sentiment` / `.reply_sentiment_note`
+- person `last_sequence_sentiment` / `last_sequence_sentiment_note`
+- extracted recruiting fields (comp, notice, locations, …) onto the person
+
+Sentiment vocab: `interested | positive | maybe | neutral | negative |
+not_interested | do_not_contact | ooo`. The calendar handler also stamps
+`booked_meeting` (stop_trigger `calendar_booked`). Keep
+`SequenceAnalyticsPage` `SENTIMENT_COLORS` and `CandidateDetail`
+`SENTIMENT_CONFIG` in sync with this list.
+
+Then `stopEnrollment(..., 'reply_received', replyText)` terminates the
+enrollment and `triggerSentimentAnalysis` stamps `reply_received_at` +
+`reply_text` on the last *sent* step so the analytics funnels can attribute
+the reply. (It does NOT call any AI — sentiment is already done above.)
+
+---
+
+## Analytics — where the numbers come from
+
+`SequenceAnalyticsPage`:
+
+- **Enrolled / active / completed / reply rate** — `sequence_enrollments`
+  (`status`, `stop_trigger='reply_received'`).
+- **Sends / skipped / failed** — `sequence_step_logs.status`.
+- **Open rate** — `opened_at` / `open_count` from the email tracking pixel.
+- **Sentiment breakdown** — `sequence_enrollments.reply_sentiment`
+  (+ `booked_meeting` from `stop_trigger`). Do NOT read
+  `sequence_step_logs.sentiment` — that column is effectively never written.
+- **Per-step / per-channel replies** — attributed to each replied
+  enrollment's last sent step.
 
 ---
 
 ## Pausing All Sequences (Emergency)
 ```sql
 UPDATE sequence_enrollments
-SET status = 'paused', paused_at = NOW(), updated_at = NOW()
+SET status = 'paused', updated_at = NOW()
 WHERE status = 'active';
+-- and/or pause the parent so the sweep skips it:
+UPDATE sequences SET status = 'paused' WHERE status = 'active';
 ```
-
----
-
-## Channel Types
-```
-linkedin_connection     connection request (300 char limit, 24/7)
-linkedin_message        classic LinkedIn DM (must have prior connection step)
-linkedin_recruiter      Recruiter InMail (Chris + Nancy)
-email                   Outlook via Microsoft Graph or Unipile v2 (kill-switch USE_UNIPILE_EMAIL)
-sms                     RingCentral (Chris + Nancy only, NOT Ashley — no RingCentral)
-phone                   Call log/script
-```
-
-Sales Navigator is NOT a separate bucket — `canonicalChannel()` folds it into `linkedin`.
-
-### Send shape (Unipile v2)
-For all LinkedIn sends, `sendLinkedIn` uses:
-```
-POST /api/v2/{account_id}/chats
-body: { attendees_ids: [providerId], text, linkedin?: { api: 'recruiter' } }
-```
-The `linkedin: { api: 'recruiter' }` flag routes through Recruiter InMail. Omit it for Classic DMs. Do NOT use `message_type: "INMAIL"` (that was v1).
-
-### InMail credit guard
-`sendLinkedIn` reads `integration_accounts.inmail_credits_remaining` for the resolved account before any InMail send. Throws fast when 0 ("InMail credits exhausted on …") so the step doesn't waste a send. Successful InMails decrement the cache locally; `sync-inmail-credits` re-syncs hourly.
-
-### Sequence sends use personal email
-Recipient resolution reads `entity.email` from the `candidates` / `contacts` views, which both compute `email = COALESCE(personal_email, work_email)` — personal first. To force a work address, write directly to `work_email` on a stub row or extend the resolver. Bounce + reply matching uses the multi-column `matchPersonByEmail` so the same person matches whether they reply from gmail or work.
-
----
-
-## Sentiment Analysis on Reply
-All three webhook functions (unipile, outlook, ringcentral) run Claude Haiku sentiment on every inbound reply:
-- Writes to `reply_sentiment` table
-- Stamps `last_sequence_sentiment` + `last_sequence_sentiment_note` on candidate/contact
-- `do_not_contact` classification should trigger auto-stop (compliance risk)
-
----
-
-## Analytics — What's in the DB
-
-From `sequence_enrollments`:
-- Total enrolled, active, paused, stopped, completed
-- Replied = `status = 'stopped' AND stopped_reason ILIKE '%reply%'`
-- Reply rate = replied / total
-
-From `sequence_step_executions`:
-- Total sent, failed, delivery rate
-- Step-by-step funnel by `step_order`
-
-From `reply_sentiment`:
-- Sentiment breakdown per sequence (join via enrollment_id)
+Both the sweep query and `runSequenceAction` re-check `status='active'` on the
+enrollment AND its sequence, so a pause halts sends within one sweep (≤3 min).

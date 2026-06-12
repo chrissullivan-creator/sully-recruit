@@ -31,6 +31,20 @@ export interface SequenceSetupData {
   weekdaysOnly: boolean;
 }
 
+// Zones the team actually sends from. value = IANA id the engine uses.
+const TIMEZONES: { value: string; label: string }[] = [
+  { value: "America/New_York", label: "Eastern (ET)" },
+  { value: "America/Chicago", label: "Central (CT)" },
+  { value: "America/Denver", label: "Mountain (MT)" },
+  { value: "America/Phoenix", label: "Arizona (MST)" },
+  { value: "America/Los_Angeles", label: "Pacific (PT)" },
+  { value: "Europe/London", label: "London (GMT/BST)" },
+];
+
+export function tzLabel(value: string): string {
+  return TIMEZONES.find((t) => t.value === value)?.label || value;
+}
+
 interface Props {
   data: SequenceSetupData;
   onChange: (data: SequenceSetupData) => void;
@@ -202,9 +216,31 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
           />
         </div>
 
+        <div className="space-y-2">
+          <Label>Timezone</Label>
+          <Select
+            value={data.timezone || "America/New_York"}
+            onValueChange={(v) => update("timezone", v)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select timezone" />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMEZONES.map((tz) => (
+                <SelectItem key={tz.value} value={tz.value}>
+                  {tz.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">
+            The send window below is interpreted in this timezone.
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="windowStart">Send Window Start (EST)</Label>
+            <Label htmlFor="windowStart">Send Window Start ({tzLabel(data.timezone || "America/New_York")})</Label>
             <Input
               id="windowStart"
               type="time"
@@ -213,7 +249,7 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="windowEnd">Send Window End (EST)</Label>
+            <Label htmlFor="windowEnd">Send Window End ({tzLabel(data.timezone || "America/New_York")})</Label>
             <Input
               id="windowEnd"
               type="time"
