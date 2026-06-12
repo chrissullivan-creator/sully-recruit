@@ -474,6 +474,19 @@ export async function stopEnrollment(
   }
 }
 
+/**
+ * Stamp WHICH sent step earned the reply, so the analytics funnels can
+ * attribute it (per-step + per-channel reply rates).
+ *
+ * Note: reply *sentiment* and recruiting-intel extraction already run at the
+ * webhook layer (intel-extraction → `reply_sentiment` table +
+ * `sequence_enrollments.reply_sentiment` + `last_sequence_sentiment`) BEFORE
+ * the enrollment is stopped — so there is no AI call to make here. An earlier
+ * version POSTed to a `sentiment_analysis` task on `ask-joe` that was never
+ * implemented (and `ask-joe` streams SSE, so `response.json()` threw on every
+ * reply), which meant `reply_received_at` was never actually stamped. This
+ * does the one thing that was still missing, with no external dependency.
+ */
 export async function triggerSentimentAnalysis(
   supabase: any,
   enrollment: any,
@@ -481,63 +494,31 @@ export async function triggerSentimentAnalysis(
   logger?: Logger,
 ): Promise<void> {
   try {
-    const { data: sequence } = await supabase
-      .from("sequences")
-      .select("objective, audience_type, job_id, jobs(title)")
-      .eq("id", enrollment.sequence_id)
-      .single();
+    const { data: lastSent } = await supabase
+      .from("sequence_step_logs")
+      .select("id")
+      .eq("enrollment_id", enrollment.id)
+      .eq("status", "sent")
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/ask-joe`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task: "sentiment_analysis",
-        reply_text: replyText,
-        audience_type: sequence?.audience_type || "candidates",
-        job_title: sequence?.jobs?.title || "",
-        sequence_objective: sequence?.objective || "",
-      }),
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-
+    if (lastSent?.id) {
       await supabase
         .from("sequence_step_logs")
-        .update({ reply_received_at: new Date().toISOString(), reply_text: replyText, sentiment: result.sentiment, sentiment_reason: result.reason })
-        .eq("enrollment_id", enrollment.id)
-        .eq("status", "sent")
-        .order("sent_at", { ascending: false })
-        .limit(1);
-
-      const entityTable = enrollment.candidate_id ? "candidates" : "contacts";
-      const entityId = enrollment.candidate_id || enrollment.contact_id;
-      await supabase
-        .from(entityTable)
-        .update({ last_sequence_sentiment: result.sentiment, last_sequence_sentiment_note: result.reason } as any)
-        .eq("id", entityId);
-
-      if (enrollment.candidate_id && sequence?.job_id && result.pipeline_status) {
-        await supabase
-          .from("candidate_jobs")
-          .update({ stage: result.pipeline_status } as any)
-          .eq("candidate_id", enrollment.candidate_id)
-          .eq("job_id", sequence.job_id);
-      }
+        .update({ reply_received_at: new Date().toISOString(), reply_text: replyText.slice(0, 2000) })
+        .eq("id", lastSent.id);
     }
   } catch (err: any) {
-    logger?.error("Sentiment analysis failed", { error: err.message });
-    // Sentiment classification gates do_not_contact / negative-reply
-    // detection — silent failure here means missed compliance signals.
-    // Dedup'd to one email/hour per error signature by notifyError.
+    logger?.error("Failed to stamp reply on last sent step", {
+      error: err.message,
+      enrollmentId: enrollment?.id,
+    });
     await notifyError({
-      taskId: "sequence-runner.sentiment",
+      taskId: "sequence-runner.stampReply",
       severity: "WARN",
       error: err,
-      context: { enrollmentId: enrollment?.id, sequenceId: sequence?.id },
+      context: { enrollmentId: enrollment?.id },
     });
   }
 }

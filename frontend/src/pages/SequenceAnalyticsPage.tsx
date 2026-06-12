@@ -8,14 +8,29 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Users, MessageSquare, Calendar, TrendingUp, PieChart, Eye, Send } from "lucide-react";
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 
+// Keys MUST match the classifier vocabulary emitted by intel-extraction.ts
+// ("interested|positive|maybe|neutral|negative|not_interested|do_not_contact|ooo")
+// plus "booked_meeting" stamped by the Microsoft calendar handler. Anything
+// not listed falls back to grey — keep this in sync with CandidateDetail's
+// SENTIMENT_CONFIG so the same reply reads the same colour everywhere.
 const SENTIMENT_COLORS: Record<string, string> = {
-  interested: "#22c55e",
+  interested: "#16a34a",
+  positive: "#22c55e",
+  maybe: "#eab308",
+  neutral: "#9ca3af",
+  negative: "#f97316",
   not_interested: "#ef4444",
-  maybe_later: "#eab308",
+  do_not_contact: "#b91c1c",
+  ooo: "#94a3b8",
   booked_meeting: "#3b82f6",
-  hostile: "#dc2626",
-  auto_reply: "#9ca3af",
 };
+
+/** Humanise a snake_case sentiment/channel value for display. */
+function humanize(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 const CHANNEL_COLORS: Record<string, string> = {
   linkedin_connection: "#2563eb",
@@ -93,20 +108,50 @@ export default function SequenceAnalyticsPage() {
     };
   }, [enrollments, stepLogs]);
 
-  // Sentiment breakdown
+  // Sentiment breakdown — read the LIVE column. Reply sentiment is stamped
+  // on sequence_enrollments.reply_sentiment by intel-extraction at the webhook
+  // (vocab: interested/positive/maybe/neutral/negative/not_interested/
+  // do_not_contact/ooo). A booked meeting is captured separately via the
+  // calendar handler's stop_trigger, so fold that in as "booked_meeting".
+  // (We no longer read stepLogs.sentiment — that column was only ever written
+  // by a broken ask-joe call and is effectively always empty.)
   const sentimentData = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const log of stepLogs) {
-      if (log.sentiment) {
-        counts[log.sentiment] = (counts[log.sentiment] || 0) + 1;
-      }
+    for (const e of enrollments) {
+      const s = e.reply_sentiment || (e.stop_trigger === "calendar_booked" ? "booked_meeting" : null);
+      if (s) counts[s] = (counts[s] || 0) + 1;
     }
     return Object.entries(counts).map(([name, value]) => ({
-      name,
+      name: humanize(name),
+      rawName: name,
       value,
       color: SENTIMENT_COLORS[name] || "#6b7280",
     }));
-  }, [stepLogs]);
+  }, [enrollments]);
+
+  // Attribute each replied enrollment's reply to the LAST step we actually
+  // sent it — that's the message that earned the response. We key off
+  // stop_trigger='reply_received' (reliably set by stopEnrollment) rather than
+  // step_logs.reply_received_at, which the legacy sentiment path never stamped.
+  const replyAttribution = useMemo(() => {
+    const byChannel: Record<string, number> = {};
+    const byNode: Record<string, number> = {};
+    const lastSentByEnrollment: Record<string, any> = {};
+    for (const log of stepLogs) {
+      if (log.status !== "sent" || !log.sent_at) continue;
+      const eid = (log as any).enrollment_id;
+      const prev = lastSentByEnrollment[eid];
+      if (!prev || new Date(log.sent_at) > new Date(prev.sent_at)) lastSentByEnrollment[eid] = log;
+    }
+    for (const e of enrollments) {
+      if (e.stop_trigger !== "reply_received") continue;
+      const log = lastSentByEnrollment[e.id];
+      if (!log) continue;
+      if (log.channel) byChannel[log.channel] = (byChannel[log.channel] || 0) + 1;
+      if ((log as any).node_id) byNode[(log as any).node_id] = (byNode[(log as any).node_id] || 0) + 1;
+    }
+    return { byChannel, byNode };
+  }, [enrollments, stepLogs]);
 
   // Per-channel reply rates
   const channelStats = useMemo(() => {
@@ -115,8 +160,11 @@ export default function SequenceAnalyticsPage() {
       if (!log.channel) continue;
       if (!byChannel[log.channel]) byChannel[log.channel] = { sent: 0, replies: 0, opens: 0 };
       if (log.status === "sent") byChannel[log.channel].sent++;
-      if (log.reply_received_at) byChannel[log.channel].replies++;
       if ((log as any).opened_at) byChannel[log.channel].opens++;
+    }
+    for (const [channel, count] of Object.entries(replyAttribution.byChannel)) {
+      if (!byChannel[channel]) byChannel[channel] = { sent: 0, replies: 0, opens: 0 };
+      byChannel[channel].replies = count;
     }
     return Object.entries(byChannel).map(([channel, stats]) => ({
       channel: channel.replace(/_/g, " "),
@@ -127,7 +175,7 @@ export default function SequenceAnalyticsPage() {
       openRate: stats.sent > 0 ? Number(((stats.opens / stats.sent) * 100).toFixed(1)) : 0,
       color: CHANNEL_COLORS[channel] || "#6b7280",
     }));
-  }, [stepLogs]);
+  }, [stepLogs, replyAttribution]);
 
   // Per-step funnel — group step_logs by node_id, label by node_order.
   // Email steps surface open + reply rates; non-email steps just show
@@ -140,7 +188,10 @@ export default function SequenceAnalyticsPage() {
       if (!byNode[nid]) byNode[nid] = { sent: 0, opens: 0, replies: 0, channel: log.channel || "" };
       if (log.status === "sent") byNode[nid].sent++;
       if ((log as any).opened_at) byNode[nid].opens++;
-      if (log.reply_received_at) byNode[nid].replies++;
+    }
+    for (const [nid, count] of Object.entries(replyAttribution.byNode)) {
+      if (!byNode[nid]) byNode[nid] = { sent: 0, opens: 0, replies: 0, channel: "" };
+      byNode[nid].replies = count;
     }
     return [...nodes]
       .sort((a: any, b: any) => (a.node_order || 0) - (b.node_order || 0))
@@ -159,7 +210,7 @@ export default function SequenceAnalyticsPage() {
           replyRate: s.sent > 0 ? Number(((s.replies / s.sent) * 100).toFixed(1)) : 0,
         };
       });
-  }, [nodes, stepLogs]);
+  }, [nodes, stepLogs, replyAttribution]);
 
   // Note: an earlier "connection accept rate" KPI lived here. It was a bogus
   // proxy (any non-reply non-active enrollment counted as accepted, which
@@ -356,7 +407,7 @@ export default function SequenceAnalyticsPage() {
               <Badge variant="outline">Reached: {metrics.total}</Badge>
               <Badge variant="outline">Responded: {metrics.replied}</Badge>
               <Badge variant="outline">Meetings: {metrics.calendarBooked}</Badge>
-              <Badge variant="outline">Not Interested: {sentimentData.find((s) => s.name === "not_interested")?.value || 0}</Badge>
+              <Badge variant="outline">Not Interested: {sentimentData.find((s) => s.rawName === "not_interested")?.value || 0}</Badge>
             </div>
           </CardContent>
         </Card>
