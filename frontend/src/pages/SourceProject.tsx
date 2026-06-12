@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,10 +22,22 @@ import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
-  Bookmark, Download,
+  Bookmark, Download, CheckCircle2, ExternalLink,
 } from 'lucide-react';
 
 const PAGE_SIZE = 25;
+
+/** A person already in the CRM, matched to a LinkedIn profile by slug. */
+type CrmMatch = { id: string; type: 'candidate' | 'client'; full_name: string };
+
+/** Extract the LinkedIn vanity slug from a profile URL (the stable key we
+ *  match people on — same basis as the linkedin_url dedupe in
+ *  save-to-pipeline / the bulk importers). Returns null for non-URLs / URNs. */
+function slugOf(url?: string | null): string | null {
+  if (!url) return null;
+  const m = String(url).match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -206,6 +218,85 @@ export default function SourceProject() {
   const setPageOf = (stage: string, page: number) =>
     setStagePages((prev) => ({ ...prev, [stage]: page }));
 
+  // ---- "Already in CRM" matching ----------------------------------------
+  // For every LinkedIn person we display, look up whether they already exist
+  // in the unified people table (matched by LinkedIn slug — the same
+  // linkedin_url basis save-to-pipeline / the bulk importers dedupe on) so we
+  // can badge them + link to the record instead of offering a duplicate add.
+  // Accumulates across tabs; keyed by slug.
+  const [crmMatches, setCrmMatches] = useState<Record<string, CrmMatch>>({});
+  const [savingClientId, setSavingClientId] = useState<string | null>(null);
+
+  const refreshCrmMatches = useCallback(async (list: Applicant[]) => {
+    const slugs = [...new Set(list.map((a) => slugOf(a.linkedin_url)).filter(Boolean))] as string[];
+    if (slugs.length === 0) return;
+    const found: Record<string, CrmMatch> = {};
+    for (let i = 0; i < slugs.length; i += 25) {
+      const chunk = slugs.slice(i, i + 25);
+      const orFilter = chunk.map((s) => `linkedin_url.ilike.%/${s}%`).join(',');
+      const { data } = await supabase
+        .from('people')
+        .select('id, full_name, type, roles, linkedin_url')
+        .or(orFilter)
+        .is('deleted_at', null);
+      for (const p of (data ?? []) as any[]) {
+        // Re-derive the slug from the stored URL and key on the EXACT slug, so
+        // an over-broad ilike (e.g. /john vs /john-doe) can't mis-match.
+        const s = slugOf(p.linkedin_url);
+        if (!s) continue;
+        const roles: string[] = Array.isArray(p.roles) ? p.roles : [];
+        const isClient = p.type === 'client' || (roles.includes('client') && !roles.includes('candidate'));
+        found[s] = { id: p.id, type: isClient ? 'client' : 'candidate', full_name: p.full_name || '' };
+      }
+    }
+    if (Object.keys(found).length > 0) setCrmMatches((prev) => ({ ...prev, ...found }));
+  }, []);
+
+  const crmMatchFor = useCallback(
+    (a: Applicant): CrmMatch | null => {
+      const s = slugOf(a.linkedin_url);
+      return s ? (crmMatches[s] ?? null) : null;
+    },
+    [crmMatches],
+  );
+
+  // Add a LinkedIn person to the CRM as a CLIENT (the candidate path is the
+  // existing "Save" → save-to-pipeline). Reuses /api/add-person, which routes
+  // the role + classifies email/photo/headline server-side.
+  const handleSaveClient = useCallback(async (a: Applicant) => {
+    setSavingClientId(a.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Not authenticated'); return; }
+      const resp = await fetch('/api/add-person', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'contact',
+          data: {
+            first_name: a.first_name,
+            last_name: a.last_name,
+            title: a.current_title || a.headline || '',
+            company: a.current_company || '',
+            location: a.location || '',
+            linkedin_url: a.linkedin_url || '',
+            headline: a.headline || '',
+            photo: a.profile_picture_url || '',
+          },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `Add failed (${resp.status})`);
+      toast.success(data?.merged ? 'Added client role to existing person' : 'Added as client');
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      refreshCrmMatches([a]);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add client');
+    } finally {
+      setSavingClientId(null);
+    }
+  }, [queryClient, refreshCrmMatches]);
+
   // ---- Load pipeline (curated candidates) ----
   const fetchPipeline = useCallback(async () => {
     if (!id || !accountId) {
@@ -226,14 +317,16 @@ export default function SourceProject() {
       setProjectData(data.project || null);
       setDebug(data.debug || null);
       const items = data.items || [];
-      setPipelineCandidates((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      const norm = (Array.isArray(items) ? items : []).map(normalizeApplicant);
+      setPipelineCandidates(norm);
+      refreshCrmMatches(norm);
     } catch (err: any) {
       console.error('Failed to load pipeline', err);
       toast.error(err.message || 'Failed to load pipeline');
     } finally {
       setPipelineLoading(false);
     }
-  }, [id, accountId]);
+  }, [id, accountId, refreshCrmMatches]);
 
   // ---- Load job applicants (lazy on tab activation) ----
   const fetchJobApplicants = useCallback(async () => {
@@ -250,15 +343,17 @@ export default function SourceProject() {
       }, session);
       if (!projectData && data.project) setProjectData(data.project);
       const items = data.items || [];
-      setJobApplicants((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      const norm = (Array.isArray(items) ? items : []).map(normalizeApplicant);
+      setJobApplicants(norm);
       setApplicantsLoaded(true);
+      refreshCrmMatches(norm);
     } catch (err: any) {
       console.error('Failed to load applicants', err);
       toast.error(err.message || 'Failed to load applicants');
     } finally {
       setApplicantsLoading(false);
     }
-  }, [id, accountId, projectData]);
+  }, [id, accountId, projectData, refreshCrmMatches]);
 
   useEffect(() => { fetchPipeline(); }, [fetchPipeline]);
 
@@ -326,12 +421,13 @@ export default function SourceProject() {
       }
       toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      refreshCrmMatches([a]);
     } catch (err: any) {
       toast.error(err.message || 'Save failed');
     } finally {
       setSavingApplicantId(null);
     }
-  }, [callSaveToPipeline, queryClient]);
+  }, [callSaveToPipeline, queryClient, refreshCrmMatches]);
 
   const confirmLinkJob = useCallback(async () => {
     if (!linkDialogApplicant || !linkDialogJobId) return;
@@ -342,6 +438,7 @@ export default function SourceProject() {
         setLinkedJobId(linkDialogJobId);
         toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
+        refreshCrmMatches([linkDialogApplicant]);
         setLinkDialogApplicant(null);
         setLinkDialogJobId('');
       }
@@ -350,7 +447,7 @@ export default function SourceProject() {
     } finally {
       setSavingApplicantId(null);
     }
-  }, [linkDialogApplicant, linkDialogJobId, callSaveToPipeline, queryClient]);
+  }, [linkDialogApplicant, linkDialogJobId, callSaveToPipeline, queryClient, refreshCrmMatches]);
 
   // Lazy-load applicants the first time the user opens that tab.
   useEffect(() => {
@@ -392,8 +489,10 @@ export default function SourceProject() {
         limit: 25,
       }, session);
       const items = data.items || [];
-      setSearchResults((Array.isArray(items) ? items : []).map(normalizeApplicant));
+      const norm = (Array.isArray(items) ? items : []).map(normalizeApplicant);
+      setSearchResults(norm);
       setSearchTotal(typeof data.total_count === 'number' ? data.total_count : null);
+      refreshCrmMatches(norm);
     } catch (err: any) {
       console.error('Search failed', err);
       toast.error(err.message || 'Search failed');
@@ -751,6 +850,10 @@ export default function SourceProject() {
                             {applicant.headline && applicant.headline !== applicant.current_title && (
                               <div className="text-xs text-muted-foreground truncate">{applicant.headline}</div>
                             )}
+                            {(() => {
+                              const m = crmMatchFor(applicant);
+                              return m ? <div className="mt-0.5"><CrmBadge match={m} /></div> : null;
+                            })()}
                           </div>
                         </div>
                       </td>
@@ -817,6 +920,9 @@ export default function SourceProject() {
             onDownloadResume={handleDownloadResume}
             onSave={handleSaveApplicant}
             savingId={savingApplicantId}
+            getCrmMatch={crmMatchFor}
+            onSaveClient={handleSaveClient}
+            savingClientId={savingClientId}
           />
         </TabsContent>
 
@@ -859,6 +965,9 @@ export default function SourceProject() {
             total={searchTotal}
             onSave={handleSaveApplicant}
             savingId={savingApplicantId}
+            getCrmMatch={crmMatchFor}
+            onSaveClient={handleSaveClient}
+            savingClientId={savingClientId}
           />
         </TabsContent>
       </Tabs>
@@ -953,9 +1062,12 @@ interface ApplicantsTabProps {
   onDownloadResume: (a: Applicant) => void;
   onSave: (a: Applicant) => void;
   savingId: string | null;
+  getCrmMatch: (a: Applicant) => CrmMatch | null;
+  onSaveClient: (a: Applicant) => void;
+  savingClientId: string | null;
 }
 
-function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId }: ApplicantsTabProps) {
+function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId, getCrmMatch, onSaveClient, savingClientId }: ApplicantsTabProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
@@ -980,6 +1092,9 @@ function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId
           onDownloadResume={onDownloadResume}
           onSave={onSave}
           saving={savingId === a.id}
+          crmMatch={getCrmMatch(a)}
+          onSaveClient={onSaveClient}
+          savingClient={savingClientId === a.id}
         />
       ))}
     </div>
@@ -991,9 +1106,12 @@ interface ApplicantCardProps {
   onDownloadResume: (a: Applicant) => void;
   onSave?: (a: Applicant) => void;
   saving?: boolean;
+  crmMatch?: CrmMatch | null;
+  onSaveClient?: (a: Applicant) => void;
+  savingClient?: boolean;
 }
 
-function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving }: ApplicantCardProps) {
+function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving, crmMatch, onSaveClient, savingClient }: ApplicantCardProps) {
   const appliedRaw = a.applied_at || a.appliedAt || a.application_date;
   const appliedAt = appliedRaw ? new Date(appliedRaw) : null;
   const appliedStr = appliedAt && !Number.isNaN(appliedAt.getTime())
@@ -1070,19 +1188,39 @@ function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving }: Appli
               Resume
             </Button>
           )}
-          {onSave && (
-            <Button
-              size="sm"
-              variant="gold"
-              disabled={saving}
-              onClick={() => onSave(a)}
-              title="Save to LinkedIn pipeline + Sully Recruit"
-            >
-              {saving
-                ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                : <Bookmark className="h-3.5 w-3.5 mr-1" />}
-              Save
-            </Button>
+          {crmMatch ? (
+            <CrmBadge match={crmMatch} />
+          ) : (
+            <>
+              {onSave && (
+                <Button
+                  size="sm"
+                  variant="gold"
+                  disabled={saving}
+                  onClick={() => onSave(a)}
+                  title="Save as candidate (LinkedIn pipeline + Sully Recruit)"
+                >
+                  {saving
+                    ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    : <Bookmark className="h-3.5 w-3.5 mr-1" />}
+                  Candidate
+                </Button>
+              )}
+              {onSaveClient && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={savingClient}
+                  onClick={() => onSaveClient(a)}
+                  title="Add as client"
+                >
+                  {savingClient
+                    ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    : <Contact className="h-3.5 w-3.5 mr-1" />}
+                  Client
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1110,6 +1248,9 @@ interface SearchTabProps {
   total: number | null;
   onSave: (a: Applicant) => void;
   savingId: string | null;
+  getCrmMatch: (a: Applicant) => CrmMatch | null;
+  onSaveClient: (a: Applicant) => void;
+  savingClientId: string | null;
 }
 
 function SearchTab({
@@ -1117,7 +1258,7 @@ function SearchTab({
   onKeywordsChange, onTitleChange, onCompanyChange, onLocationChange,
   onLocationSearch,
   onSubmit, searching, results, total,
-  onSave, savingId,
+  onSave, savingId, getCrmMatch, onSaveClient, savingClientId,
 }: SearchTabProps) {
   return (
     <div className="space-y-4">
@@ -1172,6 +1313,9 @@ function SearchTab({
               onDownloadResume={() => { /* search results have no resume */ }}
               onSave={onSave}
               saving={savingId === a.id}
+              crmMatch={getCrmMatch(a)}
+              onSaveClient={onSaveClient}
+              savingClient={savingClientId === a.id}
             />
           ))}
         </div>
@@ -1246,5 +1390,25 @@ function LinkJobDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  CrmBadge — "already in Sully Recruit" pill linking to the record   */
+/* ------------------------------------------------------------------ */
+
+function CrmBadge({ match }: { match: CrmMatch }) {
+  const to = match.type === 'client' ? `/contacts/${match.id}` : `/candidates/${match.id}`;
+  return (
+    <Link
+      to={to}
+      title={match.full_name ? `In Sully Recruit: ${match.full_name}` : 'Already in Sully Recruit'}
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
+    >
+      <CheckCircle2 className="h-3 w-3 shrink-0" />
+      In CRM · {match.type === 'client' ? 'Client' : 'Candidate'}
+      <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+    </Link>
   );
 }
