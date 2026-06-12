@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MessageTemplateManager } from '@/components/templates/MessageTemplateManager';
+import { ChannelLimitsSettings } from '@/components/sequences/ChannelLimitsSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,6 +41,7 @@ import {
   X,
   CalendarClock,
   Copy,
+  Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -929,6 +931,7 @@ Senior Recruiter | Your Company
     { id: 'signature', label: 'Email Signature', icon: PenLine },
     { id: 'scheduling', label: 'Scheduling', icon: CalendarClock },
     { id: 'linkedin_safety', label: 'LinkedIn Safety', icon: ShieldCheck },
+    { id: 'send_limits', label: 'Send Limits', icon: Gauge },
     { id: 'api', label: 'API Keys', icon: Key },
     { id: 'job_spec', label: 'Lead Search Filter', icon: Target },
     { id: 'general', label: 'General', icon: SettingsIcon },
@@ -2178,6 +2181,9 @@ Senior Recruiter | Your Company
                     </div>
                   </div>
                 )}
+
+                {/* ============ SEND LIMITS TAB ============ */}
+                {activeTab === 'send_limits' && <ChannelLimitsSettings />}
 
                 {/* ============ SCHEDULING TAB ============ */}
                 {activeTab === 'scheduling' && (

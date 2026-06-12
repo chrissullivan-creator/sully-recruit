@@ -97,23 +97,37 @@ rescheduled +30 min. Neither marks the step failed.
 
 ## Send Window, Jitter, Caps
 
-All timing lives in `frontend/src/server-lib/send-time-calculator.ts` and is
-computed in **`America/New_York` (EST/EDT)**.
+All timing lives in `frontend/src/server-lib/send-time-calculator.ts`.
 
+- **Timezone** is per-sequence (`sequences.timezone`, picked in the builder),
+  resolved through `Intl` so it's DST-correct. Defaults to `America/New_York`.
+  Every caller threads it in (`enrollment-init-runner`, `reanchorNextStep`,
+  the connection-accept handlers); there are **no hardcoded UTC offsets**.
 - **Send window** is per-sequence (`send_window_start` / `send_window_end`,
-  `"HH:MM"`), default **09:00–18:00**. Delay hours tick *only inside* the
-  window. `weekdays_only` rolls Sat/Sun to Monday open.
+  `"HH:MM"`, in the sequence timezone), default **09:00–18:00**. Delay hours
+  tick *only inside* the window. `weekdays_only` rolls Sat/Sun to Monday open.
 - **`linkedin_connection` bypasses the window** — fires immediately, 24/7
   (+0–3 min anti-burst offset).
 - **Jitter:** per-action `jiggle_minutes` (±), re-clamped into the window;
   plus deterministic per-hour "hot-spot" snapping so independently-scheduled
   enrollments cluster like a human instead of bunching at HH:00.
-- **Caps:** `channel_limits` (daily/hourly) + `daily_send_log` counter.
-  `calculateSendTime` rolls a step to the next day/hour when a cap is hit, at
-  init time, so steps don't pile onto one day.
+- **Caps:** `channel_limits` (daily/hourly per channel) + `daily_send_log`
+  counter. `calculateSendTime` rolls a step to the next day/hour when a cap is
+  hit, at init time, so steps don't pile onto one day. **Editable in the UI** at
+  Settings → Send Limits (`ChannelLimitsSettings`); the builder's "estimated
+  daily sends" warnings and the schedule view's utilization bars read the same
+  table via `useChannelLimits()` — no hardcoded cap numbers anywhere.
 
 > Note: the old doc claimed "4:30 AM–9:30 PM CST" — that was never the code.
-> The window is the per-sequence EST window above.
+> The window is the per-sequence, timezone-aware window above.
+
+## Compliance — do_not_contact
+
+`people.do_not_contact` is a hard global suppression. When an inbound reply is
+classified `do_not_contact`, `intel-extraction` sets it. The engine then
+refuses to message that person again, on any sequence: `enrollment-init-runner`
+stops a new enrollment before scheduling, and `runSequenceAction` stops any
+in-flight enrollment at its pre-flight check (`stop_trigger='do_not_contact'`).
 
 ---
 

@@ -118,9 +118,21 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
   if (recipientId) {
     const { data: person } = await supabase
       .from("people")
-      .select("type, primary_email, work_email, personal_email, phone, linkedin_url")
+      .select("type, primary_email, work_email, personal_email, phone, linkedin_url, do_not_contact")
       .eq("id", recipientId)
       .maybeSingle();
+
+    // Compliance guard — never schedule anything for a suppressed person.
+    // Stop the enrollment so it doesn't sit "active" forever.
+    if (person?.do_not_contact) {
+      await supabase
+        .from("sequence_enrollments")
+        .update({ status: "stopped", stop_trigger: "do_not_contact", stop_reason: "do_not_contact", stopped_at: new Date().toISOString() })
+        .eq("id", payload.enrollmentId);
+      console.info("[enrollment-init-runner] Skipped — recipient is do_not_contact", { enrollmentId: payload.enrollmentId });
+      return { action: "skipped", reason: "do_not_contact" };
+    }
+
     if (person) {
       recipientEmail =
         person.type === "candidate"
@@ -223,6 +235,7 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
           sendWindowStart: sequence.send_window_start || "09:00",
           sendWindowEnd: sequence.send_window_end || "18:00",
           accountId: senderUserId,
+          timezone: sequence.timezone || undefined,
           weekdaysOnly: sequence.weekdays_only === true,
         });
 

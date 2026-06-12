@@ -176,6 +176,18 @@ export async function applyExtractedIntel(
     } as any)
     .eq("id", entityId);
 
+  // Compliance: an explicit "stop contacting me" suppresses ALL future
+  // outreach, not just the current sequence. Set on the base people table so
+  // the enrollment guard (enrollment-init-runner / sequence-runner) can refuse
+  // to message them again. Reply-stop of the active enrollment is handled by
+  // the webhook caller separately.
+  if (intel.sentiment === "do_not_contact") {
+    await supabase
+      .from("people")
+      .update({ do_not_contact: true } as any)
+      .eq("id", entityId);
+  }
+
   // Build update object with only non-null extracted fields
   const updates: Record<string, any> = {};
 

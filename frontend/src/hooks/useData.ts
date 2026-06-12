@@ -349,6 +349,32 @@ export function useSequenceListMetrics() {
   });
 }
 
+// Per-channel send caps (channel_limits table). These are the SAME limits the
+// engine enforces in send-time-calculator — surfaced here so the builder /
+// schedule view and the Settings editor all read one source of truth instead
+// of hardcoded constants.
+export interface ChannelLimit {
+  channel: string;
+  daily_max: number | null;
+  hourly_max: number | null;
+}
+
+export function useChannelLimits() {
+  return useQuery({
+    queryKey: ['channel_limits'],
+    queryFn: async (): Promise<Record<string, ChannelLimit>> => {
+      const { data, error } = await supabase
+        .from('channel_limits')
+        .select('channel, daily_max, hourly_max');
+      if (error) throw error;
+      const map: Record<string, ChannelLimit> = {};
+      for (const row of (data || []) as ChannelLimit[]) map[row.channel] = row;
+      return map;
+    },
+    staleTime: 60_000,
+  });
+}
+
 // Send outs for a specific job
 export function useJobSendOuts(jobId: string | undefined) {
   return useQuery({

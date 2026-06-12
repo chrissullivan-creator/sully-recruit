@@ -17,7 +17,7 @@
  */
 import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./send-channels.js";
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./merge-tags.js";
-import { calculateSendTime, incrementDailySend } from "./send-time-calculator.js";
+import { calculateSendTime, incrementDailySend, localDateString } from "./send-time-calculator.js";
 import { canonicalChannel } from "./unipile-v2.js";
 import { notifyError } from "./alerting.js";
 
@@ -139,9 +139,18 @@ export async function runSequenceAction(
   // The legacy `primary_email` column is the fallback during the migration.
   const { data: entityRow } = await supabase
     .from("people")
-    .select("type, primary_email, work_email, personal_email, phone, linkedin_url, email_invalid")
+    .select("type, primary_email, work_email, personal_email, phone, linkedin_url, email_invalid, do_not_contact")
     .eq("id", entityId)
     .maybeSingle();
+
+  // Compliance guard — a person flagged do_not_contact (e.g. they replied
+  // "stop") must not receive anything, even on a step that was already
+  // scheduled before they opted out. Stop the whole enrollment.
+  if (entityRow?.do_not_contact) {
+    await stopEnrollment(supabase, enrollment, "do_not_contact", undefined, logger);
+    await markStepLog(supabase, payload.stepLogId, "cancelled");
+    return { action: "stopped", reason: "do_not_contact" };
+  }
 
   const resolvedEmail =
     entityRow?.type === "candidate"
@@ -371,10 +380,9 @@ export async function runSequenceAction(
   // Re-anchor the next pending step to actual sent_at + delay.
   await reanchorNextStep(supabase, payload.enrollmentId, payload.stepLogId, sentAt, sequence, logger);
 
-  // Increment daily send counter
-  const est = sentAt.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const estDate = new Date(est);
-  const dateStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, "0")}-${String(estDate.getDate()).padStart(2, "0")}`;
+  // Increment daily send counter, keyed by the sequence's local date so the
+  // counter aligns with the cap check (checkDailyCap uses the same zone).
+  const dateStr = localDateString(sentAt, sequence.timezone || undefined);
   await incrementDailySend(supabase, senderUserId, action.channel, dateStr);
 
   // Log outbound message. Canonicalise channel so sequence sends
@@ -588,6 +596,7 @@ export async function reanchorNextStep(
     sendWindowStart: sequence.send_window_start || "09:00",
     sendWindowEnd: sequence.send_window_end || "18:00",
     accountId: senderUserId,
+    timezone: sequence.timezone || undefined,
     weekdaysOnly: sequence.weekdays_only === true,
   });
 

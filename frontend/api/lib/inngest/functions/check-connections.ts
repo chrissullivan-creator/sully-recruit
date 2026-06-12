@@ -58,6 +58,7 @@ async function schedulePendingConnectionLogs(
       sequence.send_window_start || "09:00",
       sequence.send_window_end || "18:00",
       senderUserId,
+      sequence.timezone || undefined,
     );
     await supabase
       .from("sequence_step_logs")

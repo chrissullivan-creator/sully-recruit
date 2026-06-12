@@ -93,23 +93,27 @@ export function SequenceList() {
 
       if (error) throw error;
 
-      // Fetch enrollment counts
-      const enriched = await Promise.all(
-        (data || []).map(async (seq: SequenceRow) => {
-          const { count: totalCount } = await supabase
-            .from("sequence_enrollments")
-            .select("id", { count: "exact", head: true })
-            .eq("sequence_id", seq.id);
-
-          const { count: activeCount } = await supabase
-            .from("sequence_enrollments")
-            .select("id", { count: "exact", head: true })
-            .eq("sequence_id", seq.id)
-            .eq("status", "active");
-
-          return { ...seq, _enrollmentCount: totalCount || 0, _activeCount: activeCount || 0 };
-        }),
-      );
+      // Enrollment counts in ONE query (was 2 per sequence = N+1). Aggregate
+      // total + active per sequence_id client-side.
+      const seqIds = (data || []).map((s: SequenceRow) => s.id);
+      const totals: Record<string, number> = {};
+      const actives: Record<string, number> = {};
+      if (seqIds.length) {
+        const { data: enrollRows, error: enrollErr } = await supabase
+          .from("sequence_enrollments")
+          .select("sequence_id, status")
+          .in("sequence_id", seqIds);
+        if (enrollErr) throw enrollErr;
+        for (const row of (enrollRows || []) as { sequence_id: string; status: string }[]) {
+          totals[row.sequence_id] = (totals[row.sequence_id] || 0) + 1;
+          if (row.status === "active") actives[row.sequence_id] = (actives[row.sequence_id] || 0) + 1;
+        }
+      }
+      const enriched = (data || []).map((seq: SequenceRow) => ({
+        ...seq,
+        _enrollmentCount: totals[seq.id] || 0,
+        _activeCount: actives[seq.id] || 0,
+      }));
       setSequences(enriched);
     } catch (err: any) {
       console.error("Failed to load sequences:", err);
