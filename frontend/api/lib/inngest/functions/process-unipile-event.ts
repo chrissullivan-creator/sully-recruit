@@ -10,6 +10,7 @@ import { canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
 import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
 import { resolvePerson, type LinkMethod } from "../../identity-resolver.js";
+import { autoCreatePersonFromOutbound } from "../../../../src/server-lib/resolve-counterparty.js";
 
 /**
  * Process Unipile webhook events (LinkedIn messages, connection updates,
@@ -473,6 +474,45 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       return null;
     }
     return created?.id ?? null;
+  }
+
+  // Auto-add: an inbound LinkedIn Recruiter (InMail) message is a real person
+  // reaching out, so create the candidate now instead of dropping it (the
+  // Phase-5 rule below). matchLinkedinEntity above already deduped (provider
+  // id / candidate_channels / slug), so we only land here when they're
+  // genuinely new; autoCreatePersonFromOutbound mirrors the provider id into
+  // candidate_channels so the next message hard-matches, and the
+  // resolve-unipile / find-linkedin crons backfill title/company/URL.
+  // Scoped to inbound: on outbound the sender id is *us* (that's how direction
+  // is detected), and outbound recipients are auto-added upstream in the send
+  // path — so creating from senderId here is only correct for inbound.
+  if (!entityId && channel === "linkedin_recruiter" && direction === "inbound" && integrationAccountId) {
+    const { data: ownerRow } = await supabase
+      .from("integration_accounts")
+      .select("owner_user_id")
+      .eq("id", integrationAccountId)
+      .maybeSingle();
+    const ownerUserId = ownerRow?.owner_user_id ?? null;
+    const senderName =
+      messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
+    if (ownerUserId) {
+      const created = await autoCreatePersonFromOutbound(supabase, {
+        channel: "linkedin_recruiter",
+        address: senderId,
+        name: senderName,
+        ownerUserId,
+        source: "recruiter_inmail",
+      });
+      if (created) {
+        entityId = created.id;
+        entityType = created.type;
+        entityColumn = created.entityColumn;
+        logger.info("Auto-created candidate from inbound LinkedIn Recruiter InMail", {
+          senderId,
+          personId: entityId,
+        });
+      }
+    }
   }
 
   if (!entityId) {
