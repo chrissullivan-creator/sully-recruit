@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MessageTemplateManager } from '@/components/templates/MessageTemplateManager';
+import { CustomFieldsManager } from '@/components/custom-fields/CustomFieldsManager';
 import { ChannelLimitsSettings } from '@/components/sequences/ChannelLimitsSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +44,7 @@ import {
   CalendarClock,
   Copy,
   Gauge,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -934,8 +937,12 @@ Senior Recruiter | Your Company
     { id: 'send_limits', label: 'Send Limits', icon: Gauge },
     { id: 'api', label: 'API Keys', icon: Key },
     { id: 'job_spec', label: 'Lead Search Filter', icon: Target },
+    { id: 'data_hygiene', label: 'Data Hygiene', icon: Copy },
     { id: 'general', label: 'General', icon: SettingsIcon },
-    ...(isAdmin ? [{ id: 'admin', label: 'Admin Tools', icon: Wrench }] : []),
+    ...(isAdmin ? [
+      { id: 'custom_fields', label: 'Custom Fields', icon: Sparkles },
+      { id: 'admin', label: 'Admin Tools', icon: Wrench },
+    ] : []),
   ];
 
   const isSaving = (type: string) => saving === type;
@@ -2653,6 +2660,57 @@ Senior Recruiter | Your Company
                           </Button>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ============ CUSTOM FIELDS TAB ============ */}
+                {activeTab === 'custom_fields' && isAdmin && (
+                  <CustomFieldsManager />
+                )}
+
+                {/* ============ DATA HYGIENE TAB ============ */}
+                {activeTab === 'data_hygiene' && (
+                  <div>
+                    <div className="mb-6">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Data Hygiene</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Find and resolve duplicate people and resume/identity collisions.
+                      </p>
+                    </div>
+                    <div className="space-y-4">
+                      <Link
+                        to="/duplicates"
+                        className="block rounded-lg border border-border bg-card p-4 hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            <Copy className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-medium text-foreground">Duplicates</h3>
+                            <p className="text-xs text-muted-foreground">
+                              Scan for duplicate people and merge them onto a single record.
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                      <Link
+                        to="/admin/collisions"
+                        className="block rounded-lg border border-border bg-card p-4 hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            <AlertTriangle className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-medium text-foreground">Collisions</h3>
+                            <p className="text-xs text-muted-foreground">
+                              Scan for resume/identity collisions where one file maps to multiple people.
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
                     </div>
                   </div>
                 )}

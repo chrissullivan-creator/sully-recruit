@@ -8,8 +8,8 @@ import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
-  Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch, Copy,
-  Send, Martini, Calendar, BarChart3, Menu, X, AlertTriangle, Upload,
+  Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch,
+  Send, Martini, Calendar, BarChart3, Menu, X, Upload,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -64,8 +64,8 @@ const navigation = [
   // route stays registered for deep links, but the nav points into the Hub.
   { name: 'Calls',      href: '/inbox?section=calls', icon: Phone    },
   { name: 'Reports',    href: '/reports',    icon: BarChart3       },
-  { name: 'Duplicates', href: '/duplicates', icon: Copy            },
-  { name: 'Collisions', href: '/admin/collisions', icon: AlertTriangle },
+  // Duplicates + Collisions moved to Settings → Data Hygiene (routes still
+  // registered for deep links).
   { name: 'Settings',   href: '/settings',   icon: Settings        },
 ];
 

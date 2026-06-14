@@ -67,6 +67,46 @@ export function useCandidate(id: string | undefined) {
   });
 }
 
+// Admin-defined custom field definitions for an entity type
+// ('candidate' | 'client' | 'company' | 'job'). Returns only active fields,
+// ordered by display_order. Cached aggressively — defs change rarely.
+export type CustomFieldDef = {
+  id: string;
+  entity_type: string;
+  key: string;
+  label: string;
+  field_type: 'text' | 'number' | 'date' | 'boolean' | 'select' | 'multiselect' | 'url';
+  options: string[];
+  required: boolean;
+  section: string | null;
+  display_order: number;
+  is_active: boolean;
+};
+
+export function useCustomFieldDefs(entityType: string | undefined, includeInactive = false) {
+  return useQuery({
+    queryKey: ['custom_field_defs', entityType, includeInactive],
+    enabled: !!entityType,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      // custom_field_defs isn't in the generated Supabase types yet — cast to
+      // any so the query builder doesn't resolve to `never`.
+      let q = (supabase.from('custom_field_defs' as any) as any)
+        .select('*')
+        .eq('entity_type', entityType!)
+        .order('display_order', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (!includeInactive) q = q.eq('is_active', true);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []).map((d: any) => ({
+        ...d,
+        options: Array.isArray(d.options) ? d.options : [],
+      })) as CustomFieldDef[];
+    },
+  });
+}
+
 // Notes for an entity
 export function useNotes(entityId: string | undefined, entityType: string) {
   return useQuery({

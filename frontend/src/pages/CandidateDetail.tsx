@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
+import { CustomFieldsSection } from '@/components/custom-fields/CustomFieldsSection';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useEntityTasks, Task } from '@/hooks/useTasks';
@@ -1630,6 +1631,15 @@ const CandidateDetail = () => {
                     </CollapsibleContent>
                   </Collapsible>
                 </div>
+
+                {id && (
+                  <CustomFieldsSection
+                    entityType="candidate"
+                    recordId={id}
+                    value={(candidate as any)?.custom_fields}
+                    invalidateKeys={[['candidate', id]]}
+                  />
+                )}
               </TabsContent>
 
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-6">
