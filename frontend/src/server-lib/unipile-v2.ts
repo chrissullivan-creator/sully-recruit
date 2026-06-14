@@ -144,6 +144,31 @@ export function translatePathToV1(path: string): string | null {
   return clean;
 }
 
+/**
+ * Translate a caller's v1-shaped path into its Unipile **v2** equivalent.
+ * account_id is NOT included here — unipileFetchV2 adds it as the leading
+ * path segment (`/v2/{acc_xxx}/...`).
+ *
+ * Verified live (June 2026):
+ *   - `linkedin/users/{slug}`  → `users/{slug}`                       (200)
+ *   - `linkedin/projects[...]` → `linkedin/recruiter/projects[...]`   (200, list)
+ * Everything else passes through unchanged. v2 LinkedIn messaging is
+ * inbox-scoped (top-level `chats` 501s with "use the inbox chats endpoint"),
+ * so those callers must build the inbox path themselves.
+ */
+export function translatePathToV2(path: string): string {
+  const clean = path.replace(/^\/+/, "");
+  // LinkedIn user lookups: v1-shaped `linkedin/users/...` → v2 `users/...`.
+  if (clean.startsWith("linkedin/users/")) return clean.slice("linkedin/".length);
+  // Recruiter hiring projects nest under `recruiter/` on v2.
+  if (clean.startsWith("linkedin/projects")) {
+    return "linkedin/recruiter/projects" + clean.slice("linkedin/projects".length);
+  }
+  // InMail credits live under `recruiter/` on v2.
+  if (clean === "linkedin/inmail-credits") return "linkedin/recruiter/inmail-credits";
+  return clean;
+}
+
 export interface UnipileFetchInit extends Omit<RequestInit, "headers"> {
   query?: Record<string, string | number | undefined>;
   /** Extra headers merged on top of auth/Accept defaults. */
@@ -176,49 +201,28 @@ export async function unipileFetch<T = any>(
   init: UnipileFetchInit = {},
 ): Promise<T> {
   if (!accountId) throw new Error("unipileFetch: accountId required");
-  const v1Path = translatePathToV1(path);
-  if (v1Path === null) {
+
+  // v2-only migration (2026-06-14): the v1 DSN key points at a Unipile app
+  // with zero connected accounts, so every v1 short-id call 404s. Resolve the
+  // canonical acc_xxx (callers still pass the v1 short id) and route the whole
+  // surface through the v2 host via unipileFetchV2. translatePathToV2 maps the
+  // v1-shaped paths callers wrote to their v2 equivalents.
+  const accV2 = accountId.startsWith("acc_")
+    ? accountId
+    : await getUnipileAccountV2IdByV1Id(supabase, accountId);
+  if (!accV2) {
     throw new Error(
-      `unipileFetch: no v1 equivalent for "${path}". `
-      + `This endpoint was v2-only and our v2 app lacks the scope. `
-      + `Caller should 501 or fall back to a v1 route.`,
+      `unipileFetch: no Unipile v2 account id for "${accountId}". `
+      + `Reconnect the seat in Settings → Integrations (hosted auth).`,
     );
   }
-
-  const { base, apiKey } = await resolveConfig(supabase);
-  const cleanPath = v1Path.replace(/^\/+/, "");
-
-  // Preserve a query string the caller embedded in `path`.
-  const [pathPart, embeddedQs = ""] = cleanPath.split("?");
-  const url = new URL(`${base}/${pathPart}`);
-  if (embeddedQs) {
-    const parsed = new URLSearchParams(embeddedQs);
-    for (const [k, v] of parsed.entries()) url.searchParams.set(k, v);
-  }
-  url.searchParams.set("account_id", accountId);
-  if (init.query) {
-    for (const [k, v] of Object.entries(init.query)) {
-      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-    }
-  }
-
-  const headers: Record<string, string> = {
-    "X-API-KEY": apiKey,
-    Accept: "application/json",
-    ...(init.headers || {}),
-  };
-  // Set JSON Content-Type only when body is a string AND no content-type set.
-  if (typeof init.body === "string" && !headers["Content-Type"] && !headers["content-type"]) {
-    headers["Content-Type"] = "application/json";
-  }
-  const resp = await fetch(url.toString(), { ...init, headers });
-  const text = await resp.text();
-  if (!resp.ok) {
-    throw new Error(`Unipile ${resp.status} ${path}: ${text.slice(0, 300)}`);
-  }
-  if (!text) return {} as T;
-  try { return JSON.parse(text) as T; } catch { return text as unknown as T; }
+  return unipileFetchV2<T>(supabase, accV2, translatePathToV2(path), init);
 }
+
+// resolveConfig + translatePathToV1 are retained for reference / any v1-only
+// tooling but are no longer on the unipileFetch hot path.
+void resolveConfig;
+void translatePathToV1;
 
 /**
  * Look up the Unipile account_id for a given Sully user + provider.
