@@ -16,6 +16,7 @@ If you're returning to this codebase, these are the recent invariants that bite:
 - **Unipile API split (canonical: `CLAUDE.md`, updated 2026-06).** Most methods (messaging, email, calendar, project/applicant reads) are **v1** — tenant DSN, `account_id` as a **query param**, `UNIPILE_API_KEY` — via `frontend/src/server-lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)`. **LinkedIn Recruiter writes** (create project, save candidate) are **v2** — `api.unipile.com/v2`, `account_id` as a **path segment** (`acc_xxx`), `UNIPILE_API_KEY_V2` — via `unipileFetchV2()`, gated by `UNIPILE_LINKEDIN_V2` (ON). The old `trigger/lib/` path is now `frontend/src/server-lib/`. Send-channels uses `{ attendees_ids:[providerId], text, linkedin: { api: 'recruiter' } }` for InMail, not `message_type: "INMAIL"`.
 - **Channel buckets are FOUR, not five.** `email`, `sms`, `linkedin`, `linkedin_recruiter`. Sales Navigator was removed from the active code paths — `canonicalChannel()` now folds any sales_navigator label into `linkedin`. Inbound bucketing reads `chat.content_type === 'inmail'` or `folder` includes `'INBOX_LINKEDIN_RECRUITER'`. Don't fall back to integration_account.account_type alone.
 - **InMail credit guard.** `sync-inmail-credits` cron stamps `integration_accounts.inmail_credits_remaining`. `sendLinkedIn` refuses to fire an InMail when the cached balance is 0; successful InMails decrement the cache locally between hourly polls.
+- **Custom fields layer (2026-06-14).** Admin-defined fields without a migration. Definitions in `custom_field_defs` (`entity_type` ∈ candidate|client|company|job, immutable `key`, `label`, `field_type`, `options`, `section`, `display_order`, `required`, `is_active`); values in a `custom_fields JSONB` column on the base table — **pilot: `people` only** (companies/jobs add their own column on rollout). `useCandidate` reads `people.*` so values come along free — **no view recreation**. Validation is UI-side (no DB trigger — `people` has too many writers); `required` is a UI hint only; `key` is immutable. `custom_field_defs` isn't in generated types → cast `from('custom_field_defs' as any)`. Admin UI: Settings → Custom Fields; record editor: `CustomFieldsSection` in CandidateDetail's Background tab (candidates only so far). See SKILL-frontend.md.
 - **People↔companies auto-link (2026-06-12).** `people.company_id` is set automatically — never text-match `company_name`/`current_company` to list a company's people; filter on `company_id` (CompanyDetail does this now, Contacts + Candidates tabs). Resolution: `find_company_id_by_name(text)` normalizes via `normalize_company_name()` (lowercase, strip leading "the" + trailing inc/llc/lp/ltd/etc, drop non-alphanumerics) and checks `companies.name` first, then `company_aliases.alias_normalized`. Auto-link triggers: `trg_auto_link_person_company` (people insert / company-text change; respects an explicitly-set company_id), `trg_claim_people_for_company` (companies insert/rename claims unlinked matching people), `trg_claim_people_for_company_alias` (alias insert claims immediately). ~100 curated aliases exist ("Millennium"→Millennium Management, "JPMorgan Chase & Co."→J.P. Morgan, "SS&C GlobeOp"→SS&C Technologies...). Deliberately separate firms — do NOT alias-merge: Citadel vs Citadel Securities, Citi vs Citizens Bank, Point72 vs Cubist Systematic Strategies, GTS vs GTSF. To tie a new variant: `INSERT INTO company_aliases (company_id, alias) VALUES (...)` and the trigger backfills.
 
 ---
@@ -87,11 +88,24 @@ last_sequence_sentiment, last_sequence_sentiment_note
 joe_says, joe_says_updated_at
 linkedin_headline, linkedin_current_company, linkedin_current_title, linkedin_location, linkedin_profile_text, linkedin_last_synced_at, ai_search_text
 linked_contact_id      ← self-reference to a counterpart row (same person both candidate AND client)
+custom_fields (jsonb)  ← admin-defined custom fields, keyed by custom_field_defs.key (2026-06-14)
 ```
 
 **⚠️ NEVER use `location` — it's `location_text`**
 **⚠️ Valid statuses ONLY: `new`, `reached_out`, `engaged` — NOT `back_of_resume`, `placed`, `dnc`, `stale`, `active`. CHECK constraint enforces this.**
 **⚠️ `back_of_resume` is a BOOLEAN column now, not a status value. Set `back_of_resume=true` when comp is added + resume exists.**
+
+### `custom_field_defs` table (2026-06-14)
+Admin-defined custom field definitions. Values live in the base table's
+`custom_fields JSONB` column (pilot: `people`), keyed by `key`.
+```
+id, entity_type (candidate|client|company|job), key (immutable slug),
+label, field_type (text|number|date|boolean|select|multiselect|url),
+options (jsonb[] for select/multiselect), required (UI hint only),
+section, display_order, is_active, created_by, created_at, updated_at
+UNIQUE (entity_type, key)
+```
+**⚠️ Not in generated Supabase types — cast `from('custom_field_defs' as any)`.**
 
 ### `resumes` table
 ```

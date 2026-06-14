@@ -26,9 +26,49 @@ supabase.from('contacts').select(...)
 supabase.from('contacts').insert({ ... })  // type='client' set by trigger
 ```
 
-The `Tables<'people'>`, `Tables<'candidate_profiles'>`, `Tables<'contact_profiles'>`, `Tables<'person_*'>` types are GONE — those tables were dropped. Don't import them.
+**Update (Pass 6, 2026-05-03):** `people` is now the real **base table**;
+`candidates` and `contacts` are views over it. New code can (and the
+detail pages do) write to `from('people')` directly — e.g. `useCandidate`
+reads `from('people').select('*')`. The `candidates`/`contacts` examples
+above still work via the views. See SKILL-architecture.md for the canonical
+column list and the `personal_email`/`work_email` rules.
+
+The legacy `candidate_profiles`, `contact_profiles`, `person_*` tables/types are GONE — those were dropped. Don't import them.
 
 **Dashboard date range:** `useDashboardMetrics(range)` requires a `{ from: Date, to: Date }` arg. Use `<DateRangePicker>` from `components/dashboard/DateRangePicker.tsx` with `defaultDashboardRange()` for the initial value.
+
+---
+
+## Custom Fields layer (2026-06-14)
+
+Admin-defined, config-driven fields — add a field from the UI, no migration.
+Definitions live in `custom_field_defs`; values live in a `custom_fields` JSONB
+column on the base table (pilot: `people` only — companies/jobs get their own
+column on rollout). `useCandidate` reads `people.*`, so a candidate's
+`custom_fields` rides along with the record — **no view changes needed**.
+
+- **Hook:** `useCustomFieldDefs(entityType, includeInactive?)` in `useData.ts`
+  (`'candidate' | 'client' | 'company' | 'job'`). Active-only by default,
+  cached 5 min.
+- **Record editor:** `components/custom-fields/CustomFieldsSection.tsx` —
+  self-saving (`UPDATE people SET custom_fields`), renders nothing when no
+  fields are defined. Lives in the CandidateDetail **Background** tab.
+- **Admin CRUD:** `components/custom-fields/CustomFieldsManager.tsx` at
+  **Settings → Custom Fields** (admin-only). The live record editor is wired
+  for **candidates** only so far.
+- **Gotchas:** `key` is immutable (only `label` is renamable); `required` is a
+  UI hint, not DB-enforced; value-type validation is UI-side (no DB trigger —
+  `people` has too many writers). `custom_field_defs` isn't in the generated
+  Supabase types, so cast the table arg: `supabase.from('custom_field_defs' as any)`.
+- Promote a field to a real typed column the moment the engine/financials/
+  reporting depend on it. Custom fields are for the long tail.
+
+## Navigation — Data Hygiene moved (2026-06-14)
+
+**Duplicates** (`/duplicates`) and **Collisions** (`/admin/collisions`) are no
+longer in the sidebar (`components/layout/Sidebar.tsx`). They live under
+**Settings → Data Hygiene** as launcher cards. The routes stay registered in
+`App.tsx` for deep links — don't re-add them to the sidebar.
 
 ---
 
@@ -92,33 +132,36 @@ do_not_contact: dark red
 ```
 frontend/src/
   pages/
+    Index.tsx               dashboard (route '/')
+    People.tsx              unified people list (candidates + clients)
     Candidates.tsx          candidate list + resume drop
-    CandidateDetail.tsx     candidate profile + tabs
-    Contacts.tsx            contacts list
-    ContactDetail.tsx       contact profile
-    Jobs.tsx                jobs list
-    JobDetail.tsx           job + pipeline
+    CandidateDetail.tsx     candidate profile + tabs (custom fields in Background tab)
+    Contacts.tsx / ContactDetail.tsx   client list + profile
+    Companies.tsx / CompanyDetail.tsx
+    Jobs.tsx / JobDetail.tsx           jobs list + pipeline
     Sequences.tsx           sequence list
-    SequenceDetail.tsx      sequence builder + enrollees + analytics
-    Inbox.tsx               unified inbox
-    Dashboard.tsx           dashboard
+    SequenceBuilder.tsx     node-based sequence builder (/sequences/new, /:id/edit)
+    SequenceScheduleView.tsx / SequenceAnalyticsPage.tsx
+    Inbox.tsx               unified Communication Hub (Calls live here via ?section=calls)
+    DuplicatesReview.tsx / CollisionReview.tsx   reached via Settings → Data Hygiene
+    Settings.tsx            tabbed settings
   components/
-    campaigns/
-      CampaignStepItem.tsx  sequence step editor (Ask Joe button here)
-      CampaignBuilder.tsx   sequence step list
-      SequenceAnalytics.tsx general tab analytics
+    sequences/
+      FlowBuilder.tsx       node graph builder
+      StepEditorDialog.tsx  per-action step editor
+      SequenceStepCard.tsx / SequenceReview.tsx / SequenceSetup.tsx / SequenceList.tsx
+      ChannelLimitsSettings.tsx   Settings → Send Limits
+    custom-fields/
+      CustomFieldsSection.tsx     record-page editor (self-saving)
+      CustomFieldsManager.tsx     Settings → Custom Fields admin CRUD
     candidates/
       EnrollInSequenceDialog.tsx
-      AddCandidateDialog.tsx
     shared/
       ResumeDropZone.tsx    resume upload + parse
     layout/
-      MainLayout.tsx
-      PageHeader.tsx
-    tasks/
-      TaskSidebar.tsx
+      MainLayout.tsx / PageHeader.tsx / Sidebar.tsx
   hooks/
-    useData.ts              useCandidate, useCandidates, useJobs, etc.
+    useData.ts              useCandidate, useCandidates, useJobs, useCustomFieldDefs, etc.
     useProfiles.ts          team member profiles
   integrations/
     supabase/client.ts      supabase client singleton
@@ -200,9 +243,10 @@ const resp = await fetch(
 
 ## Sequence Step Composer — Ask Joe
 
-Ask Joe button in `CampaignStepItem.tsx` calls `ask-joe` edge function in `draft_message` mode.
-
-Must pass:
+The sequence builder is now node-based: `FlowBuilder.tsx` + the per-action
+`StepEditorDialog.tsx` (the old `campaigns/CampaignStepItem.tsx` is gone). Any
+`ask-joe` drafting call (`draft_message` mode) must pass the context below —
+see SKILL-joe.md for the canonical drafting contract:
 - `job_id` (not just jobTitle string) → Joe calls `get_job_context` to read full spec
 - `sequenceDescription` → Joe understands the campaign context
 - `channel` → Joe writes appropriate length/tone

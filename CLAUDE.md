@@ -36,6 +36,8 @@ Read these before making changes:
 - **People↔companies auto-link (2026-06-12):** `people.company_id` is resolved automatically from company text (`company_name` → `current_company` → `linkedin_current_company`) by `find_company_id_by_name()`, which normalizes via `normalize_company_name()` and checks `companies.name` first, then the `company_aliases` table. Triggers keep it current: people insert/company-text change, companies insert/rename, and company_aliases insert all (re)claim links. **Never list a company's people by text-matching `company_name` — filter on `company_id`.** To map a name variant to an existing company ("Millennium" → Millennium Management), insert a `company_aliases` row — its trigger links matching unlinked people immediately.
 - Person statuses (shared candidate + client): `new`, `reached_out`, `engaged` — nothing else (CHECK constraint enforces this)
 - Pipeline stage tables: `pitches`, `send_outs`, `submissions`, `interviews`, `placements`, `rejections`
+- **Custom fields (2026-06-14):** admin-defined fields via `custom_field_defs` + a `custom_fields JSONB` column (pilot: `people` only). UI at Settings → Custom Fields; editor in CandidateDetail Background tab (candidates only so far). Cast `from('custom_field_defs' as any)` — not in generated types. See SKILL-architecture.md / SKILL-frontend.md.
+- **Data Hygiene (2026-06-14):** Duplicates (`/duplicates`) + Collisions (`/admin/collisions`) moved from the sidebar to Settings → Data Hygiene; routes still registered for deep links.
 - Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley
 
 ## Unipile API — v1 (methods) + v2 (lifecycle **and** Recruiter writes) — updated June 7 2026
