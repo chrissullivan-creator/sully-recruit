@@ -44,6 +44,37 @@ function flattenProfile(raw: any) {
   };
 }
 
+// Resolve the Unipile v2 context (acc_xxx + key + base) for a passed v1 short
+// id. Source still sends the v1 short id, but the live accounts are on the v2
+// app — see the list_projects migration note. Returns an error envelope the
+// caller can hand straight to res.status().json().
+type V2Ctx = { accV2: string; v2Key: string; v2Base: string };
+type V2CtxError = { status: number; error: string; code?: string };
+async function resolveV2Ctx(supabase: any, accountId: string): Promise<V2Ctx | V2CtxError> {
+  const { data: acctRow } = await supabase
+    .from("integration_accounts")
+    .select("unipile_account_id_v2, metadata")
+    .or(`unipile_account_id.eq.${accountId},unipile_account_id_v2.eq.${accountId}`)
+    .maybeSingle();
+  const accV2: string | null =
+    (acctRow as any)?.unipile_account_id_v2
+    || (acctRow as any)?.metadata?.unipile_account_id_v2
+    || (String(accountId).startsWith("acc_") ? accountId : null);
+  if (!accV2) {
+    return {
+      status: 409,
+      code: "NO_V2_ACCOUNT_ID",
+      error: "This LinkedIn seat has no Unipile v2 account id yet — reconnect it in Settings → Integrations (hosted auth), then retry.",
+    };
+  }
+  const { data: v2KeyRow } = await supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle();
+  const v2Key = v2KeyRow?.value;
+  if (!v2Key) return { status: 500, error: "Unipile v2 key missing (UNIPILE_API_KEY_V2)" };
+  const { data: v2BaseRow } = await supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle();
+  const v2Base = (v2BaseRow?.value || "https://api.unipile.com/v2").replace(/\/+$/, "");
+  return { accV2, v2Key, v2Base };
+}
+
 // Bumped 2026-05-08 to force Vercel to rebuild this serverless function.
 // Production was returning 404 even though the file was on main; build
 // log didn't surface a per-function error. Touching the file to invalidate
@@ -325,110 +356,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ── list_pipeline ───────────────────────────────────────────
-    // POST /linkedin/recruiter/projects/{id}/pipeline — returns the
-    // saved pipeline candidates (curated by the recruiter), grouped by
-    // stage. Distinct from talent-pool/applicants (job posting applicants).
-    // v1 doesn't expose a Recruiter "pipeline candidates" route — only
-    // Talent Hub job applicants. So we read the project detail to get
-    // the linked job_posting.id, then list applicants of that job.
-    //   GET /v1/linkedin/projects/{id}?account_id=X
-    //   GET /v1/linkedin/jobs/{job_posting_id}/applicants?account_id=X
-    if (action === "list_pipeline") {
+    // ── list_pipeline / list_job_applicants ─────────────────────
+    // Migrated to Unipile v2 (2026-06-14). Both read the project's applicants
+    // via the confirmed v2 endpoint (verified live, returns JobApplicant rows):
+    //   POST /v2/{acc}/linkedin/recruiter/projects/{id}/talent-pool/applicants
+    //   → { data: [ { object:'JobApplicant', id, applied_at, profile:{...} } ] }
+    // The old v1 two-step (project → job_posting.id → jobs/{id}/applicants) is
+    // dead (v1 app has zero accounts). GET 404s — this endpoint is POST with
+    // filters in the body ({} = unfiltered). The legacy pipeline-vs-applicants
+    // split collapses onto this single v2 surface.
+    if (action === "list_pipeline" || action === "list_job_applicants") {
       if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
-      const projectId = encodeURIComponent(job_id);
-
-      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
-      const projResp = await fetch(projUrl, { headers });
-      if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      let projectData: any = null;
-      if (projResp.ok) projectData = await projResp.json();
-
-      const jobPostingId = projectData?.job_posting?.id;
-      if (!jobPostingId) {
-        return res.status(200).json({
-          items: [],
-          next_cursor: null,
-          total_count: 0,
-          project: projectData,
-          note: "Project has no linked job_posting — no applicants to list",
-        });
-      }
+      const ctx = await resolveV2Ctx(supabase, account_id);
+      if ("error" in ctx) return res.status(ctx.status).json({ error: ctx.error, code: ctx.code });
 
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
+      qs.set("limit", String(limit || 25));
       if (cursor) qs.set("cursor", String(cursor));
-      if (limit) qs.set("limit", String(limit));
-      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
-      const appResp = await fetch(appUrl, { headers });
-      if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      const appText = await appResp.text();
-      const appData = appText ? JSON.parse(appText) : null;
-      if (!appResp.ok) {
-        return res.status(appResp.status).json({
-          error: `Unipile ${appResp.status}: applicants fetch failed`,
-          detail: appData ?? appText.slice(0, 500),
+      const url = `${ctx.v2Base}/${encodeURIComponent(ctx.accV2)}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}/talent-pool/applicants?${qs.toString()}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "X-API-KEY": ctx.v2Key, Accept: "application/json", "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
+      const text = await resp.text();
+      if (!resp.ok) {
+        return res.status(resp.status).json({
+          error: `Unipile ${resp.status}: applicants fetch failed`,
+          detail: text.slice(0, 500),
         });
       }
+      const data = text ? JSON.parse(text) : {};
       return res.status(200).json({
-        items: appData?.items ?? appData?.data ?? [],
-        next_cursor: appData?.cursor ?? appData?.next_cursor ?? null,
-        total_count: appData?.paging?.total_count ?? appData?.total_count ?? null,
-        project: projectData,
+        items: data.data ?? data.items ?? [],
+        next_cursor: data.cursor ?? data.next_cursor ?? null,
+        total_count: data?.paging?.total_count ?? data.total_count ?? null,
       });
     }
 
-    // v1 route confirmed via probe:
-    //   GET /v1/linkedin/projects/{id}?account_id=X       -> project detail
-    //   GET /v1/linkedin/jobs/{job_posting_id}/applicants -> applicants list
-    if (action === "list_job_applicants") {
-      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
-      const projectId = encodeURIComponent(job_id);
-
-      const projUrl = `${v1Base}/linkedin/projects/${projectId}?account_id=${encodeURIComponent(account_id)}`;
-      const projResp = await fetch(projUrl, { headers });
-      if (projResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      if (!projResp.ok) {
-        return res.status(projResp.status).json({
-          error: `Unipile ${projResp.status}: project fetch failed`,
-          detail: (await projResp.text()).slice(0, 500),
-        });
-      }
-      const projectData = await projResp.json();
-      const jobPostingId = projectData?.job_posting?.id;
-      if (!jobPostingId) {
-        return res.status(200).json({
-          items: [],
-          project: projectData,
-          next_cursor: null,
-          total_count: 0,
-          note: "Project has no linked job_posting — no applicants to list",
-        });
-      }
-
-      const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
-      if (cursor) qs.set("cursor", String(cursor));
-      if (limit) qs.set("limit", String(limit));
-      const appUrl = `${v1Base}/linkedin/jobs/${encodeURIComponent(jobPostingId)}/applicants?${qs.toString()}`;
-      const appResp = await fetch(appUrl, { headers });
-      if (appResp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
-      const appText = await appResp.text();
-      const appData = appText ? JSON.parse(appText) : null;
-      if (!appResp.ok) {
-        return res.status(appResp.status).json({
-          error: `Unipile ${appResp.status}: applicants fetch failed`,
-          detail: appData ?? appText.slice(0, 500),
-        });
-      }
-      return res.status(200).json({
-        items: appData?.items ?? appData?.data ?? [],
-        next_cursor: appData?.cursor ?? appData?.next_cursor ?? null,
-        total_count: appData?.paging?.total_count ?? appData?.total_count ?? null,
-        project: projectData,
-        job_posting_id: jobPostingId,
-      });
-    }
+    // list_job_applicants is handled by the combined v2 block above.
 
     // v1 route confirmed via probe:
     //   POST /v1/linkedin/search/parameters?account_id=X
