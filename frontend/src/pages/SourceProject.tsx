@@ -120,6 +120,9 @@ function normalizeApplicant(raw: any): Applicant {
     has_resume: raw.has_resume ?? profile.has_resume ?? false,
 
     id: profile.candidate_id || profile.applicant_id || raw.id || profile.id || profile.urn || `app-${Math.random()}`,
+    // Provider URN (profile.id, e.g. "AEMAA…") — the id the v2 talent-pool
+    // detail/resume sub-endpoints require (NOT candidate_id / JobApplicant id).
+    provider_id: profile.id || profile.provider_id || profile.urn || raw.profile?.id || undefined,
     first_name: profile.first_name || profile.firstName || firstFromDisplay || '',
     last_name: profile.last_name || profile.lastName || restFromDisplay.join(' ') || '',
     headline: profile.headline || '',
@@ -525,7 +528,8 @@ export default function SourceProject() {
         action: 'download_resume',
         account_id: accountId,
         job_id: id,
-        applicant_id: applicant.id,
+        // v2 resume keys off the profile URN, not candidate_id / applicant id.
+        applicant_id: applicant.provider_id || applicant.id,
       }, session);
       if (!data.data_base64) {
         setResumeView((prev) => ({ ...prev, loading: false }));

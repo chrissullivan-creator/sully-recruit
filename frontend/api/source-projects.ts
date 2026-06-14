@@ -279,12 +279,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // v1 route confirmed via probe:
     //   GET /v1/linkedin/jobs/applicants/{applicant_id}/resume?account_id=X
     // Returns PDF bytes (or sometimes JSON for non-PDF resumes).
+    // Migrated to v2 (2026-06-14). Resume lives under the project's talent-pool
+    // and keys off the applicant's **profile URN** (e.g. "AEMAA…"), NOT the
+    // JobApplicant id / candidate_id. Verified live: returns a PDF (200).
+    //   GET /v2/{acc}/linkedin/recruiter/projects/{id}/talent-pool/applicants/{urn}/resume
     if (action === "download_resume") {
-      if (!applicant_id) {
-        return res.status(400).json({ error: "Missing applicant_id" });
-      }
-      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}/resume?account_id=${encodeURIComponent(account_id)}`;
-      const resp = await fetch(url, { headers });
+      if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id (profile URN)" });
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const ctx = await resolveV2Ctx(supabase, account_id);
+      if ("error" in ctx) return res.status(ctx.status).json({ error: ctx.error, code: ctx.code });
+      const url = `${ctx.v2Base}/${encodeURIComponent(ctx.accV2)}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}/talent-pool/applicants/${encodeURIComponent(applicant_id)}/resume`;
+      const resp = await fetch(url, { headers: { "X-API-KEY": ctx.v2Key, Accept: "application/json" } });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       if (!resp.ok) {
         return res.status(resp.status).json({
@@ -325,10 +330,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // v1 route confirmed via probe:
     //   GET /v1/linkedin/jobs/applicants/{applicant_id}?account_id=X
+    // Migrated to v2 (2026-06-14). Same talent-pool surface as resume; keys off
+    // the profile URN + project id.
+    //   GET /v2/{acc}/linkedin/recruiter/projects/{id}/talent-pool/applicants/{urn}
     if (action === "get_applicant") {
-      if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id" });
-      const url = `${v1Base}/linkedin/jobs/applicants/${encodeURIComponent(applicant_id)}?account_id=${encodeURIComponent(account_id)}`;
-      const resp = await fetch(url, { headers });
+      if (!applicant_id) return res.status(400).json({ error: "Missing applicant_id (profile URN)" });
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const ctx = await resolveV2Ctx(supabase, account_id);
+      if ("error" in ctx) return res.status(ctx.status).json({ error: ctx.error, code: ctx.code });
+      const url = `${ctx.v2Base}/${encodeURIComponent(ctx.accV2)}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}/talent-pool/applicants/${encodeURIComponent(applicant_id)}`;
+      const resp = await fetch(url, { headers: { "X-API-KEY": ctx.v2Key, Accept: "application/json" } });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const text = await resp.text();
       const data = text ? JSON.parse(text) : null;
