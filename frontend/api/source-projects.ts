@@ -169,24 +169,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // candidates under each project. We probe a few candidate paths
     // in case Unipile renames or sticks to legacy names.
     if (action === "list_projects") {
-      // Per Unipile docs + direct probe: hiring projects live at
-      //   GET {dsn}/api/v1/linkedin/projects?account_id={acct}&...
-      // The /v2/{acct}/linkedin/recruiter/projects pattern we used to
-      // call hit api.unipile.com/v2 which isn't a Unipile host (returns
-      // 'Route Not Found'). The 401 'Invalid API Key' was a misleading
-      // error code, not a real auth failure.
+      // Migrated to Unipile v2 (2026-06-14). The v1 DSN key (UNIPILE_API_KEY)
+      // now points at a Unipile app with ZERO connected accounts, so every
+      // stored v1 short id 404s "Account not found" (verified live: v1
+      // /accounts → empty; /accounts/<short_id> → 404). The real accounts are
+      // running on the v2 app (api.unipile.com/v2) — verified:
+      //   GET /v2/{acc_xxx}/linkedin/recruiter/projects → 200 with projects.
+      // Source still passes the v1 short id; resolve it to the canonical
+      // acc_xxx (column → metadata fallback) and call v2.
+      const { data: acctRow } = await supabase
+        .from("integration_accounts")
+        .select("unipile_account_id_v2, metadata")
+        .or(`unipile_account_id.eq.${account_id},unipile_account_id_v2.eq.${account_id}`)
+        .maybeSingle();
+      const accV2: string | null =
+        (acctRow as any)?.unipile_account_id_v2
+        || (acctRow as any)?.metadata?.unipile_account_id_v2
+        || (String(account_id).startsWith("acc_") ? account_id : null);
+      if (!accV2) {
+        return res.status(409).json({
+          error: "This LinkedIn seat has no Unipile v2 account id yet — reconnect it in Settings → Integrations (hosted auth), then retry.",
+          code: "NO_V2_ACCOUNT_ID",
+        });
+      }
+
+      const { data: v2KeyRow } = await supabase
+        .from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle();
+      const v2Key = v2KeyRow?.value;
+      if (!v2Key) return res.status(500).json({ error: "Unipile v2 key missing (UNIPILE_API_KEY_V2)" });
+      const { data: v2BaseRow } = await supabase
+        .from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle();
+      const v2Base = (v2BaseRow?.value || "https://api.unipile.com/v2").replace(/\/+$/, "");
+
+      // Source re-sorts client-side by recency, so we skip the sort_by param
+      // (v1's enum 400s on v2). Just paginate.
       const qs = new URLSearchParams();
-      qs.set("account_id", account_id);
-      // v1 sort_by enum is NAME / FAVORITE / CREATED_TIME / ACCESSED_TIME
-      // / ENGAGED_TIME / ENGAGEMENT_COUNT. v2-only values like
-      // LAST_USED_BY_ME 400. ACCESSED_TIME + DESCENDING gives the same
-      // 'most-recently-used first' default the UI expects.
-      qs.set("sort_by", "ACCESSED_TIME");
-      qs.set("sort_order", "DESCENDING");
       if (cursor) qs.set("cursor", String(cursor));
-      if (limit) qs.set("limit", String(limit));
-      const url = `${v1Base}/linkedin/projects?${qs.toString()}`;
-      const resp = await fetch(url, { headers });
+      qs.set("limit", String(limit || 50));
+      const url = `${v2Base}/${encodeURIComponent(accV2)}/linkedin/recruiter/projects?${qs.toString()}`;
+      const resp = await fetch(url, { headers: { "X-API-KEY": v2Key, Accept: "application/json" } });
       if (resp.status === 429) return res.status(429).json({ error: "Unipile rate limit reached." });
       const body = await resp.text();
       if (resp.ok) {
@@ -199,10 +220,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           total_count: data?.paging?.total_count ?? data.total_count ?? null,
         });
       }
-      // Persist the latest 4xx body to app_settings so it survives
-      // Vercel's log preview truncation — query via the Supabase MCP
-      // to read the full Unipile rejection text.
-      console.error(`[source-projects][list_projects] Unipile ${resp.status} ${url} :: ${body.slice(0, 600)}`);
+      // Persist the latest 4xx body to app_settings so it survives Vercel's
+      // log preview truncation — query via the Supabase MCP for the full text.
+      console.error(`[source-projects][list_projects][v2] Unipile ${resp.status} ${url} :: ${body.slice(0, 600)}`);
       await supabase.from("app_settings").upsert(
         { key: "DEBUG_UNIPILE_LIST_PROJECTS_LAST", value: JSON.stringify({ status: resp.status, url, body: body.slice(0, 2000), at: new Date().toISOString() }) },
         { onConflict: "key" },
