@@ -91,6 +91,23 @@ export const backfillEntityHistories = inngest.createFunction(
       dispatched,
       sample_ids: people.slice(0, 5).map((p: any) => p.id),
     });
+
+    // ── Self-healing residual epoch cleanup ─────────────────────────────
+    // A historical backfill stamped last_responded_at='1970-01-01' on people
+    // who never replied, falsely promoting them to status='engaged'. Now that
+    // the per-person history re-fetch is working again (v2), clean residual
+    // epoch values ONLY for people who have already been re-fetched
+    // (last_history_synced_at set) AND still have no inbound message — i.e.
+    // we've confirmed there's no real reply to recover. This shrinks to a
+    // no-op as the re-sync drains, so no manual reminder / one-off script is
+    // needed. Bounded per tick to keep the cron light.
+    try {
+      const { data: cleaned } = await supabase.rpc("cleanup_residual_epoch_responses", { p_limit: 500 });
+      if (cleaned) logger.info("Residual epoch cleanup", { demoted: cleaned });
+    } catch (err: any) {
+      logger.warn("Residual epoch cleanup failed", { error: err.message });
+    }
+
     return { dispatched, batch_size: BATCH, stale_after_days: STALE_AFTER_DAYS };
   },
 );
