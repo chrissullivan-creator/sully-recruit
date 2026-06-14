@@ -26,7 +26,12 @@ import { getSupabaseAdmin } from "../../../../src/server-lib/supabase.js";
  * duplicate fans for the same person from firing in parallel.
  */
 
-const BATCH = 50;
+// Raised 50→200 (2026-06-14) to drain the one-time full re-sync after the
+// email-history fetch was repaired (it had been a no-op on the dead v1 Unipile
+// path since ~5/7). 200/hr clears ~12.6k people in ~2.6 days. fetch-entity-
+// history throttles its own Unipile calls + handles 429s, so this stays within
+// rate limits. Lower back to 50 once the backlog is drained.
+const BATCH = 200;
 const STALE_AFTER_DAYS = 30;
 
 export const backfillEntityHistories = inngest.createFunction(
