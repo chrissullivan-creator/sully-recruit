@@ -174,7 +174,7 @@ async function processRow(
   } else {
     payload.title = clean(row.title) || null;
     payload.company_name = clean(row.company) || null;
-    payload.location = clean(row.location) || null;
+    payload.location_text = clean(row.location) || null;
     if (clean(row.notes)) payload.notes = clean(row.notes);
   }
 
