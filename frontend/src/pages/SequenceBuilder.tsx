@@ -137,13 +137,48 @@ export default function SequenceBuilder() {
       // sequence_steps was the v1 schema; it was dropped in the v2
       // sequence rebuild. The hydrate function still accepts a legacy
       // step list as a backfill for older sequences, but we no longer
-      // query it (the table is gone). Cast preserves the parameter shape.
-      const { data: nodes } = await supabase
+      // query it (the table is gone).
+      //
+      // Fetch nodes and their actions as TWO flat queries, then stitch
+      // them together in JS. We deliberately DON'T use an embedded
+      // `sequence_actions(*)` select: PostgREST intermittently fails to
+      // resolve the nested relationship (schema-cache miss after a
+      // migration, etc.) and returns null for the entire nodes payload —
+      // which silently rendered the builder with zero steps. That's the
+      // "I wrote 2 steps but they don't always show" bug: the earlier fix
+      // only split out the setup row, leaving this query still embedded.
+      // Two independent queries with explicit error surfacing can't hit
+      // that failure mode.
+      const { data: nodes, error: nodesErr } = await supabase
         .from("sequence_nodes")
-        .select("id, node_order, node_type, label, branch_id, branch_step_order, sequence_actions(*)")
+        .select("id, node_order, node_type, label, branch_id, branch_step_order")
         .eq("sequence_id", id);
+      if (nodesErr) {
+        toast.error(`Couldn't load sequence steps: ${nodesErr.message}`);
+        return;
+      }
 
-      const nodeRows = ((nodes ?? []) as any[]).sort(compareSequenceNodes);
+      const nodeRowsRaw = (nodes ?? []) as any[];
+      const actionsByNode = new Map<string, any[]>();
+      if (nodeRowsRaw.length) {
+        const { data: actions, error: actionsErr } = await supabase
+          .from("sequence_actions")
+          .select("*")
+          .in("node_id", nodeRowsRaw.map((n) => n.id));
+        if (actionsErr) {
+          toast.error(`Couldn't load sequence actions: ${actionsErr.message}`);
+          return;
+        }
+        for (const a of (actions ?? []) as any[]) {
+          const list = actionsByNode.get(a.node_id) ?? [];
+          list.push(a);
+          actionsByNode.set(a.node_id, list);
+        }
+      }
+
+      const nodeRows = nodeRowsRaw
+        .map((n) => ({ ...n, sequence_actions: actionsByNode.get(n.id) ?? [] }))
+        .sort(compareSequenceNodes);
       const loadedBranches = hydrateBranchesFromNodes(nodeRows, []);
       setBranches(loadedBranches);
       lastStructuralRef.current = structuralFingerprint(

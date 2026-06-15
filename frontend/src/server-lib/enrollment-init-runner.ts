@@ -176,7 +176,18 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
       }
 
       // Pre-skip if the recipient lacks the required field for this channel.
-      if (!recipientHasRequired(action.channel)) {
+      //
+      // EXCEPTION: email steps are never pre-skipped here. A recipient's
+      // address is frequently enriched moments after enrollment — e.g. a
+      // CSV import fills `work_email`, then the user immediately enrolls the
+      // newly-imported contacts. Pre-skipping at init would permanently
+      // strand those steps (a 'skipped' log never recovers, even once the
+      // address lands). Instead we always schedule the email step and let
+      // the send-time runner be the authoritative gate: it re-resolves and
+      // re-validates the address at dispatch and only skips
+      // (no_email_on_record / email_invalid_bounced) if it's STILL missing
+      // then. A late-arriving address therefore sends instead of dying.
+      if (action.channel !== "email" && !recipientHasRequired(action.channel)) {
         await supabase.from("sequence_step_logs").insert({
           enrollment_id: payload.enrollmentId,
           action_id: action.id,
