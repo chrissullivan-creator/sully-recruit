@@ -189,7 +189,13 @@ async function findExistingCandidate(supabase: any, parsed: any): Promise<string
  * — Inngest is the only scheduler now.
  */
 export const reconcileOrphanedResumes = inngest.createFunction(
-  { id: "reconcile-orphaned-resumes", name: "Reconcile orphaned resumes (Inngest)" },
+  // concurrency:1 — this cron fires every minute but a run can take longer
+  // than that (downloads + AI parse + 300ms/resume). Without serialization,
+  // overlapping runs grab the same orphaned resumes (there's no row-claim),
+  // both miss in findExistingCandidate, and both insert the same person —
+  // tripping candidates_normalized_email_unique. Serializing prevents the race;
+  // the insert below is also made conflict-tolerant as defense in depth.
+  { id: "reconcile-orphaned-resumes", name: "Reconcile orphaned resumes (Inngest)", concurrency: { limit: 1 } },
   { cron: "* * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
@@ -357,7 +363,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         }
 
         let candidateId = await findExistingCandidate(supabase, parsed);
-        const wasMatch = !!candidateId;
+        let wasMatch = !!candidateId;
 
         if (candidateId) {
           const { data: existing } = await supabase
@@ -411,9 +417,38 @@ export const reconcileOrphanedResumes = inngest.createFunction(
             })
             .select("id")
             .single();
-          if (insertErr || !newCand) throw new Error(`Create candidate failed: ${insertErr?.message}`);
-          candidateId = newCand.id;
-          created++;
+          if (insertErr || !newCand) {
+            // Lost a create race — a concurrent run or another ingestion path
+            // inserted this person microseconds earlier, tripping
+            // candidates_normalized_email_unique. Don't fail the resume: link
+            // it to the row that already exists (treat as a match) and add the
+            // candidate role, exactly as the normal match branch would.
+            const isDup =
+              insertErr?.code === "23505" ||
+              /duplicate key|normalized_email/i.test(insertErr?.message || "");
+            const norm = (parsed.email || "").trim().toLowerCase();
+            if (isDup && norm) {
+              const { data: raced } = await supabase
+                .from("people")
+                .select("id, roles, resume_url")
+                .eq("normalized_email", norm)
+                .maybeSingle();
+              if (raced?.id) {
+                candidateId = raced.id;
+                wasMatch = true;
+                const racedRoles: string[] = Array.isArray(raced.roles) ? raced.roles : [];
+                const update: Record<string, any> = { updated_at: new Date().toISOString() };
+                if (!racedRoles.includes("candidate")) update.roles = [...racedRoles, "candidate"];
+                if (!raced.resume_url) update.resume_url = pub.publicUrl;
+                await supabase.from("people").update(update).eq("id", candidateId);
+                matched++;
+              }
+            }
+            if (!candidateId) throw new Error(`Create candidate failed: ${insertErr?.message}`);
+          } else {
+            candidateId = newCand.id;
+            created++;
+          }
         }
 
         await supabase
