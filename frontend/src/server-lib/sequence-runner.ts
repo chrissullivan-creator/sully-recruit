@@ -228,23 +228,32 @@ export async function runSequenceAction(
         let subject = action.subject_line || "";
         let threadingOptions: { inReplyTo?: string; references?: string } | undefined;
         if (action.reply_to_previous) {
+          // Anchor to the most recent SENT email step in this enrollment.
+          // We deliberately do NOT require internet_message_id here: Graph's
+          // send is async so the id capture can miss, and gating the SUBJECT
+          // on it made follow-ups go out with an empty subject as a brand-new
+          // email. Subject (Re: …) is derived whenever a prior step exists;
+          // the In-Reply-To/References headers are added only when we actually
+          // captured an id.
           const { data: prev } = await supabase
             .from("sequence_step_logs")
             .select("internet_message_id, action_id, sent_at")
             .eq("enrollment_id", payload.enrollmentId)
             .eq("status", "sent")
             .eq("channel", "email")
-            .not("internet_message_id", "is", null)
             .order("sent_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (prev?.internet_message_id) {
-            threadingOptions = {
-              inReplyTo: prev.internet_message_id,
-              references: prev.internet_message_id,
-            };
-            // Re-use the previous step's subject (with "Re: " prefix)
-            // when the user didn't type a fresh one.
+          if (prev) {
+            if (prev.internet_message_id) {
+              threadingOptions = {
+                inReplyTo: prev.internet_message_id,
+                references: prev.internet_message_id,
+              };
+            }
+            // Re-use the previous step's subject (with "Re: " prefix) when the
+            // user didn't type a fresh one, so the follow-up threads by subject
+            // in the recipient's mail client even if header threading is absent.
             if (!subject) {
               const { data: prevAction } = await supabase
                 .from("sequence_actions")
