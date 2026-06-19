@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Award, Users, FileCheck, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { stageToCanonical, daysSince } from '@/lib/pipeline';
+import { stageToCanonical, daysSince, type CanonicalStage } from '@/lib/pipeline';
 import { formatComp } from '@/lib/queries/send-outs';
 
 interface QuickStatsProps {
@@ -35,15 +35,28 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
   });
 
   const total = rows.length;
-  let submitted = 0, interviewing = 0, placed = 0;
+  // Funnel progression (terminal `withdrawn` excluded — it's an exit, not a step).
+  // A candidate at a later stage has, by definition, passed every earlier one, so
+  // the rates below are cumulative ("reached this stage or beyond"), not "currently
+  // parked here". Counting only the current stage made e.g. a placed candidate show
+  // 0% interview / 0% submission rate.
+  const PROGRESSION: CanonicalStage[] = ['pitch', 'ready_to_send', 'submitted', 'interview', 'offer', 'placed'];
+  const SUBMITTED_IDX = PROGRESSION.indexOf('submitted');
+  const INTERVIEW_IDX = PROGRESSION.indexOf('interview');
+
+  let reachedSubmitted = 0, reachedInterview = 0, placed = 0;
   for (const r of rows) {
     const c = stageToCanonical(r.pipeline_stage);
-    if (c === 'submitted') submitted++;
-    else if (c === 'interview') interviewing++;
-    else if (c === 'placed') placed++;
+    const idx = c ? PROGRESSION.indexOf(c) : -1;
+    if (idx < 0) continue; // withdrawn / unknown — not a funnel step
+    if (idx >= SUBMITTED_IDX) reachedSubmitted++;
+    if (idx >= INTERVIEW_IDX) reachedInterview++;
+    if (c === 'placed') placed++;
   }
-  const submissionRate = total > 0 ? Math.round((submitted / total) * 100) : 0;
-  const interviewRate  = total > 0 ? Math.round((interviewing / total) * 100) : 0;
+  // Submission rate is of the whole candidate pool; interview rate is the
+  // submission→interview conversion (how many of those submitted reached interview).
+  const submissionRate = total > 0 ? Math.round((reachedSubmitted / total) * 100) : 0;
+  const interviewRate  = reachedSubmitted > 0 ? Math.round((reachedInterview / reachedSubmitted) * 100) : 0;
 
   const daysOpen = closedAt
     ? Math.max(0, Math.floor((new Date(closedAt).getTime() - new Date(createdAt ?? Date.now()).getTime()) / 86_400_000))
