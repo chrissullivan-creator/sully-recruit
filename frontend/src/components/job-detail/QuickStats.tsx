@@ -27,31 +27,32 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
     queryFn: async () => {
       const { data, error } = await supabase
         .from('candidate_jobs')
-        .select('pipeline_stage')
+        .select('pipeline_stage, max_pipeline_stage')
         .eq('job_id', jobId);
       if (error) throw error;
-      return (data ?? []) as { pipeline_stage: string | null }[];
+      return (data ?? []) as { pipeline_stage: string | null; max_pipeline_stage: string | null }[];
     },
   });
 
   const total = rows.length;
   // Funnel progression (terminal `withdrawn` excluded — it's an exit, not a step).
-  // A candidate at a later stage has, by definition, passed every earlier one, so
-  // the rates below are cumulative ("reached this stage or beyond"), not "currently
-  // parked here". Counting only the current stage made e.g. a placed candidate show
-  // 0% interview / 0% submission rate.
+  // Rates are cumulative ("reached this stage or beyond"), not "currently parked
+  // here": a candidate who advanced past a stage — even one who later withdrew —
+  // still counts as having passed through it. We read max_pipeline_stage (the
+  // furthest stage ever reached, maintained server-side) rather than the current
+  // pipeline_stage, so e.g. a submitted-then-rejected candidate still counts as a
+  // submission. `placed` stays on the current stage — it's a live "won" count.
   const PROGRESSION: CanonicalStage[] = ['pitch', 'ready_to_send', 'submitted', 'interview', 'offer', 'placed'];
   const SUBMITTED_IDX = PROGRESSION.indexOf('submitted');
   const INTERVIEW_IDX = PROGRESSION.indexOf('interview');
 
   let reachedSubmitted = 0, reachedInterview = 0, placed = 0;
   for (const r of rows) {
-    const c = stageToCanonical(r.pipeline_stage);
-    const idx = c ? PROGRESSION.indexOf(c) : -1;
-    if (idx < 0) continue; // withdrawn / unknown — not a funnel step
+    const reached = stageToCanonical(r.max_pipeline_stage);
+    const idx = reached ? PROGRESSION.indexOf(reached) : -1;
     if (idx >= SUBMITTED_IDX) reachedSubmitted++;
     if (idx >= INTERVIEW_IDX) reachedInterview++;
-    if (c === 'placed') placed++;
+    if (stageToCanonical(r.pipeline_stage) === 'placed') placed++;
   }
   // Submission rate is of the whole candidate pool; interview rate is the
   // submission→interview conversion (how many of those submitted reached interview).

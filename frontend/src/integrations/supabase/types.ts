@@ -1055,6 +1055,7 @@ export type Database = {
           interview_round: number | null
           interviewing_at: string | null
           job_id: string
+          max_pipeline_stage: string | null
           pipeline_stage: string
           pitched_at: string | null
           reached_out_at: string | null
@@ -1080,6 +1081,7 @@ export type Database = {
           interview_round?: number | null
           interviewing_at?: string | null
           job_id: string
+          max_pipeline_stage?: string | null
           pipeline_stage?: string
           pitched_at?: string | null
           reached_out_at?: string | null
@@ -1105,6 +1107,7 @@ export type Database = {
           interview_round?: number | null
           interviewing_at?: string | null
           job_id?: string
+          max_pipeline_stage?: string | null
           pipeline_stage?: string
           pitched_at?: string | null
           reached_out_at?: string | null
