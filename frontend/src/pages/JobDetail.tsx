@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel } from '@/lib/jobStatus';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
@@ -73,12 +74,7 @@ const JOB_STATUSES = [
   { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
 ];
 
-const STATUS_OPTIONS = [
-  { value: 'lead', label: 'Lead' },
-  { value: 'hot', label: 'Hot' },
-  { value: 'closed_won', label: 'Closed Won' },
-  { value: 'closed_lost', label: 'Closed Lost' },
-];
+const STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
 // ── Clickable field wrapper ─────────────────────────────────────────────────
 const EditableField = ({
@@ -1035,15 +1031,9 @@ const JobDetail = () => {
             {/* Status pill */}
             <span className={cn(
               'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border',
-              job.status === 'open'        && 'bg-emerald-light text-emerald border-emerald/30',
-              job.status === 'hot'         && 'bg-gold-bg text-gold-deep border-gold/40',
-              job.status === 'on_hold'     && 'bg-amber-50 text-amber-800 border-amber-200',
-              job.status === 'filled'      && 'bg-emerald-light text-emerald-dark border-emerald/40',
-              job.status === 'closed'      && 'bg-muted text-muted-foreground border-border',
-              job.status === 'closed_won'  && 'bg-emerald text-white border-emerald',
-              job.status === 'closed_lost' && 'bg-red-100 text-red-700 border-red-200',
+              jobStatusMeta(job.status)?.pillClass ?? 'bg-muted text-muted-foreground border-border',
             )}>
-              {(job.status ?? 'open').replace(/_/g, ' ')}
+              {jobStatusLabel(job.status)}
             </span>
             {/* Priority badge — gold treatment */}
             {(job as any).priority && (job as any).priority !== 'normal' && (
@@ -1137,16 +1127,10 @@ const JobDetail = () => {
             <div className="flex flex-col items-center text-center gap-1.5">
               <Badge
                 variant="secondary"
-                className={cn(
-                  'text-xs cursor-pointer',
-                  job.status === 'lead' && 'bg-gray-100 text-gray-600',
-                  job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
-                  job.status === 'closed_won' && 'bg-[#1C3D2E] text-white border-[#1C3D2E]',
-                  job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626] border-[#DC2626]/20',
-                )}
+                className={cn('text-xs cursor-pointer', jobStatusMeta(job.status)?.pillClass)}
                 onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}
               >
-                {STATUS_OPTIONS.find(s => s.value === job.status)?.label || job.status}
+                {jobStatusLabel(job.status)}
               </Badge>
               {(job as any).job_code && (
                 <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded">

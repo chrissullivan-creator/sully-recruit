@@ -198,7 +198,7 @@ const CandidateDetail = () => {
   const { data: candidate, isLoading } = useCandidate(id);
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
-  const openJobs = (jobs as any[]).filter(j => !['closed_lost','closed_won','lost','closed'].includes(j.status));
+  const openJobs = (jobs as any[]).filter(j => !['filled','closed_lost'].includes(j.status));
   const { data: notes = [] } = useNotes(id, 'candidate');
   const { data: conversations = [] } = useCandidateConversations(id);
   const { data: callNotes = [] } = useQuery({

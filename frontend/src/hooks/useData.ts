@@ -187,7 +187,7 @@ export function useJobs(includesClosed = false) {
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (!includesClosed) {
-        query = query.not('status', 'in', '("lost","closed","closed_won","closed_lost")');
+        query = query.not('status', 'in', '("filled","closed_lost")');
       }
       const { data, error } = await query;
       if (error) throw error;

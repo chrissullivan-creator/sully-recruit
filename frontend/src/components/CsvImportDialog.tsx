@@ -70,7 +70,7 @@ const JOB_ALIASES: Record<string, string[]> = {
   notes: ['notes','note','comments','comment','description','details'],
 };
 const VALID_CANDIDATE_STAGES = ['back_of_resume','pitch','send_out','submitted','interview','first_round','second_round','third_plus_round','offer','accepted','declined','counter_offer','disqualified'];
-const VALID_JOB_STAGES = ['lead','hot','offer_made','closed_won','closed_lost'];
+const VALID_JOB_STAGES = ['lead','hot','offer_made','filled','closed_lost'];
 const VALID_PRIORITIES = ['low','medium','high'];
 
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {

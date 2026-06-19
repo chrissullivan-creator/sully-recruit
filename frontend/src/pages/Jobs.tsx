@@ -11,6 +11,7 @@ import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel } from '@/lib/jobStatus';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
@@ -32,13 +33,7 @@ const Jobs = () => {
   const queryClient = useQueryClient();
   const { data: jobs = [], isLoading } = useJobs();
 
-  const JOB_STATUS_OPTIONS = [
-    { value: 'lead', label: 'Lead' },
-    { value: 'hot', label: 'Hot' },
-    { value: 'offer_made', label: 'Offer Made' },
-    { value: 'closed_won', label: 'Closed Won' },
-    { value: 'closed_lost', label: 'Closed Lost' },
-  ];
+  const JOB_STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
   const handleQuickStatusChange = async (jobId: string, newStatus: string) => {
     try {
@@ -175,13 +170,9 @@ const Jobs = () => {
                     <td className="px-4 py-3">
                       <span className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        job.status === 'lead' && 'bg-gray-100 text-gray-600',
-                        job.status === 'hot' && 'bg-[#C9A84C]/10 text-[#C9A84C]',
-                        job.status === 'offer_made' && 'bg-[#2A5C42]/10 text-[#2A5C42]',
-                        job.status === 'closed_won' && 'bg-[#1C3D2E] text-white',
-                        job.status === 'closed_lost' && 'bg-[#FEF2F2] text-[#DC2626]',
+                        jobStatusMeta(job.status)?.pillClass ?? 'bg-gray-100 text-gray-600',
                       )}>
-                        {job.status === 'lead' ? 'Lead' : job.status === 'hot' ? 'Hot' : job.status === 'offer_made' ? 'Offer Made' : job.status === 'closed_won' ? 'Closed Won' : job.status === 'closed_lost' ? 'Closed Lost' : job.status}
+                        {jobStatusLabel(job.status)}
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>

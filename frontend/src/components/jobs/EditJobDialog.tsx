@@ -218,7 +218,8 @@ export function EditJobDialog({ open, onOpenChange, job }: Props) {
               <SelectContent>
                 <SelectItem value="lead">Lead</SelectItem>
                 <SelectItem value="hot">Hot</SelectItem>
-                <SelectItem value="closed_won">Closed Won</SelectItem>
+                <SelectItem value="offer_made">Offer Made</SelectItem>
+                <SelectItem value="filled">Filled</SelectItem>
                 <SelectItem value="closed_lost">Closed Lost</SelectItem>
               </SelectContent>
             </Select>

@@ -317,7 +317,7 @@ export function CandidateFilterSidebar({
               <SelectContent>
                 <SelectItem value="all">All Jobs</SelectItem>
                 {(jobs as any[])
-                  .filter((j) => j.status !== 'lost' && j.status !== 'on_hold')
+                  .filter((j) => j.status !== 'filled' && j.status !== 'closed_lost')
                   .sort((a, b) => a.title.localeCompare(b.title))
                   .map((job) => (
                     <SelectItem key={job.id} value={job.id}>

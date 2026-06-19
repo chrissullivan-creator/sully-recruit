@@ -127,7 +127,7 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
       const q = entitySearch.trim();
       const [candRes, jobRes, contactRes, companyRes] = await Promise.all([
         supabase.from('people').select('id, full_name').ilike('full_name', `%${q}%`).limit(4),
-        supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${q}%`).not('status', 'in', '("closed_won","closed_lost")').limit(4),
+        supabase.from('jobs').select('id, title, company_name, status').ilike('title', `%${q}%`).not('status', 'in', '("filled","closed_lost")').limit(4),
         supabase.from('contacts').select('id, full_name, title, email').ilike('full_name', `%${q}%`).limit(4),
         supabase.from('companies').select('id, name').ilike('name', `%${q}%`).limit(4),
       ]);

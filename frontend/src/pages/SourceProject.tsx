@@ -161,7 +161,7 @@ export default function SourceProject() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: allJobs = [] } = useJobs();
-  const openJobs = allJobs.filter((j: any) => j.status !== 'closed_lost' && j.status !== 'closed_won');
+  const openJobs = allJobs.filter((j: any) => j.status !== 'closed_lost' && j.status !== 'filled');
 
   // State from URL search params
   const params = new URLSearchParams(window.location.search);
