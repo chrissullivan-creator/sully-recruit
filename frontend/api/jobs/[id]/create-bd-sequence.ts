@@ -150,8 +150,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // send JSON — the client then chokes on an empty body ("Unexpected end of
   // JSON input"). Fall back to the VITE_ URL and, if creds are truly absent,
   // return a clear JSON error instead of crashing.
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL;
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
   if (!supabaseUrl || !serviceKey) {
     return res.status(500).json({
       error:

@@ -7,13 +7,22 @@ import { logger } from "./logger.js";
  * All other secrets are read from the app_settings table in Supabase.
  */
 export function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Accept the common env-var spellings so the app works whether the project
+  // uses the bare names or the Supabase-Vercel-integration names
+  // (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY). SUPABASE_URL /
+  // SUPABASE_SERVICE_ROLE_KEY are tried first, so existing envs are unaffected.
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY;
 
   if (!url || !key) {
     throw new Error(
-      "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. " +
-        "Set these in your Trigger.dev dashboard environment variables.",
+      "Missing Supabase admin credentials. Set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) " +
+        "and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) in the environment.",
     );
   }
 
