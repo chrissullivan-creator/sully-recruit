@@ -40,16 +40,17 @@ Read these before making changes:
 - **Data Hygiene (2026-06-14):** Duplicates (`/duplicates`) + Collisions (`/admin/collisions`) moved from the sidebar to Settings → Data Hygiene; routes still registered for deep links.
 - Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley
 
-## Unipile API — v1 (methods) + v2 (lifecycle **and** Recruiter writes) — updated June 7 2026
+## Unipile API — v1 (reads/email/calendar) + v2 (lifecycle, Recruiter writes, **LinkedIn message sends**) — updated June 20 2026
 
-Unipile has now shipped the full **v2 Methods API** (LinkedIn, Recruiter, messaging, email, calendar). We are migrating **incrementally**. **Today: LinkedIn Recruiter project-create + pipeline-save run on v2 (flag-gated, flag is ON); everything else still runs on v1.** Centralized helpers:
+Unipile has now shipped the full **v2 Methods API** (LinkedIn, Recruiter, messaging, email, calendar). We are migrating **incrementally**. **Today on v2: (1) LinkedIn Recruiter project-create + pipeline-save, and (2) LinkedIn message _sends_ — classic DM / InMail / connection requests — via `frontend/src/server-lib/send-channels.ts`. Both flags (`UNIPILE_LINKEDIN_V2`, `USE_LINKEDIN_V2_SEND`) are ON; the v2 send path is taken whenever the account has an `acc_xxx` id (else it falls back to v1). Everything else (email send/receive, calendar, search, jobs, project/applicant reads, contracts, LinkedIn message reads) still runs on v1.** Centralized helpers:
 - `frontend/api/lib/unipile-urls.ts` — v1 builders (`linkedinV1`) + v2 templates (`recruiterV2`)
 - `frontend/src/server-lib/unipile-v2.ts` — `unipileFetch()` = **v1**, `unipileFetchV2()` = **v2**, `isLinkedinV2Enabled()`, `getUnipileAccountV2IdByV1Id()`
 
 | Concern | API | Host | Key | account_id |
 |---|---|---|---|---|
-| Most methods — messaging, email, calendar, search, jobs, project/applicant **reads**, contracts | **v1** | tenant DSN `api19.unipile.com:14926/api/v1` | `UNIPILE_API_KEY` | **query param** `?account_id=<short_id>` |
+| Most methods — email, calendar, search, jobs, project/applicant **reads**, contracts, LinkedIn message **reads** | **v1** | tenant DSN `api19.unipile.com:14926/api/v1` | `UNIPILE_API_KEY` | **query param** `?account_id=<short_id>` |
 | Recruiter **writes** — create project, save candidate to pipeline | **v2** | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | **path segment** `/v2/<acc_xxx>/...` |
+| LinkedIn message **sends** — classic DM / InMail / connection requests (via `send-channels.ts`, `USE_LINKEDIN_V2_SEND` ON) | **v2** | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | **path segment** `/v2/<acc_xxx>/...` |
 | Lifecycle — hosted auth, checkpoint, webhooks, accounts | v2 | `api.unipile.com/v2` | `UNIPILE_API_KEY_V2` | — |
 
 ### v2 Recruiter migration status (verified live June 7 2026)
@@ -103,4 +104,4 @@ POST /v2/{acc_xxx}/linkedin/recruiter/search/people
 
 ### Still on v1, NOT yet migrated (v2 equivalents exist per Unipile's v2 Methods matrix, just not wired)
 
-Messaging + InMail, email send/receive, calendar, people/company search, job applicants, profile lookups. Migrate these the same way Recruiter writes were: add v2 templates to `unipile-urls.ts`, route through `unipileFetchV2`, gate behind a flag, verify the body shape against the v2 reference before flipping on.
+Email send/receive (via Microsoft Graph — `USE_UNIPILE_EMAIL` is OFF), calendar, people/company search, job applicants, profile lookups, and LinkedIn message **reads**/backfill. **LinkedIn message _sends_ (classic DM / InMail / connection requests) are already on v2** via `send-channels.ts` — the classic-DM v2 shape is proven by live traffic (157 sends in the 30d to 2026-06-19); InMail is less battle-tested. Migrate the remaining reads the same way Recruiter writes were: add v2 templates to `unipile-urls.ts`, route through `unipileFetchV2`, gate behind a flag, verify the body shape against the v2 reference before flipping on.
