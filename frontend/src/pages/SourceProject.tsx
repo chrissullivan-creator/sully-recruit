@@ -22,7 +22,7 @@ import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
-  Bookmark, Download, CheckCircle2, ExternalLink,
+  Bookmark, Download, CheckCircle2, ExternalLink, Import,
 } from 'lucide-react';
 
 const PAGE_SIZE = 25;
@@ -508,6 +508,64 @@ export default function SourceProject() {
   const applicants = pipelineCandidates;
   const loading = pipelineLoading;
 
+  // ---- Import LinkedIn applicants into the shared `applicants` table ----
+  // Keeps the live list on screen; this just persists them (deduped by
+  // provider id / linkedin_url) so they also surface in People → Applicants.
+  // Resume isn't copied — provider_id is stored for on-demand fetch.
+  const [importingApplicants, setImportingApplicants] = useState(false);
+  const handleImportApplicants = async () => {
+    if (jobApplicants.length === 0) { toast.info('No applicants to import'); return; }
+    setImportingApplicants(true);
+    try {
+      const { data: existing } = await supabase
+        .from('applicants' as any)
+        .select('provider_id, linkedin_url')
+        .eq('source', 'linkedin');
+      const existProv = new Set((existing ?? []).map((e: any) => e.provider_id).filter(Boolean));
+      const existLi = new Set((existing ?? []).map((e: any) => e.linkedin_url).filter(Boolean));
+
+      const rows = jobApplicants
+        .filter((a) => {
+          const pid = a.provider_id || a.id;
+          if (pid && existProv.has(pid)) return false;
+          if (a.linkedin_url && existLi.has(a.linkedin_url)) return false;
+          return true;
+        })
+        .map((a) => {
+          const appliedRaw = a.applied_at || (a as any).appliedAt || (a as any).application_date;
+          const appliedAt = appliedRaw && !Number.isNaN(new Date(appliedRaw).getTime())
+            ? new Date(appliedRaw).toISOString() : null;
+          return {
+            source: 'linkedin',
+            provider_id: a.provider_id || a.id || null,
+            job_id: linkedJobId,
+            marketing_title_snapshot: projectData?.name ?? null,
+            first_name: a.first_name ?? null,
+            last_name: a.last_name ?? null,
+            linkedin_url: a.linkedin_url ?? null,
+            headline: a.headline ?? null,
+            current_title: a.current_title ?? null,
+            current_company: a.current_company ?? null,
+            location: a.location ?? null,
+            profile_picture_url: a.profile_picture_url ?? null,
+            applied_at: appliedAt,
+            status: 'new',
+          };
+        });
+
+      if (rows.length === 0) { toast.info('All applicants already imported'); return; }
+      const { error } = await supabase.from('applicants' as any).insert(rows);
+      if (error) throw new Error(error.message);
+      toast.success(`Imported ${rows.length} applicant${rows.length === 1 ? '' : 's'} to Applicants`);
+      queryClient.invalidateQueries({ queryKey: ['applicants'] });
+      queryClient.invalidateQueries({ queryKey: ['applicants_count'] });
+    } catch (e: any) {
+      toast.error(e.message || 'Import failed');
+    } finally {
+      setImportingApplicants(false);
+    }
+  };
+
   // ---- Resume viewer ----
   const handleDownloadResume = async (applicant: Applicant) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -785,10 +843,8 @@ export default function SourceProject() {
           {/* Applicant tables by stage */}
           {sortedStages.map((stage) => {
             const stageApplicants = byStage[stage];
-            const totalPages = Math.max(1, Math.ceil(stageApplicants.length / PAGE_SIZE));
-            const currentPage = Math.min(pageOf(stage), totalPages - 1);
-            const start = currentPage * PAGE_SIZE;
-            const visible = stageApplicants.slice(start, start + PAGE_SIZE);
+            // Show every candidate in each stage (no per-stage pagination).
+            const visible = stageApplicants;
 
             return (
             <div key={stage} className="border border-border rounded-lg overflow-hidden">
@@ -798,9 +854,6 @@ export default function SourceProject() {
                 </Badge>
                 <span className="text-sm text-muted-foreground">
                   {stageApplicants.length} applicant{stageApplicants.length !== 1 ? 's' : ''}
-                  {stageApplicants.length > PAGE_SIZE && (
-                    <> · page {currentPage + 1} of {totalPages}</>
-                  )}
                 </span>
               </div>
 
@@ -880,35 +933,6 @@ export default function SourceProject() {
                 </tbody>
               </table>
               </HorizontalTableScroll>
-
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/50 text-xs text-muted-foreground">
-                  <span>
-                    Showing {start + 1}–{Math.min(start + PAGE_SIZE, stageApplicants.length)} of {stageApplicants.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      disabled={currentPage === 0}
-                      onClick={() => setPageOf(stage, currentPage - 1)}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <span className="px-2">{currentPage + 1} / {totalPages}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      disabled={currentPage >= totalPages - 1}
-                      onClick={() => setPageOf(stage, currentPage + 1)}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           );
           })}
@@ -927,6 +951,8 @@ export default function SourceProject() {
             getCrmMatch={crmMatchFor}
             onSaveClient={handleSaveClient}
             savingClientId={savingClientId}
+            onImport={handleImportApplicants}
+            importing={importingApplicants}
           />
         </TabsContent>
 
@@ -1069,9 +1095,19 @@ interface ApplicantsTabProps {
   getCrmMatch: (a: Applicant) => CrmMatch | null;
   onSaveClient: (a: Applicant) => void;
   savingClientId: string | null;
+  onImport: () => void;
+  importing: boolean;
 }
 
-function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId, getCrmMatch, onSaveClient, savingClientId }: ApplicantsTabProps) {
+const APPLICANTS_PER_PAGE = 50;
+
+function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId, getCrmMatch, onSaveClient, savingClientId, onImport, importing }: ApplicantsTabProps) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(applicants.length / APPLICANTS_PER_PAGE));
+  const current = Math.min(page, totalPages - 1);
+  const start = current * APPLICANTS_PER_PAGE;
+  const visible = applicants.slice(start, start + APPLICANTS_PER_PAGE);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
@@ -1089,7 +1125,18 @@ function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId
   }
   return (
     <div className="space-y-2">
-      {applicants.map((a) => (
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {applicants.length} applicant{applicants.length === 1 ? '' : 's'}
+          {totalPages > 1 && <> · showing {start + 1}–{Math.min(start + APPLICANTS_PER_PAGE, applicants.length)}</>}
+        </span>
+        <Button size="sm" variant="outline" onClick={onImport} disabled={importing} title="Save these applicants into the Applicants table (People → Applicants)">
+          {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Import className="h-3.5 w-3.5 mr-1" />}
+          Import to Applicants
+        </Button>
+      </div>
+
+      {visible.map((a) => (
         <ApplicantCard
           key={a.id}
           applicant={a}
@@ -1101,6 +1148,18 @@ function ApplicantsTab({ loading, applicants, onDownloadResume, onSave, savingId
           savingClient={savingClientId === a.id}
         />
       ))}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-3">
+          <Button size="sm" variant="ghost" className="h-8 px-2" disabled={current === 0} onClick={() => setPage(current - 1)}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-xs text-muted-foreground px-2">Page {current + 1} of {totalPages}</span>
+          <Button size="sm" variant="ghost" className="h-8 px-2" disabled={current >= totalPages - 1} onClick={() => setPage(current + 1)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
