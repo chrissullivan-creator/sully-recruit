@@ -12,6 +12,7 @@ import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel } from '@/lib/jobStatus';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
+import { CreateBdSequenceDialog } from '@/components/jobs/CreateBdSequenceDialog';
 import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { authHeaders } from '@/lib/api-auth';
@@ -395,6 +396,7 @@ const JobDetail = () => {
   const { data: jobFunctions = [] } = useJobFunctions();
 
   const [addContactOpen, setAddContactOpen] = useState(false);
+  const [bdSeqOpen, setBdSeqOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState(false);
   const [funnelStage, setFunnelStage] = useState<CanonicalStage | null>(null);
   // Active sub-tab inside the Send Outs tab. 'all' shows everything;
@@ -1452,6 +1454,15 @@ const JobDetail = () => {
                   {(jobContacts as any[]).length > 0 && (
                     <Badge variant="secondary" className="ml-1">{(jobContacts as any[]).length}</Badge>
                   )}
+                  <Button
+                    size="sm"
+                    variant="gold-outline"
+                    className="ml-auto gap-1.5"
+                    onClick={() => setBdSeqOpen(true)}
+                    title="Create a business-development email sequence to these contacts, drafted by Joe"
+                  >
+                    <Megaphone className="h-3.5 w-3.5" /> BD Sequence
+                  </Button>
                 </div>
 
                 {/* Existing contacts */}
@@ -1912,6 +1923,7 @@ const JobDetail = () => {
       </Dialog>
 
       <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
+      {id && <CreateBdSequenceDialog jobId={id} open={bdSeqOpen} onOpenChange={setBdSeqOpen} />}
       {taskPanel && (
         <TaskSlidePanel
           open={taskPanel}
