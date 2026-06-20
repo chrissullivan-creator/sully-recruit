@@ -61,19 +61,11 @@ import {
   pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
 } from '@dnd-kit/core';
 
-const JOB_STATUSES = [
-  { value: 'new',          label: 'New',          color: 'bg-slate-500/15 text-slate-400' },
-  { value: 'reached_out',  label: 'Reached Out',  color: 'bg-sky-500/15 text-sky-400' },
-  { value: 'pitched',      label: 'Pitch',        color: 'bg-blue-500/15 text-blue-400' },
-  { value: 'send_out',     label: 'Send Out',     color: 'bg-yellow-500/15 text-yellow-400' },
-  { value: 'submitted',    label: 'Submission',   color: 'bg-purple-500/15 text-purple-400' },
-  { value: 'interviewing', label: 'Interview',    color: 'bg-orange-500/15 text-orange-400' },
-  { value: 'offer',        label: 'Offer',        color: 'bg-emerald-500/15 text-emerald-400' },
-  { value: 'placed',       label: 'Placed',       color: 'bg-green-500/15 text-green-400' },
-  { value: 'rejected',     label: 'Rejected',     color: 'bg-red-500/15 text-red-400' },
-  { value: 'withdrew',     label: 'Withdrew',     color: 'bg-muted text-muted-foreground' },
-];
-
+// Job status options for the detail-page status editor. Sourced from the
+// canonical jobStatus.ts (lead / hot / offer_made / filled / closed_lost) so
+// the dropdown matches the DB CHECK constraint — previously a stale local list
+// of pipeline-stage values shadowed the import, which is why "Closed Lost"
+// couldn't be selected here.
 const STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
 // ── Clickable field wrapper ─────────────────────────────────────────────────
