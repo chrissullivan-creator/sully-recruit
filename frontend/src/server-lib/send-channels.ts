@@ -18,9 +18,11 @@ import { notifyError } from "./alerting.js";
 // reverse). Keep these in sync with `messagingV2`.
 //
 // READS at these paths are verified live (backfill-linkedin-messages-v2.ts).
-// The POST/SEND shapes are INFERRED and NOT yet confirmed against Unipile's
-// v2 Methods reference — every call site below carries a
-// `TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND)`.
+// SENDS are now LIVE: USE_LINKEDIN_V2_SEND is ON and the classic-DM POST
+// shape (`chats`) is proven by production traffic (157 sends in the 30d to
+// 2026-06-19). The connection-request (`users/invite`) shape rides the same
+// live path. Recruiter InMail (`chats` + linkedin.api='recruiter') is the
+// least battle-tested shape — see the note at its call site.
 const linkedinV2SendPaths = {
   chatMessages: (chatId: string) => `chats/${encodeURIComponent(chatId)}/messages`,
   chats: () => "chats",
@@ -614,10 +616,11 @@ async function verifyUnipileAccountHealth(supabase: any, accountId: string): Pro
  * the v1-style verifyUnipileAccountHealth on this path — a failed send
  * surfaces the real Unipile error anyway.
  *
- * ⚠️ The v2 SEND request BODY SHAPES below are INFERRED, not verified. Every
- * POST is annotated with TODO(verify v2 body shape before enabling
- * USE_LINKEDIN_V2_SEND). Confirm them against Unipile's v2 Methods reference
- * before flipping the flag on. No test sends were performed.
+ * Status: USE_LINKEDIN_V2_SEND is ON in production. The classic-DM send
+ * shape (POST `chats`) is proven by live traffic; the connection-request
+ * shape (POST `users/invite`) rides the same live path. Recruiter InMail
+ * (POST `chats` + linkedin.api='recruiter') is the least-exercised shape —
+ * verify against Unipile's v2 Methods reference if InMail sends misbehave.
  *
  * Attachments are not yet supported on the v2 path (the v2 multipart shape is
  * unverified); when files are present we send the text only and warn, so a
@@ -637,10 +640,9 @@ async function sendLinkedInV2(
 ): Promise<{ message_id: string; conversation_id: string }> {
   // ── Connection request via v2 ───────────────────────────────────
   // v1 equivalent: POST users/invite { provider_id, message }.
-  // TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND):
-  //   path `users/invite`, body { provider_id, message } — the v2 key
-  //   may be `identifier`/`recipient` and the field may be `body` not
-  //   `message`. Confirm against Unipile's v2 Methods reference.
+  //   path `users/invite`, body { provider_id, message }. Live on the v2
+  //   send path; if invites start failing, re-check whether v2 wants
+  //   `identifier`/`recipient` for the key or `body` for the message field.
   if (opts.isConnectionRequest) {
     const data: any = await unipileFetchV2(
       supabase,
@@ -667,13 +669,12 @@ async function sendLinkedInV2(
   // v1 equivalent: POST chats { attendees_ids: [providerId], text,
   // linkedin?: { api: 'recruiter' } }. The verified v2 READ shape uses a
   // top-level `chats` collection, so a first message is a POST to it.
-  // TODO(verify v2 body shape before enabling USE_LINKEDIN_V2_SEND):
   //   path `chats`, body { attendees_ids: [providerId], text, ... }.
-  //   v2 may want `recipients`/`attendees` instead of `attendees_ids`,
-  //   and the InMail selector (here `linkedin.api='recruiter'`) is the
-  //   single biggest unknown — Recruiter InMail may instead be a
-  //   recruiter/inbox-scoped route (e.g. an inmail/subject param, or a
-  //   /linkedin/recruiter/... path). Confirm both before enabling.
+  //   The classic-DM shape is proven by live traffic. The InMail selector
+  //   (here `linkedin.api='recruiter'`) is the least-exercised piece — if
+  //   Recruiter InMail misbehaves, re-check whether v2 expects a
+  //   recruiter/inbox-scoped route (an inmail/subject param, or a
+  //   /linkedin/recruiter/... path) instead.
   const sendPayload: any = { attendees_ids: [providerId], text: body };
   if (opts.isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
 
@@ -797,8 +798,9 @@ export async function sendLinkedIn(
   // ── v2 send dispatch ─────────────────────────────────────────────
   // When the flag + acc_xxx are present, route the whole send (connection
   // invite / classic DM / Recruiter InMail) through the v2 host. The credit
-  // guard above already ran (it reads our cached counter, API-agnostic). The
-  // v2 SEND body shapes are UNVERIFIED — see sendLinkedInV2's TODOs.
+  // guard above already ran (it reads our cached counter, API-agnostic).
+  // The classic-DM v2 send shape is proven by live traffic; InMail is the
+  // least-exercised path — see the notes in sendLinkedInV2.
   if (useV2 && acctV2Id) {
     const hasAttachments = Array.isArray(attachmentUrls)
       ? attachmentUrls.filter(Boolean).length > 0
