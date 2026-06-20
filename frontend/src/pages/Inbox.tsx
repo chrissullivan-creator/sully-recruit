@@ -1751,6 +1751,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
           rawBody={firstInbound?.body || undefined}
           externalConversationId={thread.external_conversation_id}
           integrationAccountId={thread.integration_account_id}
+          senderProviderId={thread.channel?.startsWith('linkedin') && !senderAddress.includes('linkedin.com') ? senderAddress : undefined}
           onPersonLinked={() => {
             invalidateCommsScope(queryClient);
           }}

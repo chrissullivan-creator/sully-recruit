@@ -82,6 +82,7 @@ export interface AddPersonWizardProps {
   rawBody?: string;
   externalConversationId?: string | null;
   integrationAccountId?: string | null;
+  senderProviderId?: string | null;
   onPersonLinked?: () => void;
 }
 
@@ -96,6 +97,7 @@ export function AddPersonWizard({
   rawBody,
   externalConversationId,
   integrationAccountId,
+  senderProviderId,
   onPersonLinked,
 }: AddPersonWizardProps) {
   const queryClient = useQueryClient();
@@ -289,11 +291,15 @@ export function AddPersonWizard({
     const looksLikeUrl = /linkedin\.com\/(?:in|pub)\//.test(rawUrl);
     const body: Record<string, string> = {};
     if (looksLikeUrl) body.linkedin_url = rawUrl;
+    // LinkedIn Recruiter (InMail) senders arrive as an AEM… provider URN with no
+    // profile URL; pass it as unipile_id so lookup tries /users/{id} first (the
+    // RECRUITER_* chat_id below doesn't resolve on the classic chat endpoint).
+    if (!opts.urlOverride && senderProviderId) body.unipile_id = senderProviderId;
     if (externalConversationId) body.chat_id = externalConversationId;
     if (integrationAccountId) body.integration_account_id = integrationAccountId;
 
     // Nothing to resolve with — bail.
-    if (!body.linkedin_url && !body.chat_id) return;
+    if (!body.linkedin_url && !body.chat_id && !body.unipile_id) return;
 
     const res = await fetch('/api/lookup-linkedin', {
       method: 'POST',

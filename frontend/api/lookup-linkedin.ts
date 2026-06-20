@@ -85,11 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Try direct fetch by Unipile ID — v1: /users/{id}?account_id=X
     if (unipile_id) {
-      const r = await fetch(
+      const r = await uniGet(
         `${v1Base}/users/${encodeURIComponent(unipile_id)}?account_id=${acctParam}`,
-        { headers: uniHeaders },
+        uniHeaders,
       );
-      if (r.ok) profileData = await r.json();
+      if (r?.ok) profileData = await r.json();
     }
 
     // Try resolving by LinkedIn URL slug — v1: /users/{slug}?account_id=X
@@ -97,11 +97,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const match = linkedin_url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/);
       const slug = match?.[1];
       if (slug) {
-        const r = await fetch(
+        const r = await uniGet(
           `${v1Base}/users/${encodeURIComponent(slug)}?account_id=${acctParam}`,
-          { headers: uniHeaders },
+          uniHeaders,
         );
-        if (r.ok) profileData = await r.json();
+        if (r?.ok) profileData = await r.json();
       }
     }
 
@@ -111,20 +111,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //   v1: /chats/{id}?account_id=X and /chats/{id}/attendees?account_id=X
     if (!profileData && chat_id) {
       let attendees: any[] = [];
-      const chatResp = await fetch(
+      const chatResp = await uniGet(
         `${v1Base}/chats/${encodeURIComponent(chat_id)}?account_id=${acctParam}`,
-        { headers: uniHeaders },
+        uniHeaders,
       );
-      if (chatResp.ok) {
+      if (chatResp?.ok) {
         const chatJson: any = await chatResp.json();
         attendees = chatJson.attendees ?? chatJson.members ?? chatJson.participants ?? [];
       }
       if (attendees.length === 0) {
-        const attResp = await fetch(
+        const attResp = await uniGet(
           `${v1Base}/chats/${encodeURIComponent(chat_id)}/attendees?account_id=${acctParam}`,
-          { headers: uniHeaders },
+          uniHeaders,
         );
-        if (attResp.ok) {
+        if (attResp?.ok) {
           const attJson: any = await attResp.json();
           attendees = attJson.items ?? attJson.attendees ?? [];
         }
@@ -138,11 +138,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         attendeeData = other;
         const providerId = other.provider_id ?? other.id;
         if (providerId) {
-          const r = await fetch(
+          const r = await uniGet(
             `${v1Base}/users/${encodeURIComponent(providerId)}?account_id=${acctParam}`,
-            { headers: uniHeaders },
+            uniHeaders,
           );
-          if (r.ok) profileData = await r.json();
+          if (r?.ok) profileData = await r.json();
         }
       }
     }
@@ -260,6 +260,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err) {
     console.error("LinkedIn lookup failed:", err);
     return res.status(200).json({});
+  }
+}
+
+/** GET a Unipile URL with a hard timeout. The classic v1 chat/user endpoints
+ *  don't serve LinkedIn Recruiter (RECRUITER_*) chats / AEM member ids and can
+ *  hang, which would freeze the Add Person wizard's enrich step — so fail fast
+ *  (return null) and let resolution fall through to the next strategy. */
+async function uniGet(url: string, headers: Record<string, string>): Promise<Response | null> {
+  try {
+    return await fetch(url, { headers, signal: AbortSignal.timeout(9000) });
+  } catch {
+    return null;
   }
 }
 
