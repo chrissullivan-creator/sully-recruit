@@ -22,6 +22,11 @@ import { toast } from 'sonner';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 const Jobs = () => {
   const navigate = useNavigate();
@@ -30,8 +35,14 @@ const Jobs = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
+  // List view: optionally include closed (filled / closed_lost) jobs so they
+  // can be reviewed and bulk-reactivated; the board always shows closed columns.
+  const [showClosed, setShowClosed] = useState(false);
+  // Bulk-selection state (list view).
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const queryClient = useQueryClient();
-  const { data: jobs = [], isLoading } = useJobs();
+  const { data: jobs = [], isLoading } = useJobs(showClosed);
 
   const JOB_STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
@@ -62,6 +73,49 @@ const Jobs = () => {
     (job.company_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     ((job as any).job_code ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // ── Bulk selection (list view) ────────────────────────────────────────────
+  const toggleSelect = (jobId: string) =>
+    setSelectedIds((prev) => prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]);
+
+  const allOnPageSelected = filteredJobs.length > 0 && filteredJobs.every((j) => selectedIds.includes(j.id));
+  const toggleSelectAll = () => {
+    const pageIds = filteredJobs.map((j) => j.id);
+    setSelectedIds((prev) => allOnPageSelected ? prev.filter((id) => !pageIds.includes(id)) : [...new Set([...prev, ...pageIds])]);
+  };
+  const clearSelection = () => setSelectedIds([]);
+
+  const handleBulkStatusChange = async (newStatus: string) => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const { error } = await supabase.from('jobs').update({ status: newStatus }).in('id', selectedIds);
+      if (error) throw new Error(error.message);
+      toast.success(`${selectedIds.length} job${selectedIds.length === 1 ? '' : 's'} moved to ${JOB_STATUS_OPTIONS.find(o => o.value === newStatus)?.label ?? newStatus}`);
+      clearSelection();
+      invalidateJobScope(queryClient);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update status');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const { error } = await softDelete('jobs', selectedIds);
+      if (error) throw new Error(error.message);
+      toast.success(`${selectedIds.length} job${selectedIds.length === 1 ? '' : 's'} deleted`);
+      clearSelection();
+      invalidateJobScope(queryClient);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete jobs');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <MainLayout>
@@ -103,16 +157,65 @@ const Jobs = () => {
       />
       
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
-        <div className="relative max-w-md mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search jobs…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div className="relative max-w-md flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search jobs…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          {view === 'list' && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+              <Checkbox checked={showClosed} onCheckedChange={(v) => setShowClosed(!!v)} />
+              Show closed (Filled / Closed Lost)
+            </label>
+          )}
         </div>
+
+        {/* Bulk action bar — list view, when rows are selected. */}
+        {view === 'list' && selectedIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+            <span className="text-sm font-medium text-foreground">{selectedIds.length} selected</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy}>
+                  <RefreshCw className="h-3.5 w-3.5" /> Change Status
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {JOB_STATUS_OPTIONS.map((o) => (
+                  <DropdownMenuItem key={o.value} onClick={() => handleBulkStatusChange(o.value)}>
+                    {o.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" disabled={bulkBusy}>
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {selectedIds.length} job{selectedIds.length === 1 ? '' : 's'}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    They'll be moved to trash and can be restored from /audit/trash within 30 days.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleBulkDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <Button variant="ghost" size="sm" className="h-8 ml-auto" onClick={clearSelection}>Clear</Button>
+          </div>
+        )}
 
         {isLoading ? (
           <TableSkeleton rows={6} cols={6} />
@@ -130,6 +233,9 @@ const Jobs = () => {
             <table className="w-full">
               <thead className="table-header-green">
                 <tr>
+                  <th className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAll} aria-label="Select all" />
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Code</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
@@ -141,7 +247,10 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
-                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="group hover:bg-muted/50 transition-colors cursor-pointer">
+                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className={cn('group hover:bg-muted/50 transition-colors cursor-pointer', selectedIds.includes(job.id) && 'bg-accent/5')}>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox checked={selectedIds.includes(job.id)} onCheckedChange={() => toggleSelect(job.id)} aria-label={`Select ${job.title}`} />
+                    </td>
                     <td className="px-4 py-3">
                       {(job as any).job_code ? (
                         <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded">{(job as any).job_code}</span>

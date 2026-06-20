@@ -145,7 +145,11 @@ function DroppableColumn({
 }
 
 export function JobPipeline() {
-  const { data: jobs = [] } = useJobs();
+  // Include closed jobs so the Filled / Closed Lost columns actually populate —
+  // otherwise a job dragged into a closed column immediately disappears (the
+  // default useJobs() filters out filled/closed_lost), which read as "can't
+  // move to closed lost".
+  const { data: jobs = [] } = useJobs(true);
   const queryClient = useQueryClient();
   const [activeJob, setActiveJob] = useState<any>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
@@ -201,8 +205,8 @@ export function JobPipeline() {
 
     if (!targetStage || targetStage === draggedJob.status) return;
 
-    // Optimistic update
-    queryClient.setQueryData(['jobs'], (old: any[] | undefined) =>
+    // Optimistic update — keyed to ['jobs', true] to match this board's query.
+    queryClient.setQueryData(['jobs', true], (old: any[] | undefined) =>
       (old ?? []).map(j => j.id === jobId ? { ...j, status: targetStage } : j)
     );
 
@@ -215,7 +219,7 @@ export function JobPipeline() {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
     } catch (err: any) {
       // Revert on failure
-      queryClient.setQueryData(['jobs'], (old: any[] | undefined) =>
+      queryClient.setQueryData(['jobs', true], (old: any[] | undefined) =>
         (old ?? []).map(j => j.id === jobId ? { ...j, status: draggedJob.status } : j)
       );
       toast.error('Failed to move job');

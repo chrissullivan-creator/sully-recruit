@@ -32,7 +32,11 @@ Return ONLY a JSON object with EXACTLY these string fields:
 - "marketing_type_of_firm": a short description of the firm type, anonymized if the company is confidential (e.g. "Multi-strategy hedge fund", "Top-tier proprietary trading firm"). Plain text.
 - "marketing_job_location": a clean, public-facing location string (e.g. "New York, NY (Hybrid)"). Plain text.
 - "marketing_job_compensation": tasteful public compensation copy. If figures are provided you may reference them; otherwise use language like "Competitive base + bonus". NEVER fabricate specific numbers. Plain text.
-- "marketing_job_description": a compelling public role summary as simple HTML. Use only <p>, <ul>, <li>, <strong>, and <em> tags. Open with a short hook paragraph, then a bulleted list of 3-6 highlights/responsibilities, then a brief "why join" closing paragraph. ~120-220 words.
+- "marketing_job_description": a compelling public role description as simple HTML, broken into EXACTLY these three sections, in this order, each introduced by an <h3> heading with the exact title shown:
+    1. <h3>What You'll Be Doing</h3> — a short intro <p> and/or a <ul> of the core responsibilities/day-to-day.
+    2. <h3>Who We're Looking For</h3> — a <ul> of the key qualifications, experience, and skills.
+    3. <h3>Why This Role</h3> — a punchy <p> that sells the opportunity (the "sizzle": growth, impact, team calibre, the firm/market).
+  Use ONLY <h3>, <p>, <ul>, <li>, <strong>, and <em> tags. Roughly 150-260 words total across the three sections.
 
 Rules:
 - Professional, confident, on-brand for a top-tier financial-services recruiting firm. No emoji, no hype.

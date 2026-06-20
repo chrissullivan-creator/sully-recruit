@@ -27,7 +27,7 @@ import {
   FileText, Sparkles, Loader2, Check, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
-  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal,
+  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -1872,6 +1872,58 @@ const CandidateDetail = () => {
                       <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.rtf" className="hidden"
                         onChange={e => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ''; }} />
                     </div>
+
+                    {/* Most-recent resume — inline preview with open/download.
+                        candidateResumes is ordered created_at desc, so [0] is newest. */}
+                    {candidateResumes.length > 0 && (() => {
+                      const latest = candidateResumes[0] as any;
+                      const url = latest.file_path ? signedUrls[latest.file_path] : null;
+                      const isPdf = /\.pdf$/i.test(latest.file_name ?? '');
+                      const downloadHref = url ? `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(latest.file_name ?? 'resume')}` : null;
+                      return (
+                        <div className="rounded-xl border border-accent/20 overflow-hidden">
+                          <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-accent/5 border-b border-accent/20">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="h-4 w-4 text-accent shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-accent">Most recent resume</p>
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  {latest.file_name}
+                                  {latest.created_at && <span className="text-xs text-muted-foreground font-normal ml-2">{format(new Date(latest.created_at), 'MMM d, yyyy')}</span>}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {url && (
+                                <a href={url} target="_blank" rel="noopener noreferrer">
+                                  <Button variant="outline" size="sm" className="h-8 gap-1.5"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
+                                </a>
+                              )}
+                              {downloadHref && (
+                                <a href={downloadHref} download={latest.file_name ?? true}>
+                                  <Button variant="outline" size="sm" className="h-8 gap-1.5"><Download className="h-3.5 w-3.5" /> Download</Button>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                          {url ? (
+                            isPdf ? (
+                              <iframe src={url} title="Most recent resume" className="w-full h-[520px] bg-white" />
+                            ) : (
+                              <div className="p-8 text-center bg-white">
+                                <FileText className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
+                                <p className="text-sm text-muted-foreground">Preview isn't available for this file type. Use Open or Download above.</p>
+                              </div>
+                            )
+                          ) : (
+                            <div className="p-8 text-center bg-white">
+                              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {candidateResumes.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-border p-8 text-center">
                         <FileText className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
