@@ -785,10 +785,8 @@ export default function SourceProject() {
           {/* Applicant tables by stage */}
           {sortedStages.map((stage) => {
             const stageApplicants = byStage[stage];
-            const totalPages = Math.max(1, Math.ceil(stageApplicants.length / PAGE_SIZE));
-            const currentPage = Math.min(pageOf(stage), totalPages - 1);
-            const start = currentPage * PAGE_SIZE;
-            const visible = stageApplicants.slice(start, start + PAGE_SIZE);
+            // Show every candidate in each stage (no per-stage pagination).
+            const visible = stageApplicants;
 
             return (
             <div key={stage} className="border border-border rounded-lg overflow-hidden">
@@ -798,9 +796,6 @@ export default function SourceProject() {
                 </Badge>
                 <span className="text-sm text-muted-foreground">
                   {stageApplicants.length} applicant{stageApplicants.length !== 1 ? 's' : ''}
-                  {stageApplicants.length > PAGE_SIZE && (
-                    <> · page {currentPage + 1} of {totalPages}</>
-                  )}
                 </span>
               </div>
 
@@ -880,35 +875,6 @@ export default function SourceProject() {
                 </tbody>
               </table>
               </HorizontalTableScroll>
-
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/50 text-xs text-muted-foreground">
-                  <span>
-                    Showing {start + 1}–{Math.min(start + PAGE_SIZE, stageApplicants.length)} of {stageApplicants.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      disabled={currentPage === 0}
-                      onClick={() => setPageOf(stage, currentPage - 1)}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <span className="px-2">{currentPage + 1} / {totalPages}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      disabled={currentPage >= totalPages - 1}
-                      onClick={() => setPageOf(stage, currentPage + 1)}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           );
           })}
