@@ -297,10 +297,11 @@ export const reconcileOrphanedResumes = inngest.createFunction(
         // yields no readable text, so the candidate + resume still land
         // in the system rather than dying in 'failed'.
         const runParse = async (): Promise<{ parsed: any; rawText: string | null }> => {
-          const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-          const buf = await fetchWithRetry(urlData.publicUrl, { signal: AbortSignal.timeout(20_000) }, { label: "resume-download" }).then((r: any) =>
-            r.arrayBuffer(),
-          );
+          // Service-role download — the resumes bucket is private, so the public
+          // URL 404s. The admin client reads it directly regardless of bucket ACL.
+          const { data: blob, error: dlErr } = await supabase.storage.from("resumes").download(resume.file_path);
+          if (dlErr || !blob) throw new Error(`resume download failed: ${dlErr?.message ?? "no data"}`);
+          const buf = await blob.arrayBuffer();
           try {
             const r2 = await parseResume(buf, resume.fileName, parseOpts);
             return { parsed: r2.parsed, rawText: r2.rawText };

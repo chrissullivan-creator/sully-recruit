@@ -9,7 +9,7 @@
  * and appended to back_of_resume_notes for context preservation.
  */
 import { logger } from "./logger.js";
-import { getAnthropicKey, getOpenAIKey } from "./supabase.js";
+import { getAnthropicKey, getOpenAIKey, getGeminiKey, getOpenRouterKey } from "./supabase.js";
 import { callAIWithFallback } from "../lib/ai-fallback.js";
 import { notifyError } from "./alerting.js";
 
@@ -90,10 +90,14 @@ export async function extractMessageIntel(
     : plainText;
 
   try {
-    const [apiKey, openaiKey] = await Promise.all([getAnthropicKey(), getOpenAIKey()]);
+    const [apiKey, openaiKey, geminiKey, openRouterKey] = await Promise.all([
+      getAnthropicKey(), getOpenAIKey(), getGeminiKey(), getOpenRouterKey(),
+    ]);
     const { text, via } = await callAIWithFallback({
       anthropicKey: apiKey,
       openaiKey: openaiKey || undefined,
+      geminiKey: geminiKey || undefined,
+      openRouterKey: openRouterKey || undefined,
       systemPrompt: EXTRACTION_PROMPT,
       userContent: fullText.slice(0, 3000),
       model: "claude-haiku-4-5-20251001",

@@ -97,13 +97,11 @@ export const reparseResumes = inngest.createFunction(
     for (let i = 0; i < filtered.length; i++) {
       const resume = filtered[i];
       try {
-        const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(resume.file_path);
-        const publicUrl = urlData?.publicUrl;
-        if (!publicUrl) throw new Error("No public URL");
-
-        const buf = await fetchWithRetry(publicUrl, { signal: AbortSignal.timeout(20_000) }, { label: "resume-download" }).then((r: any) =>
-          r.arrayBuffer(),
-        );
+        // Service-role download — the resumes bucket is private, so the public
+        // URL 404s. The admin client reads it directly regardless of bucket ACL.
+        const { data: blob, error: dlErr } = await supabase.storage.from("resumes").download(resume.file_path);
+        if (dlErr || !blob) throw new Error(`resume download failed: ${dlErr?.message ?? "no data"}`);
+        const buf = await blob.arrayBuffer();
         const { parsed, rawText } = await parseResume(buf, resume.fileName, {
           mistralKey: mistralKey || undefined,
           callAI: (req) =>
