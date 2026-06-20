@@ -19,6 +19,7 @@ import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./send-chann
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./merge-tags.js";
 import { calculateSendTime, incrementDailySend, localDateString } from "./send-time-calculator.js";
 import { canonicalChannel } from "./unipile-v2.js";
+import { resolveOOOResumeBase } from "./out-of-office.js";
 import { notifyError } from "./alerting.js";
 
 export interface Logger {
@@ -448,12 +449,17 @@ export async function hasRepliedSinceEnrollment(supabase: any, enrollment: any):
   const entityColumn = enrollment.candidate_id ? "candidate_id" : "contact_id";
   const entityId = enrollment.candidate_id || enrollment.contact_id;
 
+  // Exclude connection-accepted pings AND out-of-office auto-replies — neither
+  // is a genuine human reply that should stop the sequence. (PostgREST `not.in`
+  // compiles to `NOT (... IN ...)`, which — like the prior `<>` — also drops
+  // NULL message_type rows; live inbound emails are NULL-typed and the webhook
+  // handles their stop directly, so this guard's role is the sweep backstop.)
   const { data: replies } = await supabase
     .from("messages")
     .select("id")
     .eq(entityColumn, entityId)
     .eq("direction", "inbound")
-    .neq("message_type", "connection_accepted")
+    .not("message_type", "in", "(connection_accepted,auto_reply)")
     .gte("sent_at", enrollment.enrolled_at)
     .limit(1);
 
@@ -489,6 +495,101 @@ export async function stopEnrollment(
   if (replyText && trigger === "reply_received") {
     await triggerSentimentAnalysis(supabase, enrollment, replyText, logger);
   }
+}
+
+/**
+ * Out-of-office reschedule — the counterpart to stopEnrollment for auto-replies.
+ *
+ * An OOO auto-reply is NOT a genuine reply, so we do NOT stop the enrollment.
+ * Instead we push the next pending step to the day AFTER the contact's stated
+ * return date (resolveOOOResumeBase), clamped into the sequence's send window,
+ * and shift every later scheduled step by the same delta so the original
+ * cadence is preserved and nothing fires before they're back. Push-forward
+ * only — we never pull a step earlier (if their return is sooner than the next
+ * scheduled step, we leave the schedule alone).
+ *
+ * As each shifted step later fires, `reanchorNextStep` re-clamps the following
+ * one back into the window, so the raw delta applied here is just a safe
+ * holding position that guarantees ordering. Returns the new resume time, or
+ * null if there was nothing left to move (or no push was warranted).
+ */
+export async function rescheduleEnrollmentForOOO(
+  supabase: any,
+  enrollment: any,
+  returnDateStr: string | null | undefined,
+  logger?: Logger,
+): Promise<Date | null> {
+  const sequence = enrollment.sequences || {};
+  const tz = sequence.timezone || undefined;
+  const windowStart = sequence.send_window_start || "09:00";
+  const windowEnd = sequence.send_window_end || "18:00";
+  const senderUserId = sequence.sender_user_id || sequence.created_by || enrollment.enrolled_by || "";
+
+  // Earliest not-yet-fired step.
+  const { data: nextStep } = await supabase
+    .from("sequence_step_logs")
+    .select("id, scheduled_at, channel")
+    .eq("enrollment_id", enrollment.id)
+    .eq("status", "scheduled")
+    .order("scheduled_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!nextStep) return null;
+
+  const resumeBase = resolveOOOResumeBase(returnDateStr);
+  const newNextAt = await calculateSendTime(supabase, {
+    startTime: resumeBase,
+    delayHours: 0,
+    delayMinutes: 0,
+    jiggleMinutes: 0,
+    channel: nextStep.channel || "email",
+    sendWindowStart: windowStart,
+    sendWindowEnd: windowEnd,
+    accountId: senderUserId,
+    timezone: tz,
+    weekdaysOnly: sequence.weekdays_only === true,
+  });
+
+  const oldNextAt = new Date(nextStep.scheduled_at);
+  if (newNextAt.getTime() <= oldNextAt.getTime()) {
+    logger?.info("OOO reschedule skipped — next step already later than resume date", {
+      enrollmentId: enrollment.id,
+      nextStepAt: oldNextAt.toISOString(),
+      resumeAt: newNextAt.toISOString(),
+    });
+    return null;
+  }
+
+  const deltaMs = newNextAt.getTime() - oldNextAt.getTime();
+
+  // Shift the next step to the resume time, and every later scheduled step by
+  // the same delta. pending_connection steps are intentionally untouched —
+  // they're gated on connection acceptance, not the clock.
+  const { data: scheduledSteps } = await supabase
+    .from("sequence_step_logs")
+    .select("id, scheduled_at")
+    .eq("enrollment_id", enrollment.id)
+    .eq("status", "scheduled");
+
+  for (const step of scheduledSteps || []) {
+    const shifted =
+      step.id === nextStep.id
+        ? newNextAt
+        : new Date(new Date(step.scheduled_at).getTime() + deltaMs);
+    await supabase
+      .from("sequence_step_logs")
+      .update({ scheduled_at: shifted.toISOString(), updated_at: new Date().toISOString() } as any)
+      .eq("id", step.id);
+  }
+
+  logger?.info("OOO reschedule applied", {
+    enrollmentId: enrollment.id,
+    resumeAt: newNextAt.toISOString(),
+    shiftedSteps: (scheduledSteps || []).length,
+    deltaMinutes: Math.round(deltaMs / 60000),
+  });
+  return newNextAt;
 }
 
 /**

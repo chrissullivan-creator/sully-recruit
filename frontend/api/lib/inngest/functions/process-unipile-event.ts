@@ -4,7 +4,13 @@ import {
   extractMessageIntel,
   applyExtractedIntel,
 } from "../../../../src/server-lib/intel-extraction.js";
-import { stopEnrollment } from "../../../../src/server-lib/sequence-runner.js";
+import { stopEnrollment, rescheduleEnrollmentForOOO } from "../../../../src/server-lib/sequence-runner.js";
+import {
+  detectOutOfOfficeHeuristic,
+  decideOutOfOffice,
+  noteOutOfOffice,
+  clearOutOfOffice,
+} from "../../../../src/server-lib/out-of-office.js";
 import { calculatePostConnectionSendTime } from "../../../../src/server-lib/send-time-calculator.js";
 import { canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
@@ -353,7 +359,42 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
       "email",
       enrollment?.id,
     );
+  }
 
+  // OOO handling mirrors the Microsoft Graph processor: an auto-reply
+  // reschedules the next step (day after return) instead of stopping. See
+  // process-microsoft-event.ts / out-of-office.ts for the rationale.
+  const ooo = decideOutOfOffice(
+    intel?.sentiment,
+    intel?.ooo_return_date,
+    detectOutOfOfficeHeuristic(subject, bodyForSearch),
+  );
+  const oooReturnDate = ooo.returnDate;
+
+  if (ooo.isOOO) {
+    if (externalId) {
+      await supabase
+        .from("messages")
+        .update({ message_type: "auto_reply" } as any)
+        .eq("external_message_id", externalId)
+        .eq("direction", "inbound");
+    }
+    const { data: actives } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(match.entityColumn, match.entityId)
+      .eq("status", "active");
+    let resumeAt: Date | null = null;
+    for (const e of actives ?? []) {
+      const r = await rescheduleEnrollmentForOOO(supabase, e, oooReturnDate, logger);
+      if (r) resumeAt = r;
+    }
+    await noteOutOfOffice(supabase, match, oooReturnDate, resumeAt);
+    logger.info("Unipile OOO auto-reply — rescheduled instead of stopping", {
+      entityId: match.entityId,
+      returnDate: oooReturnDate,
+    });
+  } else if (intel) {
     const { data: actives } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
@@ -362,6 +403,7 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     for (const e of actives ?? []) {
       await stopEnrollment(supabase, e, "reply_received", bodyForSearch.slice(0, 500));
     }
+    await clearOutOfOffice(supabase, match);
   }
 
   await inngest.send({

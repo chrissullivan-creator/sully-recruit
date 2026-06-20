@@ -8,7 +8,13 @@ import {
   extractMessageIntel,
   applyExtractedIntel,
 } from "../../../../src/server-lib/intel-extraction.js";
-import { stopEnrollment } from "../../../../src/server-lib/sequence-runner.js";
+import { stopEnrollment, rescheduleEnrollmentForOOO } from "../../../../src/server-lib/sequence-runner.js";
+import {
+  detectOutOfOfficeHeuristic,
+  decideOutOfOffice,
+  noteOutOfOffice,
+  clearOutOfOffice,
+} from "../../../../src/server-lib/out-of-office.js";
 import {
   matchPersonByEmail,
   classifyEmail,
@@ -562,15 +568,19 @@ async function processEmailMessage(
     .eq("id", match.entityId);
 
   const emailBody = message.body?.content || message.bodyPreview || "";
+  let intel: Awaited<ReturnType<typeof extractMessageIntel>> = null;
   if (emailBody.length > 10) {
-    const intel = await extractMessageIntel(emailBody, message.subject);
+    intel = await extractMessageIntel(emailBody, message.subject);
     if (intel) {
       const { data: enrollment } = await supabase
         .from("sequence_enrollments")
         .select("id")
         .eq(match.entityColumn, match.entityId)
         .eq("status", "active")
-        .order("created_at", { ascending: false })
+        // enrolled_at — sequence_enrollments has no created_at column; the
+        // prior order key silently errored, so applyExtractedIntel never got
+        // an enrollment id (enrollment-level reply_sentiment never persisted).
+        .order("enrolled_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -585,6 +595,63 @@ async function processEmailMessage(
     }
   }
 
+  // Out-of-office handling. An auto-reply is NOT a genuine reply — instead of
+  // stopping the sequence, push the next step to the day after the contact's
+  // return date. The AI intel extractor is the primary detector (sentiment
+  // 'ooo' + structured ooo_return_date); detectOutOfOfficeHeuristic is the
+  // AI-independent backstop for the obvious Exchange "Automatic reply:" cases.
+  const ooo = decideOutOfOffice(
+    intel?.sentiment,
+    intel?.ooo_return_date,
+    detectOutOfOfficeHeuristic(message.subject, emailBody),
+  );
+  const oooReturnDate = ooo.returnDate;
+
+  if (ooo.isOOO) {
+    // Tag the inbound row so the sweep's reply-guard (hasRepliedSinceEnrollment)
+    // skips it when the resumed step fires weeks later.
+    if (externalId) {
+      await supabase
+        .from("messages")
+        .update({ message_type: "auto_reply" } as any)
+        .eq("external_message_id", externalId)
+        .eq("direction", "inbound");
+    }
+
+    const { data: oooEnrollments } = await supabase
+      .from("sequence_enrollments")
+      .select("*, sequences!inner(*)")
+      .eq(match.entityColumn, match.entityId)
+      .eq("status", "active");
+
+    let rescheduled = 0;
+    let resumeAt: Date | null = null;
+    for (const enrollment of oooEnrollments || []) {
+      const r = await rescheduleEnrollmentForOOO(supabase, enrollment, oooReturnDate, logger);
+      if (r) {
+        rescheduled++;
+        resumeAt = r;
+      }
+    }
+
+    await noteOutOfOffice(supabase, match, oooReturnDate, resumeAt);
+
+    logger.info("OOO auto-reply — rescheduled instead of stopping", {
+      entityId: match.entityId,
+      returnDate: oooReturnDate,
+      detectedVia: intel?.sentiment === "ooo" ? "ai" : "heuristic",
+      rescheduled,
+    });
+
+    await inngest.send({
+      name: "ai/joe-says.requested",
+      data: { entityId: match.entityId, entityType: match.entityType as "candidate" | "contact" },
+    });
+    return { action: "ooo_rescheduled", entityId: match.entityId, returnDate: oooReturnDate, rescheduled };
+  }
+
+  // Genuine reply → stop active enrollments (existing behaviour). Clear any
+  // stale OOO flag too: they're evidently back at their desk.
   const { data: activeEnrollments } = await supabase
     .from("sequence_enrollments")
     .select("*, sequences!inner(*)")
@@ -600,6 +667,7 @@ async function processEmailMessage(
       count: activeEnrollments.length,
     });
   }
+  await clearOutOfOffice(supabase, match);
 
   logger.info("Email logged", { entityId: match.entityId, subject: message.subject });
 
@@ -811,6 +879,24 @@ async function extractFailedRecipientFromOriginalSubject(
   return (data as any)?.recipient_address?.toLowerCase() ?? null;
 }
 
+/**
+ * Append a dated, human-readable bounce note to a candidate's
+ * back_of_resume_notes. The EmailBounceBadge already surfaces email_invalid in
+ * the UI; this keeps the "why did the sequence stop" breadcrumb in the
+ * candidate's timeline too.
+ */
+async function appendBounceNote(supabase: any, personId: string, reason: string): Promise<void> {
+  const { data: person } = await supabase
+    .from("people")
+    .select("back_of_resume_notes")
+    .eq("id", personId)
+    .maybeSingle();
+  const dateStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const note = `\n--- email bounced (${dateStr}) ---\nSequence stopped — message to this address was undeliverable${reason ? ` (${reason})` : ""}. Address flagged invalid.`;
+  const existing = person?.back_of_resume_notes || "";
+  await supabase.from("people").update({ back_of_resume_notes: existing + note } as any).eq("id", personId);
+}
+
 async function maybeHandleBounce(
   supabase: any,
   message: any,
@@ -853,6 +939,7 @@ async function maybeHandleBounce(
         email_invalid_at: now,
       } as any)
       .eq("id", cand.id);
+    await appendBounceNote(supabase, cand.id, reason);
 
     const { data: enrollments } = await supabase
       .from("sequence_enrollments")

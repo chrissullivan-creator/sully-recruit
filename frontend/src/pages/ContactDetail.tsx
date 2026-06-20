@@ -35,6 +35,7 @@ import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { MeetingRecapsTab } from '@/components/shared/MeetingRecapsTab';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
+import { OutOfOfficeBadge } from '@/components/shared/OutOfOfficeBadge';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -717,6 +718,7 @@ const ContactDetail = () => {
                       reason={(contact as any).email_invalid_reason}
                       invalidatedAt={(contact as any).email_invalid_at}
                     />
+                    <OutOfOfficeBadge oooUntil={(contact as any).ooo_until} />
                   </span>
                 }
                 value={c.work_email}

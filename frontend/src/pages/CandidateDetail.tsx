@@ -45,6 +45,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
+import { OutOfOfficeBadge } from '@/components/shared/OutOfOfficeBadge';
 import { cn } from '@/lib/utils';
 import { CANONICAL_PIPELINE, canonicalConfig, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { format } from 'date-fns';
@@ -1323,6 +1324,7 @@ const CandidateDetail = () => {
                 </span>
               )}
               <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
+              <OutOfOfficeBadge oooUntil={(candidate as any).ooo_until} />
               <span>Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</span>
             </div>
 
