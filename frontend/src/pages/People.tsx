@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { ApplicantsTab } from '@/components/people/ApplicantsTab';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
 import { usePeople } from '@/hooks/useData';
 import {
@@ -35,7 +36,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
 
-type PersonTab = 'all' | 'candidates' | 'clients';
+type PersonTab = 'all' | 'candidates' | 'clients' | 'applicants';
 type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated' | 'created';
 type SortDir = 'asc' | 'desc';
 
@@ -85,6 +86,7 @@ const TAB_CONFIG: { key: PersonTab; label: string }[] = [
   { key: 'all',        label: 'All People'  },
   { key: 'candidates', label: 'Candidates'  },
   { key: 'clients',    label: 'Clients'     },
+  { key: 'applicants', label: 'Applicants'  },
 ];
 
 const People = () => {
@@ -198,11 +200,20 @@ const People = () => {
     return list;
   }, [people, emailHits, looksLikeEmail, trimmedQuery, tab, sortField, sortDir]);
 
+  const { data: applicantCount = 0 } = useQuery({
+    queryKey: ['applicants_count'],
+    queryFn: async () => {
+      const { count } = await supabase.from('applicants' as any).select('id', { count: 'exact', head: true });
+      return count ?? 0;
+    },
+  });
+
   const tabCounts = useMemo(() => ({
     all:        people.length,
     candidates: people.filter((p: any) => getRoles(p).includes('candidate')).length,
     clients:    people.filter((p: any) => getRoles(p).includes('client')).length,
-  }), [people]);
+    applicants: applicantCount,
+  }), [people, applicantCount]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -348,6 +359,10 @@ const People = () => {
           ))}
         </div>
 
+        {tab === 'applicants' ? (
+          <ApplicantsTab />
+        ) : (
+        <>
         {/* Search + page select */}
         <div className="flex items-center gap-4 mb-5">
           <div className="relative flex-1 max-w-md">
@@ -592,6 +607,8 @@ const People = () => {
               <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(totalPages)}>Last</Button>
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
 
