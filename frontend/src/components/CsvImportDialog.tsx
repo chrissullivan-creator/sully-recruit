@@ -339,15 +339,20 @@ export function CsvImportDialog({ open, onOpenChange, entityType }: CsvImportDia
         const rows = valid.map(r => {
           const j = r.mapped as any;
           const stage = j.stage ? j.stage.toLowerCase().replace(/\s/g, '_') : 'lead';
-          const priority = j.priority ? j.priority.toLowerCase() : 'medium';
+          // Map to real `jobs` columns: company_name (not company), compensation
+          // (not salary), additional_notes (not notes). jobs has no user_id /
+          // priority / hiring_manager columns, so those are not sent.
           const row: Record<string, any> = {
-            user_id: user.id, title: j.title || '', company: j.company || '',
-            location: j.location || '', status: VALID_JOB_STAGES.includes(stage) ? stage : 'lead',
-            priority: VALID_PRIORITIES.includes(priority) ? priority : 'medium',
+            title: j.title || '',
+            company_name: j.company || null,
+            location: j.location || null,
+            status: VALID_JOB_STAGES.includes(stage) ? stage : 'lead',
           };
-          if (j.salary) row.salary = j.salary;
-          if (j.hiring_manager) row.hiring_manager = j.hiring_manager;
-          if (j.notes) row.notes = j.notes;
+          if (j.salary) row.compensation = j.salary;
+          const extraNotes = [j.notes, j.hiring_manager ? `Hiring manager: ${j.hiring_manager}` : '']
+            .filter(Boolean)
+            .join('\n');
+          if (extraNotes) row.additional_notes = extraNotes;
           return row;
         });
         for (let i = 0; i < rows.length; i += BATCH) {
