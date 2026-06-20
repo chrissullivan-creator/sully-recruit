@@ -27,7 +27,7 @@ import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
-  Mailbox, Linkedin, Copy,
+  Mailbox, Linkedin, Copy, Megaphone,
 } from 'lucide-react';
 import { JobSourceTab } from '@/components/source/SourceTabs';
 import {
@@ -1267,6 +1267,7 @@ const JobDetail = () => {
             <div className="px-8 pt-4 border-b border-border">
               <TabsList className="bg-secondary">
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
+                <TabsTrigger value="marketing" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Marketing</TabsTrigger>
                 <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
@@ -1334,6 +1335,61 @@ const JobDetail = () => {
                     />
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ── Marketing Tab ──────────────────────────── */}
+              {/* Public, website-facing copy for this role. Kept separate from
+                  the internal Details fields so recruiters can polish marketing
+                  language without touching the operational record. */}
+              <TabsContent value="marketing" className="px-8 py-5 mt-0 space-y-6">
+                <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Megaphone className="h-3.5 w-3.5 text-accent" />
+                    These fields power the public website listing — separate from the internal Details tab.
+                  </p>
+                </div>
+
+                {/* Marketing Title */}
+                <EditableField onClick={() => openFieldEdit('marketing_title', 'Marketing Title', 'text', (job as any).marketing_title || '', undefined, 'e.g. Senior Quantitative Researcher — Systematic Macro')}>
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Briefcase className="h-3 w-3" /> Marketing Title</Label>
+                  <p className="text-sm font-medium text-foreground mt-0.5">{(job as any).marketing_title || <span className="italic text-muted-foreground">Not set</span>}</p>
+                </EditableField>
+
+                {/* Type of Firm */}
+                <EditableField onClick={() => openFieldEdit('marketing_type_of_firm', 'Marketing Type of Firm', 'text', (job as any).marketing_type_of_firm || '', undefined, 'e.g. Multi-strategy hedge fund')}>
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Type of Firm</Label>
+                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_type_of_firm || <span className="italic text-muted-foreground">Not set</span>}</p>
+                </EditableField>
+
+                {/* Marketing Location */}
+                <EditableField onClick={() => openFieldEdit('marketing_job_location', 'Marketing Location', 'text', (job as any).marketing_job_location || '', undefined, 'e.g. New York, NY (Hybrid)')}>
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><MapPin className="h-3 w-3" /> Location</Label>
+                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_location || <span className="italic text-muted-foreground">Not set</span>}</p>
+                </EditableField>
+
+                {/* Marketing Compensation */}
+                <EditableField onClick={() => openFieldEdit('marketing_job_compensation', 'Marketing Compensation', 'text', (job as any).marketing_job_compensation || '', undefined, 'e.g. Competitive base + bonus')}>
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><DollarSign className="h-3 w-3" /> Compensation</Label>
+                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
+                </EditableField>
+
+                {/* Marketing Description */}
+                <div className="border-t border-border pt-5">
+                  <EditableField onClick={() => openFieldEdit('marketing_job_description', 'Marketing Job Description', 'richtext', (job as any).marketing_job_description || '', undefined, 'Public-facing role summary, highlights, what makes this opportunity compelling...')}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Megaphone className="h-4 w-4 text-accent" />
+                      <h2 className="text-base font-semibold text-foreground">Marketing Job Description</h2>
+                    </div>
+                    {(job as any).marketing_job_description ? (
+                      <div
+                        className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).marketing_job_description) }}
+                      />
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">No marketing description yet. Click to add.</p>
+                    )}
+                  </EditableField>
+                </div>
               </TabsContent>
 
               {/* ── Pipeline Tab (kanban with DnD; DndContext is at page-level) ─ */}

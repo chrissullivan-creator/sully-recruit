@@ -2655,6 +2655,11 @@ export type Database = {
           linkedin_project_id: string | null
           location: string | null
           market_over: boolean
+          marketing_job_compensation: string | null
+          marketing_job_description: string | null
+          marketing_job_location: string | null
+          marketing_title: string | null
+          marketing_type_of_firm: string | null
           num_openings: number
           status: string
           submittal_instructions: string | null
@@ -2680,6 +2685,11 @@ export type Database = {
           linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
+          marketing_job_compensation?: string | null
+          marketing_job_description?: string | null
+          marketing_job_location?: string | null
+          marketing_title?: string | null
+          marketing_type_of_firm?: string | null
           num_openings?: number
           status?: string
           submittal_instructions?: string | null
@@ -2705,6 +2715,11 @@ export type Database = {
           linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
+          marketing_job_compensation?: string | null
+          marketing_job_description?: string | null
+          marketing_job_location?: string | null
+          marketing_title?: string | null
+          marketing_type_of_firm?: string | null
           num_openings?: number
           status?: string
           submittal_instructions?: string | null
