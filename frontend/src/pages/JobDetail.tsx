@@ -1561,6 +1561,11 @@ const JobDetail = () => {
                             <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border border-border bg-card text-foreground shadow-md max-h-56 overflow-y-auto">
                               {(() => {
                                 const q = contactSearch.toLowerCase();
+                                // Only surface contacts at the job's company (the
+                                // people related to it). Fall back to all contacts
+                                // only when the job has no company set, so the
+                                // search never becomes a dead end.
+                                const restrictToCompany = !!job?.company_id;
                                 const filtered = (availableSorted as any[]).filter((c: any) =>
                                   !q ||
                                   c.full_name?.toLowerCase().includes(q) ||
@@ -1568,9 +1573,15 @@ const JobDetail = () => {
                                   c.email?.toLowerCase().includes(q)
                                 );
                                 const companyOnes = filtered.filter((c: any) => companyContactIds.has(c.id));
-                                const others = filtered.filter((c: any) => !companyContactIds.has(c.id));
-                                if (filtered.length === 0) return (
-                                  <div className="px-3 py-3 text-sm text-muted-foreground">No contacts found</div>
+                                const others = restrictToCompany
+                                  ? []
+                                  : filtered.filter((c: any) => !companyContactIds.has(c.id));
+                                if (companyOnes.length === 0 && others.length === 0) return (
+                                  <div className="px-3 py-3 text-sm text-muted-foreground">
+                                    {restrictToCompany
+                                      ? `No ${companyName ?? 'company'} contacts${q ? ' match your search' : ' yet'} — use “Create New Contact” below.`
+                                      : 'No contacts found'}
+                                  </div>
                                 );
                                 return (
                                   <>
