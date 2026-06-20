@@ -207,18 +207,25 @@ async function processAccountV2(
   try {
     inboxPayload = await unipileFetchV2(supabase, acctV2, "inboxes", { method: "GET" });
   } catch (err: any) {
-    logger.warn("v2 inboxes fetch failed", { email: accountEmail, error: err.message });
-    const m = String(err?.message || "").match(/Unipile v2 (\d{3})/);
+    const msg = String(err?.message || "");
+    logger.warn("v2 inboxes fetch failed", { email: accountEmail, error: msg });
+    const m = msg.match(/Unipile v2 (\d{3})/);
     const status = m ? Number(m[1]) : null;
     const is5xx = status !== null && status >= 500 && status <= 599;
+    // A provider-credentials 401 (Unipile error type "provider/…") means THIS
+    // LinkedIn seat's Unipile session is invalid — it was logged out / hit a
+    // checkpoint and needs a reconnect via Settings → Integrations. Like a 404,
+    // that's an account-health state, not a code bug, so don't page on it every
+    // 15 min. A genuine API-key/config problem surfaces as an "errors/…" type
+    // (and hits every account), which still pages below.
+    const isProviderAuth = status === 401 && /"type"\s*:\s*"provider\//i.test(msg);
     // Don't page on expected/account-health failures:
     //   429 = rate-limited (backpressure), 5xx = transient Unipile,
-    //   404 = this account isn't reachable on the v2 app (disconnected /
-    //         needs reconnect — e.g. a dead acc_xxx like a LinkedIn seat
-    //         that was re-auth'd elsewhere). That's an account state, not a
-    //         code bug. A genuine endpoint rename would 404 EVERY account
-    //         and show up as zero inserts in the daily pipeline-health digest.
-    if (!is5xx && status !== 429 && status !== 404) {
+    //   404 = account not reachable on v2 (disconnected / needs reconnect),
+    //   401 provider/* = seat session invalid (needs reconnect).
+    // A genuine endpoint rename would 404 EVERY account and show up as zero
+    // inserts in the daily pipeline-health digest.
+    if (!is5xx && status !== 429 && status !== 404 && !isProviderAuth) {
       await notifyError({
         taskId: "backfill-linkedin-messages-v2",
         severity: "ERROR",
