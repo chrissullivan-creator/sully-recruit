@@ -159,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         payload.title = data.title?.trim() || null;
         payload.company_name = data.company?.trim() || null;
-        payload.location = data.location?.trim() || null;
+        payload.location_text = data.location?.trim() || null;
         if (data.company_id) payload.company_id = data.company_id;
         if (data.notes?.trim()) payload.notes = data.notes.trim();
       }

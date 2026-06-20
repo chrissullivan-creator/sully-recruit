@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Candidates
       supabase
         .from("candidates")
-        .select("id, full_name, current_title, current_company, location, status, email, phone")
+        .select("id, full_name, current_title, current_company, location_text, status, email, phone")
         .or(keywords.map((k: string) => `full_name.ilike.%${k}%,current_title.ilike.%${k}%,current_company.ilike.%${k}%,email.ilike.%${k}%`).join(","))
         .limit(15),
 
@@ -86,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sections.push(
         `## Candidates (${candidateRes.data.length} found)\n` +
         candidateRes.data
-          .map((c) => `- **${c.full_name}** | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location || "?"} | Status: ${c.status} | ${c.email || "no email"} | ${c.phone || "no phone"}`)
+          .map((c) => `- **${c.full_name}** | ${c.current_title || "?"} at ${c.current_company || "?"} | ${c.location_text || "?"} | Status: ${c.status} | ${c.email || "no email"} | ${c.phone || "no phone"}`)
           .join("\n"),
       );
     }

@@ -20,7 +20,7 @@ import { renewWebhookSubscriptions } from "./lib/inngest/functions/renew-webhook
 import { backfillResumeEmbeddings } from "./lib/inngest/functions/backfill-resume-embeddings.js";
 import { reparseResumes } from "./lib/inngest/functions/reparse-resumes.js";
 import { reconcileOrphanedResumes } from "./lib/inngest/functions/reconcile-orphaned-resumes.js";
-import { syncOutlookEvents } from "./lib/inngest/functions/sync-outlook-events.js";
+import { syncOutlookEvents, syncOutlookEventsOnce } from "./lib/inngest/functions/sync-outlook-events.js";
 import { syncPeopleToOutlook } from "./lib/inngest/functions/sync-people-to-outlook.js";
 import { syncConversations } from "./lib/inngest/functions/sync-conversations.js";
 import { purgeMarketingEmails } from "./lib/inngest/functions/purge-marketing-emails.js";
@@ -99,6 +99,7 @@ export default serve({
     reparseResumes,
     reconcileOrphanedResumes,
     syncOutlookEvents,
+    syncOutlookEventsOnce,
     syncPeopleToOutlook,
     syncConversations,
     purgeMarketingEmails,

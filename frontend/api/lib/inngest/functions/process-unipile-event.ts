@@ -454,7 +454,10 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     };
     const { data: created, error } = await supabase
       .from("conversations")
-      .insert(row)
+      .upsert(row, {
+        onConflict: "integration_account_id,channel,external_conversation_id",
+        ignoreDuplicates: true,
+      })
       .select("id")
       .single();
     if (error) {

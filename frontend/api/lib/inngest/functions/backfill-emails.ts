@@ -248,7 +248,7 @@ async function processAccount(
         if (!conversation) {
           const { data: created } = await supabase
             .from("conversations")
-            .insert({
+            .upsert({
               candidate_id: candidateId,
               contact_id: contactId,
               channel: "email",
@@ -260,10 +260,16 @@ async function processAccount(
               is_read: true,
               is_archived: false,
               assigned_user_id: entity?.owner_user_id ?? account.owner_user_id,
-            })
+            }, { onConflict: "integration_account_id,channel,external_conversation_id", ignoreDuplicates: true })
             .select("id")
-            .single();
-          conversation = created;
+            .maybeSingle();
+          conversation = created
+            ?? (await supabase
+              .from("conversations")
+              .select("id")
+              .eq("external_conversation_id", externalConversationId)
+              .eq("integration_account_id", account.id)
+              .maybeSingle()).data;
         }
         if (!conversation) {
           errors++;
@@ -441,7 +447,7 @@ async function processAccountV2(
         if (!conversation) {
           const { data: created } = await supabase
             .from("conversations")
-            .insert({
+            .upsert({
               candidate_id: candidateId,
               contact_id: contactId,
               channel: "email",
@@ -453,10 +459,16 @@ async function processAccountV2(
               is_read: true,
               is_archived: false,
               assigned_user_id: entity?.owner_user_id ?? account.owner_user_id,
-            })
+            }, { onConflict: "integration_account_id,channel,external_conversation_id", ignoreDuplicates: true })
             .select("id")
-            .single();
-          conversation = created;
+            .maybeSingle();
+          conversation = created
+            ?? (await supabase
+              .from("conversations")
+              .select("id")
+              .eq("external_conversation_id", externalConversationId)
+              .eq("integration_account_id", account.id)
+              .maybeSingle()).data;
         }
         if (!conversation) {
           errors++;

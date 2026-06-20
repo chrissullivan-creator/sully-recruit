@@ -53,7 +53,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         full_name,
         current_title,
         current_company,
-        location,
         location_text,
         linkedin_url,
         avatar_url,
