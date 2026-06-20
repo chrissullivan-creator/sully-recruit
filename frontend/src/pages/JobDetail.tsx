@@ -467,6 +467,40 @@ const JobDetail = () => {
     }
   };
 
+  // ── Ask Joe: draft the marketing fields from the internal job info ─────────
+  // Calls /api/generate-job-marketing (OpenAI → Claude fallback), then writes
+  // the returned copy straight into the jobs.marketing_* columns.
+  const [askingJoe, setAskingJoe] = useState(false);
+
+  const handleAskJoe = async () => {
+    if (!id) return;
+    setAskingJoe(true);
+    try {
+      const resp = await fetch('/api/generate-job-marketing', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ job_id: id }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Failed to generate marketing copy');
+      const m = data.marketing ?? {};
+      const { error } = await supabase.from('jobs').update({
+        marketing_title: m.marketing_title || null,
+        marketing_type_of_firm: m.marketing_type_of_firm || null,
+        marketing_job_location: m.marketing_job_location || null,
+        marketing_job_compensation: m.marketing_job_compensation || null,
+        marketing_job_description: m.marketing_job_description || null,
+      }).eq('id', id);
+      if (error) throw error;
+      invalidateJobScope(queryClient);
+      toast.success(`Joe drafted your marketing copy${data.via ? ` (via ${data.via})` : ''} — review and tweak as needed`);
+    } catch (err: any) {
+      toast.error(err.message || 'Joe could not draft the marketing copy');
+    } finally {
+      setAskingJoe(false);
+    }
+  };
+
   const handleSendOutNotesConfirm = async (note: string) => {
     if (!pendingMove) return;
     setSavingMove(true);
@@ -1342,11 +1376,31 @@ const JobDetail = () => {
                   the internal Details fields so recruiters can polish marketing
                   language without touching the operational record. */}
               <TabsContent value="marketing" className="px-8 py-5 mt-0 space-y-6">
-                <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
+                <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 flex items-center justify-between gap-3">
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <Megaphone className="h-3.5 w-3.5 text-accent" />
                     These fields power the public website listing — separate from the internal Details tab.
                   </p>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="gold" size="sm" className="h-8 gap-1.5 shrink-0" disabled={askingJoe}>
+                        {askingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        Ask Joe
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Let Joe draft the marketing copy?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Joe will use this job's internal details (title, company, location, compensation, description) to write public, website-facing copy for all five marketing fields. This replaces the current marketing values — you can edit any field afterward.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleAskJoe}>Draft with Joe</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
 
                 {/* Marketing Title */}
