@@ -36,6 +36,23 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
+// Parse a response body safely: a crashed/timed-out function returns an empty
+// (or non-JSON) body, and resp.json() then throws the opaque "Unexpected end of
+// JSON input". Surface the real HTTP status instead.
+async function readJson(resp: Response): Promise<any> {
+  const text = await resp.text();
+  if (!text) {
+    throw new Error(
+      `The drafting service returned an empty response (HTTP ${resp.status}). It may be unavailable on this deployment — try the production URL.`,
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Unexpected response (HTTP ${resp.status}): ${text.slice(0, 140)}`);
+  }
+}
+
 export function CreateBdSequenceDialog({
   jobId,
   open,
@@ -64,8 +81,8 @@ export function CreateBdSequenceDialog({
           headers: await authHeaders(),
           body: JSON.stringify({ mode: 'preview' }),
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data?.error || 'Failed to draft BD sequence');
+        const data = await readJson(resp);
+        if (!resp.ok) throw new Error(data?.error || `Failed to draft BD sequence (HTTP ${resp.status})`);
         if (cancelled) return;
         setJobName(data.job?.title || 'this role');
         setContacts(data.contacts || []);
@@ -119,8 +136,8 @@ export function CreateBdSequenceDialog({
           contact_ids: emailableSelected.map((c) => c.id),
         }),
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || 'Failed to create sequence');
+      const data = await readJson(resp);
+      if (!resp.ok) throw new Error(data?.error || `Failed to create sequence (HTTP ${resp.status})`);
       toast.success(
         launch
           ? `BD sequence launched — ${data.enrolled} contact${data.enrolled === 1 ? '' : 's'} enrolled`

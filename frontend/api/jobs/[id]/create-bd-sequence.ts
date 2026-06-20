@@ -101,16 +101,23 @@ Return ONLY a JSON array of exactly 3 objects, no markdown, no preamble:
 Email 1 has a sharp subject line. Emails 2 and 3 have an empty subject (they reply in-thread). Bodies are plain text with \\n line breaks and should start with "Hi {{first_name}},".`;
 
   try {
-    const { text } = await callAIWithFallback({
-      anthropicKey: anthropicKey || undefined,
-      openaiKey: openaiKey || undefined,
-      geminiKey: geminiKey || undefined,
-      openRouterKey: openRouterKey || undefined,
-      systemPrompt: "You are Joe, a Wall Street BD copywriter. Output strictly valid JSON.",
-      userContent: prompt,
-      model: "claude-sonnet-4-6",
-      maxTokens: 1400,
-    });
+    // Cap the draft call so a slow/hanging provider can't blow the function's
+    // time budget (which would return an empty body to the client). On timeout
+    // the catch below ships the solid template instead.
+    const ai = await Promise.race([
+      callAIWithFallback({
+        anthropicKey: anthropicKey || undefined,
+        openaiKey: openaiKey || undefined,
+        geminiKey: geminiKey || undefined,
+        openRouterKey: openRouterKey || undefined,
+        systemPrompt: "You are Joe, a Wall Street BD copywriter. Output strictly valid JSON.",
+        userContent: prompt,
+        model: "claude-sonnet-4-6",
+        maxTokens: 1400,
+      }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ai_timeout")), 12_000)),
+    ]);
+    const { text } = ai as { text: string };
     const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const start = cleaned.indexOf("[");
     const end = cleaned.lastIndexOf("]");
@@ -137,7 +144,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const jobId = req.query.id as string;
   if (!jobId) return res.status(400).json({ error: "Missing job id" });
 
-  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  // Resolve Supabase creds defensively. Production has SUPABASE_URL; preview
+  // deployments often don't (only VITE_* are exposed), and a bare
+  // createClient(undefined, …) throws "supabaseUrl is required" BEFORE we can
+  // send JSON — the client then chokes on an empty body ("Unexpected end of
+  // JSON input"). Fall back to the VITE_ URL and, if creds are truly absent,
+  // return a clear JSON error instead of crashing.
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return res.status(500).json({
+      error:
+        "Server misconfigured: missing Supabase credentials (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY). Preview deployments may not have these set — try the production URL.",
+    });
+  }
+  const supabase = createClient(supabaseUrl, serviceKey);
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
