@@ -1055,6 +1055,7 @@ export type Database = {
           interview_round: number | null
           interviewing_at: string | null
           job_id: string
+          max_pipeline_stage: string | null
           pipeline_stage: string
           pitched_at: string | null
           reached_out_at: string | null
@@ -1080,6 +1081,7 @@ export type Database = {
           interview_round?: number | null
           interviewing_at?: string | null
           job_id: string
+          max_pipeline_stage?: string | null
           pipeline_stage?: string
           pitched_at?: string | null
           reached_out_at?: string | null
@@ -1105,6 +1107,7 @@ export type Database = {
           interview_round?: number | null
           interviewing_at?: string | null
           job_id?: string
+          max_pipeline_stage?: string | null
           pipeline_stage?: string
           pitched_at?: string | null
           reached_out_at?: string | null
@@ -2652,6 +2655,11 @@ export type Database = {
           linkedin_project_id: string | null
           location: string | null
           market_over: boolean
+          marketing_job_compensation: string | null
+          marketing_job_description: string | null
+          marketing_job_location: string | null
+          marketing_title: string | null
+          marketing_type_of_firm: string | null
           num_openings: number
           status: string
           submittal_instructions: string | null
@@ -2677,6 +2685,11 @@ export type Database = {
           linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
+          marketing_job_compensation?: string | null
+          marketing_job_description?: string | null
+          marketing_job_location?: string | null
+          marketing_title?: string | null
+          marketing_type_of_firm?: string | null
           num_openings?: number
           status?: string
           submittal_instructions?: string | null
@@ -2702,6 +2715,11 @@ export type Database = {
           linkedin_project_id?: string | null
           location?: string | null
           market_over?: boolean
+          marketing_job_compensation?: string | null
+          marketing_job_description?: string | null
+          marketing_job_location?: string | null
+          marketing_title?: string | null
+          marketing_type_of_firm?: string | null
           num_openings?: number
           status?: string
           submittal_instructions?: string | null
