@@ -862,7 +862,7 @@ const JobDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_contacts')
-        .select('id, contact_id, is_primary, role, contact:people!contact_id(id, full_name, email, phone, title, current_company, current_title)')
+        .select('id, contact_id, is_primary, role, contact:people!contact_id(id, full_name, work_email, primary_email, personal_email, phone, title, current_company, current_title)')
         .eq('job_id', id!)
         .order('is_primary', { ascending: false });
       if (error) throw error;
@@ -930,13 +930,16 @@ const JobDetail = () => {
         contact_id: selectedContactId,
         is_primary: isFirst,
       });
-      if (error) throw error;
-      if (isFirst) {
+      // 23505 = already linked (unique job_id+contact_id). Treat as success so
+      // a retry surfaces the existing link instead of a scary DB error.
+      const alreadyLinked = (error as any)?.code === '23505';
+      if (error && !alreadyLinked) throw error;
+      if (!error && isFirst) {
         await supabase.from('jobs').update({ contact_id: selectedContactId }).eq('id', id);
       }
-      refetchJobContacts();
+      await refetchJobContacts();
       invalidateJobScope(queryClient);
-      toast.success('Contact added');
+      toast.success(alreadyLinked ? 'Contact already linked' : 'Contact added');
       setSelectedContactId('');
     } catch (err: any) {
       toast.error(err.message || 'Failed to add contact');
@@ -1497,7 +1500,9 @@ const JobDetail = () => {
                               />
                             </div>
                             {c?.title && <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>}
-                            {c?.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                            {(c?.work_email || c?.primary_email || c?.personal_email) && (
+                              <p className="text-xs text-muted-foreground">{c.work_email || c.primary_email || c.personal_email}</p>
+                            )}
                             {c?.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
