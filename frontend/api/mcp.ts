@@ -39,7 +39,7 @@ const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 // attributed to THEM. Defaults to Chris; override with MCP_ACTOR_USER_ID.
 const ACTOR_DEFAULT = process.env.MCP_ACTOR_USER_ID || "fc07e240-0e31-45d4-a8f1-ddec1042dd5f";
 const ACTOR_NAME_DEFAULT = process.env.MCP_ACTOR_NAME || "Joe (MCP)";
-const RAW_SQL_ENABLED = process.env.MCP_ENABLE_RAW_SQL === "true";
+const RAW_SQL_ENABLED = process.env.MCP_ENABLE_RAW_SQL !== "false";
 
 type Actor = { userId: string; name: string };
 const sha256hex = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -167,8 +167,24 @@ const TOOLS = [
   {
     name: "query",
     description:
-      "Run a read-only SQL SELECT for ad-hoc questions across the whole database. SELECT/WITH only, capped at 1000 rows, 8s timeout. Disabled unless enabled by the operator.",
-    inputSchema: { type: "object", properties: { sql: { type: "string" } }, required: ["sql"] },
+      "Run read-only SQL (SELECT/WITH only, max 1000 rows, 8s) for any ad-hoc question the other tools don't cover — counts, 'latest/most recent', filters, cross-table joins. Tip: call describe_schema first for exact column names. Real enum values: jobs.status = lead|hot|closed_lost; people.status = new|reached_out|engaged.",
+    inputSchema: { type: "object", properties: { sql: { type: "string", description: "A single SELECT or WITH statement." } }, required: ["sql"] },
+  },
+  {
+    name: "describe_schema",
+    description: "Introspect the database. Omit 'table' to list all tables/views; pass a table name to get its columns + types. Use this before writing a query so column names are exact.",
+    inputSchema: { type: "object", properties: { table: { type: "string", description: "Optional table/view name." } } },
+  },
+  {
+    name: "list_jobs",
+    description: "List jobs newest-first, optionally filtered by status (lead | hot | closed_lost). Answers e.g. 'the latest hot job'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "lead | hot | closed_lost" },
+        limit: { type: "number", description: "Default 20, max 100." },
+      },
+    },
   },
   {
     name: "add_person",
@@ -496,6 +512,29 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
       return data;
     }
 
+    case "describe_schema": {
+      const t = typeof args.table === "string" ? args.table.replace(/[^a-zA-Z0-9_]/g, "") : "";
+      const q = t
+        ? `select column_name, data_type from information_schema.columns where table_schema='public' and table_name='${t}' order by ordinal_position`
+        : `select table_name, table_type from information_schema.tables where table_schema='public' order by table_name`;
+      const { data, error } = await sb.rpc("mcp_run_read_query", { query_text: q });
+      if (error) throw new Error(error.message);
+      return data;
+    }
+
+    case "list_jobs": {
+      const limit = clamp(args.limit, 20, 100);
+      let q = sb.from("jobs")
+        .select("id, title, company_name, status, location, num_openings, created_at, updated_at")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (args.status) q = q.eq("status", args.status);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      return data;
+    }
+
     case "add_person": {
       const role = args.role === "candidate" ? "candidate" : "client";
       if (!args.first_name || !args.last_name) throw new Error("first_name and last_name required");
@@ -801,9 +840,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "sully-recruit", version: "1.0.0" },
           instructions:
-            "Sully Recruit CRM/ATS. People are candidates and/or clients in one table. Person status is new|reached_out|engaged. Pipeline stages: " +
+            "Sully Recruit CRM/ATS. People (candidates and/or clients) live in one table; person status is new|reached_out|engaged. Job status is lead|hot|closed_lost. Per-job pipeline stages: " +
             PIPELINE_STAGES.join(", ") +
-            ". Always 'search' to get IDs before mutating. Outreach to do_not_contact people is blocked.",
+            ". Use 'search' to find IDs. For anything the structured tools don't cover (counts, 'latest/most recent', filters, joins), call 'describe_schema' to learn exact columns then 'query' for read-only SQL. Outreach to do_not_contact people is blocked.",
         }));
       case "tools/list":
         return reply(req, res, ok(id, { tools: TOOLS }));
