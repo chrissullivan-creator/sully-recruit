@@ -178,6 +178,7 @@ async function processAccountV2(
   supabase: any,
   account: any,
   logger: any,
+  opts?: { recentDays?: number; maxPages?: number },
 ): Promise<{
   inboxes: number;
   chats_scanned: number;
@@ -200,7 +201,7 @@ async function processAccountV2(
   const accountEmail: string | null = account.email_address ?? null;
   if (!acctV2) return stats; // not yet backfilled onto v2 — can't pull
 
-  const cutoffMs = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+  const cutoffMs = Date.now() - (opts?.recentDays ?? RECENT_DAYS) * 24 * 60 * 60 * 1000;
 
   // 1) List inboxes. Be defensive: data may be under .data or a bare array.
   let inboxPayload: any;
@@ -257,7 +258,7 @@ async function processAccountV2(
     let cursor: string | undefined;
     let pages = 0;
     let reachedOld = false;
-    while (pages < MAX_CHAT_PAGES && !reachedOld) {
+    while (pages < (opts?.maxPages ?? MAX_CHAT_PAGES) && !reachedOld) {
       let chatPayload: any;
       try {
         chatPayload = await unipileFetchV2(
@@ -469,14 +470,30 @@ export const backfillLinkedinMessagesV2 = inngest.createFunction(
   // ~100 requests/window per account and that budget is shared with the other
   // LinkedIn crons; every-5-min runs across ~14 inboxes were tripping 429s.
   // Real-time inbound still arrives via the Unipile webhook — this is the net.
-  { cron: "8-53/15 * * * *" },
-  async ({ logger }) => {
+  [
+    { cron: "8-53/15 * * * *" },
+    // One-shot deep backfill (wider window / more pages) — fired from
+    // Admin → Integrations to recover messages older than the routine
+    // 3-day sweep (e.g. Recruiter InMail missed while a seat was stalled).
+    { event: "ops/backfill-linkedin-deep.requested" },
+  ],
+  async ({ logger, event }) => {
     const supabase = getSupabaseAdmin();
+
+    const isDeep = (event as any)?.name === "ops/backfill-linkedin-deep.requested";
+    const deepOpts = isDeep
+      ? {
+          recentDays: Number((event as any)?.data?.lookbackDays ?? 45),
+          maxPages: Number((event as any)?.data?.maxPages ?? 6),
+        }
+      : undefined;
+    const onlyAccountId: string | undefined = isDeep ? (event as any)?.data?.accountId : undefined;
+    if (isDeep) logger.info("Deep LinkedIn backfill requested", { deepOpts, onlyAccountId: onlyAccountId ?? "all" });
 
     // Kill switch — set app_settings.BACKFILL_LINKEDIN_V2_PAUSED to "true"
     // to no-op this cron without a deploy (e.g. during a Unipile incident).
     const pausedSetting = (await getAppSetting("BACKFILL_LINKEDIN_V2_PAUSED")).toLowerCase();
-    if (pausedSetting === "true" || pausedSetting === "1" || pausedSetting === "on") {
+    if (!isDeep && (pausedSetting === "true" || pausedSetting === "1" || pausedSetting === "on")) {
       logger.info("backfill-linkedin-messages-v2 paused via app_settings.BACKFILL_LINKEDIN_V2_PAUSED");
       return { paused: true };
     }
@@ -485,12 +502,14 @@ export const backfillLinkedinMessagesV2 = inngest.createFunction(
     // (unipile_account_id_v2 set). Accounts still missing the acc_xxx id
     // can't be pulled on v2 yet — skip them (the v1 cron covers nothing
     // now, but we don't error on them here).
-    const { data: accounts, error: acctErr } = await supabase
+    let acctQuery = supabase
       .from("integration_accounts")
       .select("id, email_address, owner_user_id, account_type, unipile_account_id_v2, unipile_provider")
       .eq("unipile_provider", "LINKEDIN")
       .eq("is_active", true)
       .not("unipile_account_id_v2", "is", null);
+    if (onlyAccountId) acctQuery = acctQuery.eq("id", onlyAccountId);
+    const { data: accounts, error: acctErr } = await acctQuery;
 
     if (acctErr) {
       logger.error("LinkedIn v2 account lookup failed", { error: acctErr.message });
@@ -506,7 +525,7 @@ export const backfillLinkedinMessagesV2 = inngest.createFunction(
     for (const account of accounts) {
       const label = account.email_address ?? account.id;
       try {
-        const stats = await processAccountV2(supabase, account, logger);
+        const stats = await processAccountV2(supabase, account, logger, deepOpts);
         perAccount.push({ account: label, stats });
         logger.info(`Processed LinkedIn v2 for ${label}`, stats);
       } catch (err: any) {
