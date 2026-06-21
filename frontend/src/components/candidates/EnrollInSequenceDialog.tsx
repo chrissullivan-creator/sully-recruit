@@ -129,32 +129,47 @@ export const EnrollInSequenceDialog = ({ open, onOpenChange, candidateIds, candi
     setEnrolling(true);
     try {
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const candidateIdSet = new Set(candidates.map(c => c.id));
-      const contactIdSet = new Set(contacts.map((c: any) => c.id));
 
-      // Check for existing enrollments to prevent duplicates
+      // Resolve each id straight from `people` rather than from the cached
+      // candidate/contact lists. useContacts is capped at 1000 rows and
+      // useCandidates only holds type='candidate', so people outside those
+      // cached windows — e.g. a client like Sarah — were wrongly flagged
+      // "could not be resolved". Both candidate_id and contact_id FK to
+      // people, so we just choose the column by role.
+      const { data: peopleRows, error: peopleErr } = await supabase
+        .from('people')
+        .select('id, type, roles')
+        .in('id', idsToEnroll)
+        .is('deleted_at', null);
+      if (peopleErr) throw peopleErr;
+      const personById = new Map((peopleRows ?? []).map((p: any) => [p.id, p]));
+
+      // Existing enrollments to skip duplicates. Both columns hold people ids,
+      // so one set keyed on the person id covers candidate + contact rows.
       const { data: existingEnrollments } = await supabase
         .from('sequence_enrollments')
         .select('candidate_id, contact_id')
         .eq('sequence_id', selectedSequenceId);
-
-      const existingCandIds = new Set((existingEnrollments ?? []).filter(e => e.candidate_id).map(e => e.candidate_id));
-      const existingContIds = new Set((existingEnrollments ?? []).filter(e => e.contact_id).map(e => e.contact_id));
+      const existingIds = new Set<string>();
+      for (const e of existingEnrollments ?? []) {
+        if (e.candidate_id) existingIds.add(e.candidate_id);
+        if (e.contact_id) existingIds.add(e.contact_id);
+      }
 
       let skipped = 0;
       let unresolved = 0;
       const enrollments: any[] = [];
       for (const personId of idsToEnroll) {
-        const isCand = candidateIdSet.has(personId);
-        const isCont = contactIdSet.has(personId);
-        // If we can't resolve the id to either pool, skip rather than
-        // shoving it into contact_id (which would FK-violate).
-        if (!isCand && !isCont) { unresolved++; continue; }
-        if (isCand && existingCandIds.has(personId)) { skipped++; continue; }
-        if (isCont && existingContIds.has(personId)) { skipped++; continue; }
+        const row = personById.get(personId);
+        // Truly unknown id (not in people / soft-deleted) — skip it.
+        if (!row) { unresolved++; continue; }
+        if (existingIds.has(personId)) { skipped++; continue; }
+        const roles: string[] = Array.isArray(row.roles) ? row.roles : [];
+        // Clients enroll via contact_id; candidates (incl. dual-role) via candidate_id.
+        const isClient = row.type === 'client' || (roles.includes('client') && !roles.includes('candidate'));
         enrollments.push({
           sequence_id: selectedSequenceId,
-          ...(isCand ? { candidate_id: personId } : { contact_id: personId }),
+          ...(isClient ? { contact_id: personId } : { candidate_id: personId }),
           status: 'active',
           enrolled_by: userId,
         });
