@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { inngest } from "./lib/inngest/client.js";
 
 /**
@@ -34,11 +34,45 @@ import { inngest } from "./lib/inngest/client.js";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
-// Attribute MCP writes to a real user (owner_user_id / created_by / enrolled_by).
-// Defaults to Chris Sullivan; override with MCP_ACTOR_USER_ID.
-const ACTOR = process.env.MCP_ACTOR_USER_ID || "fc07e240-0e31-45d4-a8f1-ddec1042dd5f";
-const ACTOR_NAME = process.env.MCP_ACTOR_NAME || "Joe (MCP)";
+// Fallback actor for the shared token (Claude Code / admin path). Per-user
+// tokens in the mcp_tokens table override this so each recruiter's writes are
+// attributed to THEM. Defaults to Chris; override with MCP_ACTOR_USER_ID.
+const ACTOR_DEFAULT = process.env.MCP_ACTOR_USER_ID || "fc07e240-0e31-45d4-a8f1-ddec1042dd5f";
+const ACTOR_NAME_DEFAULT = process.env.MCP_ACTOR_NAME || "Joe (MCP)";
 const RAW_SQL_ENABLED = process.env.MCP_ENABLE_RAW_SQL === "true";
+
+type Actor = { userId: string; name: string };
+const sha256hex = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * Resolve which recruiter a request acts as, from its bearer token:
+ *   1. A per-user token in mcp_tokens (stored as a SHA-256 hash) → that user,
+ *      so Chris / Nancy / Ashley each get their own attribution.
+ *   2. The shared MCP_AUTH_TOKEN → the default actor (Chris). Used by Claude
+ *      Code / admin.
+ * Returns null if the token matches neither (→ 401).
+ */
+async function resolveActor(sb: SupabaseClient, token: string): Promise<Actor | null> {
+  const hash = sha256hex(token);
+  try {
+    const { data } = await sb
+      .from("mcp_tokens")
+      .select("user_id, label")
+      .eq("token_sha256", hash)
+      .eq("is_active", true)
+      .maybeSingle();
+    if ((data as any)?.user_id) {
+      void sb.from("mcp_tokens").update({ last_used_at: now() } as any).eq("token_sha256", hash);
+      return { userId: (data as any).user_id, name: (data as any).label || "MCP" };
+    }
+  } catch {
+    /* table missing (e.g. preview branch DB) — fall through to the shared token */
+  }
+  if (MCP_AUTH_TOKEN && token === MCP_AUTH_TOKEN) {
+    return { userId: ACTOR_DEFAULT, name: ACTOR_NAME_DEFAULT };
+  }
+  return null;
+}
 
 const VALID_STATUSES = ["new", "reached_out", "engaged"];
 const PIPELINE_STAGES = [
@@ -70,10 +104,10 @@ function countBy(rows: any[] | null | undefined, key: string): Record<string, nu
   }
   return out;
 }
-async function addNote(sb: SupabaseClient, entity_type: string, entity_id: string, note: string) {
+async function addNote(sb: SupabaseClient, actor: Actor, entity_type: string, entity_id: string, note: string) {
   const { data, error } = await sb
     .from("notes")
-    .insert({ entity_type, entity_id, note, created_by: ACTOR_NAME, note_source: "mcp" } as any)
+    .insert({ entity_type, entity_id, note, created_by: actor.name, note_source: "mcp" } as any)
     .select("id")
     .single();
   if (error) throw new Error(error.message);
@@ -292,7 +326,7 @@ const TOOLS = [
 ];
 
 // ── tool implementations ──────────────────────────────────────────────────────
-async function runTool(sb: SupabaseClient, name: string, args: Record<string, any>): Promise<any> {
+async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
     case "search": {
       const q = sanitize(args.query);
@@ -495,8 +529,8 @@ async function runTool(sb: SupabaseClient, name: string, args: Record<string, an
         linkedin_url: args.linkedin_url?.trim() || null,
         roles: [role],
         status: "new",
-        owner_user_id: ACTOR,
-        created_by_user_id: ACTOR,
+        owner_user_id: actor.userId,
+        created_by_user_id: actor.userId,
       };
       if (role === "candidate") {
         payload.current_title = args.title?.trim() || null;
@@ -509,7 +543,7 @@ async function runTool(sb: SupabaseClient, name: string, args: Record<string, an
       payload.location_text = args.location?.trim() || null;
       const { data: row, error } = await sb.from("people").insert(payload).select("id, roles").single();
       if (error) throw new Error(error.message);
-      if (args.notes?.trim()) await addNote(sb, role === "candidate" ? "candidate" : "contact", (row as any).id, args.notes.trim());
+      if (args.notes?.trim()) await addNote(sb, actor, role === "candidate" ? "candidate" : "contact", (row as any).id, args.notes.trim());
       return { id: (row as any).id, merged: false, roles: (row as any).roles };
     }
 
@@ -555,7 +589,7 @@ async function runTool(sb: SupabaseClient, name: string, args: Record<string, an
         entityType = (p as any)?.type === "client" ? "contact" : "candidate";
       }
       if (!entityType || !entityId) throw new Error("Provide person_id, or entity_type + entity_id");
-      return await addNote(sb, entityType, entityId, note);
+      return await addNote(sb, actor, entityType, entityId, note);
     }
 
     case "tag_person_to_job": {
@@ -623,8 +657,8 @@ async function runTool(sb: SupabaseClient, name: string, args: Record<string, an
         timezone: args.timezone ?? "America/New_York",
         weekdays_only: args.weekdays_only !== false,
         stop_on_reply: args.stop_on_reply !== false,
-        created_by: ACTOR,
-        sender_user_id: args.sender_user_id ?? ACTOR,
+        created_by: actor.userId,
+        sender_user_id: args.sender_user_id ?? actor.userId,
         status: launch ? "active" : "draft",
         engine: "inngest",
       };
@@ -681,11 +715,11 @@ async function runTool(sb: SupabaseClient, name: string, args: Record<string, an
       const toEnroll = eligible.filter((id) => !alreadySet.has(id));
       if (!toEnroll.length)
         return { enrolled: 0, blocked_do_not_contact: blocked, already_enrolled: already, message: "Nobody new to enroll." };
-      const rows = toEnroll.map((id) => ({ sequence_id: args.sequence_id, [field]: id, status: "active", enrolled_by: ACTOR }));
+      const rows = toEnroll.map((id) => ({ sequence_id: args.sequence_id, [field]: id, status: "active", enrolled_by: actor.userId }));
       const { data: inserted, error } = await sb.from("sequence_enrollments").insert(rows as any).select(`id, sequence_id, ${field}`);
       if (error) throw new Error(error.message);
       const events = (inserted ?? []).map((r: any) => {
-        const data: any = { enrollmentId: r.id, sequenceId: r.sequence_id, enrolledBy: ACTOR };
+        const data: any = { enrollmentId: r.id, sequenceId: r.sequence_id, enrolledBy: actor.userId };
         if (field === "contact_id") data.contactId = r[field]; else data.candidateId = r[field];
         return { id: `enrollment-init-${r.id}`, name: "sequence/enrollment-init.requested" as const, data };
       });
@@ -743,8 +777,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     setCors(res);
     return res.status(500).json(rpcErr(null, -32000, "Server misconfigured: missing Supabase credentials"));
   }
-  const auth = req.headers.authorization || "";
-  if (!MCP_AUTH_TOKEN || auth !== `Bearer ${MCP_AUTH_TOKEN}`) {
+  const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!bearer) {
+    setCors(res);
+    return res.status(401).json(rpcErr(null, -32001, "Unauthorized"));
+  }
+
+  const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+  const actor = await resolveActor(sb, bearer);
+  if (!actor) {
     setCors(res);
     return res.status(401).json(rpcErr(null, -32001, "Unauthorized"));
   }
@@ -758,8 +799,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { id, method, params } = msg;
   // Notifications (no id) — acknowledge, no body.
   if (id === undefined || id === null) { setCors(res); return res.status(202).end(); }
-
-  const sb = createClient(SUPABASE_URL, SERVICE_KEY);
 
   try {
     switch (method) {
@@ -776,7 +815,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case "tools/list":
         return reply(req, res, ok(id, { tools: TOOLS }));
       case "tools/call": {
-        const out = await runTool(sb, params?.name, params?.arguments ?? {});
+        const out = await runTool(sb, actor, params?.name, params?.arguments ?? {});
         return reply(req, res, ok(id, { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] }));
       }
       case "ping":
