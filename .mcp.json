@@ -27,6 +27,12 @@
       "headers": {
         "Authorization": "Bearer b3079575-b549-41c6-b6dc-ba6d211a234b"
       }
+    },
+    "sully-recruit": {
+      "url": "https://app.sullyrecruit.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer 5af44e41838d9c0945e1afddb10d677d4b6cf3aa9a37a8b1d06c466cf1d6d494"
+      }
     }
   }
 }
