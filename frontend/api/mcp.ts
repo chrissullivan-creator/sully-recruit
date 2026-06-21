@@ -917,7 +917,7 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
         location: args.location?.trim() || null,
         description: args.description ?? null,
         compensation: args.compensation ?? null,
-        num_openings: args.num_openings ?? null,
+        num_openings: args.num_openings ?? 1, // jobs.num_openings is NOT NULL (default 1); never insert null
         submittal_instructions: args.submittal_instructions ?? null,
         additional_notes: args.additional_notes ?? null,
         job_url: jobUrl,
