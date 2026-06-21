@@ -23,6 +23,7 @@ import {
   FileText, CheckSquare, Square, Briefcase,
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
   Bookmark, Download, CheckCircle2, ExternalLink, Import,
+  Linkedin, Trash2, Plus,
 } from 'lucide-react';
 
 const PAGE_SIZE = 25;
@@ -151,6 +152,38 @@ const STAGE_COLORS: Record<string, string> = {
   unknown: 'bg-muted text-muted-foreground border-border',
 };
 
+/* Internal sourcing funnel — OUR stages, aligned to LinkedIn Recruiter's
+ * pipeline (Uncontacted → Contacted → Replied, plus our "Back of Resume"
+ * present stage). The `sourcing` table auto-advances these from message /
+ * call / meeting activity (incl. LinkedIn), so the funnel stays in step with
+ * outreach. LinkedIn's own pipeline is read-only via the API, so we mirror
+ * inbound activity but can't write a stage back to LinkedIn. */
+type SourcingStage = 'uncontacted' | 'contacted' | 'replied' | 'back_of_resume';
+const SOURCING_STAGES: { key: SourcingStage; label: string }[] = [
+  { key: 'uncontacted', label: 'Uncontacted' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'replied', label: 'Replied' },
+  { key: 'back_of_resume', label: 'Back of Resume' },
+];
+const SOURCING_STAGE_COLORS: Record<SourcingStage, string> = {
+  uncontacted: STAGE_COLORS.uncontacted,
+  contacted: STAGE_COLORS.contacted,
+  replied: STAGE_COLORS.replied,
+  back_of_resume: STAGE_COLORS.in_review,
+};
+interface SourcingPerson {
+  id: string; full_name?: string; first_name?: string; last_name?: string;
+  current_title?: string; current_company?: string;
+  linkedin_current_title?: string; linkedin_current_company?: string;
+  location_text?: string; avatar_url?: string; linkedin_url?: string; type?: string;
+}
+interface SourcingRow {
+  id: string; stage: SourcingStage; candidate_id: string; updated_at?: string;
+  uncontacted_at?: string | null; contacted_at?: string | null;
+  replied_at?: string | null; back_of_resume_at?: string | null;
+  person: SourcingPerson | null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -177,6 +210,17 @@ export default function SourceProject() {
   // Pipeline = recruiter-curated saved candidates with stage info.
   const [pipelineCandidates, setPipelineCandidates] = useState<Applicant[]>([]);
   const [pipelineLoading, setPipelineLoading] = useState(true);
+
+  // ---- Internal sourcing pipeline (our funnel; the Pipeline tab renders
+  //      this instead of the LinkedIn talent-pool, which carried no stages) ----
+  const [sourcingRows, setSourcingRows] = useState<SourcingRow[]>([]);
+  const [sourcingLoading, setSourcingLoading] = useState(true);
+  const [movingId, setMovingId] = useState<string | null>(null);
+  // LinkedIn Recruiter's own pipeline stages (read-only reference bar).
+  const [liStages, setLiStages] = useState<{ id: string | null; name: string; candidates_count: number }[]>([]);
+  // Link-a-job prompt (shown when the project isn't tied to an internal job).
+  const [linkSelectJobId, setLinkSelectJobId] = useState('');
+  const [linkingProject, setLinkingProject] = useState(false);
 
   // ---- State (job applicants) ----
   // Applicants = people who applied to the linked job posting, newest first.
@@ -358,7 +402,9 @@ export default function SourceProject() {
     }
   }, [id, accountId, projectData, refreshCrmMatches]);
 
-  useEffect(() => { fetchPipeline(); }, [fetchPipeline]);
+  // Pipeline tab now renders the internal `sourcing` funnel (see effects
+  // below), not the LinkedIn talent-pool. fetchPipeline is retained for
+  // reference/diagnostics but no longer auto-runs.
 
   // ---- Save-to-Pipeline orchestration ----
   // The project may already be linked to an internal job (via
@@ -387,6 +433,117 @@ export default function SourceProject() {
     })();
     return () => { cancelled = true; };
   }, [id, accountId]);
+
+  // ── Internal sourcing pipeline ─────────────────────────────────────
+  // The Pipeline tab renders our `sourcing` funnel for the linked job
+  // (LinkedIn's own pipeline is read-only via the API). DB triggers auto-bump
+  // stages from message/call/meeting activity; here we add manual moves,
+  // one-click withdraw, and a best-effort LinkedIn stage reference bar.
+  const fetchSourcing = useCallback(async () => {
+    if (!linkedJobId) { setSourcingRows([]); setSourcingLoading(false); return; }
+    setSourcingLoading(true);
+    try {
+      const { data: srows, error } = await supabase
+        .from('sourcing')
+        .select('id, stage, candidate_id, updated_at, uncontacted_at, contacted_at, replied_at, back_of_resume_at')
+        .eq('job_id', linkedJobId)
+        .is('withdrawn_at', null)
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
+      const rows = (srows ?? []) as any[];
+      const ids = [...new Set(rows.map((r) => r.candidate_id).filter(Boolean))] as string[];
+      const peopleById: Record<string, SourcingPerson> = {};
+      if (ids.length > 0) {
+        const { data: ppl } = await supabase
+          .from('people')
+          .select('id, full_name, first_name, last_name, current_title, current_company, linkedin_current_title, linkedin_current_company, location_text, avatar_url, linkedin_url, type')
+          .in('id', ids);
+        for (const p of (ppl ?? []) as any[]) peopleById[p.id] = p;
+      }
+      setSourcingRows(rows.map((r) => ({ ...r, person: peopleById[r.candidate_id] ?? null })));
+    } catch (e: any) {
+      console.error('Failed to load sourcing pipeline', e);
+      toast.error(e.message || 'Failed to load pipeline');
+    } finally {
+      setSourcingLoading(false);
+    }
+  }, [linkedJobId]);
+
+  const fetchProjectStages = useCallback(async () => {
+    if (!id || !accountId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    try {
+      const data = await callSourceApi({ action: 'get_project', account_id: accountId, job_id: id }, session);
+      if (Array.isArray(data?.stages)) setLiStages(data.stages.filter((s: any) => s?.name));
+      if (data?.project) setProjectData((prev: any) => prev || data.project);
+    } catch { /* best-effort reference bar — never block the pipeline */ }
+  }, [id, accountId]);
+
+  const moveSourcing = useCallback(async (row: SourcingRow, toStage: SourcingStage) => {
+    if (row.stage === toStage) return;
+    setMovingId(row.id);
+    const nowIso = new Date().toISOString();
+    const order: SourcingStage[] = ['uncontacted', 'contacted', 'replied', 'back_of_resume'];
+    const stampCol: Record<SourcingStage, string> = {
+      uncontacted: 'uncontacted_at', contacted: 'contacted_at', replied: 'replied_at', back_of_resume: 'back_of_resume_at',
+    };
+    const toIdx = order.indexOf(toStage);
+    const patch: any = { stage: toStage };
+    // Stamp the target + backfill missing earlier stamps so funnel times stay
+    // monotonic (mirrors the server-side backfill logic).
+    order.forEach((st, i) => {
+      if (i <= toIdx) {
+        const col = stampCol[st];
+        if (!(row as any)[col]) patch[col] = nowIso;
+      }
+    });
+    try {
+      const { error } = await supabase.from('sourcing').update(patch).eq('id', row.id);
+      if (error) throw error;
+      setSourcingRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...patch } : r)));
+      toast.success(`Moved to ${SOURCING_STAGES.find((s) => s.key === toStage)?.label}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Move failed');
+    } finally {
+      setMovingId(null);
+    }
+  }, []);
+
+  const withdrawSourcing = useCallback(async (row: SourcingRow) => {
+    setMovingId(row.id);
+    try {
+      const { error } = await supabase
+        .from('sourcing')
+        .update({ withdrawn_at: new Date().toISOString() })
+        .eq('id', row.id);
+      if (error) throw error;
+      setSourcingRows((prev) => prev.filter((r) => r.id !== row.id));
+      toast.success('Removed from pipeline');
+    } catch (e: any) {
+      toast.error(e.message || 'Remove failed');
+    } finally {
+      setMovingId(null);
+    }
+  }, []);
+
+  const handleLinkProject = useCallback(async () => {
+    if (!linkSelectJobId) return;
+    setLinkingProject(true);
+    try {
+      const { error } = await supabase
+        .from('jobs')
+        .update({ linkedin_project_id: id, linkedin_project_account_id: accountId })
+        .eq('id', linkSelectJobId);
+      if (error) throw error;
+      setLinkedJobId(linkSelectJobId);
+      toast.success('Project linked — pipeline ready');
+    } catch (e: any) {
+      toast.error(e.message || 'Link failed');
+    } finally {
+      setLinkingProject(false);
+    }
+  }, [linkSelectJobId, id, accountId]);
 
   const callSaveToPipeline = useCallback(async (a: Applicant, jobIdOverride?: string) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -422,15 +579,16 @@ export default function SourceProject() {
         setLinkDialogApplicant(a);
         return;
       }
-      toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
+      toast.success((result as any)?.merged ? 'Added to pipeline (existing candidate)' : 'Added to pipeline · Uncontacted');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       refreshCrmMatches([a]);
+      fetchSourcing();
     } catch (err: any) {
       toast.error(err.message || 'Save failed');
     } finally {
       setSavingApplicantId(null);
     }
-  }, [callSaveToPipeline, queryClient, refreshCrmMatches]);
+  }, [callSaveToPipeline, queryClient, refreshCrmMatches, fetchSourcing]);
 
   const confirmLinkJob = useCallback(async () => {
     if (!linkDialogApplicant || !linkDialogJobId) return;
@@ -439,9 +597,10 @@ export default function SourceProject() {
       const result = await callSaveToPipeline(linkDialogApplicant, linkDialogJobId);
       if (result && !(result as any).needsLink) {
         setLinkedJobId(linkDialogJobId);
-        toast.success((result as any)?.merged ? 'Updated existing candidate' : 'Saved to pipeline');
+        toast.success((result as any)?.merged ? 'Added to pipeline (existing candidate)' : 'Added to pipeline · Uncontacted');
         queryClient.invalidateQueries({ queryKey: ['candidates'] });
         refreshCrmMatches([linkDialogApplicant]);
+        fetchSourcing();
         setLinkDialogApplicant(null);
         setLinkDialogJobId('');
       }
@@ -450,7 +609,7 @@ export default function SourceProject() {
     } finally {
       setSavingApplicantId(null);
     }
-  }, [linkDialogApplicant, linkDialogJobId, callSaveToPipeline, queryClient, refreshCrmMatches]);
+  }, [linkDialogApplicant, linkDialogJobId, callSaveToPipeline, queryClient, refreshCrmMatches, fetchSourcing]);
 
   // Lazy-load applicants the first time the user opens that tab.
   useEffect(() => {
@@ -458,6 +617,11 @@ export default function SourceProject() {
       fetchJobApplicants();
     }
   }, [tab, applicantsLoaded, applicantsLoading, fetchJobApplicants]);
+
+  // Load our pipeline once the linked-job lookup resolves; pull LinkedIn's
+  // stage reference bar in parallel (best-effort).
+  useEffect(() => { if (linkedJobChecked) fetchSourcing(); }, [linkedJobChecked, fetchSourcing]);
+  useEffect(() => { fetchProjectStages(); }, [fetchProjectStages]);
 
   // ---- Search (lazy, on submit only) ----
   const runSearch = async () => {
@@ -667,6 +831,12 @@ export default function SourceProject() {
   const selectedApplicants = applicants.filter(a => selectedIds.has(a.id));
   const project = { id: id || '', account_id: accountId };
 
+  // Group our sourcing rows by stage for the Pipeline tab.
+  const bySourcingStage = sourcingRows.reduce<Record<string, SourcingRow[]>>((acc, r) => {
+    (acc[r.stage] ||= []).push(r);
+    return acc;
+  }, {});
+
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -682,7 +852,7 @@ export default function SourceProject() {
           <h1 className="text-xl font-semibold truncate">{projectTitle}</h1>
           <p className="text-sm text-muted-foreground">
             {recruiterName}
-            {applicants.length > 0 && ` · ${applicants.length} in pipeline`}
+            {sourcingRows.length > 0 && ` · ${sourcingRows.length} in pipeline`}
             {jobApplicants.length > 0 && ` · ${jobApplicants.length} applicant${jobApplicants.length === 1 ? '' : 's'}`}
           </p>
         </div>
@@ -716,7 +886,7 @@ export default function SourceProject() {
       <Tabs value={tab} onValueChange={(v) => setTab(v as ProjectTab)} className="mb-4">
         <TabsList>
           <TabsTrigger value="pipeline">
-            Pipeline{applicants.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">({applicants.length})</span>}
+            Pipeline{sourcingRows.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">({sourcingRows.length})</span>}
           </TabsTrigger>
           <TabsTrigger value="applicants">
             Applicants{applicantsLoaded && jobApplicants.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">({jobApplicants.length})</span>}
@@ -727,214 +897,166 @@ export default function SourceProject() {
         {/* ─── Pipeline tab ───────────────────────────────────────── */}
         <TabsContent value="pipeline" className="mt-4 space-y-4">
 
-      {/* Controls bar */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {/* Candidate / Contact dropdown */}
-        <Select value={label} onValueChange={(val) => setLabel(val as ProjectLabel)}>
-          <SelectTrigger className="w-44">
-            <div className="flex items-center gap-1.5">
-              {label === 'candidate'
-                ? <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                : <Contact className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              }
-              <SelectValue />
-            </div>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="candidate">Candidate</SelectItem>
-            <SelectItem value="contact">Contact</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* LinkedIn Recruiter's own pipeline — read-only reference. Our funnel
+          below mirrors LinkedIn activity inbound; LinkedIn's API doesn't let us
+          write a stage back, so this bar is for reference only. */}
+      {liStages.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <Linkedin className="h-3.5 w-3.5 text-[#0a66c2]" /> LinkedIn Recruiter:
+          </span>
+          {liStages.map((s, i) => (
+            <span key={s.id || `${s.name}-${i}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-card">
+              {s.name}
+              <span className="font-semibold tabular-nums">{s.candidates_count}</span>
+            </span>
+          ))}
+          <span className="text-muted-foreground/70">· read-only</span>
+        </div>
+      )}
 
-        {/* Job picker (candidate mode) */}
-        {label === 'candidate' && (
-          <Select value={jobId} onValueChange={setJobId}>
-            <SelectTrigger className="w-64">
-              <div className="flex items-center gap-1.5 truncate">
-                <Briefcase className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <SelectValue placeholder="Tag to job…" />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              {openJobs.length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No open jobs</div>
-              )}
-              {openJobs.map((job: any) => (
-                <SelectItem key={job.id} value={job.id}>
-                  <span className="truncate">{job.title} — {job.company_name}</span>
-                  <Badge variant="outline" className="ml-2 text-[10px]">{job.status}</Badge>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {/* Bulk actions */}
-        {selectedIds.size > 0 && (
-          <>
-            <div className="h-6 w-px bg-border" />
-            <button onClick={toggleAll} className="text-xs text-muted-foreground hover:text-foreground underline">
-              {selectedIds.size === applicants.length ? 'Deselect all' : 'Select all'}
-            </button>
-            <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
-            {label === 'candidate' ? (
-              <Button
-                size="sm"
-                variant="gold"
-                onClick={() => {
-                  if (!jobId) { toast.error('Please select a job first'); return; }
-                  setCandidateDialogOpen(true);
-                }}
-              >
-                <UserCheck className="h-3.5 w-3.5 mr-1" />
-                Import as Candidates
-              </Button>
-            ) : (
-              <Button size="sm" variant="gold" onClick={() => setContactDialogOpen(true)}>
-                <Contact className="h-3.5 w-3.5 mr-1" />
-                Import as Contacts
-              </Button>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Loading */}
-      {loading && (
+      {/* Pipeline body — our internal sourcing funnel for the linked job. */}
+      {(!linkedJobChecked || sourcingLoading) ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          Loading applicants…
+          Loading pipeline…
         </div>
-      )}
-
-      {/* Empty */}
-      {!loading && applicants.length === 0 && (
-        <div className="text-center py-20 text-muted-foreground space-y-3">
-          <p>No applicants found in this project.</p>
-          {debug?.tries && (
-            <details className="mt-4 max-w-2xl mx-auto text-left text-xs">
-              <summary className="cursor-pointer text-amber-700 underline">
-                Show endpoint diagnostics ({debug.tries.length} attempted)
-              </summary>
-              <pre className="mt-2 bg-muted/40 p-3 rounded overflow-x-auto whitespace-pre-wrap">
-                {JSON.stringify(debug.tries, null, 2)}
-              </pre>
-            </details>
-          )}
+      ) : !linkedJobId ? (
+        <div className="max-w-md mx-auto text-center py-16 space-y-4">
+          <Briefcase className="h-8 w-8 mx-auto text-muted-foreground/60" />
+          <div>
+            <p className="font-medium">Link this project to a job</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Tie this LinkedIn project to a Sully Recruit job to start tracking a stage-by-stage pipeline.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 justify-center">
+            <Select value={linkSelectJobId} onValueChange={setLinkSelectJobId}>
+              <SelectTrigger className="w-64">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Briefcase className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <SelectValue placeholder="Choose a job…" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                {openJobs.length === 0 && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">No open jobs</div>
+                )}
+                {openJobs.map((job: any) => (
+                  <SelectItem key={job.id} value={job.id}>
+                    <span className="truncate">{job.title} — {job.company_name || job.company}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="gold" disabled={!linkSelectJobId || linkingProject} onClick={handleLinkProject}>
+              {linkingProject ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Briefcase className="h-3.5 w-3.5 mr-1" />}
+              Link
+            </Button>
+          </div>
         </div>
-      )}
-
-      {/* Pipeline stages */}
-      {!loading && sortedStages.length > 0 && (
+      ) : sourcingRows.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground">No one in this pipeline yet</p>
+          <p className="text-sm">
+            Add people from the{' '}
+            <button className="underline hover:text-foreground" onClick={() => setTab('applicants')}>Applicants</button> or{' '}
+            <button className="underline hover:text-foreground" onClick={() => setTab('search')}>Search</button> tab — they enter at Uncontacted.
+          </p>
+        </div>
+      ) : (
         <div className="space-y-6">
           {/* Stage summary cards */}
           <div className="flex gap-3 flex-wrap">
-            {sortedStages.map((stage) => (
+            {SOURCING_STAGES.map((s) => (
               <div
-                key={stage}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border ${STAGE_COLORS[stage] || STAGE_COLORS.unknown}`}
+                key={s.key}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border ${SOURCING_STAGE_COLORS[s.key]}`}
               >
-                <span className="font-medium text-sm capitalize">{stage}</span>
-                <span className="text-lg font-bold">{byStage[stage].length}</span>
+                <span className="font-medium text-sm">{s.label}</span>
+                <span className="text-lg font-bold">{(bySourcingStage[s.key] || []).length}</span>
               </div>
             ))}
           </div>
 
-          {/* Applicant tables by stage */}
-          {sortedStages.map((stage) => {
-            const stageApplicants = byStage[stage];
-            // Show every candidate in each stage (no per-stage pagination).
-            const visible = stageApplicants;
-
+          {/* Per-stage tables */}
+          {SOURCING_STAGES.filter((s) => (bySourcingStage[s.key] || []).length > 0).map((s) => {
+            const rows = bySourcingStage[s.key] || [];
             return (
-            <div key={stage} className="border border-border rounded-lg overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 bg-card border-b border-border">
-                <Badge className={STAGE_COLORS[stage] || STAGE_COLORS.unknown}>
-                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
-                </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {stageApplicants.length} applicant{stageApplicants.length !== 1 ? 's' : ''}
-                </span>
+              <div key={s.key} className="border border-border rounded-lg overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 bg-card border-b border-border">
+                  <Badge className={SOURCING_STAGE_COLORS[s.key]}>{s.label}</Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {rows.length} {rows.length !== 1 ? 'people' : 'person'}
+                  </span>
+                </div>
+                <HorizontalTableScroll minWidth={1000}>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border text-xs text-muted-foreground">
+                        <th className="px-4 py-2 text-left">Name</th>
+                        <th className="px-2 py-2 text-left">Title</th>
+                        <th className="px-2 py-2 text-left">Company</th>
+                        <th className="px-2 py-2 text-left">Location</th>
+                        <th className="px-2 py-2 text-left w-40">Stage</th>
+                        <th className="w-10 px-2 py-2 text-center"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => {
+                        const p = row.person;
+                        const name = p?.full_name || [p?.first_name, p?.last_name].filter(Boolean).join(' ') || 'Unknown';
+                        const title = p?.current_title || p?.linkedin_current_title || '';
+                        const company = p?.current_company || p?.linkedin_current_company || '';
+                        return (
+                          <tr key={row.id} className="border-b border-border/50 hover:bg-accent/5 text-sm">
+                            <td className="px-4 py-2">
+                              <div className="flex items-center gap-2">
+                                {p?.avatar_url ? (
+                                  <img src={p.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                                ) : (
+                                  <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium shrink-0">
+                                    {(p?.first_name?.[0] || '') + (p?.last_name?.[0] || '')}
+                                  </div>
+                                )}
+                                <Link to={`/candidates/${row.candidate_id}`} className="font-medium truncate hover:underline">
+                                  {name}
+                                </Link>
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 text-muted-foreground truncate max-w-[200px]">{title}</td>
+                            <td className="px-2 py-2 text-muted-foreground truncate max-w-[160px]">{company}</td>
+                            <td className="px-2 py-2 text-muted-foreground truncate max-w-[140px]">{p?.location_text}</td>
+                            <td className="px-2 py-2">
+                              <Select value={row.stage} onValueChange={(v) => moveSourcing(row, v as SourcingStage)} disabled={movingId === row.id}>
+                                <SelectTrigger className="h-8 w-36">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {SOURCING_STAGES.map((opt) => (
+                                    <SelectItem key={opt.key} value={opt.key}>{opt.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                onClick={() => withdrawSourcing(row)}
+                                disabled={movingId === row.id}
+                                className="text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-50"
+                                title="Remove from pipeline"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 inline" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </HorizontalTableScroll>
               </div>
-
-              <HorizontalTableScroll minWidth={1100}>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="w-10 px-4 py-2 text-left">
-                      <button
-                        onClick={() => toggleStageApplicants(visible)}
-                        className="hover:text-foreground"
-                        title={`Select all on this page (${visible.length})`}
-                      >
-                        {visible.length > 0 && visible.every(a => selectedIds.has(a.id))
-                          ? <CheckSquare className="h-3.5 w-3.5" />
-                          : <Square className="h-3.5 w-3.5" />
-                        }
-                      </button>
-                    </th>
-                    <th className="px-2 py-2 text-left">Name</th>
-                    <th className="px-2 py-2 text-left">Title</th>
-                    <th className="px-2 py-2 text-left">Company</th>
-                    <th className="px-2 py-2 text-left">Location</th>
-                    <th className="w-10 px-2 py-2 text-center" title="Resume">
-                      <FileText className="h-3.5 w-3.5 inline" />
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((applicant) => (
-                    <tr key={applicant.id} className="border-b border-border/50 hover:bg-accent/5 text-sm">
-                      <td className="px-4 py-2">
-                        <button onClick={() => toggleApplicant(applicant.id)}>
-                          {selectedIds.has(applicant.id)
-                            ? <CheckSquare className="h-3.5 w-3.5 text-primary" />
-                            : <Square className="h-3.5 w-3.5 text-muted-foreground" />
-                          }
-                        </button>
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center gap-2">
-                          {applicant.profile_picture_url ? (
-                            <img src={applicant.profile_picture_url} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
-                          ) : (
-                            <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium shrink-0">
-                              {(applicant.first_name?.[0] || '') + (applicant.last_name?.[0] || '')}
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{applicant.first_name} {applicant.last_name}</div>
-                            {applicant.headline && applicant.headline !== applicant.current_title && (
-                              <div className="text-xs text-muted-foreground truncate">{applicant.headline}</div>
-                            )}
-                            {(() => {
-                              const m = crmMatchFor(applicant);
-                              return m ? <div className="mt-0.5"><CrmBadge match={m} /></div> : null;
-                            })()}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-muted-foreground truncate max-w-[200px]">{applicant.current_title}</td>
-                      <td className="px-2 py-2 text-muted-foreground truncate max-w-[160px]">{applicant.current_company}</td>
-                      <td className="px-2 py-2 text-muted-foreground truncate max-w-[140px]">{applicant.location}</td>
-                      <td className="px-2 py-2 text-center">
-                        {applicant.has_resume && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDownloadResume(applicant); }}
-                            className="hover:text-emerald-400 transition-colors"
-                            title="View resume"
-                          >
-                            <FileText className="h-3.5 w-3.5 inline text-emerald-500" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </HorizontalTableScroll>
-            </div>
-          );
+            );
           })}
         </div>
       )}
@@ -1251,39 +1373,37 @@ function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving, crmMatc
               Resume
             </Button>
           )}
-          {crmMatch ? (
-            <CrmBadge match={crmMatch} />
-          ) : (
-            <>
-              {onSave && (
-                <Button
-                  size="sm"
-                  variant="gold"
-                  disabled={saving}
-                  onClick={() => onSave(a)}
-                  title="Save as candidate (LinkedIn pipeline + Sully Recruit)"
-                >
-                  {saving
-                    ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                    : <Bookmark className="h-3.5 w-3.5 mr-1" />}
-                  Candidate
-                </Button>
-              )}
-              {onSaveClient && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={savingClient}
-                  onClick={() => onSaveClient(a)}
-                  title="Add as client"
-                >
-                  {savingClient
-                    ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                    : <Contact className="h-3.5 w-3.5 mr-1" />}
-                  Client
-                </Button>
-              )}
-            </>
+          {crmMatch && <CrmBadge match={crmMatch} />}
+          {/* Add to pipeline is available whether or not they're already in the
+              CRM — being in the CRM ≠ being in THIS job's pipeline. Enters at
+              Uncontacted (save-to-pipeline upserts the sourcing row). */}
+          {onSave && (
+            <Button
+              size="sm"
+              variant="gold"
+              disabled={saving}
+              onClick={() => onSave(a)}
+              title="Add to this project's pipeline (Uncontacted)"
+            >
+              {saving
+                ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                : <Plus className="h-3.5 w-3.5 mr-1" />}
+              Add to pipeline
+            </Button>
+          )}
+          {!crmMatch && onSaveClient && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={savingClient}
+              onClick={() => onSaveClient(a)}
+              title="Add as client"
+            >
+              {savingClient
+                ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                : <Contact className="h-3.5 w-3.5 mr-1" />}
+              Client
+            </Button>
           )}
         </div>
       </div>
