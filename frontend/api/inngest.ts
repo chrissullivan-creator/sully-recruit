@@ -65,6 +65,7 @@ import { reextractCallIntel } from "./lib/inngest/functions/reextract-call-intel
 import { wakeSnoozedThreads } from "./lib/inngest/functions/wake-snoozed-threads.js";
 import { processFollowUps } from "./lib/inngest/functions/process-follow-ups.js";
 import { bestMatchJob, bestMatchHotJobsCron } from "./lib/inngest/functions/best-match-job.js";
+import { joeDailyBrief } from "./lib/inngest/functions/joe-daily-brief.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -143,5 +144,6 @@ export default serve({
     processFollowUps,
     bestMatchJob,
     bestMatchHotJobsCron,
+    joeDailyBrief,
   ],
 });

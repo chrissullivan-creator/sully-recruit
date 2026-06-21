@@ -1,13 +1,14 @@
 import { inngest } from "../client.js";
 import {
   getSupabaseAdmin,
+  getAppSetting,
   getAnthropicKey,
   getOpenAIKey,
   getGeminiKey,
   getOpenRouterKey,
   getVoyageKey,
 } from "../../../../src/server-lib/supabase.js";
-import { callAIWithFallback } from "../../../../src/lib/ai-fallback.js";
+import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-fallback.js";
 import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 
 interface GenerateJoeSaysPayload {
@@ -232,6 +233,42 @@ export const generateJoeSays = inngest.createFunction(
       }
     } catch (err: any) {
       logger.warn("joe_says embedding step failed", { error: err?.message });
+    }
+
+    // Phase 1 (proactive Joe): derive a one-line "next best action" for this
+    // person from the brief we just wrote, and stamp `people.next_action`.
+    // Gated behind JOE_PROACTIVE_ENABLED (default off) so it adds no cost until
+    // enabled, and best-effort so a failure never affects the brief above.
+    try {
+      const proactive = (await getAppSetting("JOE_PROACTIVE_ENABLED").catch(() => "false"))
+        .trim()
+        .toLowerCase();
+      if (proactive === "true" || proactive === "1" || proactive === "yes" || proactive === "on") {
+        const { text: nextAction } = await callAIWithFallback({
+          anthropicKey: anthropicKey || undefined,
+          openaiKey: openaiKey || undefined,
+          geminiKey: geminiKey || undefined,
+          openRouterKey: openRouterKey || undefined,
+          order: RESUME_PARSE_ORDER, // OpenAI-first
+          systemPrompt:
+            "You are Joe, a sharp Wall Street headhunter. Given a brief on a person, reply with ONE short imperative next action the recruiter should take now (<= 120 chars). No preamble, no quotes — just the action.",
+          userContent: summary.slice(0, 6000),
+          maxTokens: 60,
+          temperature: 0,
+        });
+        const trimmed = (nextAction || "").trim().replace(/^["']|["']$/g, "").slice(0, 200);
+        if (trimmed) {
+          await supabase
+            .from("people")
+            .update({
+              next_action: trimmed,
+              next_action_updated_at: new Date().toISOString(),
+            } as any)
+            .eq("id", entityId);
+        }
+      }
+    } catch (err: any) {
+      logger.warn("next_action computation failed", { error: err?.message });
     }
 
     logger.info("Joe Says generated successfully", {

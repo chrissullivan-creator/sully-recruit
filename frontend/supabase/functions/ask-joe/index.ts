@@ -1,18 +1,23 @@
-// Ask Joe with tool use: streams a Claude → OpenAI → Gemini → OpenRouter
-// cascade. Claude + OpenAI run with tool-use enabled (8 read-only tools
-// over the recruiting CRM); Gemini + OpenRouter answer text-only without
-// tools — they're only hit when the upstream providers fail, which is
-// rare enough not to warrant per-provider tool schemas.
+// Ask Joe with tool use: streams an OpenAI → Claude → Gemini → OpenRouter
+// cascade (OpenAI-first per the AI-native roadmap). OpenAI + Claude run with
+// tool-use enabled; Gemini + OpenRouter answer text-only without tools —
+// they're only hit when the upstream providers fail.
+//
+// Tools: 9 read-only CRM tools always. When the JOE_AGENTIC_ENABLED app_setting
+// is on, an additional propose-only write tier (draft_message,
+// enroll_in_sequence, move_pipeline_stage, create_task, add_note) is loaded.
+// Those tools NEVER write — they emit an `action` SSE event that the client
+// renders as an approve/edit/reject card; the write happens only on approval.
 //
 // Auth: requires a valid Supabase JWT (verify_jwt: true on deploy).
 // SSE output:
 //   data: {"content":"..."}              -- streaming text from the model
 //   data: {"status":"Joe is searching..."} -- short ephemeral status line
-//                                            shown while a tool runs
+//   data: {"action":{...}}                -- a proposed action card (agentic)
 //
-// Safety: tool calls are read-only; max 6 iterations per turn; 12s per
-// tool; bodies are truncated before being injected back to the model so
-// a runaway query can't drain the context window.
+// Safety: read tools are read-only; write tools are propose-only and
+// do_not_contact-guarded; max 6 iterations per turn; 12s per tool; bodies are
+// truncated before being injected back to the model.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -48,6 +53,11 @@ Valid person statuses: new | reached_out | engaged. Never filter by back_of_resu
 You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications).
 
 When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people.`;
+
+// Appended only when JOE_AGENTIC_ENABLED is on and the write-tools are loaded.
+const AGENTIC_PROMPT_SUFFIX = `
+
+You can also PROPOSE actions: draft_message, enroll_in_sequence, move_pipeline_stage, create_task, add_note. These do NOT execute — each shows the recruiter an approve/edit/reject card. Only propose an action when the user clearly asks for it (e.g. "draft an email to X", "enroll her", "move him to submitted", "remind me to follow up", "note that..."). After proposing, say in one short line what you put up for approval. Never claim an action is done — it only happens if they approve.`;
 
 const TOOLS = [
   {
@@ -159,10 +169,91 @@ const TOOLS = [
   },
 ];
 
-const OPENAI_TOOLS = TOOLS.map((t) => ({
-  type: "function",
-  function: { name: t.name, description: t.description, parameters: t.input_schema },
-}));
+// ── Agentic write-tools (Phase 2) ──────────────────────────────────────────
+// Gated behind the JOE_AGENTIC_ENABLED app_setting. These tools NEVER perform
+// a side effect on the backend — each one validates guardrails and returns a
+// *proposal* that is surfaced to the recruiter as an approve/edit/reject action
+// card. The recruiter's client performs the actual write only on approval. So
+// even a buggy tool here cannot send a message, enroll, or move a stage.
+const WRITE_TOOLS = [
+  {
+    name: "draft_message",
+    description:
+      "Propose a draft outreach message to a person (the recruiter reviews and sends it — this does NOT send). Use when the user asks to write/draft/reach out. Returns a proposal card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "uuid of the person to message" },
+        channel: { type: "string", enum: ["email", "linkedin", "sms"], description: "Channel to draft for." },
+        purpose: { type: "string", description: "What the message should accomplish, in a phrase." },
+      },
+      required: ["person_id", "channel", "purpose"],
+    },
+  },
+  {
+    name: "enroll_in_sequence",
+    description:
+      "Propose enrolling a person into an outreach sequence (the recruiter confirms — this does NOT enroll). Returns a proposal card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "uuid of the person" },
+        sequence_query: { type: "string", description: "Name/keywords of the sequence to enroll into." },
+      },
+      required: ["person_id", "sequence_query"],
+    },
+  },
+  {
+    name: "move_pipeline_stage",
+    description:
+      "Propose moving a candidate to a pipeline stage (the recruiter confirms — this does NOT move). Returns a proposal card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "uuid of the candidate" },
+        job_id: { type: "string", description: "uuid of the job (optional but preferred)" },
+        to_stage: { type: "string", description: "Target stage, e.g. pitch, submitted, interview, offer, placed, withdrawn." },
+      },
+      required: ["person_id", "to_stage"],
+    },
+  },
+  {
+    name: "create_task",
+    description:
+      "Propose creating a follow-up task / reminder (the recruiter confirms). Returns a proposal card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short task title." },
+        person_id: { type: "string", description: "uuid of the related person (optional)." },
+        due_date: { type: "string", description: "ISO date (YYYY-MM-DD), optional." },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "add_note",
+    description: "Propose adding a note to a person's record (the recruiter confirms). Returns a proposal card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "uuid of the person" },
+        note: { type: "string", description: "The note text." },
+      },
+      required: ["person_id", "note"],
+    },
+  },
+];
+
+const WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
+
+const toOpenAITools = (list: any[]) =>
+  list.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+
+const OPENAI_TOOLS = toOpenAITools(TOOLS);
 
 async function embedQuery(text: string): Promise<number[] | null> {
   if (!VOYAGE_API_KEY) return null;
@@ -547,8 +638,100 @@ async function toolSearchCompanies(supabase: any, input: any): Promise<string> {
   return JSON.stringify({ items: data ?? [] });
 }
 
-async function runTool(supabase: any, name: string, input: any): Promise<string> {
+async function getPersonBrief(supabase: any, personId: string): Promise<any> {
+  const { data } = await supabase
+    .from("people")
+    .select("id, full_name, first_name, last_name, type, do_not_contact")
+    .eq("id", personId)
+    .maybeSingle();
+  return data;
+}
+
+function personName(p: any): string {
+  return p?.full_name || [p?.first_name, p?.last_name].filter(Boolean).join(" ") || "this person";
+}
+
+// Build + emit an approve/edit/reject proposal. Never writes to the DB; the
+// recruiter's client performs the action only on approval.
+async function handleWriteTool(
+  supabase: any,
+  name: string,
+  input: any,
+  emitAction: (a: any) => void,
+): Promise<string> {
+  const outreach = name === "draft_message" || name === "enroll_in_sequence";
+  let person: any = null;
+  if (input?.person_id) person = await getPersonBrief(supabase, input.person_id);
+  if (outreach && person?.do_not_contact) {
+    return JSON.stringify({
+      refused: true,
+      reason: "Person is marked do_not_contact — outreach is blocked. Do not propose this.",
+    });
+  }
+
+  const actionId = crypto.randomUUID();
+  // Deep-link the recruiter to the right place to confirm, and tell the note
+  // path which entity bucket to write to.
+  const route = person
+    ? person.type === "client"
+      ? `/contacts/${person.id}`
+      : `/candidates/${person.id}`
+    : input?.job_id
+      ? `/jobs/${input.job_id}`
+      : null;
+  const noteEntityType = person?.type === "client" ? "contact" : "candidate";
+
+  let title = "";
+  let preview = "";
+  switch (name) {
+    case "draft_message":
+      title = `Draft ${input.channel} to ${personName(person)}`;
+      preview = input.purpose ?? "";
+      break;
+    case "enroll_in_sequence":
+      title = `Enroll ${personName(person)} in a sequence`;
+      preview = `Sequence: ${input.sequence_query ?? ""}`;
+      break;
+    case "move_pipeline_stage":
+      title = `Move ${personName(person)} → ${input.to_stage}`;
+      break;
+    case "create_task":
+      title = `Create task: ${input.title}`;
+      preview = input.due_date ? `Due ${input.due_date}` : "";
+      break;
+    case "add_note":
+      title = `Add note to ${personName(person)}`;
+      preview = input.note ?? "";
+      break;
+    default:
+      return JSON.stringify({ error: `unknown write tool ${name}` });
+  }
+
+  emitAction({
+    id: actionId,
+    type: name,
+    title,
+    params: input,
+    preview,
+    route,
+    entity_type: noteEntityType,
+  });
+  return JSON.stringify({
+    proposed: true,
+    action_id: actionId,
+    awaiting_recruiter_approval: true,
+    note: "An approval card was shown to the recruiter. Summarize what you proposed in one short line. Do NOT claim it is done — it only happens if they approve.",
+  });
+}
+
+async function runTool(
+  supabase: any,
+  name: string,
+  input: any,
+  emitAction: (a: any) => void,
+): Promise<string> {
   const exec = async (): Promise<string> => {
+    if (WRITE_TOOL_NAMES.has(name)) return await handleWriteTool(supabase, name, input, emitAction);
     switch (name) {
       case "search_people": return await toolSearchPeople(supabase, input);
       case "get_person_detail": return await toolGetPersonDetail(supabase, input);
@@ -591,6 +774,8 @@ async function streamAnthropicWithTools(
   initialMessages: any[],
   send: (text: string) => void,
   status: (s: string) => void,
+  tools: any[],
+  emitAction: (a: any) => void,
 ): Promise<StreamResult> {
   const messages: any[] = initialMessages.map((m) => ({ role: m.role, content: m.content }));
 
@@ -607,7 +792,7 @@ async function streamAnthropicWithTools(
         max_tokens: 2048,
         stream: true,
         system: systemPrompt,
-        tools: TOOLS,
+        tools,
         messages,
       }),
     });
@@ -691,7 +876,7 @@ async function streamAnthropicWithTools(
       let parsedInput: any = {};
       try { parsedInput = JSON.parse(tu.input_json || "{}"); } catch { /* empty */ }
       status(statusFromToolCall(tu.name, parsedInput));
-      const result = await runTool(supabase, tu.name, parsedInput);
+      const result = await runTool(supabase, tu.name, parsedInput, emitAction);
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: result });
     }
     messages.push({ role: "user", content: toolResults });
@@ -718,6 +903,8 @@ async function streamOpenAIWithTools(
   initialMessages: any[],
   send: (text: string) => void,
   status: (s: string) => void,
+  openaiTools: any[],
+  emitAction: (a: any) => void,
 ): Promise<StreamResult> {
   const messages: any[] = [
     { role: "system", content: systemPrompt },
@@ -728,7 +915,7 @@ async function streamOpenAIWithTools(
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: OPENAI_MODEL, stream: true, tools: OPENAI_TOOLS, messages }),
+      body: JSON.stringify({ model: OPENAI_MODEL, stream: true, tools: openaiTools, messages }),
     });
     if (!resp.ok || !resp.body) {
       const body = resp.body ? await resp.text() : "";
@@ -796,7 +983,7 @@ async function streamOpenAIWithTools(
       let parsed: any = {};
       try { parsed = JSON.parse(c.args || "{}"); } catch { /* empty */ }
       status(statusFromToolCall(c.name!, parsed));
-      const result = await runTool(supabase, c.name!, parsed);
+      const result = await runTool(supabase, c.name!, parsed, emitAction);
       messages.push({ role: "tool", tool_call_id: c.id!, content: result });
     }
   }
@@ -914,6 +1101,20 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  // Agentic write-tools are gated behind JOE_AGENTIC_ENABLED (read via the
+  // service role). Off → Joe behaves exactly as before (9 read-only tools).
+  let agentic = false;
+  try {
+    const { data: flag } = await supabase
+      .from("app_settings").select("value").eq("key", "JOE_AGENTIC_ENABLED").maybeSingle();
+    const raw = String(flag?.value ?? "").trim().toLowerCase();
+    agentic = raw === "true" || raw === "1" || raw === "yes" || raw === "on";
+  } catch { /* default off */ }
+
+  const systemPrompt = agentic ? BASE_SYSTEM_PROMPT + AGENTIC_PROMPT_SUFFIX : BASE_SYSTEM_PROMPT;
+  const tools = agentic ? [...TOOLS, ...WRITE_TOOLS] : TOOLS;
+  const openaiTools = agentic ? toOpenAITools(tools) : OPENAI_TOOLS;
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -921,27 +1122,31 @@ serve(async (req) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: text })}\n\n`));
       const status = (s: string) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: s })}\n\n`));
+      // Additive SSE event: existing clients ignore unknown keys; the action
+      // card UI listens for `action`.
+      const emitAction = (a: any) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ action: a })}\n\n`));
 
       try {
-        if (ANTHROPIC_API_KEY) {
-          const r = await streamAnthropicWithTools(supabase, BASE_SYSTEM_PROMPT, messages, send, status);
-          if (r.ok) return;
-          if (!r.fallbackable) { send(`\n\n[Joe error] Anthropic ${r.status}: ${r.body.slice(0, 200)}`); return; }
-          console.warn("Anthropic failed, falling back:", r.status);
-        }
         if (OPENAI_API_KEY) {
-          const r = await streamOpenAIWithTools(supabase, BASE_SYSTEM_PROMPT, messages, send, status);
+          const r = await streamOpenAIWithTools(supabase, systemPrompt, messages, send, status, openaiTools, emitAction);
           if (r.ok) return;
           if (!r.fallbackable) { send(`\n\n[Joe error] OpenAI ${r.status}: ${r.body.slice(0, 200)}`); return; }
           console.warn("OpenAI failed, falling back:", r.status);
         }
+        if (ANTHROPIC_API_KEY) {
+          const r = await streamAnthropicWithTools(supabase, systemPrompt, messages, send, status, tools, emitAction);
+          if (r.ok) return;
+          if (!r.fallbackable) { send(`\n\n[Joe error] Anthropic ${r.status}: ${r.body.slice(0, 200)}`); return; }
+          console.warn("Anthropic failed, falling back:", r.status);
+        }
         if (GEMINI_API_KEY) {
-          const r = await streamGeminiOneShot(BASE_SYSTEM_PROMPT, messages, send);
+          const r = await streamGeminiOneShot(systemPrompt, messages, send);
           if (r.ok) return;
           if (!r.fallbackable) { send(`\n\n[Joe error] Gemini ${r.status}: ${r.body.slice(0, 200)}`); return; }
         }
         if (OPENROUTER_API_KEY) {
-          const r = await streamOpenRouter(BASE_SYSTEM_PROMPT, messages, send);
+          const r = await streamOpenRouter(systemPrompt, messages, send);
           if (r.ok) return;
           send(`\n\n[Joe error] OpenRouter ${r.status}: ${r.body.slice(0, 200)}`);
           return;

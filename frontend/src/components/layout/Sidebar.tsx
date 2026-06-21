@@ -9,7 +9,7 @@ import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, Phone, ListTodo, FolderSearch,
-  Send, Martini, Calendar, BarChart3, Menu, X, Upload,
+  Send, Martini, Calendar, BarChart3, Menu, X, Upload, Sun,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -49,6 +49,7 @@ function useSidebarCounts(userId: string | undefined) {
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
+  { name: 'Today',      href: '/today',      icon: Sun             },
   { name: 'Communication Hub', href: '/inbox', icon: Inbox          },
   { name: 'Ask Joe',    href: '/ask-joe',    icon: Martini         },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
