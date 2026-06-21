@@ -23,6 +23,7 @@ const CandidateDetail = lazy(() => import("./pages/CandidateDetail"));
 const SendOut = lazy(() => import("./pages/SendOut"));
 const SendOuts = lazy(() => import("./pages/SendOuts"));
 const AskJoe = lazy(() => import("./pages/AskJoe"));
+const Today = lazy(() => import("./pages/Today"));
 const Companies = lazy(() => import("./pages/Companies"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail"));
 const Contacts = lazy(() => import("./pages/Contacts"));
@@ -97,6 +98,7 @@ const App = () => (
             <Route path="/source/:id" element={<ProtectedRoute><SourceProject /></ProtectedRoute>} />
             <Route path="/send-outs" element={<ProtectedRoute><SendOuts /></ProtectedRoute>} />
             <Route path="/ask-joe" element={<ProtectedRoute><AskJoe /></ProtectedRoute>} />
+            <Route path="/today" element={<ProtectedRoute><Today /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
