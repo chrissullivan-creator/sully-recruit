@@ -107,6 +107,7 @@ const Settings = () => {
   const [backfillRcLookback, setBackfillRcLookback] = useState<string>('180');
   const [reextractingCalls, setReextractingCalls] = useState(false);
   const [backfillingRecentPeople, setBackfillingRecentPeople] = useState(false);
+  const [backfillingLiDeep, setBackfillingLiDeep] = useState(false);
   const [recentPeopleLimit, setRecentPeopleLimit] = useState<string>('200');
   const [ringcentralConfig, setRingcentralConfig] = useState<IntegrationConfig>({
     client_id: '',
@@ -2683,6 +2684,45 @@ Senior Recruiter | Your Company
                             }}
                           >
                             {backfillingRecentPeople ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : <><Play className="h-3.5 w-3.5 mr-1" /> Run backfill</>}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Deep LinkedIn backfill — wider window than the routine
+                          3-day v2 sweep. Recovers Recruiter InMail / classic DMs
+                          missed while a seat's Unipile session was stalled. Run
+                          AFTER reconnecting the seat in Integrations. */}
+                      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                        <div>
+                          <h3 className="text-sm font-medium text-foreground">Deep LinkedIn backfill (recover InMail / gaps)</h3>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Sweeps ~45 days across the classic + Recruiter inboxes for every connected LinkedIn seat — use it to pull back InMail / DMs missed while a seat was disconnected. Reconnect the seat first, then run this.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={backfillingLiDeep}
+                            onClick={async () => {
+                              setBackfillingLiDeep(true);
+                              try {
+                                const resp = await fetch('/api/admin/backfill-linkedin-deep', {
+                                  method: 'POST',
+                                  headers: await authHeaders(),
+                                  body: JSON.stringify({ lookbackDays: 45 }),
+                                });
+                                const data = await resp.json().catch(() => ({}));
+                                if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                toast.success('Deep LinkedIn backfill started — InMail / DMs will land over the next few minutes.');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Backfill failed');
+                              } finally {
+                                setBackfillingLiDeep(false);
+                              }
+                            }}
+                          >
+                            {backfillingLiDeep ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Triggering...</> : <><Play className="h-3.5 w-3.5 mr-1" /> Run deep backfill</>}
                           </Button>
                         </div>
                       </div>
