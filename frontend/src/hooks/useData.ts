@@ -239,12 +239,26 @@ export function useContacts() {
   const query = useQuery({
     queryKey: ['contacts'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*, companies!left(name, domain), work_email, personal_email, mobile_phone, roles, linked_candidate_id')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
+      // Paginate past PostgREST's 1000-row cap (mirrors useCandidates). With
+      // >1000 clients a single select silently dropped the rest, which made
+      // enrollment + people pickers report older contacts as "could not be
+      // resolved" and hid them from contact lists entirely.
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*, companies!left(name, domain), work_email, personal_email, mobile_phone, roles, linked_candidate_id')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      return allData;
     },
   });
 
