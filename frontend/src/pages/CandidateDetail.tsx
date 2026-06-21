@@ -250,6 +250,7 @@ const CandidateDetail = () => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('joe');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
@@ -1091,12 +1092,6 @@ const CandidateDetail = () => {
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setScheduleMeetingOpen(true)}>
-            <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Schedule
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEnrollOpen(true)}>
-            <Play className="h-3.5 w-3.5 mr-1" />Enroll
-          </Button>
           {id && (
             <EnrichButton
               peopleIds={[id]}
@@ -1111,6 +1106,13 @@ const CandidateDetail = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setScheduleMeetingOpen(true)}>
+                <CalendarPlus className="h-3.5 w-3.5 mr-2" /> Schedule meeting
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setEnrollOpen(true)}>
+                <Play className="h-3.5 w-3.5 mr-2" /> Enroll in sequence
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {resumeUrl && (
                 <DropdownMenuItem onClick={() => setShowResume(!showResume)}>
                   <FileText className="h-3.5 w-3.5 mr-2" />
@@ -1147,6 +1149,14 @@ const CandidateDetail = () => {
               >
                 {((c.roles ?? ['candidate']) as string[]).includes('client') ? '− Remove Client tag' : '+ Tag as Client'}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={deleting}
+                onClick={() => setDeleteConfirmOpen(true)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete candidate
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -1157,12 +1167,7 @@ const CandidateDetail = () => {
               currentType={(candidate as any)?.type}
             />
           )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" disabled={deleting} title="Delete candidate">
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </AlertDialogTrigger>
+          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete this candidate?</AlertDialogTitle>
