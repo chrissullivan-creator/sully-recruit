@@ -27,6 +27,9 @@ The chat object's `content_type === 'inmail'` OR `folder` array including `'INBO
 
 `conversations.content_type` is now persisted on insert; `reclassify-linkedin-chats-once` task back-stamps historical rows.
 
+### Inbound auto-add (2026-06-21)
+An inbound LinkedIn message (classic DM **or** Recruiter InMail) from a sender **not already in the CRM now auto-creates the person** — `type='candidate'`, `needs_classification=true`, `auto_added_source='classic_message'` (DM) or `'recruiter_inmail'` (InMail) — and mirrors the provider id into `candidate_channels` so the next message hard-matches. See `processLinkedInMessage` in `frontend/api/lib/inngest/functions/process-unipile-event.ts` (live path; the Deno `unipile-webhook` edge fn is legacy/unused — 0 invocations). Previously **only InMail** auto-created and classic DMs from unknown senders were *dropped* ("Phase 5 rule"); that drop is now only a fallback when auto-add can't run (no `owner_user_id` on the integration account). Auto-added people surface in Data Cleanup (`needs_classification`) for review. Requires a valid integration account — note Nancy's LinkedIn (no v2 id + v1 id 404s) must be reconnected before her inbound will attach.
+
 ### Webhook signature verification (`/api/webhooks/unipile.ts`)
 Unipile sends the secret in any of: `x-unipile-secret`, `x-webhook-secret`, `x-unipile-signature`, `x-webhook-signature`, `x-signature`, `unipile-signature`, or `Authorization: Bearer <secret>`. Verifier accepts all formats + HMAC-SHA256 of the body. Stored in `app_settings.UNIPILE_WEBHOOK_SECRET`.
 

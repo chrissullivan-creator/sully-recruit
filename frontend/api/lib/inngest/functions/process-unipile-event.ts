@@ -521,17 +521,19 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return created?.id ?? null;
   }
 
-  // Auto-add: an inbound LinkedIn Recruiter (InMail) message is a real person
-  // reaching out, so create the candidate now instead of dropping it (the
-  // Phase-5 rule below). matchLinkedinEntity above already deduped (provider
-  // id / candidate_channels / slug), so we only land here when they're
-  // genuinely new; autoCreatePersonFromOutbound mirrors the provider id into
-  // candidate_channels so the next message hard-matches, and the
-  // resolve-unipile / find-linkedin crons backfill title/company/URL.
+  // Auto-add: an inbound LinkedIn message (classic DM OR Recruiter InMail)
+  // from an unknown sender is a real person reaching out, so create the
+  // candidate now instead of dropping it (the Phase-5 fallback below).
+  // matchLinkedinEntity above already deduped (provider id / candidate_channels
+  // / slug), so we only land here when they're genuinely new;
+  // autoCreatePersonFromOutbound mirrors the provider id into candidate_channels
+  // so the next message hard-matches, and the resolve-unipile / find-linkedin
+  // crons backfill title/company/URL. Auto-created people are flagged
+  // needs_classification=true so they surface in Data Cleanup for review.
   // Scoped to inbound: on outbound the sender id is *us* (that's how direction
   // is detected), and outbound recipients are auto-added upstream in the send
   // path — so creating from senderId here is only correct for inbound.
-  if (!entityId && channel === "linkedin_recruiter" && direction === "inbound" && integrationAccountId) {
+  if (!entityId && (channel === "linkedin" || channel === "linkedin_recruiter") && direction === "inbound" && integrationAccountId) {
     const { data: ownerRow } = await supabase
       .from("integration_accounts")
       .select("owner_user_id")
@@ -542,30 +544,31 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
     if (ownerUserId) {
       const created = await autoCreatePersonFromOutbound(supabase, {
-        channel: "linkedin_recruiter",
+        channel,
         address: senderId,
         name: senderName,
         ownerUserId,
-        source: "recruiter_inmail",
+        source: channel === "linkedin_recruiter" ? "recruiter_inmail" : "classic_message",
       });
       if (created) {
         entityId = created.id;
         entityType = created.type;
         entityColumn = created.entityColumn;
-        logger.info("Auto-created candidate from inbound LinkedIn Recruiter InMail", {
+        logger.info("Auto-created candidate from inbound LinkedIn message", {
           senderId,
           personId: entityId,
+          channel,
         });
       }
     }
   }
 
   if (!entityId) {
-    // Phase 5 rule: inbound from unknown LinkedIn senders is NOT persisted.
-    // The live inbox UI will fetch the last 100 LinkedIn messages from
-    // Unipile directly for the "Other" view; once the user adds the
-    // person, the person.created webhook backfills the history.
-    // Outbound from us to a non-CRM recipient still persists (it's our
+    // Phase 5 fallback: we get here only if the auto-add above couldn't run
+    // (no owner on the integration account, or the insert failed). Inbound
+    // from an unknown sender we couldn't attach is NOT persisted — the live
+    // inbox UI fetches recent LinkedIn messages from Unipile for the "Other"
+    // view. Outbound from us to a non-CRM recipient still persists (it's our
     // work product) — auto-add of the recipient happens upstream in the
     // send path.
     if (direction === "inbound") {
