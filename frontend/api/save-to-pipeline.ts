@@ -356,7 +356,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   file_name: safeName,
                   mime_type: contentType,
                   file_size: buffer.length,
-                  parse_status: "pending",
+                  // Column is `parsing_status` (default 'pending'), not
+                  // `parse_status` — the old name failed the whole insert so
+                  // Source-saved resumes never attached.
+                  parsing_status: "pending",
                 } as any)
                 .select("id")
                 .single();

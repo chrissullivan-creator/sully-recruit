@@ -158,34 +158,61 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
       }
 
       if (inserted && resumeStoragePath && resumeFile) {
-        // Skip if this candidate already has a resume with the same
-        // file_name — UNIQUE(candidate_id, file_name) would block it.
+        // Attach the uploaded resume to the new candidate. Two bugs lived here:
+        //   1) the insert passed `storage_bucket`, which isn't a column on
+        //      `resumes` — so the (unchecked) insert threw and was swallowed,
+        //      leaving the candidate's Documents tab empty.
+        //   2) ingestion was triggered with only { candidateId }, but the
+        //      endpoint requires { resumeId, candidateId, filePath, fileName }
+        //      and 400s otherwise — so the resume was never parsed/embedded.
+        // Insert the real columns (status column is `parsing_status`, defaults
+        // 'pending'), check the error, and kick ingestion with the full payload.
         const { data: existingResume } = await supabase
           .from('resumes')
           .select('id')
           .eq('candidate_id', inserted.id)
           .eq('file_name', resumeFile.name)
           .maybeSingle();
-        if (!existingResume) {
-          await supabase.from('resumes').insert({
-            candidate_id: inserted.id,
-            file_path: resumeStoragePath,
-            file_name: resumeFile.name,
-            mime_type: resumeFile.type || 'application/pdf',
-            file_size: resumeFile.size,
-            storage_bucket: 'resumes',
-            source: 'upload',
-            parsing_status: 'completed',
-          } as any);
+
+        let resumeId: string | null = (existingResume as any)?.id ?? null;
+        if (!resumeId) {
+          const { data: signed } = await supabase.storage
+            .from('resumes').createSignedUrl(resumeStoragePath, 3600);
+          const { data: resumeRow, error: resumeErr } = await supabase
+            .from('resumes')
+            .insert({
+              candidate_id: inserted.id,
+              file_path: resumeStoragePath,
+              file_name: resumeFile.name,
+              file_url: signed?.signedUrl ?? null,
+              mime_type: resumeFile.type || 'application/pdf',
+              file_size: resumeFile.size,
+              source: 'upload',
+              parsing_status: 'pending',
+            } as any)
+            .select('id')
+            .single();
+          if (resumeErr) {
+            toast.error(`Candidate saved, but the resume didn't attach: ${resumeErr.message}`);
+          } else {
+            resumeId = resumeRow?.id ?? null;
+          }
         }
 
-        authHeaders().then(headers =>
-          fetch('/api/trigger-resume-ingestion', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ candidateId: inserted.id }),
-          })
-        ).catch(() => {});
+        if (resumeId) {
+          authHeaders().then(headers =>
+            fetch('/api/trigger-resume-ingestion', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                resumeId,
+                candidateId: inserted.id,
+                filePath: resumeStoragePath,
+                fileName: resumeFile.name,
+              }),
+            })
+          ).catch(() => {});
+        }
       }
 
       toast.success('Candidate added');

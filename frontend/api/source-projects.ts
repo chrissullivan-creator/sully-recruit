@@ -265,6 +265,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // ── get_project ──────────────────────────────────────────────
+    // Best-effort read of ONE hiring project (for its LinkedIn Recruiter
+    // pipeline.stages — names + per-stage candidate counts) so the Source
+    // Pipeline tab can show LinkedIn's stages alongside our internal funnel.
+    // Tries the v2 single-project detail; falls back to scanning the v2 list
+    // (the proven endpoint). NEVER errors hard — returns { stages: [] } so the
+    // UI degrades gracefully when LinkedIn project reads aren't available.
+    if (action === "get_project") {
+      if (!job_id) return res.status(400).json({ error: "Missing job_id (project_id)" });
+      const ctx = await resolveV2Ctx(supabase, account_id);
+      if ("error" in ctx) return res.status(200).json({ project: null, stages: [], note: ctx.error });
+      const v2h = { "X-API-KEY": ctx.v2Key, Accept: "application/json" };
+      const pickStages = (proj: any): any[] => {
+        const raw = proj?.pipeline?.stages ?? proj?.stages ?? [];
+        return (Array.isArray(raw) ? raw : []).map((s: any) => ({
+          id: s?.id ?? null,
+          name: s?.name ?? s?.label ?? "",
+          candidates_count: Number(s?.candidates_count ?? s?.count ?? 0) || 0,
+        }));
+      };
+      try {
+        const detailUrl = `${ctx.v2Base}/${encodeURIComponent(ctx.accV2)}/linkedin/recruiter/projects/${encodeURIComponent(job_id)}`;
+        const dResp = await fetch(detailUrl, { headers: v2h });
+        if (dResp.ok) {
+          const data = JSON.parse((await dResp.text()) || "{}");
+          const proj = data?.item ?? data?.data ?? data;
+          if (proj && (proj.pipeline?.stages || proj.stages)) {
+            return res.status(200).json({ project: proj, stages: pickStages(proj) });
+          }
+        }
+        // Fallback: scan the v2 list for this project id.
+        const listUrl = `${ctx.v2Base}/${encodeURIComponent(ctx.accV2)}/linkedin/recruiter/projects?limit=50`;
+        const lResp = await fetch(listUrl, { headers: v2h });
+        if (lResp.ok) {
+          const ldata = JSON.parse((await lResp.text()) || "{}");
+          const items = ldata.items ?? ldata.data ?? [];
+          const proj = (Array.isArray(items) ? items : []).find((p: any) => String(p?.id) === String(job_id));
+          if (proj) return res.status(200).json({ project: proj, stages: pickStages(proj) });
+        }
+      } catch (err: any) {
+        console.warn("[source-projects][get_project] best-effort failed:", err?.message);
+      }
+      return res.status(200).json({ project: null, stages: [] });
+    }
+
     // list_applicants — deprecated. The UI moved to list_pipeline /
     // list_job_applicants which use confirmed v1 routes; this legacy
     // probe was the multi-URL guess against bogus v2 hosts.
