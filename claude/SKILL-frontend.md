@@ -72,6 +72,24 @@ longer in the sidebar (`components/layout/Sidebar.tsx`). They live under
 
 ---
 
+## Proactive & Agentic Joe UI (2026-06-21)
+
+- **`/today`** (`pages/Today.tsx`, sidebar item "Today", `Sun` icon) — the
+  proactive "Today / For You" feed. Reads `joe_briefings` for the current
+  `useAuth().user.id` (`from('joe_briefings' as any)`), grouped by `category`,
+  ordered by `score`. Each card links to the entity and has done/snooze/dismiss
+  (status updates only — read-only surface). Shows an empty state until the
+  `joe-daily-brief` cron populates it (gated by `JOE_PROACTIVE_ENABLED`).
+- **`JoeActionCard`** (`components/joe/JoeActionCard.tsx`) — renders the
+  approve/edit/reject proposal cards Ask Joe emits via the `data:{"action":{…}}`
+  SSE event (only when `JOE_AGENTIC_ENABLED` is on). `add_note` executes inline
+  (safe `notes` insert); consequential actions (draft/enroll/move/task)
+  deep-link to the proper UI via `action.route` to confirm — Joe never
+  sends/moves on its own. Wired into `AskJoe.tsx`'s SSE loop (`setActions`).
+- The new tables aren't in generated Supabase types — cast `as any`.
+
+---
+
 ## ⚠️ Vite Env Vars — CRITICAL
 
 Only `VITE_` prefixed vars work. `REACT_APP_*` is ALWAYS undefined.
