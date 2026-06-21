@@ -45,6 +45,7 @@ import {
   Copy,
   Gauge,
   Sparkles,
+  Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -937,6 +938,7 @@ Senior Recruiter | Your Company
     { id: 'send_limits', label: 'Send Limits', icon: Gauge },
     { id: 'api', label: 'API Keys', icon: Key },
     { id: 'job_spec', label: 'Lead Search Filter', icon: Target },
+    { id: 'import_csv', label: 'Import CSV', icon: Upload },
     { id: 'data_hygiene', label: 'Data Hygiene', icon: Copy },
     { id: 'general', label: 'General', icon: SettingsIcon },
     ...(isAdmin ? [
@@ -965,8 +967,8 @@ Senior Recruiter | Your Company
   return (
     <MainLayout>
       <PageHeader
-        title="Settings"
-        description="Configure integrations and manage your account."
+        title="Admin"
+        description="Configure integrations, import data, and manage your account."
       />
 
       <div className="p-8">
@@ -1001,6 +1003,30 @@ Senior Recruiter | Your Company
               </div>
             ) : (
               <>
+                {/* ============ IMPORT CSV TAB ============ */}
+                {activeTab === 'import_csv' && (
+                  <div className="space-y-4">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-foreground mb-1">Import CSV</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Bulk-import people, companies, or jobs from a CSV file.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-card p-6 flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                        <Upload className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold text-foreground">CSV Importer</h3>
+                        <p className="text-xs text-muted-foreground">Map columns and import records into the CRM.</p>
+                      </div>
+                      <Button asChild variant="gold" size="sm">
+                        <Link to="/import">Open Importer</Link>
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* ============ JOB FUNCTIONS TAB ============ */}
                 {activeTab === 'job_functions' && (
                   <div>
