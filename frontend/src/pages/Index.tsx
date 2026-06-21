@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
@@ -248,6 +249,10 @@ const Dashboard = () => {
           </DropdownMenu>
         }
       />
+
+      <div className="border-b border-border bg-card/30 px-8 py-3">
+        <SegmentedNav items={[{ label: 'Overview', href: '/' }, { label: 'Today', href: '/today' }]} />
+      </div>
 
       <div className="p-8 space-y-8">
 

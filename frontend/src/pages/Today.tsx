@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -107,6 +108,10 @@ export default function Today() {
         title="Today"
         description="Joe's morning read on who needs you — ranked by priority."
       />
+
+      <div className="border-b border-border bg-card/30 px-8 py-3">
+        <SegmentedNav items={[{ label: 'Overview', href: '/' }, { label: 'Today', href: '/today' }]} />
+      </div>
 
       <div className="px-4 sm:px-6 pb-10 max-w-3xl mx-auto w-full">
         {isLoading ? (
