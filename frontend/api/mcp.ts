@@ -777,18 +777,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     setCors(res);
     return res.status(500).json(rpcErr(null, -32000, "Server misconfigured: missing Supabase credentials"));
   }
-  const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (!bearer) {
-    setCors(res);
-    return res.status(401).json(rpcErr(null, -32001, "Unauthorized"));
-  }
-
+  // MCP discovery (initialize / tools/list / ping / notifications) is allowed
+  // WITHOUT auth: ChatGPT lists a connector's tools BEFORE it sends the API
+  // key, so 401-ing discovery makes the connector "fail to connect". Auth is
+  // enforced per tool call below, where data is actually read/written.
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
-  const actor = await resolveActor(sb, bearer);
-  if (!actor) {
-    setCors(res);
-    return res.status(401).json(rpcErr(null, -32001, "Unauthorized"));
-  }
 
   const msg: any = req.body;
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) {
@@ -815,6 +808,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case "tools/list":
         return reply(req, res, ok(id, { tools: TOOLS }));
       case "tools/call": {
+        const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+        const actor = bearer ? await resolveActor(sb, bearer) : null;
+        if (!actor) {
+          return reply(req, res, rpcErr(id, -32001, "Unauthorized: a valid per-user API token is required to run Sully Recruit tools."));
+        }
         const out = await runTool(sb, actor, params?.name, params?.arguments ?? {});
         return reply(req, res, ok(id, { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] }));
       }
