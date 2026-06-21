@@ -19,6 +19,7 @@ If you're returning to this codebase, these are the recent invariants that bite:
 - **Custom fields layer (2026-06-14).** Admin-defined fields without a migration. Definitions in `custom_field_defs` (`entity_type` ∈ candidate|client|company|job, immutable `key`, `label`, `field_type`, `options`, `section`, `display_order`, `required`, `is_active`); values in a `custom_fields JSONB` column on the base table — **pilot: `people` only** (companies/jobs add their own column on rollout). `useCandidate` reads `people.*` so values come along free — **no view recreation**. Validation is UI-side (no DB trigger — `people` has too many writers); `required` is a UI hint only; `key` is immutable. `custom_field_defs` isn't in generated types → cast `from('custom_field_defs' as any)`. Admin UI: Settings → Custom Fields; record editor: `CustomFieldsSection` in CandidateDetail's Background tab (candidates only so far). See SKILL-frontend.md.
 - **People↔companies auto-link (2026-06-12).** `people.company_id` is set automatically — never text-match `company_name`/`current_company` to list a company's people; filter on `company_id` (CompanyDetail does this now, Contacts + Candidates tabs). Resolution: `find_company_id_by_name(text)` normalizes via `normalize_company_name()` (lowercase, strip leading "the" + trailing inc/llc/lp/ltd/etc, drop non-alphanumerics) and checks `companies.name` first, then `company_aliases.alias_normalized`. Auto-link triggers: `trg_auto_link_person_company` (people insert / company-text change; respects an explicitly-set company_id), `trg_claim_people_for_company` (companies insert/rename claims unlinked matching people), `trg_claim_people_for_company_alias` (alias insert claims immediately). ~100 curated aliases exist ("Millennium"→Millennium Management, "JPMorgan Chase & Co."→J.P. Morgan, "SS&C GlobeOp"→SS&C Technologies...). Deliberately separate firms — do NOT alias-merge: Citadel vs Citadel Securities, Citi vs Citizens Bank, Point72 vs Cubist Systematic Strategies, GTS vs GTSF. To tie a new variant: `INSERT INTO company_aliases (company_id, alias) VALUES (...)` and the trigger backfills.
 - **Proactive & Agentic Joe (2026-06-21).** Joe became an operating layer. New tables: **`joe_briefings`** (per-recruiter "Today" feed — `owner_user_id`, `entity_type` candidate|client|job, `category` hot_lead|going_cold|stalled|reply_waiting|ops_warning, `headline`, `rationale`, `score`, `status`, owner-RLS) and **`joe_action_queue`** (agent inbox, owner-RLS); new column **`people.next_action`** (+ `next_action_updated_at`). Neither table is in generated types → cast `from('joe_briefings' as any)` / `from('joe_action_queue' as any)`. Two `app_settings` flags read server-side: **`JOE_PROACTIVE_ENABLED`** (ON — gates `joe-daily-brief.ts` cron + `generate-joe-says` next_action) and **`JOE_AGENTIC_ENABLED`** (OFF — gates `ask-joe` write tools). New Inngest fn `joe-daily-brief` (cron `0 11 * * *`) registered in `frontend/api/inngest.ts`. **`ask-joe` is OpenAI-first** and its write tools are propose-only (emit `action` SSE, client executes on approval). All these surfaces pass `RESUME_PARSE_ORDER` (OpenAI-first). See SKILL-joe.md / SKILL-frontend.md.
+- **External MCP server (2026-06-21).** `frontend/api/mcp.ts` (`/api/mcp`, a Vercel fn) exposes the CRM over MCP — read + write — for ChatGPT (Developer Mode), Claude, Claude Code. Per-user tokens in `mcp_tokens` (sha256→user) attribute writes; **discovery (`initialize`/`tools/list`) is unauthenticated, `tools/call` is token-gated**; `query` runs read-only SQL via `mcp_run_read_query()` (ON by default, `service_role`-only). **`jobs.status` is actually `lead|hot|closed_lost`** — not the `open/closed` this skill used to list (now corrected below). Full detail in the "MCP Server — `/api/mcp`" section.
 
 ---
 
@@ -336,7 +337,7 @@ const resp = await fetch(
 `active` | `paused` | `stopped` | `completed`
 
 ### Job Lifecycle (`jobs.status`)
-`open` | `on_hold` | `filled` | `closed`
+`lead` | `hot` | `closed_lost` — these are the **live** values (BD/opportunity pipeline: a job is a search/opportunity). The previously-documented `open`/`on_hold`/`filled`/`closed` never shipped. ⚠️ Don't filter `jobs.status='open'` — it returns 0 rows. "Hot jobs" = `status='hot'`.
 
 ### Four Conversion Paths
 - Opportunities → Jobs
@@ -373,6 +374,40 @@ Three MCP servers are configured for Claude Code:
 **Project ref:** `xlobevmhzimxjtpiontf`
 
 **⚠️ If an MCP server disconnects, restart the session. Keys are stored in `.mcp.json` at repo root.**
+
+---
+
+## MCP Server — `/api/mcp` (external read/write surface, added 2026-06-21)
+
+`frontend/api/mcp.ts` — a Model Context Protocol server that lets external MCP clients (ChatGPT Developer Mode, Claude, Claude Code, our own Joe) drive the CRM. It is a **Vercel serverless function**, NOT a Supabase edge fn, so it ships on the normal push to `main` (no `supabase functions deploy`).
+
+### Transport & shape
+- One POST endpoint, JSON-RPC 2.0 over **Streamable HTTP**. `reply()` content-negotiates: SSE (`event: message\ndata: {…}`) when the request `Accept` includes `text/event-stream` (ChatGPT), else `application/json` (Claude Code). Stateless — no `Mcp-Session-Id`.
+- Handles `initialize`, `tools/list`, `tools/call`, `ping`, and notifications (202).
+- URLs: `https://app.sullyrecruit.com/api/mcp` and `https://sullyrecruit.app/api/mcp` (both custom domains route to the Vercel project even though `get_project`'s domain list only shows the `*.vercel.app` aliases). Stable Vercel alias: `https://sully-recruit-chrissullivan-1122s-projects.vercel.app/api/mcp`.
+
+### Auth — per-user attribution
+- `public.mcp_tokens` (migration `20260621050000`): `token_sha256` (hash only — raw tokens are NEVER stored or committed), `user_id`, `label`, `is_active`. RLS on, no policies → `service_role`-only.
+- `resolveActor()` SHA-256s the bearer, looks it up → `{userId, name}`; writes (`owner_user_id`, `created_by_user_id`, `sender_user_id`, `enrolled_by`, note author) use that actor. Falls back to env `MCP_AUTH_TOKEN` → `MCP_ACTOR_USER_ID` (default Chris) for the shared/admin path.
+- **Discovery is unauthenticated by design.** `initialize`/`tools/list`/`ping` take no token — ChatGPT lists tools *before* sending the key, so gating discovery → "failed to add connector link". Auth is enforced only on `tools/call`.
+- Provisioning a user: generate a random token, store its `sha256` in `mcp_tokens`, hand the raw token to the person; they paste it into their ChatGPT connector (API-key auth). Each recruiter has their own.
+
+### Tools
+Reads: `search` (people/jobs/companies), `get_person` (+`v_person_activity`), `get_job` (+pipeline), `get_company`, `pipeline_report`, `last_touch`, `list_jobs` (status filter), `describe_schema` (introspect), `query` (read-only SQL).
+Writes: `add_person` (dual-role email merge), `update_person`, `set_do_not_contact`, `add_note`, `tag_person_to_job`, `set_pipeline_stage`, `list_sequences`, `create_sequence` (builds nodes+actions), `enroll_people` (`do_not_contact` guard + fires `sequence/enrollment-init.requested`), `set_enrollment_status`. Writes respect the same invariants as the app (status enum, pipeline ladder, `classifyEmail`).
+
+### Raw SQL escape hatch
+- `query` (and `describe_schema`) → `mcp_run_read_query(text)` (migration `20260621040000`): SECURITY DEFINER, forces `transaction_read_only`, SELECT/WITH only, ≤1000 rows, 8s timeout, EXECUTE granted to `service_role` only (revoked from anon/authenticated → not an RLS bypass).
+- **ON by default**; set `MCP_ENABLE_RAW_SQL=false` to disable.
+
+### Adding a tool
+Add an entry to `TOOLS` (name/description/`inputSchema`) and a `case` in `runTool(sb, actor, name, args)`. For writes, prefer reusing an existing endpoint's logic so guardrails hold.
+
+### Gotchas
+- New tools don't appear in an already-connected ChatGPT until the connector is **refreshed/reconnected** (it caches `tools/list`).
+- You can't curl the domains from the Claude Code sandbox (egress allowlist blocks them). **Test live with Supabase `pg_net`:** `select net.http_post('https://sullyrecruit.app/api/mcp','{…jsonrpc…}'::jsonb,'{}'::jsonb,'{"Content-Type":"application/json","Accept":"application/json, text/event-stream","Authorization":"Bearer <token>"}'::jsonb)` then read `net._http_response`.
+- After a squash-merge to `main`, the dev branch diverges (pre-squash commits conflict) — `git reset --hard origin/main` before the next change, then force-push.
+- ChatGPT add flow: **Developer Mode** (desktop web, paid plan), not the Deep-Research/Apps search-fetch flow. "Failed to add connector link" is usually a stuck entry → delete + recreate.
 
 ---
 

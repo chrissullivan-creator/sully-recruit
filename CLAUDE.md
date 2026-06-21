@@ -15,6 +15,17 @@ All configured in `.mcp.json`. Restart session if disconnected.
 - **Supabase** — SQL, migrations, schema (token: supabase.com/dashboard/account/tokens)
 - **Unipile** — LinkedIn API (DSN: api19.unipile.com:14926)
 
+## MCP Server — `/api/mcp` (external read/write surface, added 2026-06-21)
+
+`frontend/api/mcp.ts` is a Model Context Protocol server (**Vercel function**, not a Supabase edge fn — it ships on the normal push to `main`) that exposes the CRM as tools for ChatGPT (Developer Mode), Claude, Claude Code, or Joe.
+
+- **Transport:** one POST endpoint, JSON-RPC 2.0 over Streamable HTTP; `reply()` returns SSE when the request `Accept` includes `text/event-stream` (ChatGPT) else JSON (Claude Code). Stateless (no session id).
+- **URLs:** `https://app.sullyrecruit.com/api/mcp` or `https://sullyrecruit.app/api/mcp` (both custom domains route to the Vercel project even though `get_project` only lists the `*.vercel.app` aliases). Add in ChatGPT via **Developer Mode** (desktop web, paid plan) — NOT the Deep-Research/Apps search-fetch flow. "Failed to add connector link" is usually a stuck entry → delete + recreate.
+- **Per-user auth:** `public.mcp_tokens` maps `sha256(token)` → `user_id` (+label), so writes are attributed to the real recruiter (Chris/Nancy/Ashley). Each person pastes their own token (API-key auth) in their ChatGPT. **Discovery (`initialize`/`tools/list`/`ping`) is unauthenticated on purpose** — ChatGPT lists tools before sending the key, so gating discovery 401s the connector; only `tools/call` is token-gated. Shared `MCP_AUTH_TOKEN` env → default actor (Chris) for the Claude Code/admin path. Raw tokens are NEVER committed — only the hash lives in the DB.
+- **Tools:** reads `search`, `get_person`, `get_job`, `get_company`, `pipeline_report`, `last_touch`, `list_jobs`, `describe_schema`, `query`; writes `add_person`, `update_person`, `set_do_not_contact`, `add_note`, `tag_person_to_job`, `set_pipeline_stage`, `list_sequences`, `create_sequence`, `enroll_people`, `set_enrollment_status`. Writes honor the app invariants (status enum, pipeline ladder, `classifyEmail`, `do_not_contact`, the `sequence/enrollment-init.requested` engine event).
+- **`query` = read-only SQL, ON by default** (`MCP_ENABLE_RAW_SQL=false` to disable) via `mcp_run_read_query()` (SECURITY DEFINER, forced read-only, ≤1000 rows / 8s, `service_role`-only — not an RLS bypass).
+- **Gotchas:** new tools need a connector refresh in ChatGPT to appear; you can't curl the domains from the Claude Code sandbox (egress allowlist) → test live with Supabase `pg_net`; `git reset --hard origin/main` before each new change since the dev branch diverges after a squash-merge. Full detail in SKILL-architecture.md.
+
 ## Skills
 
 Read these before making changes:
@@ -40,6 +51,7 @@ Read these before making changes:
 - **Data Hygiene (2026-06-14):** Duplicates (`/duplicates`) + Collisions (`/admin/collisions`) moved from the sidebar to Settings → Data Hygiene; routes still registered for deep links.
 - Ashley has email and LinkedIn but NO RingCentral — no SMS routing for Ashley
 - **Proactive & Agentic Joe (2026-06-21):** Joe is now an operating layer, not just chat. Two flags in `app_settings` (read server-side): **`JOE_PROACTIVE_ENABLED`** (ON) gates the daily-briefing cron + per-person `next_action`; **`JOE_AGENTIC_ENABLED`** (OFF) gates the `ask-joe` propose-only write tools. Tables: **`joe_briefings`** (per-recruiter "Today" feed, owner-RLS), **`joe_action_queue`** (agent inbox), plus **`people.next_action`**. **`ask-joe` is now OpenAI-first** (`OpenAI → Claude → Gemini → OpenRouter`); the proactive surfaces (`joe-daily-brief.ts`, `generate-joe-says` next_action) pass `RESUME_PARSE_ORDER` (OpenAI-first) too. Frontend: `/today` page (`Today.tsx`) + sidebar nav; `JoeActionCard` renders approve/edit/reject proposals in Ask Joe. Write tools NEVER write server-side — they emit a `data: {"action":{…}}` SSE event; the client executes only on approval, and `do_not_contact` blocks outreach proposals. **Editing `ask-joe` requires `supabase functions deploy ask-joe`** (not shipped by the Vercel push). See SKILL-joe.md / SKILL-architecture.md / SKILL-frontend.md.
+- **External MCP server (2026-06-21):** `frontend/api/mcp.ts` (`/api/mcp`, a Vercel fn) exposes the CRM over MCP — read **and** write — for ChatGPT (Developer Mode), Claude, and Claude Code. Per-user tokens in `mcp_tokens` (sha256→user) attribute writes; **discovery is unauthenticated, `tools/call` is token-gated**; `query` runs read-only SQL via `mcp_run_read_query()` (ON by default). Ships on the normal `main` push. **NB: `jobs.status` is actually `lead|hot|closed_lost`** (the old `open/closed` was never real). See the "MCP Server — `/api/mcp`" section above + SKILL-architecture.md.
 
 ## Unipile API — v1 (reads/email/calendar) + v2 (lifecycle, Recruiter writes, **LinkedIn message sends**) — updated June 20 2026
 
