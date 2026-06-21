@@ -28,7 +28,7 @@ import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
-  Mailbox, Linkedin, Copy, Megaphone,
+  Mailbox, Linkedin, Copy, Megaphone, MoreHorizontal,
 } from 'lucide-react';
 import { JobSourceTab } from '@/components/source/SourceTabs';
 import {
@@ -37,6 +37,9 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { cn } from '@/lib/utils';
@@ -641,6 +644,7 @@ const JobDetail = () => {
   const [assigning, setAssigning] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [deletingJob, setDeletingJob] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Add candidate to send outs
   const [addSendOutOpen, setAddSendOutOpen] = useState(false);
@@ -1054,18 +1058,7 @@ const JobDetail = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              toast.success('Link copied');
-            }}
-            className="border-card-border gap-1.5"
-            title="Copy link to this job"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> Share
-          </Button>
+          {/* Primary action stays visible; secondary actions fold into the ⋯ menu. */}
           <Button
             variant="outline"
             size="sm"
@@ -1073,32 +1066,54 @@ const JobDetail = () => {
             className="border-card-border gap-1.5"
             title="Generate a candidate-facing LinkedIn job post"
           >
-            <Linkedin className="h-3.5 w-3.5" /> Generate LinkedIn post
+            <Linkedin className="h-3.5 w-3.5" /> LinkedIn post
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setTaskPanel(true)}>
-            <ListTodo className="h-3.5 w-3.5 mr-1" /> Tasks
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" disabled={deletingJob} title="Delete job">
-                <Trash2 className="h-4 w-4" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" title="More actions">
+                <MoreHorizontal className="h-4 w-4" />
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this job?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This permanently removes “{job?.title}” and any related send-outs and candidate links. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteJob}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href);
+                  toast.success('Link copied');
+                }}
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-2" /> Share link
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTaskPanel(true)}>
+                <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={deletingJob}
+                onClick={() => setDeleteConfirmOpen(true)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete job
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+
+      {/* Delete confirmation — controlled, opened from the ⋯ menu. */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes “{job?.title}” and any related send-outs and candidate links. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteJob}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <DndContext
         sensors={dndSensors}
