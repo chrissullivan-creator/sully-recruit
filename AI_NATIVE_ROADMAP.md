@@ -1,15 +1,19 @@
 # Sully Recruit — AI-Native Roadmap
 
-> **Status:** Recommendations / strategy doc (2026-06-21). No code shipped with
-> this file. It names the concrete files and existing helpers a future
-> implementation should reuse, so it doubles as an implementation brief.
+> **Status (updated 2026-06-21): Phases 1–2 shipped + merged; Phase 3 foundation in.**
+> - ✅ **Phase 1 — Proactive Joe:** `joe_briefings` + `people.next_action`
+>   (migration applied), `joe-daily-brief` Inngest cron, `next_action` in
+>   `generate-joe-says`, `/today` page. **`JOE_PROACTIVE_ENABLED` is ON.**
+> - ✅ **Phase 2 — Agentic Joe:** `ask-joe` reordered OpenAI-first and
+>   **deployed** (edge fn v129); propose-only write tools + `JoeActionCard`.
+>   **`JOE_AGENTIC_ENABLED` is OFF** (flip + redeploy-test before enabling).
+> - ◻️ **Phase 3:** `joe_action_queue` table created (foundation). Remaining:
+>   persist proposals + batch-approve UI on `/today`, and dormant-signal mining.
 >
-> **Weighting:** This roadmap is deliberately weighted toward a **proactive,
-> agentic Joe** — the direction chosen as the top priority.
->
-> **Provider order:** Every new AI surface described here leads with **OpenAI**
-> (`OpenAI → Claude → Gemini → OpenRouter`), reusing the existing
-> `RESUME_PARSE_ORDER` pattern. See [§6](#6-provider-strategy-openai-first).
+> **Weighting:** deliberately weighted toward a **proactive, agentic Joe**.
+> **Provider order:** every new AI surface leads with **OpenAI**
+> (`OpenAI → Claude → Gemini → OpenRouter`), reusing `RESUME_PARSE_ORDER`
+> (see [§6](#6-provider-strategy-openai-first)).
 
 ---
 

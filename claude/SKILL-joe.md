@@ -2,7 +2,11 @@
 
 ## Overview
 
-Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter persona — sharp, direct, sarcastic, zero fluff. Runs the Claude → OpenAI → Gemini → OpenRouter cascade in `ask-joe` (lead model `claude-sonnet-4-6`).
+Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter persona — sharp, direct, sarcastic, zero fluff. Runs the **OpenAI → Claude → Gemini → OpenRouter** cascade in `ask-joe` (OpenAI-first since 2026-06-21; lead model `gpt-4o-mini`, first fallback `claude-sonnet-4-6`).
+
+> **2026-06-21 — Proactive & Agentic Joe.** Joe is now an operating layer, not just chat:
+> - **Proactive** (`JOE_PROACTIVE_ENABLED`, ON): `joe-daily-brief.ts` Inngest cron (`0 11 * * *`) writes a per-recruiter "Today" feed into `joe_briefings`; `generate-joe-says` also stamps `people.next_action`. Surfaced at `/today` (`Today.tsx`). Both pass `RESUME_PARSE_ORDER` (OpenAI-first).
+> - **Agentic** (`JOE_AGENTIC_ENABLED`, OFF): when on, `ask-joe` loads a propose-only write tier — `draft_message`, `enroll_in_sequence`, `move_pipeline_stage`, `create_task`, `add_note`. These NEVER write server-side; each validates guardrails (`do_not_contact` blocks outreach) and emits a `data: {"action":{…}}` SSE event rendered as an approve/edit/reject card (`JoeActionCard`). The client executes only on approval. Off → Joe is byte-for-byte the 9 read-only tools below.
 
 ---
 
@@ -21,12 +25,12 @@ Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter pe
 **File:** `frontend/supabase/functions/ask-joe/index.ts`
 **Endpoint:** `POST /functions/v1/ask-joe`
 **Auth:** Bearer session.access_token (`verify_jwt: true`)
-**Response:** SSE stream — parse `data: {"content": "..."}` chunks (plus ephemeral `data: {"status": "..."}` lines shown while a tool runs)
+**Response:** SSE stream — parse `data: {"content": "..."}` chunks (plus ephemeral `data: {"status": "..."}` lines shown while a tool runs, and — when agentic is on — `data: {"action": {...}}` proposal cards). Existing parsers ignore unknown keys.
 
 > **Deploy:** This is a Supabase edge function. It does NOT ship with the Vercel push. After editing `index.ts` you MUST run `supabase functions deploy ask-joe` (or deploy via the Supabase MCP) for changes to go live.
 
 ### Provider cascade
-Claude → OpenAI → Gemini → OpenRouter. **Only Claude + OpenAI run with the tools enabled** (Claude reads `TOOLS`; OpenAI reads `OPENAI_TOOLS`, derived from `TOOLS`). Gemini + OpenRouter are text-only fallbacks hit only when both upstream providers fail. Models: Claude `claude-sonnet-4-6`, OpenAI `gpt-4o-mini`, Gemini `gemini-2.5-flash`, OpenRouter `openai/gpt-4o-mini`. Embeddings: Voyage `voyage-finance-2` (1024-dim).
+**OpenAI → Claude → Gemini → OpenRouter** (OpenAI-first since 2026-06-21). **Only OpenAI + Claude run with the tools enabled** (Claude reads `TOOLS`; OpenAI reads `OPENAI_TOOLS`, derived from `TOOLS` via `toOpenAITools()`). Gemini + OpenRouter are text-only fallbacks hit only when both upstream providers fail. Models: OpenAI `gpt-4o-mini`, Claude `claude-sonnet-4-6`, Gemini `gemini-2.5-flash`, OpenRouter `openai/gpt-4o-mini`. Embeddings: Voyage `voyage-finance-2` (1024-dim). When `JOE_AGENTIC_ENABLED` is on, the handler appends `WRITE_TOOLS` to the tool list and an `AGENTIC_PROMPT_SUFFIX` to the system prompt; an `emitAction` callback is threaded through both streaming loops.
 
 ### Request Shape
 ```json
