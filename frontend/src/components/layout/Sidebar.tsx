@@ -8,8 +8,8 @@ import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
-  Building2, Settings, LayoutDashboard, ListTodo, FolderSearch,
-  Send, Martini, Calendar, BarChart3, Menu, X, Sun,
+  Building2, Settings, LayoutDashboard, FolderSearch,
+  Send, Martini, Calendar, BarChart3, Menu, X,
 } from 'lucide-react';
 
 // Counts for the Inbox + To-Do's sidebar badges. One query each, cached for
@@ -49,7 +49,6 @@ function useSidebarCounts(userId: string | undefined) {
 
 const navigation = [
   { name: 'Dashboard',  href: '/',          icon: LayoutDashboard },
-  { name: 'Today',      href: '/today',      icon: Sun             },
   { name: 'Communication Hub', href: '/inbox', icon: Inbox          },
   { name: 'Ask Joe',    href: '/ask-joe',    icon: Martini         },
   { name: 'Jobs',       href: '/jobs',       icon: Briefcase       },
@@ -58,8 +57,10 @@ const navigation = [
   { name: 'Sequences',  href: '/sequences',  icon: Megaphone       },
   { name: 'Send Outs',  href: '/send-outs',  icon: Send            },
   { name: 'Source',     href: '/source',     icon: FolderSearch    },
-  { name: "To-Do's",    href: '/tasks',      icon: ListTodo        },
-  { name: 'Calendar',   href: '/calendar',   icon: Calendar        },
+  // Planner folds the old Calendar + To-Do's into one entry — a toggle at the
+  // top of each page switches between them. Today now lives under Dashboard
+  // (Overview | Today toggle). /today and /tasks routes stay for deep links.
+  { name: 'Planner',    href: '/calendar',   icon: Calendar        },
   { name: 'Reports',    href: '/reports',    icon: BarChart3       },
   // Admin = Settings (renamed). Import CSV moved under Admin; Calls is a
   // section inside the Communication Hub. Their routes (/import, /calls,
@@ -87,7 +88,8 @@ export function Sidebar() {
 
   const badgeFor = (href: string): number | null => {
     if (href === '/inbox') return inboxUnread > 0 ? inboxUnread : null;
-    if (href === '/tasks') return tasksOpen > 0 ? tasksOpen : null;
+    // Tasks-due badge now rides on Planner (To-Do's folded into it).
+    if (href === '/calendar') return tasksOpen > 0 ? tasksOpen : null;
     return null;
   };
 
@@ -151,15 +153,18 @@ export function Sidebar() {
         {navigation.map((item) => {
           const isActive =
             item.href === '/'
-              ? location.pathname === '/'
+              ? location.pathname === '/' || location.pathname === '/today'
               : item.href === '/inbox'
                 ? location.pathname === '/inbox' && !onCallsSection
                 : item.href === '/inbox?section=calls'
                   ? onCallsSection
-                  : item.href === '/people'
-                    ? ['/people', '/candidates', '/contacts'].some(p =>
+                  : item.href === '/calendar'
+                    ? ['/calendar', '/tasks'].some(p =>
                         location.pathname === p || location.pathname.startsWith(p + '/'))
-                    : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+                    : item.href === '/people'
+                      ? ['/people', '/candidates', '/contacts'].some(p =>
+                          location.pathname === p || location.pathname.startsWith(p + '/'))
+                      : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
 
           return (
             <Link

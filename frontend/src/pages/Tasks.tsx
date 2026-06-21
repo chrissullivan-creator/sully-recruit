@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { useTasks, useBulkUpdateTasks, useBulkDeleteTasks } from '@/hooks/useTasks';
 import { useQueryClient } from '@tanstack/react-query';
 import { TaskCard } from '@/components/tasks/TaskCard';
@@ -270,6 +271,10 @@ export default function Tasks() {
           </Button>
         </div>
       } />
+
+      <div className="border-b border-border bg-card/30 px-8 py-3">
+        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }]} />
+      </div>
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 space-y-4">
         {/* Filters */}

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -167,6 +168,10 @@ export default function CalendarPage() {
           </div>
         }
       />
+
+      <div className="border-b border-border bg-card/30 px-8 py-3">
+        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }]} />
+      </div>
 
       <ScheduleMeetingDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />
       <MeetingDetailDialog
