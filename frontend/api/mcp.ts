@@ -339,6 +339,85 @@ const TOOLS = [
       required: ["enrollment_id", "status"],
     },
   },
+  {
+    name: "add_company",
+    description: "Create a company (dedupes by name — returns the existing one if the name already exists). company_status: target (prospect) | client.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        company_type: { type: "string", description: "Firm type, e.g. Hedge Fund, Asset Manager, Investment Bank, Private Equity, Fintech." },
+        company_status: { type: "string", description: "target | client (default target)." },
+        industry: { type: "string" },
+        location: { type: "string" },
+        hq_location: { type: "string" },
+        domain: { type: "string" },
+        website: { type: "string" },
+        linkedin_url: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "update_company",
+    description: "Edit a company's fields by id (name, company_type, company_status, industry, location, hq_location, domain, website, linkedin_url, description).",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, fields: { type: "object" } }, required: ["id", "fields"] },
+  },
+  {
+    name: "add_job",
+    description: "Create a job/search/req. Resolves company_id from the 'company' name when given; status defaults to 'lead' (lead|hot|closed_lost). Optionally pass hiring_manager_id (a person id) to attach them as the primary job contact. Dedupes on job_url.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        company: { type: "string", description: "Company name (auto-linked to an existing company)." },
+        company_id: { type: "string" },
+        status: { type: "string", enum: ["lead", "hot", "closed_lost"] },
+        location: { type: "string" },
+        description: { type: "string" },
+        compensation: { type: "string" },
+        num_openings: { type: "number" },
+        submittal_instructions: { type: "string" },
+        additional_notes: { type: "string" },
+        job_url: { type: "string" },
+        hiring_manager_id: { type: "string", description: "Person id to attach as the primary hiring-manager contact." },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "update_job",
+    description: "Edit a job by id (title, status [lead|hot|closed_lost], location, description, compensation, num_openings, company_id, company_name, contact_id, submittal_instructions, additional_notes, job_url, job_code).",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, fields: { type: "object" } }, required: ["id", "fields"] },
+  },
+  {
+    name: "add_job_contact",
+    description: "Attach a person (hiring manager / client contact) to a job. Idempotent per (job, person). Set is_primary to also make them the job's primary contact.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string" },
+        person_id: { type: "string" },
+        is_primary: { type: "boolean" },
+        role: { type: "string", description: "Optional label, e.g. 'Hiring Manager', 'HR'." },
+      },
+      required: ["job_id", "person_id"],
+    },
+  },
+  {
+    name: "link_person_to_company",
+    description: "Link a person (candidate/client) to a company. Pass company_id, or company_name to resolve/attach by name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string" },
+        company_id: { type: "string" },
+        company_name: { type: "string" },
+      },
+      required: ["person_id"],
+    },
+  },
 ];
 
 // ── tool implementations ──────────────────────────────────────────────────────
@@ -777,6 +856,133 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
         enrollment_id: args.enrollment_id,
         status: args.status,
         ...(args.status === "active" ? { note: "Re-activated. Resuming does not re-schedule already-cancelled steps." } : {}),
+      };
+    }
+
+    case "add_company": {
+      const name = String(args.name ?? "").trim();
+      if (!name) throw new Error("name required");
+      const { data: existing } = await sb.from("companies").select("id, name").ilike("name", name).is("deleted_at", null).limit(1).maybeSingle();
+      if ((existing as any)?.id) return { id: (existing as any).id, name: (existing as any).name, duplicate: true };
+      const payload: any = {
+        name,
+        company_type: args.company_type ?? null,
+        company_status: args.company_status ?? "target",
+        industry: args.industry ?? null,
+        location: args.location ?? null,
+        hq_location: args.hq_location ?? null,
+        domain: args.domain ?? null,
+        website: args.website ?? null,
+        linkedin_url: args.linkedin_url ?? null,
+        description: args.description ?? null,
+      };
+      const { data, error } = await sb.from("companies").insert(payload).select("id").single();
+      if (error) throw new Error(error.message);
+      return { id: (data as any).id, name, duplicate: false };
+    }
+
+    case "update_company": {
+      if (!args.id) throw new Error("id required");
+      const fields = (args.fields ?? {}) as Record<string, any>;
+      const allow = ["name", "company_type", "company_status", "industry", "location", "hq_location", "domain", "website", "linkedin_url", "description"];
+      const patch: any = {};
+      for (const k of allow) if (k in fields && fields[k] !== undefined) patch[k] = fields[k];
+      if (!Object.keys(patch).length) throw new Error("No updatable fields provided");
+      patch.updated_at = now();
+      const { data, error } = await sb.from("companies").update(patch).eq("id", args.id).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Company not found");
+      return { id: args.id, updated: Object.keys(patch).filter((k) => k !== "updated_at") };
+    }
+
+    case "add_job": {
+      const title = String(args.title ?? "").trim();
+      if (!title) throw new Error("title required");
+      const jobUrl = args.job_url ? String(args.job_url).trim() : null;
+      if (jobUrl) {
+        const { data: dup } = await sb.from("jobs").select("id").eq("job_url", jobUrl).is("deleted_at", null).limit(1).maybeSingle();
+        if ((dup as any)?.id) return { job_id: (dup as any).id, duplicate: true };
+      }
+      const companyText = (args.company ?? "").toString().trim() || null;
+      let companyId: string | null = args.company_id ?? null;
+      if (!companyId && companyText) {
+        const { data: co } = await sb.from("companies").select("id").ilike("name", companyText).is("deleted_at", null).limit(1).maybeSingle();
+        companyId = (co as any)?.id ?? null;
+      }
+      const jobStatus = ["lead", "hot", "closed_lost"].includes(args.status) ? args.status : "lead";
+      const payload: any = {
+        title,
+        company_id: companyId,
+        company_name: companyText,
+        location: args.location?.trim() || null,
+        description: args.description ?? null,
+        compensation: args.compensation ?? null,
+        num_openings: args.num_openings ?? null,
+        submittal_instructions: args.submittal_instructions ?? null,
+        additional_notes: args.additional_notes ?? null,
+        job_url: jobUrl,
+        status: jobStatus,
+      };
+      if (args.hiring_manager_id) payload.contact_id = args.hiring_manager_id;
+      const { data: job, error } = await sb.from("jobs").insert(payload).select("id").single();
+      if (error) throw new Error(error.message);
+      const jobId = (job as any).id;
+      if (args.hiring_manager_id) {
+        const { error: jcErr } = await sb.from("job_contacts").insert({ job_id: jobId, contact_id: args.hiring_manager_id, is_primary: true, role: "Hiring Manager" } as any);
+        if (jcErr && (jcErr as any).code !== "23505") throw new Error(jcErr.message);
+      }
+      return { job_id: jobId, company_id: companyId, status: jobStatus, hiring_manager_linked: !!args.hiring_manager_id };
+    }
+
+    case "update_job": {
+      if (!args.id) throw new Error("id required");
+      const fields = (args.fields ?? {}) as Record<string, any>;
+      const allow = ["title", "status", "location", "description", "compensation", "num_openings", "company_id", "company_name", "contact_id", "submittal_instructions", "additional_notes", "job_url", "job_code"];
+      const patch: any = {};
+      for (const k of allow) if (k in fields && fields[k] !== undefined) patch[k] = fields[k];
+      if ("status" in patch && !["lead", "hot", "closed_lost"].includes(patch.status)) throw new Error("Invalid status. Allowed: lead, hot, closed_lost");
+      if (!Object.keys(patch).length) throw new Error("No updatable fields provided");
+      patch.updated_at = now();
+      const { data, error } = await sb.from("jobs").update(patch).eq("id", args.id).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Job not found");
+      return { id: args.id, updated: Object.keys(patch).filter((k) => k !== "updated_at") };
+    }
+
+    case "add_job_contact": {
+      if (!args.job_id || !args.person_id) throw new Error("job_id and person_id required");
+      const row: any = { job_id: args.job_id, contact_id: args.person_id, is_primary: args.is_primary === true };
+      if (args.role) row.role = String(args.role);
+      const { error } = await sb.from("job_contacts").insert(row);
+      const alreadyLinked = !!(error && (error as any).code === "23505");
+      if (error && !alreadyLinked) throw new Error(error.message);
+      if (args.is_primary === true) {
+        await sb.from("jobs").update({ contact_id: args.person_id, updated_at: now() } as any).eq("id", args.job_id);
+      }
+      return { job_id: args.job_id, person_id: args.person_id, primary: args.is_primary === true, already_linked: alreadyLinked };
+    }
+
+    case "link_person_to_company": {
+      if (!args.person_id) throw new Error("person_id required");
+      let companyId: string | null = args.company_id ?? null;
+      let companyName: string | null = args.company_name ? String(args.company_name).trim() : null;
+      if (!companyId && companyName) {
+        const { data: co } = await sb.from("companies").select("id, name").ilike("name", companyName).is("deleted_at", null).limit(1).maybeSingle();
+        if ((co as any)?.id) { companyId = (co as any).id; companyName = (co as any).name; }
+      }
+      if (!companyId && !companyName) throw new Error("Provide company_id or company_name");
+      const patch: any = { updated_at: now() };
+      if (companyId) patch.company_id = companyId;
+      if (companyName) patch.company_name = companyName;
+      const { data, error } = await sb.from("people").update(patch).eq("id", args.person_id).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Person not found");
+      return {
+        person_id: args.person_id,
+        company_id: companyId,
+        company_name: companyName,
+        linked: !!companyId,
+        ...(companyId ? {} : { note: "No matching company found; saved company_name (auto-links if that company is later created)." }),
       };
     }
 
