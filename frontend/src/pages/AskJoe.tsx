@@ -7,6 +7,7 @@ import { Martini, Send, Loader2, Sparkles, Trash2, UserCheck, Users } from 'luci
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { JoeActionCard, type JoeAction } from '@/components/joe/JoeActionCard';
 
 type Mode = 'candidate_search' | 'contact_search';
 type Role = 'user' | 'assistant';
@@ -44,6 +45,7 @@ export default function AskJoe() {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusLine, setStatusLine] = useState<string>('');
+  const [actions, setActions] = useState<JoeAction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -111,6 +113,13 @@ export default function AskJoe() {
               setStatusLine(parsed.status);
               continue;
             }
+            // Agentic proposal card (only emitted when JOE_AGENTIC_ENABLED).
+            if (parsed.action && parsed.action.id) {
+              setActions((prev) =>
+                prev.some((a) => a.id === parsed.action.id) ? prev : [...prev, parsed.action as JoeAction],
+              );
+              continue;
+            }
             const content = parsed.content ?? parsed.choices?.[0]?.delta?.content;
             if (typeof content === 'string') {
               // Real text arriving clears the status line.
@@ -147,6 +156,7 @@ export default function AskJoe() {
 
   const handleClear = () => {
     setMessages([]);
+    setActions([]);
     setQuery('');
     inputRef.current?.focus();
   };
@@ -249,6 +259,17 @@ export default function AskJoe() {
                     <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2 not-italic" />
                     {statusLine || 'Joe is thinking…'}
                   </div>
+                </div>
+              )}
+              {actions.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  {actions.map((a) => (
+                    <JoeActionCard
+                      key={a.id}
+                      action={a}
+                      onResolve={(id) => setActions((prev) => prev.filter((x) => x.id !== id))}
+                    />
+                  ))}
                 </div>
               )}
             </div>
