@@ -17,7 +17,10 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import jsPDF from 'jspdf';
+// Type-only import (erased at build) — the heavy jspdf runtime is loaded on
+// demand inside generatePDF() so opening a send-out doesn't pull in the PDF
+// libs (jspdf + html2canvas) until the user actually exports.
+import type JsPDF from 'jspdf';
 import emeraldLogo from '@/assets/emerald-logo-resume.png';
 import {
   ArrowLeft, ArrowRight, FileText, Upload, Sparkles, Loader2, Edit, Download, Mail, Send,
@@ -55,7 +58,8 @@ const emptyResume: ResumeData = {
 };
 
 // ── PDF Generation ──────────────────────────────────────────────────────────
-function generatePDF(data: ResumeData, template: TemplateName): jsPDF {
+async function generatePDF(data: ResumeData, template: TemplateName): Promise<JsPDF> {
+  const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -466,8 +470,8 @@ export default function SendOut() {
   };
 
   // Download PDF
-  const handleDownloadPDF = () => {
-    const doc = generatePDF(resumeData, template);
+  const handleDownloadPDF = async () => {
+    const doc = await generatePDF(resumeData, template);
     const fileName = `${resumeData.name.replace(/\s+/g, '_')}_Resume.pdf`;
     doc.save(fileName);
     toast.success('PDF downloaded');
@@ -501,7 +505,7 @@ export default function SendOut() {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
-            const doc = generatePDF(resumeData, template);
+            const doc = await generatePDF(resumeData, template);
             const pdfBlob = doc.output('blob');
             const fileName = `${resumeData.name.replace(/[^a-zA-Z0-9._-]/g, '_')}_Resume.pdf`;
             const path = `${session.user.id}/${id}/formatted/${Date.now()}_${fileName}`;
