@@ -27,6 +27,9 @@
       "headers": {
         "Authorization": "Bearer b3079575-b549-41c6-b6dc-ba6d211a234b"
       }
+    },
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa,web_fetch_exa"
     }
   }
 }
