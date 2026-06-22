@@ -18,7 +18,21 @@ export function useCandidates() {
       while (true) {
         const { data, error } = await supabase
           .from('people')
-          .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
+          // Curated column set for the list/pipeline/filter views. Was
+          // select('*'), which dragged down linkedin_profile_data (jsonb, ~8MB
+          // across 8k rows) + the joe_says_embedding vector + other detail-only
+          // columns on every Candidates-page load. None are rendered in the
+          // list; the detail page fetches the full row via useCandidate(id).
+          .select(
+            'id, type, full_name, first_name, last_name, ' +
+            'title, current_title, company_name, current_company, company_id, ' +
+            'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
+            'email_invalid, email_invalid_reason, email_invalid_at, ' +
+            'avatar_url, profile_picture_url, roles, status, skills, location_text, ' +
+            'last_contacted_at, last_responded_at, last_comm_channel, ' +
+            'last_sequence_sentiment, last_sequence_sentiment_note, ' +
+            'do_not_contact, linked_contact_id, owner_user_id, created_at, updated_at',
+          )
           .eq('type', 'candidate')
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
