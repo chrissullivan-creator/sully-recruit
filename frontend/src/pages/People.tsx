@@ -9,7 +9,7 @@ import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { ApplicantsTab } from '@/components/people/ApplicantsTab';
 import { EmailBounceBadge } from '@/components/shared/EmailBounceBadge';
-import { usePeople } from '@/hooks/useData';
+import { usePeopleSearch, usePeopleTabCounts } from '@/hooks/useData';
 import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
@@ -105,7 +105,22 @@ const People = () => {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 100;
 
-  const { data: people = [], isLoading, isError, error, refetch } = usePeople();
+  // Server-side search + pagination. The page used to download all ~14k people
+  // and filter/sort/paginate in JS (slow to load; search only saw loaded rows).
+  // Now the DB returns one ~100-row page per request, with trigram-indexed
+  // search. Debounce the input so we don't fire a query per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const { data: pageData, isLoading, isError, error, refetch } = usePeopleSearch({
+    search: debouncedSearch, tab, sortField, sortDir, page, pageSize: PAGE_SIZE,
+  });
+  const rows = (pageData?.rows ?? []) as any[];
+  const total = pageData?.total ?? 0;
+  const { data: tabCountData } = usePeopleTabCounts();
 
   const rowKey = (p: any) => `${p.source_table}:${p.id}`;
 
@@ -160,45 +175,10 @@ const People = () => {
     staleTime: 30_000,
   });
 
-  const filtered = useMemo(() => {
-    const q = trimmedQuery.toLowerCase();
-
-    // Merge the email-bypass hits into the working list when applicable.
-    // De-dupe by id so a row that's already loaded doesn't appear twice.
-    let source = people;
-    if (looksLikeEmail && emailHits.length > 0) {
-      const known = new Set(people.map((p: any) => p.id));
-      const extras = (emailHits as any[]).filter((p) => !known.has(p.id));
-      if (extras.length > 0) source = [...people, ...extras];
-    }
-
-    let list = source.filter((p: any) => {
-      const matchesSearch = !q ||
-        (p.full_name ?? '').toLowerCase().includes(q) ||
-        (p.company_name ?? '').toLowerCase().includes(q) ||
-        (p.title ?? '').toLowerCase().includes(q) ||
-        (p.email ?? '').toLowerCase().includes(q) ||
-        (p.work_email ?? '').toLowerCase().includes(q) ||
-        (p.personal_email ?? '').toLowerCase().includes(q) ||
-        (Array.isArray(p.secondary_emails) &&
-          p.secondary_emails.some((e: string) => (e ?? '').toLowerCase().includes(q)));
-      return matchesSearch && matchesTab(p);
-    });
-
-    list.sort((a: any, b: any) => {
-      let av = '', bv = '';
-      if (sortField === 'name')          { av = (a.full_name ?? '').toLowerCase();    bv = (b.full_name ?? '').toLowerCase(); }
-      else if (sortField === 'title')    { av = (a.title ?? '').toLowerCase();        bv = (b.title ?? '').toLowerCase(); }
-      else if (sortField === 'company')  { av = (a.company_name ?? '').toLowerCase(); bv = (b.company_name ?? '').toLowerCase(); }
-      else if (sortField === 'lastReached')   { av = a.last_contacted_at ?? ''; bv = b.last_contacted_at ?? ''; }
-      else if (sortField === 'lastResponded') { av = a.last_responded_at ?? ''; bv = b.last_responded_at ?? ''; }
-      else if (sortField === 'created')       { av = a.created_at ?? ''; bv = b.created_at ?? ''; }
-      else { av = a.updated_at ?? a.created_at ?? ''; bv = b.updated_at ?? b.created_at ?? ''; }
-      const cmp = av.localeCompare(bv);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [people, emailHits, looksLikeEmail, trimmedQuery, tab, sortField, sortDir]);
+  // Server already filtered + sorted + paged; expose under the names the
+  // render uses (paginated = the current server page).
+  const filtered = rows;
+  const paginated = rows;
 
   const { data: applicantCount = 0 } = useQuery({
     queryKey: ['applicants_count'],
@@ -208,16 +188,15 @@ const People = () => {
     },
   });
 
-  const tabCounts = useMemo(() => ({
-    all:        people.length,
-    candidates: people.filter((p: any) => getRoles(p).includes('candidate')).length,
-    clients:    people.filter((p: any) => getRoles(p).includes('client')).length,
+  const tabCounts = {
+    all:        tabCountData?.all ?? 0,
+    candidates: tabCountData?.candidates ?? 0,
+    clients:    tabCountData?.clients ?? 0,
     applicants: applicantCount,
-  }), [people, applicantCount]);
+  };
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [searchQuery, tab]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  useEffect(() => { setPage(1); }, [debouncedSearch, tab, sortField, sortDir]);
 
   const toggleSelect = (key: string) =>
     setSelectedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
@@ -617,7 +596,7 @@ const People = () => {
         onOpenChange={setEnrollOpen}
         candidateIds={selectedCandidateIds}
         candidateNames={selectedCandidateIds.map(id => {
-          const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
+          const p = rows.find((x: any) => x.id === id && x.source_table === 'candidate');
           return p?.full_name ?? id;
         })}
       />
@@ -627,7 +606,7 @@ const People = () => {
         onOpenChange={setBulkSendOutOpen}
         candidateIds={selectedCandidateOnlyIds}
         candidateNames={selectedCandidateOnlyIds.map(id => {
-          const p = people.find((x: any) => x.id === id && x.source_table === 'candidate');
+          const p = rows.find((x: any) => x.id === id && x.source_table === 'candidate');
           return p?.full_name ?? id;
         })}
       />

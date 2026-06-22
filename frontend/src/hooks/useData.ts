@@ -292,6 +292,104 @@ export function useContacts() {
   return query;
 }
 
+// Server-side search + pagination for the People page. Replaces "download all
+// ~14k rows and filter in JS" — the DB now does filtering/sorting/paging and
+// returns one page at a time. Search is trigram-indexed (see migration
+// 20260622000000). Tab filter uses the roles[] GIN index so dual-role people
+// show under both Candidates and Clients, matching the old client-side logic.
+const PEOPLE_LIST_COLS =
+  'id, type, full_name, first_name, last_name, ' +
+  'title, current_title, company_name, current_company, company_id, ' +
+  'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
+  'email_invalid, email_invalid_reason, email_invalid_at, ' +
+  'avatar_url, roles, status, ' +
+  'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, last_sequence_sentiment_note, ' +
+  'owner_user_id, created_at, updated_at';
+
+export function usePeopleSearch(params: {
+  search: string;
+  tab: 'all' | 'candidates' | 'clients' | 'applicants';
+  sortField: string;
+  sortDir: 'asc' | 'desc';
+  page: number;
+  pageSize: number;
+}) {
+  const { search, tab, sortField, sortDir, page, pageSize } = params;
+  return useQuery({
+    queryKey: ['people_search', search, tab, sortField, sortDir, page, pageSize],
+    enabled: tab !== 'applicants',
+    queryFn: async () => {
+      let q = supabase
+        .from('people')
+        .select(PEOPLE_LIST_COLS, { count: 'exact' })
+        .is('deleted_at', null);
+
+      if (tab === 'candidates') q = q.contains('roles', ['candidate']);
+      else if (tab === 'clients') q = q.contains('roles', ['client']);
+
+      // Sanitize so reserved PostgREST or()-filter chars can't break the query.
+      const safe = search.replace(/[,()*%\\]/g, ' ').trim();
+      if (safe) {
+        const like = `*${safe}*`;
+        q = q.or(
+          [
+            `full_name.ilike.${like}`,
+            `current_company.ilike.${like}`,
+            `company_name.ilike.${like}`,
+            `current_title.ilike.${like}`,
+            `title.ilike.${like}`,
+            `primary_email.ilike.${like}`,
+            `work_email.ilike.${like}`,
+            `personal_email.ilike.${like}`,
+          ].join(','),
+        );
+      }
+
+      const sortCol =
+        sortField === 'name' ? 'full_name'
+        : sortField === 'title' ? 'current_title'
+        : sortField === 'company' ? 'current_company'
+        : sortField === 'lastReached' ? 'last_contacted_at'
+        : sortField === 'lastResponded' ? 'last_responded_at'
+        : sortField === 'created' ? 'created_at'
+        : 'updated_at';
+      q = q.order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false });
+
+      const from = (page - 1) * pageSize;
+      q = q.range(from, from + pageSize - 1);
+
+      const { data, error, count } = await q;
+      if (error) throw error;
+      const rows = ((data ?? []) as any[]).map((p) => ({
+        ...p,
+        source_table: p.type === 'client' ? 'contact' : 'candidate',
+        title: p.title ?? p.current_title ?? null,
+        company_name: p.company_name ?? p.current_company ?? null,
+      }));
+      return { rows, total: count ?? 0 };
+    },
+    placeholderData: (prev) => prev,
+    staleTime: 15_000,
+  });
+}
+
+export function usePeopleTabCounts() {
+  return useQuery({
+    queryKey: ['people_tab_counts'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const base = () =>
+        supabase.from('people').select('id', { count: 'exact', head: true }).is('deleted_at', null);
+      const [all, cand, cli] = await Promise.all([
+        base(),
+        base().contains('roles', ['candidate']),
+        base().contains('roles', ['client']),
+      ]);
+      return { all: all.count ?? 0, candidates: cand.count ?? 0, clients: cli.count ?? 0 };
+    },
+  });
+}
+
 // Unified people — queries the people table directly (was renamed from candidates).
 // Title/company normalized in JS since both candidate-side (current_title, current_company)
 // and client-side (title, company_name) columns coexist on the unified row.
