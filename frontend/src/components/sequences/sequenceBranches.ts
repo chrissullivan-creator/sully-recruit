@@ -159,12 +159,39 @@ export function hydrateBranchesFromNodes(nodeRows?: NodeRowLike[] | null, sequen
     // Single-lane UI: collapse any legacy branch_b rows into branch_a so
     // they show up linearly in the editor. node_order keeps the
     // canonical order across both legacy branches.
-    const rawSteps: BranchStepData[] = [...nodeRows]
-      .sort((a, b) => (a.node_order || 0) - (b.node_order || 0))
+    const sorted = [...nodeRows].sort((a, b) => (a.node_order || 0) - (b.node_order || 0));
+
+    // Self-heal accidental duplicate nodes. A past save could persist multiple
+    // nodes with a byte-identical action set (same channel(s), delays and
+    // body) at the same position — that's the "adding a step ties them
+    // together" corruption. Drop exact duplicates on load (keep the first) so
+    // the next save deletes the extras. Two genuinely distinct steps never
+    // share an identical action set, so this never merges real steps.
+    const seenSig = new Set<string>();
+    const deduped = sorted.filter((node) => {
+      const actions = node.sequence_actions || [];
+      if (actions.length === 0) return true; // keep empty steps as-is
+      const sig = actions
+        .map((a) =>
+          [
+            (a.channel ?? a.step_type ?? "") as string,
+            Number(a.base_delay_hours ?? a.delay_hours ?? 0),
+            Number(a.delay_interval_minutes ?? 0),
+            String(a.message_body ?? a.body ?? "").trim(),
+          ].join("|"),
+        )
+        .sort()
+        .join("||");
+      if (seenSig.has(sig)) return false;
+      seenSig.add(sig);
+      return true;
+    });
+
+    const rawSteps: BranchStepData[] = deduped
       .map((node, index) => ({
         id: node.id,
         label: node.label || "",
-        branchId: "branch_a",
+        branchId: "branch_a" as SequenceBranchId,
         branchStepOrder: index + 1,
         nodeOrder: Number(node.node_order) || index + 1,
         actions: (node.sequence_actions || []).map(mapActionRow),

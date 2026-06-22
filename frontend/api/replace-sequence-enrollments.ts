@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!(await requireAuth(req, res))) return;
 
-  const { sequence_id, enrolled_by, force_imminent } = req.body ?? {};
+  const { sequence_id, enrolled_by, force_imminent, activate_paused } = req.body ?? {};
   if (!sequence_id || !enrolled_by) {
     return res.status(400).json({ error: "Missing sequence_id or enrolled_by" });
   }
@@ -32,6 +32,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
 
   try {
+    // activate_paused: start enrollments that were attached while the sequence
+    // was a draft (status='paused' — e.g. BD-sequence contacts enrolled at
+    // creation). Promote them to active and fire init so they schedule from
+    // now. Deliberately does NOT touch already-active enrollments, so
+    // activating a sequence never re-paces people who are already mid-flight.
+    if (activate_paused) {
+      const { data: paused, error: pausedErr } = await supabase
+        .from("sequence_enrollments")
+        .select("id, candidate_id, contact_id")
+        .eq("sequence_id", sequence_id)
+        .eq("status", "paused");
+      if (pausedErr) throw pausedErr;
+      if (!paused || paused.length === 0) {
+        return res.status(200).json({ started: 0, message: "No paused enrollments" });
+      }
+      const pausedIds = paused.map((e) => e.id);
+      const { error: promoteErr } = await supabase
+        .from("sequence_enrollments")
+        .update({ status: "active", updated_at: new Date().toISOString() } as any)
+        .in("id", pausedIds);
+      if (promoteErr) throw promoteErr;
+
+      const tsSec = Math.floor(Date.now() / 1000);
+      const events = paused.map((e) => ({
+        id: `enrollment-init-${e.id}-activate-${tsSec}`,
+        name: "sequence/enrollment-init.requested" as const,
+        data: {
+          enrollmentId: e.id,
+          sequenceId: sequence_id,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
+          enrolledBy: enrolled_by,
+        },
+      }));
+      const sent = await inngest.send(events);
+      return res.status(200).json({ started: paused.length, engine: "inngest", task_run_ids: sent.ids });
+    }
+
     const { data: enrollments, error: enrollErr } = await supabase
       .from("sequence_enrollments")
       .select("id, candidate_id, contact_id")

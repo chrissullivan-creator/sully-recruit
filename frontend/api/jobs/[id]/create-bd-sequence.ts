@@ -278,14 +278,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (actErr) return res.status(500).json({ error: `Could not create email ${i + 1}: ${actErr.message}` });
   }
 
-  // 3. enroll + fire init (only when launching; a draft is enrolled later from
-  //    the builder so we don't pre-schedule against emails the user may rewrite)
+  // 3. Enroll the selected contacts onto the sequence AT CREATION so the job's
+  //    people are actually "in" it. Launch → enroll ACTIVE and fire
+  //    enrollment-init so sends schedule now. Draft → enroll PAUSED: they're
+  //    attached/visible but nothing schedules until the sequence is activated
+  //    (which re-paces from now), so we never pre-schedule against copy the
+  //    user may still rewrite.
   let enrolled = 0;
-  if (launch && enrollIds.length) {
+  if (enrollIds.length) {
     const rows = enrollIds.map((cid) => ({
       sequence_id: sequenceId,
       contact_id: cid,
-      status: "active",
+      status: launch ? "active" : "paused",
       enrolled_by: auth.userId,
     }));
     const { data: inserted, error: enrErr } = await supabase
@@ -294,18 +298,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select("id, sequence_id, contact_id, enrolled_by");
     if (enrErr) return res.status(500).json({ error: `Sequence created but enrollment failed: ${enrErr.message}`, sequence_id: sequenceId });
 
-    const events = ((inserted || []) as any[]).map((row) => ({
-      id: `enrollment-init-${row.id}`,
-      name: "sequence/enrollment-init.requested",
-      data: {
-        enrollmentId: row.id,
-        sequenceId: row.sequence_id,
-        contactId: row.contact_id,
-        enrolledBy: row.enrolled_by,
-      },
-    }));
-    if (events.length) await inngest.send(events);
-    enrolled = events.length;
+    enrolled = ((inserted || []) as any[]).length;
+
+    if (launch) {
+      const events = ((inserted || []) as any[]).map((row) => ({
+        id: `enrollment-init-${row.id}`,
+        name: "sequence/enrollment-init.requested",
+        data: {
+          enrollmentId: row.id,
+          sequenceId: row.sequence_id,
+          contactId: row.contact_id,
+          enrolledBy: row.enrolled_by,
+        },
+      }));
+      if (events.length) await inngest.send(events);
+    }
   }
 
   return res.status(200).json({ sequence_id: sequenceId, status: launch ? "active" : "draft", enrolled });

@@ -103,8 +103,34 @@ export function SequenceList() {
       if (status === "active") patch.archived_at = null; // un-archive on re-activate
       const { error } = await supabase.from("sequences").update(patch as any).in("id", selectedIds);
       if (error) throw error;
+
+      // Activating also starts any enrollments that were attached while the
+      // sequence was a draft (status='paused' — e.g. BD-sequence contacts). The
+      // endpoint promotes those to active + schedules them from now, and leaves
+      // already-running enrollments untouched.
+      let started = 0;
+      if (status === "active") {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          const headers = await authHeaders();
+          const settled = await Promise.allSettled(
+            selectedIds.map((sid) =>
+              fetch("/api/replace-sequence-enrollments", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ sequence_id: sid, enrolled_by: user.id, force_imminent: true, activate_paused: true }),
+              }).then((r) => (r.ok ? r.json() : null)),
+            ),
+          );
+          for (const s of settled) if (s.status === "fulfilled" && s.value?.started) started += s.value.started;
+        }
+      }
+
       const verb = status === "active" ? "activated" : status === "paused" ? "paused" : "archived";
-      toast.success(`${selectedIds.length} sequence${selectedIds.length === 1 ? "" : "s"} ${verb}`);
+      toast.success(
+        `${selectedIds.length} sequence${selectedIds.length === 1 ? "" : "s"} ${verb}` +
+          (started > 0 ? ` — ${started} enrollment${started === 1 ? "" : "s"} started` : ""),
+      );
       clearSelection();
       await loadSequences();
     } catch (err: any) {
