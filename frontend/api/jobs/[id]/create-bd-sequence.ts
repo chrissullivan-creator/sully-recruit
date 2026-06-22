@@ -166,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, company_name, company_id, contact_id, status, marketing_title, marketing_job_description, job_description, description")
+    .select("id, title, company_name, company_id, contact_id, status, marketing_title, marketing_job_description, description")
     .eq("id", jobId)
     .maybeSingle();
   if (jobErr) return res.status(500).json({ error: jobErr.message });
@@ -174,7 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const jobName = (job as any).title || (job as any).marketing_title || "this role";
   const company = (job as any).company_name || "";
-  const jobDesc = stripHtml((job as any).marketing_job_description || (job as any).job_description || (job as any).description || "");
+  const jobDesc = stripHtml((job as any).marketing_job_description || (job as any).description || "");
 
   // Resolve the client contacts attached to this job: job_contacts + the
   // job's primary contact_id. Filter to those we can actually email.
