@@ -4,6 +4,7 @@ import { normalizeEmail } from "../../../../src/server-lib/resume-parsing.js";
 import { isMarketingEmail } from "../../../../src/server-lib/marketing-blocklist.js";
 import { unipileFetch, unipileFetchV2 } from "../../../../src/server-lib/unipile-v2.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
+import { isTransientFetchError } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Backfill emails from Unipile every 5 minutes — safety net for missed
@@ -158,7 +159,9 @@ async function processAccount(
       const status = m ? Number(m[1]) : null;
       const is5xx = status !== null && status >= 500 && status <= 599;
       const isInactiveSubscription = /api\/inactive_subscription/.test(String(err?.message || ""));
-      if (!is5xx && !isInactiveSubscription) {
+      // Transient connectivity (fetch failed / timeout) is an infra blip, not an
+      // actionable auth/config issue — log it but don't burn an ERROR alert.
+      if (!is5xx && !isInactiveSubscription && !isTransientFetchError(err)) {
         await notifyError({
           taskId: "backfill-emails",
           severity: "ERROR",
@@ -357,7 +360,9 @@ async function processAccountV2(
       const m = String(err?.message || "").match(/Unipile v2 (\d{3})/);
       const status = m ? Number(m[1]) : null;
       const is5xx = status !== null && status >= 500 && status <= 599;
-      if (!is5xx) {
+      // Transient connectivity (fetch failed / timeout) is an infra blip, not an
+      // actionable auth/config issue — log it but don't burn an ERROR alert.
+      if (!is5xx && !isTransientFetchError(err)) {
         await notifyError({
           taskId: "backfill-emails",
           severity: "ERROR",

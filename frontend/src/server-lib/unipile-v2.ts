@@ -26,6 +26,7 @@
  * Auth: X-API-KEY = UNIPILE_API_KEY (v1 key).
  */
 import { logger } from "./logger.js";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 interface ResolvedConfig {
   base: string;
@@ -431,7 +432,14 @@ export async function unipileFetchV2<T = any>(
   if (typeof init.body === "string" && !headers["Content-Type"] && !headers["content-type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const resp = await fetch(url.toString(), { ...init, headers });
+  // Retry only idempotent reads (GET/HEAD). Retrying a failed POST/send risks a
+  // DOUBLE-send when the request actually reached Unipile but the response was
+  // lost, so non-idempotent calls stay single-shot. Reads also get a fresh
+  // per-attempt timeout so a hung connection can't stall the whole function.
+  const method = (init.method || "GET").toUpperCase();
+  const resp = method === "GET" || method === "HEAD"
+    ? await fetchWithRetry(url.toString(), { ...init, headers }, { label: "unipile-v2", timeoutMs: 20_000 })
+    : await fetch(url.toString(), { ...init, headers });
   const text = await resp.text();
   if (!resp.ok) {
     throw new Error(`Unipile v2 ${resp.status} ${path}: ${text.slice(0, 300)}`);

@@ -2,6 +2,7 @@ import { inngest } from "../client.js";
 import { getSupabaseAdmin, getAppSetting } from "../../../../src/server-lib/supabase.js";
 import { unipileFetchV2, canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
+import { isTransientFetchError } from "../../../../src/server-lib/fetch-retry.js";
 
 /**
  * Backfill LinkedIn messages from the Unipile **v2** API every 5 minutes.
@@ -221,12 +222,13 @@ async function processAccountV2(
     // (and hits every account), which still pages below.
     const isProviderAuth = status === 401 && /"type"\s*:\s*"provider\//i.test(msg);
     // Don't page on expected/account-health failures:
+    //   network/timeout = transient connectivity blip (fetch failed),
     //   429 = rate-limited (backpressure), 5xx = transient Unipile,
     //   404 = account not reachable on v2 (disconnected / needs reconnect),
     //   401 provider/* = seat session invalid (needs reconnect).
     // A genuine endpoint rename would 404 EVERY account and show up as zero
     // inserts in the daily pipeline-health digest.
-    if (!is5xx && status !== 429 && status !== 404 && !isProviderAuth) {
+    if (!is5xx && status !== 429 && status !== 404 && !isProviderAuth && !isTransientFetchError(err)) {
       await notifyError({
         taskId: "backfill-linkedin-messages-v2",
         severity: "ERROR",

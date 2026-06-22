@@ -24,6 +24,10 @@ interface RetryOptions {
   baseDelayMs?: number;
   /** Cap on delay (ms). Default 30s. */
   maxDelayMs?: number;
+  /** Per-attempt timeout (ms). A FRESH AbortSignal.timeout is created for each
+   *  attempt — a single shared signal would stay aborted after the first
+   *  timeout and make every subsequent retry fail instantly. Off by default. */
+  timeoutMs?: number;
   /** Friendly label for log lines. */
   label?: string;
 }
@@ -60,13 +64,16 @@ export async function fetchWithRetry(
   opts: RetryOptions = {},
 ): Promise<Response> {
   const { maxAttempts, baseDelayMs, maxDelayMs } = { ...DEFAULT_OPTS, ...opts };
+  const timeoutMs = opts.timeoutMs;
   const label = opts.label || new URL(url).host;
 
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const resp = await fetch(url, init);
+      // Fresh per-attempt timeout signal so each retry gets a full window.
+      const attemptInit = timeoutMs ? { ...init, signal: AbortSignal.timeout(timeoutMs) } : init;
+      const resp = await fetch(url, attemptInit);
       if (resp.ok || !TRANSIENT_STATUSES.has(resp.status)) {
         return resp;
       }
@@ -94,4 +101,32 @@ export async function fetchWithRetry(
 
   // Unreachable, but keeps TS happy.
   throw lastError ?? new Error(`${label}: exhausted retries`);
+}
+
+/**
+ * True for transient CONNECTIVITY failures — ones where no HTTP response ever
+ * came back: DNS/socket errors (`TypeError: fetch failed`), connection resets,
+ * and `AbortSignal.timeout` firings (`TimeoutError`/"aborted due to timeout").
+ *
+ * Callers use this to DOWNGRADE such failures out of ERROR alerts: they're
+ * infra blips (Unipile/network), not actionable auth/config bugs, and they
+ * self-heal. A real 4xx (bad key, disconnected account) is NOT transient and
+ * still surfaces as ERROR.
+ */
+export function isTransientFetchError(err: unknown): boolean {
+  const name = (err as any)?.name ? String((err as any).name) : "";
+  const msg = String((err as any)?.message || "").toLowerCase();
+  return (
+    name === "TimeoutError" ||
+    name === "AbortError" ||
+    msg.includes("fetch failed") ||
+    msg.includes("aborted due to timeout") ||
+    msg.includes("the operation was aborted") ||
+    msg.includes("network") ||
+    msg.includes("etimedout") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("socket hang up")
+  );
 }

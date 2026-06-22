@@ -76,8 +76,7 @@ async function fetchLiveAccounts(base: string, apiKey: string): Promise<any[]> {
   while (url && guard++ < 10) {
     const resp = await fetchWithRetry(url, {
       headers: { "X-API-KEY": apiKey, Accept: "application/json" },
-      signal: AbortSignal.timeout(15_000),
-    }, { label: "unipile" });
+    }, { label: "unipile", timeoutMs: 15_000 });
     if (!resp.ok) throw new Error(`Unipile GET /accounts failed: HTTP ${resp.status}`);
     const data: any = await resp.json();
     const items: any[] = Array.isArray(data) ? data : (data.items ?? data.accounts ?? data.data ?? []);
