@@ -570,7 +570,7 @@ export function useJobSendOuts(jobId: string | undefined) {
       if (ids.length) {
         const { data: people } = await supabase
           .from('people')
-          .select('id, full_name, first_name, last_name, current_title, current_company, email:primary_email, phone, resume_url')
+          .select('id, full_name, first_name, last_name, current_title, current_company, email:primary_email, phone, resume_url, avatar_url, type, linkedin_url, target_total_comp, target_base_comp')
           .in('id', ids);
         byId = new Map(((people ?? []) as any[]).map((p) => [p.id, p]));
       }

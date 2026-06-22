@@ -57,7 +57,10 @@ import { JobNotesTab } from '@/components/job-detail/JobNotesTab';
 import { FileText as FileTextIcon } from 'lucide-react';
 import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPELINE } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
-import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
+import { fetchLatestStageMoveNote, formatComp, formatCompRange } from '@/lib/queries/send-outs';
+import { format } from 'date-fns';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
+import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import {
@@ -384,6 +387,154 @@ const SendOutCard = ({ sendOut, contacts }: { sendOut: any; contacts: any[] }) =
         </div>
       )}
     </div>
+  );
+};
+
+// ── Send-out wide table row (Send Outs tab) ─────────────────────────────────
+// Same stage / withdrawal / notes behavior as SendOutCard, laid out as a
+// horizontally-scrollable table row so the Send Outs tab reads like a wide
+// table instead of a stack of cards.
+const SendOutTableRow = ({ sendOut, contacts, index }: { sendOut: any; contacts: any[]; index: number }) => {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [changingStage, setChangingStage] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [pendingRejectStage, setPendingRejectStage] = useState<string | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  const c = sendOut.candidate ?? null;
+  const name = sendOut.candidate_name ?? c?.full_name
+    ?? (`${c?.first_name ?? ''} ${c?.last_name ?? ''}`.trim() || 'Unknown Candidate');
+  const initials = ((c?.first_name?.[0] ?? '') + (c?.last_name?.[0] ?? '')).toUpperCase()
+    || (name[0] ?? '?').toUpperCase();
+  const contact = contacts.find((x: any) => x.id === sendOut.contact_id);
+  const stageCfg = SEND_OUT_STAGES.find((s) => s.value === sendOut.stage) ?? SEND_OUT_STAGES[0];
+  const hasComp = sendOut.base_comp_min != null || sendOut.base_comp_max != null
+    || sendOut.bonus_comp_min != null || sendOut.bonus_comp_max != null;
+  const goldTone = index % 2 === 1;
+  const submitted = sendOut.sent_to_client_at ?? sendOut.created_at;
+  const profileHref = c?.id ? `${c.type === 'client' ? '/contacts/' : '/candidates/'}${c.id}` : null;
+
+  const handleStageChange = async (newStage: string) => {
+    if (stageToCanonical(newStage) === 'withdrawn') {
+      setPendingRejectStage(newStage); setRejectOpen(true); return;
+    }
+    setChangingStage(true);
+    try {
+      const updates: any = { stage: newStage };
+      if (newStage === 'interviewing') updates.interview_at = new Date().toISOString();
+      else if (newStage === 'offer') updates.offer_at = new Date().toISOString();
+      else if (newStage === 'placed') updates.placed_at = new Date().toISOString();
+      const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOut.id);
+      if (error) throw error;
+      invalidateSendOutScope(queryClient);
+      toast.success(`Stage updated to ${SEND_OUT_STAGES.find((s) => s.value === newStage)?.label}`);
+    } catch (e: any) { toast.error(e.message); } finally { setChangingStage(false); }
+  };
+
+  const handleRejectConfirm = async (party: string, reason: string) => {
+    const newStage = pendingRejectStage ?? 'rejected';
+    setChangingStage(true);
+    try {
+      const updates: any = { stage: newStage, withdrawn_by_party: party };
+      if (reason && reason.trim()) updates.withdrawn_reason = reason.trim();
+      const { error } = await supabase.from('send_outs').update(updates).eq('id', sendOut.id);
+      if (error) throw error;
+      invalidateSendOutScope(queryClient);
+      toast.success('Marked as Rejected');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setChangingStage(false); setRejectOpen(false); setPendingRejectStage(null); }
+  };
+
+  return (
+    <tr className="border-b border-border/60 hover:bg-muted/30 transition-colors text-sm">
+      <td className="px-3 py-2.5 min-w-[210px]">
+        <button
+          onClick={() => profileHref && navigate(profileHref)}
+          className="flex items-center gap-2.5 text-left"
+        >
+          {c?.avatar_url ? (
+            <img src={c.avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+          ) : (
+            <div className={cn('h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-xs font-semibold',
+              goldTone ? 'bg-gold/15 text-gold-deep' : 'bg-emerald-light text-emerald')}>{initials}</div>
+          )}
+          <div className="min-w-0">
+            <p className="font-medium text-foreground truncate hover:underline">{name}</p>
+            {contact && <p className="text-[11px] text-muted-foreground truncate">Contact: {contact.full_name}</p>}
+          </div>
+        </button>
+      </td>
+      <td className="px-3 py-2.5 text-muted-foreground min-w-[170px]">
+        <p className="truncate">{c?.current_title ?? '—'}</p>
+        {c?.current_company && <p className="text-[11px] truncate text-muted-foreground/70">{c.current_company}</p>}
+      </td>
+      <td className="px-3 py-2.5 text-gold-deep tabular-nums min-w-[130px] leading-tight">
+        {hasComp ? (
+          <>
+            <div className="font-semibold"><span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mr-1">Base</span>{formatCompRange(sendOut.base_comp_min, sendOut.base_comp_max)}</div>
+            <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mr-1">Bonus</span>{formatCompRange(sendOut.bonus_comp_min, sendOut.bonus_comp_max)}</div>
+          </>
+        ) : <span className="font-semibold">{formatComp(c?.target_total_comp ?? c?.target_base_comp ?? null)}</span>}
+      </td>
+      <td className="px-3 py-2.5 min-w-[130px]">
+        <Select value={sendOut.stage ?? 'submitted'} onValueChange={handleStageChange} disabled={changingStage}>
+          <SelectTrigger className={cn('h-7 w-auto min-w-[110px] border-0 text-xs font-medium rounded px-2 py-0.5 gap-1', stageCfg.color)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SEND_OUT_STAGES.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', s.color)}>{s.label}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <WithdrawnReasonDialog
+          open={rejectOpen}
+          onOpenChange={(v) => { setRejectOpen(v); if (!v) setPendingRejectStage(null); }}
+          onConfirm={handleRejectConfirm}
+        />
+      </td>
+      <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[110px]">
+        {submitted ? format(new Date(submitted), 'MMM d, yyyy') : '—'}
+      </td>
+      <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[90px]">
+        {sendOut.updated_at ? format(new Date(sendOut.updated_at), 'MMM d') : '—'}
+      </td>
+      <td className="px-3 py-2.5 text-xs text-muted-foreground min-w-[160px] max-w-[240px]">
+        {sendOut.submittal_notes
+          ? <span className="line-clamp-2">{sendOut.submittal_notes}</span>
+          : <span className="text-muted-foreground/50 italic">—</span>}
+      </td>
+      <td className="px-3 py-2.5 min-w-[120px]">
+        <div className="flex items-center gap-1">
+          {sendOut.resume_url && (
+            <a href={sendOut.resume_url} target="_blank" rel="noreferrer" title="Resume"
+               className="p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors">
+              <FileText className="h-3.5 w-3.5" />
+            </a>
+          )}
+          <button onClick={() => setNotesOpen(true)} title="Notes"
+                  className="p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors">
+            <FileTextIcon className="h-3.5 w-3.5" />
+          </button>
+          {profileHref && (
+            <button onClick={() => navigate(profileHref)} title="Open profile"
+                    className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <EditSendOutNotesDialog
+          open={notesOpen}
+          onOpenChange={setNotesOpen}
+          sendOutId={sendOut.id}
+          candidateName={name}
+          jobTitle={null}
+        />
+      </td>
+    </tr>
   );
 };
 
@@ -1738,11 +1889,27 @@ const JobDetail = () => {
                           No send outs in this stage.
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          {filtered.map(so => (
-                            <SendOutCard key={so.id} sendOut={so} contacts={contacts} />
-                          ))}
-                        </div>
+                        <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1100}>
+                          <table className="w-full">
+                            <thead className="table-header-green">
+                              <tr>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Candidate</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Title · Company</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Comp</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Submitted</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Updated</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes</th>
+                                <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filtered.map((so, i) => (
+                                <SendOutTableRow key={so.id} sendOut={so} contacts={contacts} index={i} />
+                              ))}
+                            </tbody>
+                          </table>
+                        </HorizontalTableScroll>
                       )}
                     </>
                   );
