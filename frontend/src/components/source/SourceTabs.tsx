@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -235,6 +236,7 @@ export function JobSourceTab({ jobId }: { jobId: string }) {
               <Badge className={meta.cls}>{meta.label}</Badge>
               <span className="text-xs text-muted-foreground">{items.length} candidate{items.length === 1 ? '' : 's'}</span>
             </div>
+            <HorizontalTableScroll minWidth={760}>
             <table className="w-full text-sm">
               <thead className="text-xs text-muted-foreground border-b border-border">
                 <tr>
@@ -270,6 +272,7 @@ export function JobSourceTab({ jobId }: { jobId: string }) {
                 })}
               </tbody>
             </table>
+            </HorizontalTableScroll>
           </div>
         );
       })}
