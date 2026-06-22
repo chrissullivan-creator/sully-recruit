@@ -61,6 +61,7 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
       .from("jobs")
       .select("id, title, company_name, status")
       .in("status", ["hot", "lead"])
+      .is("deleted_at", null)
       .order("status", { ascending: true })
       .order("title", { ascending: true })
       .then(({ data: jobData }) => {

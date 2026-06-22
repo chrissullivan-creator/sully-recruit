@@ -107,13 +107,14 @@ function useContactJobs(contactId: string | undefined) {
         .from('jobs')
         .select('*')
         .eq('contact_id', contactId!)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (err1) throw err1;
 
       // Jobs linked via send_outs
       const { data: sendOutJobs, error: err2 } = await supabase
         .from('send_outs')
-        .select('jobs(id, title, company_name, location, status, created_at)')
+        .select('jobs(id, title, company_name, location, status, created_at, deleted_at)')
         .eq('contact_id', contactId!);
       if (err2) throw err2;
 
@@ -124,7 +125,7 @@ function useContactJobs(contactId: string | undefined) {
       // Jobs linked via job_contacts table
       const { data: jobContactRows, error: err3 } = await supabase
         .from('job_contacts')
-        .select('job_id, is_primary, jobs(id, title, company_name, location, status, created_at)')
+        .select('job_id, is_primary, jobs(id, title, company_name, location, status, created_at, deleted_at)')
         .eq('contact_id', contactId!);
       if (err3) throw err3;
 
@@ -136,6 +137,7 @@ function useContactJobs(contactId: string | undefined) {
       const allJobs = [...(hiringManagerJobs || []), ...soJobs, ...jcJobs];
       const seen = new Set<string>();
       return allJobs.filter((j: any) => {
+        if (!j || !j.id || j.deleted_at) return false; // drop soft-deleted jobs
         if (seen.has(j.id)) return false;
         seen.add(j.id);
         return true;

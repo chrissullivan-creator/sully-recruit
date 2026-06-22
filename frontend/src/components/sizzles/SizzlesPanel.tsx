@@ -348,6 +348,7 @@ function JobPicker({ value, onChange }: { value: string; onChange: (v: string) =
       const { data } = await supabase
         .from('jobs')
         .select('id, title')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .limit(200);
       return data ?? [];

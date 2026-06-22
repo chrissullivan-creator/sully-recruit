@@ -40,6 +40,7 @@ function useGlobalSearch(query: string) {
           .from('jobs')
           .select('id, title, company_name, status, companies(name, domain, logo_url)')
           .or(`title.ilike.${q},company_name.ilike.${q}`)
+          .is('deleted_at', null)
           .limit(6),
         supabase
           .from('companies')
