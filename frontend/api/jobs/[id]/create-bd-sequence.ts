@@ -166,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, company_name, company_id, contact_id, status, owner_user_id, marketing_title, marketing_job_description, job_description, description")
+    .select("id, title, company_name, company_id, contact_id, status, marketing_title, marketing_job_description, job_description, description")
     .eq("id", jobId)
     .maybeSingle();
   if (jobErr) return res.status(500).json({ error: jobErr.message });
@@ -223,7 +223,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requested: string[] = Array.isArray(body.contact_ids) ? body.contact_ids : contacts.map((c) => c.id);
   const enrollIds = requested.filter((cid) => validIds.has(cid));
 
-  const senderId = (job as any).owner_user_id || auth.userId;
+  // `jobs` has no owner/recruiter column — the BD sequence is sent by the
+  // recruiter running it.
+  const senderId = auth.userId;
 
   // 1. sequence
   const { data: seq, error: seqErr } = await supabase
