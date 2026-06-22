@@ -59,7 +59,6 @@ import { stageToCanonical, canonicalConfig, type CanonicalStage, CANONICAL_PIPEL
 import { moveStage } from '@/lib/mutations/move-stage';
 import { fetchLatestStageMoveNote, formatComp, formatCompRange } from '@/lib/queries/send-outs';
 import { format } from 'date-fns';
-import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
@@ -1480,7 +1479,7 @@ const JobDetail = () => {
               </TabsList>
             </div>
 
-            <ScrollArea className="flex-1">
+            <ScrollArea className="flex-1" horizontal>
 
               {/* ── Details Tab ────────────────────────────── */}
               <TabsContent value="details" className="px-8 py-5 mt-0 space-y-6">
@@ -1925,7 +1924,7 @@ const JobDetail = () => {
                           No send outs in this stage.
                         </div>
                       ) : (
-                        <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1100}>
+                        <div className="min-w-[1100px] rounded-lg border border-border overflow-hidden">
                           <table className="w-full">
                             <thead className="table-header-green">
                               <tr>
@@ -1945,7 +1944,7 @@ const JobDetail = () => {
                               ))}
                             </tbody>
                           </table>
-                        </HorizontalTableScroll>
+                        </div>
                       )}
                     </>
                   );
