@@ -6,7 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, BarChart3, Calendar, Pause, Play, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Plus, BarChart3, Calendar, Pause, Play, Loader2, Archive, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api-auth";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
@@ -30,6 +35,9 @@ export function SequenceList() {
   // Tracks per-row pause/resume mutation state so we can disable
   // the buttons + show a spinner.
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Bulk-selection state.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   async function handlePause(seq: SequenceRow) {
     setBusyId(seq.id);
@@ -77,6 +85,52 @@ export function SequenceList() {
       toast.error(err?.message || "Failed to resume");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  const toggleSelect = (seqId: string) =>
+    setSelectedIds((prev) => (prev.includes(seqId) ? prev.filter((x) => x !== seqId) : [...prev, seqId]));
+  const allSelected = sequences.length > 0 && sequences.every((s) => selectedIds.includes(s.id));
+  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : sequences.map((s) => s.id));
+  const clearSelection = () => setSelectedIds([]);
+
+  async function bulkSetStatus(status: "active" | "paused" | "archived") {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+      if (status === "archived") patch.archived_at = new Date().toISOString();
+      if (status === "active") patch.archived_at = null; // un-archive on re-activate
+      const { error } = await supabase.from("sequences").update(patch as any).in("id", selectedIds);
+      if (error) throw error;
+      const verb = status === "active" ? "activated" : status === "paused" ? "paused" : "archived";
+      toast.success(`${selectedIds.length} sequence${selectedIds.length === 1 ? "" : "s"} ${verb}`);
+      clearSelection();
+      await loadSequences();
+    } catch (err: any) {
+      toast.error(err?.message || "Bulk update failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkDelete() {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const { error } = await supabase.from("sequences").delete().in("id", selectedIds);
+      if (error) throw error;
+      toast.success(`${selectedIds.length} sequence${selectedIds.length === 1 ? "" : "s"} deleted`);
+      clearSelection();
+      await loadSequences();
+    } catch (err: any) {
+      toast.error(
+        /foreign key|violates/i.test(err?.message || "")
+          ? "Some sequences have enrollment history and can't be hard-deleted — archive them instead."
+          : err?.message || "Bulk delete failed",
+      );
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -146,9 +200,48 @@ export function SequenceList() {
             </Link>
           </div>
         ) : (
+          <>
+            {selectedIds.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 mb-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
+                <span className="text-sm font-medium">{selectedIds.length} selected</span>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy} onClick={() => bulkSetStatus("active")}>
+                  <Play className="h-3.5 w-3.5" /> Activate
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy} onClick={() => bulkSetStatus("paused")}>
+                  <Pause className="h-3.5 w-3.5" /> Pause
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy} onClick={() => bulkSetStatus("archived")}>
+                  <Archive className="h-3.5 w-3.5" /> Archive
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" disabled={bulkBusy}>
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {selectedIds.length} sequence{selectedIds.length === 1 ? "" : "s"}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently removes the sequence{selectedIds.length === 1 ? "" : "s"} and {selectedIds.length === 1 ? "its" : "their"} steps. Sequences with enrollment history can't be hard-deleted — archive those instead. This can't be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={bulkDelete}>Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                {bulkBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                <Button variant="ghost" size="sm" className="h-8 ml-auto" onClick={clearSelection}>Clear</Button>
+              </div>
+            )}
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} aria-label="Select all" />
+                </TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Audience</TableHead>
@@ -160,7 +253,14 @@ export function SequenceList() {
             </TableHeader>
             <TableBody>
               {sequences.map((seq) => (
-                <TableRow key={seq.id}>
+                <TableRow key={seq.id} className={selectedIds.includes(seq.id) ? "bg-accent/5" : undefined}>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedIds.includes(seq.id)}
+                      onCheckedChange={() => toggleSelect(seq.id)}
+                      aria-label={`Select ${seq.name}`}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">
                     <Link to={`/sequences/${seq.id}/edit`} className="hover:underline">
                       {seq.name}
@@ -245,6 +345,7 @@ export function SequenceList() {
               ))}
             </TableBody>
           </Table>
+          </>
         )}
       </CardContent>
       <EnrolledPeopleDialog
