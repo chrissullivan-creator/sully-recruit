@@ -458,6 +458,10 @@ export function useJobSendOuts(jobId: string | undefined) {
         .from('send_outs')
         .select('*')
         .eq('job_id', jobId!)
+        // Exclude soft-deleted rows so Job Detail counts match the main Send
+        // Outs page (useSendOuts), which filters deleted_at IS NULL. Without
+        // this, deleted send-outs inflated the Job Detail tab/sidebar counts.
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
 

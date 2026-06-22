@@ -17,14 +17,21 @@ interface FunnelStripProps {
 }
 
 export function FunnelStrip({ jobId, activeStage, onStageClick, dropTargets = false }: FunnelStripProps) {
+  // Count from send_outs (the send-out lifecycle these tiles label:
+  // Pitch -> Send Out -> Submission -> Interview -> Offer -> Placed), NOT
+  // candidate_jobs. candidate_jobs is the broader "tagged/considered" set
+  // (e.g. 101 considered vs 13 actually sent out) and diverges wildly, which
+  // made the top funnel disagree with the Send Outs tab + main Send Outs page.
+  // deleted_at IS NULL keeps it in step with both of those.
   const { data: rows = [] } = useQuery({
-    queryKey: ['job_funnel', jobId],
+    queryKey: ['job_funnel_sendouts', jobId],
     enabled: !!jobId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('candidate_jobs')
-        .select('pipeline_stage')
-        .eq('job_id', jobId);
+        .from('send_outs')
+        .select('pipeline_stage:stage')
+        .eq('job_id', jobId)
+        .is('deleted_at', null);
       if (error) throw error;
       return (data ?? []) as { pipeline_stage: string | null }[];
     },
