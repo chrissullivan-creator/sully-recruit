@@ -34,6 +34,10 @@ export interface EnrollmentInitPayload {
   contactId?: string;
   enrolledBy: string;
   accountId?: string;
+  /** Minutes to offset this enrollment's FIRST scheduled send, so a batch of
+   *  simultaneous enrollments spreads out instead of bursting together. Set by
+   *  the batch enroller (BD-sequence launch / bulk activate / re-pace). */
+  staggerMinutes?: number;
 }
 
 /**
@@ -158,6 +162,8 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
     return true; // manual_call, phone — no pre-flight
   }
 
+  const staggerMinutes = Math.max(0, Number(payload.staggerMinutes) || 0);
+  let firstScheduledDone = false;
   let prevSendTime = enrolledAt;
   for (const node of orderedNodes) {
     const actions = (node as any).sequence_actions || [];
@@ -237,10 +243,15 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
         // overdue steps that would all fire at once on the next sweep.
         if (prevSendTime.getTime() < Date.now()) prevSendTime = new Date();
 
+        // Stagger the FIRST scheduled send so a batch of simultaneous
+        // enrollments spreads out instead of bursting at near-identical times.
+        // Skip the hot-spot snap on that send so the offset isn't re-clustered.
+        const applyStagger = !firstScheduledDone && staggerMinutes > 0;
+
         const scheduledAt = await calculateSendTime(supabase, {
           startTime: prevSendTime,
           delayHours: Number(action.base_delay_hours) || 0,
-          delayMinutes: action.delay_interval_minutes || 0,
+          delayMinutes: (action.delay_interval_minutes || 0) + (applyStagger ? staggerMinutes : 0),
           jiggleMinutes: action.jiggle_minutes || 0,
           channel: action.channel,
           sendWindowStart: sequence.send_window_start || "09:00",
@@ -248,6 +259,7 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
           accountId: senderUserId,
           timezone: sequence.timezone || undefined,
           weekdaysOnly: sequence.weekdays_only === true,
+          skipHotSpot: applyStagger,
         });
 
         await supabase.from("sequence_step_logs").insert({
@@ -260,6 +272,7 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
         });
         prevSendTime = scheduledAt;
         scheduled++;
+        firstScheduledDone = true;
       }
     }
   }

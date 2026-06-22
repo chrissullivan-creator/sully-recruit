@@ -301,16 +301,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     enrolled = ((inserted || []) as any[]).length;
 
     if (launch) {
-      const events = ((inserted || []) as any[]).map((row) => ({
-        id: `enrollment-init-${row.id}`,
-        name: "sequence/enrollment-init.requested",
-        data: {
-          enrollmentId: row.id,
-          sequenceId: row.sequence_id,
-          contactId: row.contact_id,
-          enrolledBy: row.enrolled_by,
-        },
-      }));
+      // Stagger the batch so the first emails don't all fire within a couple of
+      // minutes — each recipient starts 5–12 min after the previous one.
+      let cumStagger = 0;
+      const events = ((inserted || []) as any[]).map((row) => {
+        const staggerMinutes = cumStagger;
+        cumStagger += 5 + Math.floor(Math.random() * 8);
+        return {
+          id: `enrollment-init-${row.id}`,
+          name: "sequence/enrollment-init.requested" as const,
+          data: {
+            enrollmentId: row.id,
+            sequenceId: row.sequence_id,
+            contactId: row.contact_id,
+            enrolledBy: row.enrolled_by,
+            staggerMinutes,
+          },
+        };
+      });
       if (events.length) await inngest.send(events);
     }
   }

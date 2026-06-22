@@ -55,17 +55,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (promoteErr) throw promoteErr;
 
       const tsSec = Math.floor(Date.now() / 1000);
-      const events = paused.map((e) => ({
-        id: `enrollment-init-${e.id}-activate-${tsSec}`,
-        name: "sequence/enrollment-init.requested" as const,
-        data: {
-          enrollmentId: e.id,
-          sequenceId: sequence_id,
-          candidateId: e.candidate_id || undefined,
-          contactId: e.contact_id || undefined,
-          enrolledBy: enrolled_by,
-        },
-      }));
+      // Stagger the batch so the first sends spread out (5–12 min apart).
+      let cumStaggerA = 0;
+      const events = paused.map((e) => {
+        const staggerMinutes = cumStaggerA;
+        cumStaggerA += 5 + Math.floor(Math.random() * 8);
+        return {
+          id: `enrollment-init-${e.id}-activate-${tsSec}`,
+          name: "sequence/enrollment-init.requested" as const,
+          data: {
+            enrollmentId: e.id,
+            sequenceId: sequence_id,
+            candidateId: e.candidate_id || undefined,
+            contactId: e.contact_id || undefined,
+            enrolledBy: enrolled_by,
+            staggerMinutes,
+          },
+        };
+      });
       const sent = await inngest.send(events);
       return res.status(200).json({ started: paused.length, engine: "inngest", task_run_ids: sent.ids });
     }
@@ -120,19 +127,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // immediately for anyone whose original step 1 already shipped.
 
     const tsSec = Math.floor(Date.now() / 1000);
-    const events = enrollments.map((e) => ({
-      // Distinct id per repace so the original `enrollment-init-{id}`
-      // dedupe key in the Inngest log doesn't suppress this.
-      id: `enrollment-init-${e.id}-repace-${tsSec}`,
-      name: "sequence/enrollment-init.requested" as const,
-      data: {
-        enrollmentId: e.id,
-        sequenceId: sequence_id,
-        candidateId: e.candidate_id || undefined,
-        contactId: e.contact_id || undefined,
-        enrolledBy: enrolled_by,
-      },
-    }));
+    // Stagger the re-paced batch so the first sends spread out (5–12 min apart).
+    let cumStagger = 0;
+    const events = enrollments.map((e) => {
+      const staggerMinutes = cumStagger;
+      cumStagger += 5 + Math.floor(Math.random() * 8);
+      return {
+        // Distinct id per repace so the original `enrollment-init-{id}`
+        // dedupe key in the Inngest log doesn't suppress this.
+        id: `enrollment-init-${e.id}-repace-${tsSec}`,
+        name: "sequence/enrollment-init.requested" as const,
+        data: {
+          enrollmentId: e.id,
+          sequenceId: sequence_id,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
+          enrolledBy: enrolled_by,
+          staggerMinutes,
+        },
+      };
+    });
     const sent = await inngest.send(events);
 
     return res.status(200).json({

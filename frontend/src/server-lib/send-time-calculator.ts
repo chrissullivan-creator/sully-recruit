@@ -269,6 +269,9 @@ interface SendTimeInput {
   timezone?: string;
   /** When true, Sat/Sun results roll forward to Monday at window open. */
   weekdaysOnly?: boolean;
+  /** Skip the hourly hot-spot snap. Used for explicitly-staggered first sends
+   *  so the stagger offset isn't re-clustered back into the hour's hot-spots. */
+  skipHotSpot?: boolean;
 }
 
 /** Day-of-week in `tz` for a UTC date. 0=Sun, 6=Sat. */
@@ -353,8 +356,11 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
     result = rollWeekendToMonday(result, input.sendWindowStart, tz);
   }
 
-  // Snap to a bursty hot-spot within the assigned hour.
-  result = snapToHotSpot(result, input.sendWindowEnd, tz);
+  // Snap to a bursty hot-spot within the assigned hour — unless the caller
+  // applied an explicit stagger (skipHotSpot), which we must not re-cluster.
+  if (!input.skipHotSpot) {
+    result = snapToHotSpot(result, input.sendWindowEnd, tz);
+  }
 
   return result;
 }
