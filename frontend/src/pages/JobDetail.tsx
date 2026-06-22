@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
-import { JOB_STATUSES, jobStatusMeta, jobStatusLabel } from '@/lib/jobStatus';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { CreateBdSequenceDialog } from '@/components/jobs/CreateBdSequenceDialog';
 import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
@@ -28,7 +28,7 @@ import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, Upload, FileText, ExternalLink, ChevronDown, ChevronUp, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
-  Mailbox, Linkedin, Copy, Megaphone, MoreHorizontal,
+  Mailbox, Linkedin, Copy, Megaphone, MoreHorizontal, Flame,
 } from 'lucide-react';
 import { JobSourceTab } from '@/components/source/SourceTabs';
 import {
@@ -74,6 +74,11 @@ import {
 // of pipeline-stage values shadowed the import, which is why "Closed Lost"
 // couldn't be selected here.
 const STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
+
+// Lead sub-stage options (mini-pipeline within the `lead` status). Auto-advanced
+// by DB triggers; also settable by hand here. "Convert to Hot" is a separate
+// action that flips `status` to 'hot' — not a lead_stage value.
+const LEAD_STAGE_OPTIONS = LEAD_STAGES.map((s) => ({ value: s.value, label: s.label }));
 
 // ── Clickable field wrapper ─────────────────────────────────────────────────
 const EditableField = ({
@@ -1305,6 +1310,37 @@ const JobDetail = () => {
                 </span>
               )}
             </div>
+
+            {/* Lead sub-stage + Convert to Hot — only while the job is a lead.
+                lead_stage auto-advances (contacts added → reached out → market
+                over) via DB triggers; the badge is also click-to-set. */}
+            {job.status === 'lead' && (
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openFieldEdit('lead_stage', 'Lead Stage', 'select', (job as any).lead_stage || 'new', LEAD_STAGE_OPTIONS)}
+                  className="flex items-center gap-1.5"
+                  title="Lead sub-stage — auto-advances as contacts are added, you reach out, and a candidate is submitted. Click to set it manually."
+                >
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Lead Stage</span>
+                  <Badge
+                    variant="secondary"
+                    className={cn('text-xs cursor-pointer', leadStageMeta((job as any).lead_stage || 'new')?.pillClass)}
+                  >
+                    {leadStageLabel((job as any).lead_stage)}
+                  </Badge>
+                </button>
+                <Button
+                  size="sm"
+                  variant="gold"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => saveField('status', 'hot')}
+                  title="Promote this lead to a Hot (active) job"
+                >
+                  <Flame className="h-3.5 w-3.5" /> Convert to Hot
+                </Button>
+              </div>
+            )}
 
             {/* Key fields */}
             <div className="space-y-3">

@@ -8,10 +8,10 @@ import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useData';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
-import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { JOB_STATUSES, jobStatusMeta, jobStatusLabel } from '@/lib/jobStatus';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
@@ -54,6 +54,17 @@ const Jobs = () => {
       invalidateJobScope(queryClient);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update status');
+    }
+  };
+
+  const handleQuickLeadStage = async (jobId: string, leadStage: string) => {
+    try {
+      const { error } = await supabase.from('jobs').update({ lead_stage: leadStage }).eq('id', jobId);
+      if (error) throw new Error(error.message);
+      toast.success(`Lead stage set to ${LEAD_STAGES.find(s => s.value === leadStage)?.label ?? leadStage}`);
+      invalidateJobScope(queryClient);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update lead stage');
     }
   };
 
@@ -277,12 +288,22 @@ const Jobs = () => {
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
                     <td className="px-4 py-3">
-                      <span className={cn(
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        jobStatusMeta(job.status)?.pillClass ?? 'bg-gray-100 text-gray-600',
-                      )}>
-                        {jobStatusLabel(job.status)}
-                      </span>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={cn(
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                          jobStatusMeta(job.status)?.pillClass ?? 'bg-gray-100 text-gray-600',
+                        )}>
+                          {jobStatusLabel(job.status)}
+                        </span>
+                        {job.status === 'lead' && (
+                          <span className={cn(
+                            'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
+                            leadStageMeta((job as any).lead_stage || 'new')?.pillClass ?? 'bg-gray-100 text-gray-600',
+                          )}>
+                            {leadStageLabel((job as any).lead_stage)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
@@ -311,6 +332,20 @@ const Jobs = () => {
                               ))}
                             </DropdownMenuSubContent>
                           </DropdownMenuSub>
+                          {job.status === 'lead' && (
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger>
+                                <Layers className="h-3.5 w-3.5 mr-2" /> Lead Stage
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent>
+                                {LEAD_STAGES.filter(s => s.value !== ((job as any).lead_stage || 'new')).map(s => (
+                                  <DropdownMenuItem key={s.value} onClick={() => handleQuickLeadStage(job.id, s.value)}>
+                                    {s.label}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive" onClick={() => handleQuickDelete(job.id)}>
                             <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete

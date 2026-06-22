@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useJobs } from '@/hooks/useData';
 import { jobStageColors } from './PipelineColumn';
+import { leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -92,6 +93,14 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
               <MapPin className="h-3 w-3" />
               {job.location}
             </p>
+          )}
+          {job.status === 'lead' && (
+            <span className={cn(
+              'mt-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
+              leadStageMeta(job.lead_stage || 'new')?.pillClass ?? 'bg-gray-100 text-gray-600',
+            )}>
+              {leadStageLabel(job.lead_stage)}
+            </span>
           )}
         </div>
       </div>

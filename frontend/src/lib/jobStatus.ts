@@ -49,3 +49,42 @@ export function jobStatusMeta(s?: string | null): JobStatusMeta | undefined {
 export function jobStatusLabel(s?: string | null): string {
   return jobStatusMeta(s)?.label ?? (s ?? "").replace(/_/g, " ");
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Lead sub-stages — a mini-pipeline WITHIN the `lead` status.
+ *
+ *   new → contacts_added → reached_out → market_over   then "Convert to Hot"
+ *   promotes the job to status='hot' (the sub-stage stops applying).
+ *
+ * Stored in jobs.lead_stage; only meaningful while status==='lead'. The DB
+ * auto-advances it forward (contacts added / outbound message to a contact /
+ * candidate sent out), but it can also be set by hand. "Convert to Hot" is an
+ * action that changes `status`, NOT a stored lead_stage value.
+ * ────────────────────────────────────────────────────────────────────────── */
+export type LeadStage = "new" | "contacts_added" | "reached_out" | "market_over";
+
+export interface LeadStageMeta {
+  value: LeadStage;
+  label: string;
+  /** 0-based pipeline order. */
+  order: number;
+  pillClass: string;
+}
+
+export const LEAD_STAGES: LeadStageMeta[] = [
+  { value: "new",            label: "New",            order: 0, pillClass: "bg-gray-100 text-gray-600" },
+  { value: "contacts_added", label: "Contacts Added", order: 1, pillClass: "bg-sky-100 text-sky-700" },
+  { value: "reached_out",    label: "Reached Out",    order: 2, pillClass: "bg-amber-100 text-amber-700" },
+  { value: "market_over",    label: "Market Over",    order: 3, pillClass: "bg-violet-100 text-violet-700" },
+];
+
+export const LEAD_STAGE_VALUES: LeadStage[] = LEAD_STAGES.map((s) => s.value);
+
+export function leadStageMeta(s?: string | null): LeadStageMeta | undefined {
+  return LEAD_STAGES.find((j) => j.value === s);
+}
+
+/** Display label; null/unknown falls back to the base "New" stage. */
+export function leadStageLabel(s?: string | null): string {
+  return leadStageMeta(s)?.label ?? leadStageMeta("new")!.label;
+}
