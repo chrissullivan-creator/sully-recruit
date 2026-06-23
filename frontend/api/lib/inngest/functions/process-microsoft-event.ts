@@ -683,16 +683,27 @@ async function processEmailMessage(
 }
 
 async function processCalendarEvent(supabase: any, event: any, receivedAt: string, logger: any) {
-  const attendees = event.attendees || [];
-  const matches: { entityId: string; entityType: string; entityColumn: string; email: string }[] = [];
+  const rawAttendees = event.attendees || [];
+  const allAttendees: {
+    name: string | null;
+    email: string;
+    match: { entityId: string; entityType: string; entityColumn: string; email: string } | null;
+  }[] = [];
 
-  for (const attendee of attendees) {
+  for (const attendee of rawAttendees) {
     const email = attendee.emailAddress?.address?.toLowerCase();
-    if (email) {
-      const match = await matchByEmail(supabase, email);
-      if (match) matches.push({ ...match, email });
-    }
+    if (!email) continue;
+    const match = await matchByEmail(supabase, email);
+    allAttendees.push({
+      name: attendee.emailAddress?.name ?? null,
+      email,
+      match: match ? { ...match, email } : null,
+    });
   }
+
+  const matches = allAttendees
+    .map((a) => a.match)
+    .filter(Boolean) as { entityId: string; entityType: string; entityColumn: string; email: string }[];
 
   if (matches.length === 0) {
     return { action: "no_match", reason: "no_matching_attendees" };
@@ -741,13 +752,19 @@ async function processCalendarEvent(supabase: any, event: any, receivedAt: strin
     return { action: "error", reason: "task_insert_failed" };
   }
 
-  for (const match of matches) {
+  // Record every invitee (matched or not) so unmatched ones show up in the
+  // meeting dialog and can be linked to a profile later.
+  for (const a of allAttendees) {
     await supabase.from("meeting_attendees").insert({
       task_id: taskData.id,
-      entity_type: match.entityType,
-      entity_id: match.entityId,
+      entity_type: a.match?.entityType ?? null,
+      entity_id: a.match?.entityId ?? null,
+      attendee_name: a.name,
+      attendee_email: a.email,
     } as any);
+  }
 
+  for (const match of matches) {
     await supabase.from("task_links").insert({
       task_id: taskData.id,
       entity_type: match.entityType,
