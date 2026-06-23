@@ -5,6 +5,7 @@ import { isMarketingEmail } from "../../../../src/server-lib/marketing-blocklist
 import { unipileFetch, unipileFetchV2 } from "../../../../src/server-lib/unipile-v2.js";
 import { notifyError } from "../../../../src/server-lib/alerting.js";
 import { isTransientFetchError } from "../../../../src/server-lib/fetch-retry.js";
+import { extractMessageIntel, applyExtractedIntel } from "../../../../src/server-lib/intel-extraction.js";
 
 /**
  * Backfill emails from Unipile every 5 minutes — safety net for missed
@@ -106,6 +107,46 @@ interface UnipileEmail {
   conversation_id?: string | null;
   from_attendee?: UnipileAttendee | null;
   to_attendees?: UnipileAttendee[] | null;
+}
+
+/**
+ * Run Joe's sentiment-and-intel extraction on a freshly-ingested INBOUND email.
+ *
+ * The real-time webhook (process-unipile-event) does this for emails Unipile
+ * pushes, but in practice inbound email is ingested by THIS 5-minute backfill —
+ * the email webhook isn't delivering, so the matched replies land here with an
+ * avg ~30-minute lag. Without this call sentiment never runs (reply_sentiment
+ * sat empty for months). Mirrors the webhook path: extract → newest active
+ * enrollment → applyExtractedIntel.
+ *
+ * Only matched (candidate/contact) inbound emails reach here. extractMessageIntel
+ * already strips HTML, enforces the 10-char floor, and alerts on its own
+ * failures, so this stays a thin wrapper; the try/catch only keeps one bad
+ * message from aborting the surrounding backfill loop.
+ */
+async function runInboundEmailIntel(
+  supabase: any,
+  entity: { type: "candidate" | "contact"; id: string },
+  subject: string | null,
+  bodyText: string,
+  logger: any,
+): Promise<void> {
+  try {
+    const intel = await extractMessageIntel(bodyText, subject);
+    if (!intel) return;
+    const entityColumn = entity.type === "candidate" ? "candidate_id" : "contact_id";
+    const { data: enrollment } = await supabase
+      .from("sequence_enrollments")
+      .select("id")
+      .eq(entityColumn, entity.id)
+      .eq("status", "active")
+      .order("enrolled_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    await applyExtractedIntel(supabase, entity.id, entity.type, intel, "email", enrollment?.id);
+  } catch (err: any) {
+    logger.warn("Inbound email intel failed (non-fatal)", { error: err?.message });
+  }
 }
 
 async function processAccount(
@@ -304,6 +345,11 @@ async function processAccount(
           continue;
         }
         inserted++;
+        // Sentiment-and-intel on matched inbound replies (this backfill is the
+        // de-facto inbound email path — see runInboundEmailIntel).
+        if (!isOutbound && entity) {
+          await runInboundEmailIntel(supabase, { type: entity.type, id: entity.id }, subject, bodyText, logger);
+        }
       } catch (err: any) {
         logger.error("Message processing error", { error: err.message });
         errors++;
@@ -505,6 +551,11 @@ async function processAccountV2(
           continue;
         }
         inserted++;
+        // Sentiment-and-intel on matched inbound replies (this backfill is the
+        // de-facto inbound email path — see runInboundEmailIntel).
+        if (!isOutbound && entity) {
+          await runInboundEmailIntel(supabase, { type: entity.type, id: entity.id }, subject, bodyText, logger);
+        }
       } catch (err: any) {
         logger.error("v2 message processing error", { error: err.message });
         errors++;
