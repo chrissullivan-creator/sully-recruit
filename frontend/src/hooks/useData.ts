@@ -6,11 +6,14 @@ import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
 // Candidates — queries the people table (was renamed from candidates) and filters
 // to type='candidate'. The `candidates` backwards-compat view still exists for
 // untouched edge functions / Trigger.dev tasks.
-export function useCandidates() {
+export function useCandidates(opts?: { enabled?: boolean }) {
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ['candidates'],
+    // Lets the Candidates page disable the full-table load when it falls back
+    // to the server-side paginated search (useCandidatesSearch).
+    enabled: opts?.enabled ?? true,
     queryFn: async () => {
       const PAGE_SIZE = 1000;
       let allData: any[] = [];
@@ -61,6 +64,98 @@ export function useCandidates() {
   }, [queryClient]);
 
   return query;
+}
+
+// Curated list columns — kept identical to useCandidates() so the row shape
+// rendered by the Candidates list is the same whether it came from the full
+// client-side load or this server-side paginated search.
+const CANDIDATE_LIST_COLS =
+  'id, type, full_name, first_name, last_name, ' +
+  'title, current_title, company_name, current_company, company_id, ' +
+  'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
+  'email_invalid, email_invalid_reason, email_invalid_at, ' +
+  'avatar_url, profile_picture_url, roles, status, skills, location_text, ' +
+  'last_contacted_at, last_responded_at, last_comm_channel, ' +
+  'last_sequence_sentiment, last_sequence_sentiment_note, ' +
+  'do_not_contact, linked_contact_id, owner_user_id, created_at, updated_at';
+
+/**
+ * Server-side paginated candidate search. Powers the Candidates page's default
+ * (sidebar-closed, no boolean/advanced filter) path so it stops loading the
+ * entire table into the browser. Mirrors usePeopleSearch: simple ILIKE text
+ * search across name/company/title/email plus the cheap structured filters
+ * (status, owner), sorted + paged + exact count, server-side. The advanced
+ * filters (boolean operators, radius, skills, title/company/jobTag/workauth/
+ * dates) keep running client-side on the full load — see Candidates.tsx.
+ */
+export function useCandidatesSearch(params: {
+  search: string;
+  status: string;
+  owner: string;
+  userId?: string | null;
+  sortField: string;
+  sortDir: 'asc' | 'desc';
+  page: number;
+  pageSize: number;
+  enabled: boolean;
+}) {
+  const { search, status, owner, userId, sortField, sortDir, page, pageSize, enabled } = params;
+  return useQuery({
+    // Nested under 'candidates' so existing invalidateQueries(['candidates'])
+    // calls (incl. the realtime people-change subscription) refresh this
+    // server page too via React Query's prefix matching.
+    queryKey: ['candidates', 'search', search, status, owner, userId, sortField, sortDir, page, pageSize],
+    enabled,
+    queryFn: async () => {
+      let q = supabase
+        .from('people')
+        .select(CANDIDATE_LIST_COLS, { count: 'exact' })
+        .eq('type', 'candidate')
+        .is('deleted_at', null);
+
+      if (status !== 'all') q = q.eq('status', status);
+      if (owner === 'mine' && userId) q = q.eq('owner_user_id', userId);
+      else if (owner !== 'all' && owner !== 'mine') q = q.eq('owner_user_id', owner);
+
+      // Sanitize so reserved PostgREST or()-filter chars can't break the query.
+      const safe = search.replace(/[,()*%\\]/g, ' ').trim();
+      if (safe) {
+        const like = `*${safe}*`;
+        q = q.or(
+          [
+            `full_name.ilike.${like}`,
+            `first_name.ilike.${like}`,
+            `last_name.ilike.${like}`,
+            `current_company.ilike.${like}`,
+            `company_name.ilike.${like}`,
+            `current_title.ilike.${like}`,
+            `title.ilike.${like}`,
+            `primary_email.ilike.${like}`,
+            `work_email.ilike.${like}`,
+            `personal_email.ilike.${like}`,
+          ].join(','),
+        );
+      }
+
+      const sortCol =
+        sortField === 'name' ? 'full_name'
+        : sortField === 'title' ? 'current_title'
+        : sortField === 'company' ? 'current_company'
+        : sortField === 'status' ? 'status'
+        : sortField === 'created' ? 'created_at'
+        : 'updated_at';
+      q = q.order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false });
+
+      const from = (page - 1) * pageSize;
+      q = q.range(from, from + pageSize - 1);
+
+      const { data, error, count } = await q;
+      if (error) throw error;
+      return { rows: (data ?? []) as any[], total: count ?? 0 };
+    },
+    placeholderData: (prev) => prev,
+    staleTime: 15_000,
+  });
 }
 
 // Single person by ID — queries people table directly. Keep export name 'useCandidate'
