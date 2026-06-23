@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { safeEqual } from "./safe-compare.js";
 
 /**
  * Verifies the request bears a valid Supabase JWT (logged-in user) or the
@@ -41,7 +42,7 @@ export async function requireAuth(
   }
 
   // Service-role key grants full access (used by internal callers / cron).
-  if (token === serviceKey) {
+  if (safeEqual(token, serviceKey)) {
     return { userId: null };
   }
 

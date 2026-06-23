@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createHash, randomUUID } from "node:crypto";
 import { inngest } from "./lib/inngest/client.js";
+import { safeEqual } from "./lib/safe-compare.js";
 
 /**
  * POST /api/mcp  — Model Context Protocol server for Sully Recruit.
@@ -68,7 +69,7 @@ async function resolveActor(sb: SupabaseClient, token: string): Promise<Actor | 
   } catch {
     /* table missing (e.g. preview branch DB) — fall through to the shared token */
   }
-  if (MCP_AUTH_TOKEN && token === MCP_AUTH_TOKEN) {
+  if (MCP_AUTH_TOKEN && safeEqual(token, MCP_AUTH_TOKEN)) {
     return { userId: ACTOR_DEFAULT, name: ACTOR_NAME_DEFAULT };
   }
   return null;
