@@ -179,8 +179,8 @@ export default function SendOuts() {
     // pre-fills with the prior pitch note so it carries through. We
     // only intercept on the FIRST call (note === undefined); the
     // dialog confirm path passes `note` and skips this branch.
-    if (note === undefined && (target === 'pitched' || target === 'ready_to_send' || target === 'submitted')) {
-      const prior = target === 'pitched' ? null : await fetchLatestStageMoveNote(row.id);
+    if (note === undefined && (target === 'pitch' || target === 'ready_to_send' || target === 'submitted')) {
+      const prior = target === 'pitch' ? null : await fetchLatestStageMoveNote(row.id);
       setPendingNotedMove({ row, target, source, initialNote: prior });
       return;
     }
@@ -398,7 +398,7 @@ export default function SendOuts() {
         title={
           pendingNotedMove?.target === 'submitted'
             ? 'Send to Client'
-            : pendingNotedMove?.target === 'pitched'
+            : pendingNotedMove?.target === 'pitch'
               ? 'Move to Pitch'
               : 'Move to Send Out'
         }

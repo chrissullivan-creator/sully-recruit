@@ -32,7 +32,7 @@ interface RetryOptions {
   label?: string;
 }
 
-const DEFAULT_OPTS: Required<Omit<RetryOptions, "label">> = {
+const DEFAULT_OPTS: Required<Omit<RetryOptions, "label" | "timeoutMs">> = {
   maxAttempts: 4,
   baseDelayMs: 1000,
   maxDelayMs: 30_000,
