@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { inngest } from "../lib/inngest/client.js";
+import { safeEqual } from "../lib/safe-compare.js";
 
 /**
  * One-shot admin endpoint to kick off `recover-orphan-resumes`.
@@ -28,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured" });
   }
   const got = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (got !== expected) {
+  if (!safeEqual(got, expected)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 

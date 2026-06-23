@@ -262,7 +262,7 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
           skipHotSpot: applyStagger,
         });
 
-        await supabase.from("sequence_step_logs").insert({
+        const { error: schedErr } = await supabase.from("sequence_step_logs").insert({
           enrollment_id: payload.enrollmentId,
           action_id: action.id,
           node_id: node.id,
@@ -270,6 +270,13 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
           scheduled_at: scheduledAt.toISOString(),
           status: "scheduled",
         });
+        // A swallowed failure here loses a send the enrollment thinks it
+        // scheduled (counts say 15, only 14 rows exist). Surface it.
+        if (schedErr) {
+          console.error("[enrollment-init-runner] failed to schedule step", {
+            enrollmentId: payload.enrollmentId, channel: action.channel, error: schedErr.message,
+          });
+        }
         prevSendTime = scheduledAt;
         scheduled++;
         firstScheduledDone = true;
@@ -278,10 +285,15 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
   }
 
   // Set current_node_id to first node (for tracking)
-  await supabase
+  const { error: cursorErr } = await supabase
     .from("sequence_enrollments")
     .update({ current_node_id: orderedNodes[0].id })
     .eq("id", payload.enrollmentId);
+  if (cursorErr) {
+    console.error("[enrollment-init-runner] failed to set current_node_id", {
+      enrollmentId: payload.enrollmentId, error: cursorErr.message,
+    });
+  }
 
   console.info("[enrollment-init-runner] Enrollment initialized", {
     enrollmentId: payload.enrollmentId,

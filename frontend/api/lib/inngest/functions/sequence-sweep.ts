@@ -29,11 +29,14 @@ export const sequenceSweep = inngest.createFunction(
     // mid-execute on either engine.
     await step.run("recover-stuck-in-flight", async () => {
       const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      await (supabase as any)
+      const { error } = await (supabase as any)
         .from("sequence_step_logs")
         .update({ status: "scheduled" })
         .eq("status", "in_flight")
         .lt("updated_at", tenMinAgo);
+      // Don't swallow: a failed recovery silently leaves rows stuck in_flight
+      // forever, blocking re-scheduling. Log so the next tick (and ops) can see it.
+      if (error) logger.warn("recover-stuck-in-flight failed; will retry next tick", { error: error.message });
     });
 
     const dueLogs: any[] = await step.run("find-due", async () => {
