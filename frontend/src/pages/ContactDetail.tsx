@@ -81,15 +81,43 @@ function useContactConversations(contactId: string | undefined) {
   });
 }
 
+// Send-outs to surface on a client contact's page: any candidate who has
+// reached the submission stage (or beyond) on a job this contact is tied to —
+// not just send-outs whose contact_id literally points at this contact. A
+// client wants to see everyone submitted to *their* jobs.
+const SUBMISSION_PLUS_STAGES = [
+  'submitted', 'sent',
+  'interview', 'interviewing', 'interview_round_1', 'interview_round_2_plus',
+  'offer', 'placed',
+];
+
 function useContactSendOuts(contactId: string | undefined) {
   return useQuery({
     queryKey: ['contact_send_outs', contactId],
     enabled: !!contactId,
     queryFn: async () => {
+      // Resolve every job this contact is tied to: hiring-manager jobs
+      // (jobs.contact_id), explicit job_contacts links, and any job where a
+      // send-out already names this contact.
+      const [hmJobs, jcRows, soRows] = await Promise.all([
+        supabase.from('jobs').select('id').eq('contact_id', contactId!).is('deleted_at', null),
+        supabase.from('job_contacts').select('job_id').eq('contact_id', contactId!),
+        supabase.from('send_outs').select('job_id').eq('contact_id', contactId!),
+      ]);
+      const jobIds = Array.from(new Set([
+        ...((hmJobs.data ?? []).map((j: any) => j.id)),
+        ...((jcRows.data ?? []).map((r: any) => r.job_id)),
+        ...((soRows.data ?? []).map((r: any) => r.job_id)),
+      ].filter(Boolean)));
+
+      if (jobIds.length === 0) return [];
+
       const { data, error } = await supabase
         .from('send_outs')
         .select('*, candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, email:primary_email, phone, status), jobs(id, title, company_name, location, status)')
-        .eq('contact_id', contactId!)
+        .in('job_id', jobIds)
+        .in('stage', SUBMISSION_PLUS_STAGES)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as any[];

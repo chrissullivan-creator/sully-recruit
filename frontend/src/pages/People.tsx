@@ -458,7 +458,7 @@ const People = () => {
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{person.title ?? '—'}</td>
                       <td className="px-4 py-3">
-                        {person.company_name ? (
+                        {(person.company_name || person.company_id) ? (
                           <CompanyLink
                             companyId={person.company_id}
                             name={person.company_name}

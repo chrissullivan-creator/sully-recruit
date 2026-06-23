@@ -367,6 +367,13 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
   const firstInbound = messages.find(m => m.direction === 'inbound');
   const senderName = firstInbound?.sender_name || thread?.candidate_name || thread?.contact_name || '';
   const senderAddress = firstInbound?.sender_address || '';
+  // On LinkedIn channels, sender_address carries the Unipile provider id / URN
+  // (not a URL or email). Pass it so the Add Person wizard can look the sender
+  // up via /api/lookup-linkedin (→ /users/{provider_id}?account_id=X) and
+  // prefill name/title/company/location/photo/LinkedIn URL from the profile.
+  const senderProviderId = thread?.channel?.startsWith('linkedin') && senderAddress
+    ? senderAddress
+    : null;
 
   const handleSearch = async () => {
     if (!linkSearch.trim()) return;
@@ -593,6 +600,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
         rawBody={firstInbound?.body || undefined}
         externalConversationId={thread.external_conversation_id}
         integrationAccountId={thread.integration_account_id}
+        senderProviderId={senderProviderId}
         onPersonLinked={() => {
           invalidateCommsScope(queryClient);
         }}

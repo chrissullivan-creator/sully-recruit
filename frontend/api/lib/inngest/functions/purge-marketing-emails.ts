@@ -11,16 +11,24 @@ import {
  * both null) — never deletes a message tied to a real person, even if
  * the sender shape looks marketing-y.
  *
- * Daily at 04:00 UTC. Ported from `src/trigger/purge-marketing-emails.ts`
- * — Inngest is the only scheduler now. The blocklist + isMarketingEmail
- * helper moved to `src/server-lib/marketing-blocklist.ts` so the
- * backfill-emails Inngest function can share it.
+ * Daily at 04:00 UTC. Only deletes marketing mail older than a 3-day
+ * retention window (gated on created_at), so there's a short buffer to
+ * catch a mis-flagged message before it's gone. Ported from
+ * `src/trigger/purge-marketing-emails.ts` — Inngest is the only scheduler
+ * now. The blocklist + isMarketingEmail helper moved to
+ * `src/server-lib/marketing-blocklist.ts` so the backfill-emails Inngest
+ * function can share it.
  */
 export const purgeMarketingEmails = inngest.createFunction(
   { id: "purge-marketing-emails", name: "Purge marketing emails (Inngest)" },
   { cron: "0 4 * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
+
+    // 3-day retention: leave very recent marketing in place briefly in case
+    // it's mis-flagged or gets tagged to a person, then purge.
+    const RETENTION_DAYS = 3;
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     const domainConditions = MARKETING_DOMAINS.map((d) => {
       if (d.includes("@")) return `sender_address.eq.${d}`;
@@ -36,6 +44,7 @@ export const purgeMarketingEmails = inngest.createFunction(
       .select("id, conversation_id, sender_address")
       .is("candidate_id", null)
       .is("contact_id", null)
+      .lt("created_at", cutoff)
       .or(`${domainConditions},${prefixConditions}`)
       .limit(1000);
 

@@ -44,12 +44,25 @@ export function normalizeCompanyName(raw: string | null | undefined): string {
   return s;
 }
 
+export interface CompanyEntry {
+  name: string | null;
+  domain: string | null;
+  logoUrl: string | null;
+}
+export interface CompanyIndex {
+  /** normalized company name (and known aliases) → company id */
+  nameToId: Map<string, string>;
+  /** company id → display details (name / domain / logo) */
+  byId: Map<string, CompanyEntry>;
+}
+
 /**
- * Lazily-loaded map of normalized company name (and known aliases) → company id.
- * Cached for the session and shared across every <CompanyLink>, so even when a
- * surface only has a company *name* string (no id), the link still resolves.
- * Only fetched when `enabled` (i.e. at least one CompanyLink on the page lacks
- * an explicit id) — pages whose company links all carry ids never load it.
+ * Lazily-loaded company lookup, cached for the session and shared across every
+ * <CompanyLink>. Resolves both directions: a name string → id (when a surface
+ * only has the name), and an id → display name/logo (when a surface only has
+ * company_id, e.g. an auto-linked person whose company text column is blank).
+ * Only fetched when `enabled` (i.e. at least one CompanyLink on the page needs
+ * a lookup) — pages whose links carry both id and name never load it.
  */
 export function useCompanyNameIndex(opts?: { enabled?: boolean }) {
   return useQuery({
@@ -57,8 +70,9 @@ export function useCompanyNameIndex(opts?: { enabled?: boolean }) {
     enabled: opts?.enabled ?? true,
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
-    queryFn: async () => {
-      const map = new Map<string, string>();
+    queryFn: async (): Promise<CompanyIndex> => {
+      const nameToId = new Map<string, string>();
+      const byId = new Map<string, CompanyEntry>();
 
       // companies.name (paginate past PostgREST's 1000-row cap).
       const PAGE = 1000;
@@ -66,13 +80,15 @@ export function useCompanyNameIndex(opts?: { enabled?: boolean }) {
       while (true) {
         const { data, error } = await supabase
           .from('companies')
-          .select('id, name')
+          .select('id, name, domain, logo_url')
           .is('deleted_at', null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         for (const c of data ?? []) {
-          const key = normalizeCompanyName((c as any).name);
-          if (key && !map.has(key)) map.set(key, (c as any).id);
+          const row = c as any;
+          byId.set(row.id, { name: row.name, domain: row.domain ?? null, logoUrl: row.logo_url ?? null });
+          const key = normalizeCompanyName(row.name);
+          if (key && !nameToId.has(key)) nameToId.set(key, row.id);
         }
         if (!data || data.length < PAGE) break;
         from += PAGE;
@@ -85,10 +101,10 @@ export function useCompanyNameIndex(opts?: { enabled?: boolean }) {
         .select('alias_normalized, company_id');
       for (const a of aliases ?? []) {
         const key = (a as any).alias_normalized as string | null;
-        if (key && !map.has(key)) map.set(key, (a as any).company_id);
+        if (key && !nameToId.has(key)) nameToId.set(key, (a as any).company_id);
       }
 
-      return map;
+      return { nameToId, byId };
     },
   });
 }
@@ -208,20 +224,27 @@ export function CompanyLink({
   fallback = '—',
   children,
 }: CompanyLinkProps) {
-  const needsResolve = !companyId && !!name;
+  // Resolve a name when we only have an id, and an id when we only have a name —
+  // either way the index lets the link work and show a label.
+  const needsResolve = (!companyId && !!name) || (!!companyId && !name);
   const { data: index } = useCompanyNameIndex({ enabled: needsResolve });
-  const resolvedId = companyId ?? (needsResolve ? index?.get(normalizeCompanyName(name)) : undefined);
+  const resolvedId = companyId ?? (name ? index?.nameToId.get(normalizeCompanyName(name)) : undefined);
+  const entry = resolvedId ? index?.byId.get(resolvedId) : undefined;
+
+  const displayName = name ?? entry?.name ?? null;
+  const displayDomain = domain ?? entry?.domain ?? null;
+  const displayLogoUrl = logoUrl ?? entry?.logoUrl ?? null;
 
   // Nothing to show.
-  if (!name && !children) {
+  if (!displayName && !children) {
     return <span className={className}>{fallback}</span>;
   }
 
   const logo = showLogo ? (
-    <CompanyLogo name={name ?? ''} domain={domain ?? null} logoUrl={logoUrl ?? null} size={logoSize} className={logoClassName} />
+    <CompanyLogo name={displayName ?? ''} domain={displayDomain} logoUrl={displayLogoUrl} size={logoSize} className={logoClassName} />
   ) : null;
 
-  const label = children ?? name;
+  const label = children ?? displayName;
 
   if (!resolvedId) {
     return (

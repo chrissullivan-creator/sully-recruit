@@ -657,7 +657,7 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => navigate(`/candidates/${candidate.id}`)}>{candidate.current_title ?? '-'}</td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
-                      {candidate.current_company ? (
+                      {(candidate.current_company || (candidate as any).company_id) ? (
                         <CompanyLink
                           companyId={(candidate as any).company_id}
                           name={candidate.current_company}

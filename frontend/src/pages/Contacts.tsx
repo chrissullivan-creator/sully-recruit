@@ -426,7 +426,7 @@ const Contacts = () => {
                       {(() => {
                         const companyName = (contact as any).company_name || (contact.companies as any)?.name || null;
                         const companyDomain = (contact.companies as any)?.domain ?? null;
-                        return companyName ? (
+                        return (companyName || (contact as any).company_id) ? (
                           <CompanyLink
                             companyId={(contact as any).company_id}
                             name={companyName}
