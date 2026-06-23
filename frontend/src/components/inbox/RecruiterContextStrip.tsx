@@ -1,14 +1,15 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Building } from 'lucide-react';
 import { formatSmartTimestamp } from '@/lib/format-time';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 
 interface PersonRow {
   id: string;
   full_name: string | null;
   current_title: string | null;
   current_company: string | null;
+  company_id: string | null;
   status: string | null;
   avatar_url: string | null;
   last_contacted_at: string | null;
@@ -39,7 +40,7 @@ export function RecruiterContextStrip({ personId, role }: RecruiterContextStripP
     queryFn: async () => {
       const { data, error } = await supabase
         .from('people')
-        .select('id, full_name, current_title, current_company, status, avatar_url, last_contacted_at, last_responded_at')
+        .select('id, full_name, current_title, current_company, company_id, status, avatar_url, last_contacted_at, last_responded_at')
         .eq('id', personId)
         .maybeSingle();
       if (error) throw error;
@@ -88,10 +89,13 @@ export function RecruiterContextStrip({ personId, role }: RecruiterContextStripP
             {person.current_title}
             {person.current_title && person.current_company && ' at '}
             {person.current_company && (
-              <span className="inline-flex items-center gap-1">
-                <Building className="h-3 w-3 opacity-60" />
-                {person.current_company}
-              </span>
+              <CompanyLink
+                companyId={person.company_id}
+                name={person.current_company}
+                showLogo
+                stopPropagation
+                className="text-muted-foreground"
+              />
             )}
           </span>
         )}

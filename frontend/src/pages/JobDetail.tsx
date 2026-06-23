@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -805,7 +806,9 @@ const JobDetail = () => {
             )}
           </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
-            {companyName && <span className="truncate">{companyName}</span>}
+            {companyName && (
+              <CompanyLink companyId={(job as any).company_id} name={companyName} className="truncate" />
+            )}
             {((job as any).comp_min || (job as any).comp_max) && (
               <span className="text-gold-deep font-semibold">
                 ${Math.round(((job as any).comp_min ?? 0) / 1000)}k–${Math.round(((job as any).comp_max ?? 0) / 1000)}k

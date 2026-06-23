@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PersonLink, JobLink, CompanyLink } from '@/components/shared/EntityLinks';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
@@ -55,23 +56,34 @@ const CandidateRow = ({
     (candidate.first_name?.[0] ?? '') + (candidate.last_name?.[0] ?? '')
   ).toUpperCase() || name[0]?.toUpperCase() || '?';
   return (
-    <button
+    <div
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left group"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } }}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left group cursor-pointer"
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
         {initials}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">{name}</p>
+        <PersonLink
+          id={candidate.id}
+          name={name}
+          type={candidate.type}
+          stopPropagation
+          className="block text-sm font-medium text-foreground truncate"
+        />
         <p className="text-xs text-muted-foreground truncate">
           {candidate.current_title ?? ''}
           {candidate.current_title && candidate.current_company ? ' · ' : ''}
-          {candidate.current_company ?? ''}
+          {candidate.current_company && (
+            <CompanyLink companyId={candidate.company_id} name={candidate.current_company} stopPropagation className="text-muted-foreground" />
+          )}
         </p>
         {sub && <p className="text-[10px] text-muted-foreground/70 truncate mt-0.5">{sub}</p>}
       </div>
-    </button>
+    </div>
   );
 };
 
@@ -93,24 +105,38 @@ const SendOutRow = ({
     (cand?.first_name?.[0] ?? '') + (cand?.last_name?.[0] ?? '')
   ).toUpperCase() || name[0]?.toUpperCase() || '?';
   return (
-    <button
+    <div
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left group"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } }}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left group cursor-pointer"
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
         {initials}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">{name}</p>
+        <PersonLink
+          id={cand?.id ?? sendOut.candidate_id}
+          name={name}
+          type={cand?.type}
+          stopPropagation
+          className="block text-sm font-medium text-foreground truncate"
+        />
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Building className="h-3 w-3 shrink-0" />
-          <span className="truncate">{job?.title ?? '—'}{job?.company_name ? ` · ${job.company_name}` : ''}</span>
+          <span className="truncate">
+            <JobLink id={sendOut.job_id} title={job?.title ?? '—'} stopPropagation className="text-muted-foreground" />
+            {job?.company_name ? (
+              <> · <CompanyLink name={job.company_name} stopPropagation className="text-muted-foreground" /></>
+            ) : null}
+          </span>
         </div>
         {dateLabel && (
           <p className="text-[10px] text-muted-foreground/70 truncate mt-0.5">{dateLabel}</p>
         )}
       </div>
-    </button>
+    </div>
   );
 };
 

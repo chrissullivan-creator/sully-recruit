@@ -7,7 +7,7 @@ import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs } from '@/hooks/useData';
-import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -274,14 +274,20 @@ const Jobs = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
                       {(() => {
-                        const companyName = job.company_name ?? (job.companies as any)?.name ?? '-';
+                        const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
                         const companyDomain = (job.companies as any)?.domain ?? null;
                         const companyLogoUrl = (job.companies as any)?.logo_url ?? null;
-                        return (
-                          <span className="flex items-center gap-2">
-                            <CompanyLogo name={companyName} domain={companyDomain} logoUrl={companyLogoUrl} size="xs" />
-                            {companyName}
-                          </span>
+                        return companyName ? (
+                          <CompanyLink
+                            companyId={(job as any).company_id}
+                            name={companyName}
+                            domain={companyDomain}
+                            logoUrl={companyLogoUrl}
+                            showLogo
+                            stopPropagation
+                          />
+                        ) : (
+                          <span>-</span>
                         );
                       })()}
                     </td>

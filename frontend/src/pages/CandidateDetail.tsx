@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 import DOMPurify from 'dompurify';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -945,7 +946,12 @@ const CandidateDetail = () => {
               );
             })()}
           </div>
-          <p className="text-sm text-muted-foreground truncate">{candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}{candidate.current_company ?? ''}</p>
+          <p className="text-sm text-muted-foreground truncate">
+            {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}
+            {candidate.current_company && (
+              <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
+            )}
+          </p>
         </div>
 
         {/* Social / contact links */}

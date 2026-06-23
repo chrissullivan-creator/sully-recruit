@@ -27,7 +27,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
@@ -424,13 +424,19 @@ const Contacts = () => {
                     <td className="px-4 py-3 text-sm text-muted-foreground">{contact.title ?? '-'}</td>
                     <td className="px-4 py-3">
                       {(() => {
-                        const companyName = (contact as any).company_name || (contact.companies as any)?.name || '-';
+                        const companyName = (contact as any).company_name || (contact.companies as any)?.name || null;
                         const companyDomain = (contact.companies as any)?.domain ?? null;
-                        return (
-                          <span className="text-sm text-muted-foreground flex items-center gap-2">
-                            <CompanyLogo name={companyName} domain={companyDomain} size="xs" />
-                            {companyName}
-                          </span>
+                        return companyName ? (
+                          <CompanyLink
+                            companyId={(contact as any).company_id}
+                            name={companyName}
+                            domain={companyDomain}
+                            showLogo
+                            stopPropagation
+                            className="text-sm text-muted-foreground"
+                          />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
                         );
                       })()}
                     </td>

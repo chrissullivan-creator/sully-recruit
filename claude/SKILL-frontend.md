@@ -72,6 +72,36 @@ longer in the sidebar (`components/layout/Sidebar.tsx`). They live under
 
 ---
 
+## Entity links — make every mention clickable (2026-06-23)
+
+`components/shared/EntityLinks.tsx` is the **one** way to render a clickable
+candidate / client contact / company / job anywhere in the app. Always prefer
+these over re-inlining `navigate()`/`<Link>` so coverage stays consistent
+site-wide.
+
+- **`<PersonLink id name type? sourceTable? roles? stopPropagation? />`** —
+  routes to `/candidates/:id` (candidate) or `/contacts/:id` (client). Decides
+  from `type==='client'` / `sourceTable==='contact'` / `roles`; dual-role →
+  candidate page. No `id` → renders plain text (never a dead link).
+- **`<JobLink id title? stopPropagation? />`** — `/jobs/:id`.
+- **`<CompanyLink companyId? name? showLogo? domain? logoUrl? stopPropagation? />`**
+  — `/companies/:id`. Resolves the id from `companyId` **or**, when only a name
+  string is available, from `useCompanyNameIndex()` (a cached
+  normalized-name→id map over `companies` + `company_aliases`, mirroring the
+  DB's `normalize_company_name()`; lazily loaded only when some link lacks an
+  id). `showLogo` renders `<CompanyLogo>` inline. Falls back to plain text when
+  the name can't be resolved.
+- **`stopPropagation`** — pass when the link sits inside a clickable row/card so
+  the parent's `onClick` (e.g. "open candidate") doesn't also fire. The link
+  uses a real `<a>` so cmd/middle-click opens a new tab.
+- ⚠️ Don't nest these inside a `<button>` (invalid HTML). If a row is a
+  `<button>`, convert it to a `<div role="button" tabIndex={0} onKeyDown=…>`
+  first (see the dashboard `SendOutRow`/`CandidateRow` in `Index.tsx`).
+- ⚠️ Don't add a link where the row's click is an **action** (e.g. "add to
+  send-outs" pickers) rather than navigation — it would hijack the action.
+
+---
+
 ## Proactive & Agentic Joe UI (2026-06-21)
 
 - **`/today`** (`pages/Today.tsx`, sidebar item "Today", `Sun` icon) — the

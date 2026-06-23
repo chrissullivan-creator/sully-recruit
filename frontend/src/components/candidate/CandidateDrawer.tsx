@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -186,8 +186,13 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                     {c.current_company && (
                       <>
                         <span>·</span>
-                        <CompanyLogo name={c.current_company} size="xs" />
-                        <span className="truncate">{c.current_company}</span>
+                        <CompanyLink
+                          companyId={(c as any).company_id}
+                          name={c.current_company}
+                          showLogo
+                          stopPropagation
+                          className="truncate"
+                        />
                       </>
                     )}
                   </p>

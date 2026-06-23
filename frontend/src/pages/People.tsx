@@ -35,6 +35,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { CompanyLink } from '@/components/shared/EntityLinks';
 
 type PersonTab = 'all' | 'candidates' | 'clients' | 'applicants';
 type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated' | 'created';
@@ -456,19 +457,18 @@ const People = () => {
                         <RoleBadges roles={person.roles} sourceTable={person.source_table} />
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{person.title ?? '—'}</td>
-                      <td className="px-4 py-3" onClick={e => { if (person.company_id) e.stopPropagation(); }}>
-                        {person.company_id && person.company_name ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); navigate(`/companies/${person.company_id}`); }}
-                            className="text-sm text-muted-foreground hover:text-emerald hover:underline flex items-center gap-2 transition-colors"
-                          >
-                            <CompanyLogo name={person.company_name ?? ''} domain={null} size="xs" />
-                            {person.company_name}
-                          </button>
+                      <td className="px-4 py-3">
+                        {person.company_name ? (
+                          <CompanyLink
+                            companyId={person.company_id}
+                            name={person.company_name}
+                            showLogo
+                            stopPropagation
+                            className="text-sm text-muted-foreground"
+                          />
                         ) : (
                           <span className="text-sm text-muted-foreground flex items-center gap-2">
-                            <CompanyLogo name={person.company_name ?? ''} domain={null} size="xs" />
-                            {person.company_name ?? '—'}
+                            <CompanyLogo name="" domain={null} size="xs" />—
                           </span>
                         )}
                       </td>

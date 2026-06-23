@@ -9,6 +9,7 @@ import { format } from 'date-fns';
 import { type SendOutRow, formatComp, formatCompRange, lastTouchAt } from '@/lib/queries/send-outs';
 import { daysSince, type CanonicalStage, nextStage, canonicalConfig } from '@/lib/pipeline';
 import { EditSendOutNotesDialog } from './EditSendOutNotesDialog';
+import { JobLink, CompanyLink } from '@/components/shared/EntityLinks';
 
 interface CandidateRowProps {
   row: SendOutRow;
@@ -87,7 +88,10 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
             <p className="text-sm font-medium text-foreground truncate">{name}</p>
             {j?.title && (
               <p className="text-[11px] text-muted-foreground truncate">
-                {j.title}{j.company_name ? ` · ${j.company_name}` : ''}
+                <JobLink id={j.id} title={j.title} stopPropagation className="text-muted-foreground" />
+                {j.company_name ? (
+                  <> · <CompanyLink name={j.company_name} stopPropagation className="text-muted-foreground" /></>
+                ) : null}
               </p>
             )}
           </div>

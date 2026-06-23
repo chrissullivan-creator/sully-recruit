@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { CompanyLink, JobLink } from '@/components/shared/EntityLinks';
 import DOMPurify from 'dompurify';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -553,7 +554,10 @@ const ContactDetail = () => {
             )}
           </div>
           <p className="text-sm text-muted-foreground truncate">
-            {contact.title ?? ''}{contact.title && companyName ? ' at ' : ''}{companyName}
+            {contact.title ?? ''}{contact.title && companyName ? ' at ' : ''}
+            {companyName && (
+              <CompanyLink companyId={(c as any).company_id} name={companyName} className="text-muted-foreground" />
+            )}
           </p>
         </div>
 
@@ -1049,11 +1053,14 @@ const ContactDetail = () => {
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                {cand?.current_title ?? ''}{cand?.current_title && cand?.current_company ? ' at ' : ''}{cand?.current_company ?? ''}
+                                {cand?.current_title ?? ''}{cand?.current_title && cand?.current_company ? ' at ' : ''}
+                                {cand?.current_company && (
+                                  <CompanyLink name={cand.current_company} className="text-muted-foreground" />
+                                )}
                               </p>
                               {job && (
                                 <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                                  <Briefcase className="h-3 w-3" /> {job.title}{job.company_name ? ` \u2014 ${job.company_name}` : ''}
+                                  <Briefcase className="h-3 w-3" /> <JobLink id={job.id} title={job.title} className="text-muted-foreground" />{job.company_name ? (<>{' \u2014 '}<CompanyLink name={job.company_name} className="text-muted-foreground" /></>) : null}
                                 </p>
                               )}
                             </div>
