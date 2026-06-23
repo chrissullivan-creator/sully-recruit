@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -23,7 +23,7 @@ import {
 } from '@/components/candidates/CandidateFilterSidebar';
 import { booleanMatch, hasBooleanOperators } from '@/lib/booleanSearch';
 import { haversineDistanceMiles } from '@/lib/geocoding';
-import { useCandidates, useJobs } from '@/hooks/useData';
+import { useCandidates, useCandidatesSearch, useJobs } from '@/hooks/useData';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -95,7 +95,6 @@ const Candidates = () => {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const { data: candidates = [], isLoading, isError, error, refetch } = useCandidates();
   const { data: jobs = [] } = useJobs();
   const { data: profiles = [] } = useProfiles();
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
@@ -111,6 +110,47 @@ const Candidates = () => {
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>(loadSavedSearches);
   const queryClient = useQueryClient();
   const PAGE_SIZE = 100;
+
+  // ── Data source ──────────────────────────────────────────────────────────
+  // Default path is the server-side paginated search so we don't load the whole
+  // candidates table into the browser. We fall back to the full client-side load
+  // + filter whenever an advanced feature is in play: boolean search operators,
+  // a location/radius filter, or any other sidebar filter. Opening the filter
+  // sidebar also forces the full load so its skill/location suggestion lists
+  // (derived from the loaded set) populate.
+  const advancedFilterActive = useMemo(() => {
+    const f = filters;
+    return !!(
+      f.location || f.skills.length || f.title || f.company ||
+      (f.jobTag && f.jobTag !== 'all') ||
+      (f.workAuthorization && f.workAuthorization !== 'all') ||
+      f.dateAddedFrom || f.dateAddedTo || f.lastActivityFrom
+    );
+  }, [filters]);
+  const clientMode = filterSidebarOpen || hasBooleanOperators(searchQuery) || advancedFilterActive;
+
+  const fullQuery = useCandidates({ enabled: clientMode });
+  const serverQuery = useCandidatesSearch({
+    search: searchQuery,
+    status: filters.status,
+    owner: filters.owner,
+    userId: user?.id ?? null,
+    sortField,
+    sortDir,
+    page,
+    pageSize: PAGE_SIZE,
+    enabled: !clientMode,
+  });
+
+  const candidates = (clientMode ? fullQuery.data : undefined) ?? [];
+  const isLoading = clientMode ? fullQuery.isLoading : serverQuery.isLoading;
+  const isError = clientMode ? fullQuery.isError : serverQuery.isError;
+  const error = clientMode ? fullQuery.error : serverQuery.error;
+  const refetch = clientMode ? fullQuery.refetch : serverQuery.refetch;
+
+  // Reset to page 1 when the data-source mode flips so we never sit on a page
+  // index that doesn't exist in the other mode's result set.
+  useEffect(() => { setPage(1); }, [clientMode]);
 
   // Derive unique skills and locations from candidate data for filter suggestions
   const availableSkills = useMemo(() => {
@@ -272,9 +312,16 @@ const Candidates = () => {
   const activeFilterCount = getActiveFilterCount(filters);
   const filterChips = getActiveFilterChips(filters, STATUS_LABELS, jobs, profiles);
 
-  // Reset page when filters change
-  const totalPages = Math.ceil(filteredCandidates.length / PAGE_SIZE);
-  const paginatedCandidates = filteredCandidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Unified view over the active data source: client-side filtered set, or the
+  // server page. `totalCount` drives pagination + the "showing X of Y" label.
+  const totalCount = clientMode ? filteredCandidates.length : (serverQuery.data?.total ?? 0);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const pageRows = clientMode
+    ? filteredCandidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+    : (serverQuery.data?.rows ?? []);
+  // What the select-all checkbox acts on: the whole filtered set client-side,
+  // or just the current page in server mode (we don't hold the full set there).
+  const selectableRows = clientMode ? filteredCandidates : pageRows;
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -297,14 +344,14 @@ const Candidates = () => {
   };
 
   const toggleAll = () => {
-    if (selectedIds.length === filteredCandidates.length) {
+    if (selectedIds.length === selectableRows.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filteredCandidates.map((c) => c.id));
+      setSelectedIds(selectableRows.map((c) => c.id));
     }
   };
 
-  const selectedNames = candidates
+  const selectedNames = (clientMode ? candidates : pageRows)
     .filter((c) => selectedIds.includes(c.id))
     .map((c) => c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`);
 
@@ -490,13 +537,13 @@ const Candidates = () => {
             </>
           )}
 
-          {filteredCandidates.length > 0 && selectedIds.length !== filteredCandidates.length && (
+          {selectableRows.length > 0 && selectedIds.length !== selectableRows.length && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
-              Add All ({filteredCandidates.length})
+              Add All ({selectableRows.length})
             </Button>
           )}
 
-          {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 && (
+          {selectedIds.length === selectableRows.length && selectableRows.length > 0 && (
             <Button variant="outline" size="sm" onClick={toggleAll}>
               Deselect All
             </Button>
@@ -539,7 +586,7 @@ const Candidates = () => {
               <RefreshCw className="h-4 w-4 mr-1" /> Retry
             </Button>
           </div>
-        ) : filteredCandidates.length === 0 && !searchQuery && filters.status === 'all' && filters.jobTag === 'all' && filters.owner === 'all' ? (
+        ) : totalCount === 0 && !searchQuery && filters.status === 'all' && filters.jobTag === 'all' && filters.owner === 'all' ? (
           <div className="text-center py-16">
             <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-1">No candidates yet</h3>
@@ -558,7 +605,7 @@ const Candidates = () => {
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <Checkbox
-                      checked={selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0}
+                      checked={selectedIds.length === selectableRows.length && selectableRows.length > 0}
                       onCheckedChange={toggleAll}
                     />
                   </th>
@@ -586,7 +633,7 @@ const Candidates = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {paginatedCandidates.map((candidate) => (
+                {pageRows.map((candidate) => (
                   <tr key={candidate.id} className="group hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -707,7 +754,7 @@ const Candidates = () => {
                     </td>
                   </tr>
                 ))}
-                {paginatedCandidates.length === 0 && (
+                {pageRows.length === 0 && (
                   <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</td></tr>
                 )}
               </tbody>
@@ -716,7 +763,7 @@ const Candidates = () => {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-muted-foreground">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCandidates.length)} of {filteredCandidates.length}
+                Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
               </p>
               <div className="flex items-center gap-1">
                 <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>First</Button>
