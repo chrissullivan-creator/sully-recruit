@@ -6,6 +6,7 @@ import { unipileFetch, unipileFetchV2 } from "../../../../src/server-lib/unipile
 import { notifyError } from "../../../../src/server-lib/alerting.js";
 import { isTransientFetchError } from "../../../../src/server-lib/fetch-retry.js";
 import { extractMessageIntel, applyExtractedIntel } from "../../../../src/server-lib/intel-extraction.js";
+import { isBounceEmail, extractFailedRecipient, applyEmailBounce } from "../../../../src/server-lib/email-bounce.js";
 
 /**
  * Backfill emails from Unipile every 5 minutes — safety net for missed
@@ -283,6 +284,19 @@ async function processAccount(
         const bodyText = stripHtml(msg.body_html ?? msg.body ?? msg.body_preview ?? "");
         const preview = (msg.body_preview ?? bodyText ?? "").slice(0, 500);
 
+        // Bounce / NDR: don't store it as a normal inbound message — pull the
+        // failed recipient and mark them email-invalid + stop their sequence.
+        // This backfill is the live inbound path, so (like sentiment) bounce
+        // handling has to run here, not only in the process-unipile-event webhook.
+        if (!isOutbound && isBounceEmail(senderEmail, subject)) {
+          const failed = extractFailedRecipient(bodyText);
+          if (failed) {
+            await applyEmailBounce(supabase, failed, (subject || "ndr").slice(0, 200), logger);
+            skipped++;
+            continue;
+          }
+        }
+
         let { data: conversation } = await supabase
           .from("conversations")
           .select("id")
@@ -488,6 +502,17 @@ async function processAccountV2(
 
         const bodyText = stripHtml(msg.body ?? msg.snippet ?? "");
         const preview = (msg.snippet ?? bodyText ?? "").slice(0, 500);
+
+        // Bounce / NDR — see the v1 path above. Same handling: flag the failed
+        // recipient + stop their sequence instead of storing the NDR.
+        if (!isOutbound && isBounceEmail(senderEmail, subject)) {
+          const failed = extractFailedRecipient(bodyText);
+          if (failed) {
+            await applyEmailBounce(supabase, failed, (subject || "ndr").slice(0, 200), logger);
+            skipped++;
+            continue;
+          }
+        }
 
         let { data: conversation } = await supabase
           .from("conversations")
