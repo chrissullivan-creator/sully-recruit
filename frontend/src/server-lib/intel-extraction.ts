@@ -105,10 +105,19 @@ export async function extractMessageIntel(
       jsonOutput: true,
     });
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    // Strip markdown code fences the model sometimes wraps JSON in, then take
+    // the outermost object. notifyError (not a silent logger.warn) on failure —
+    // these two branches are how sentiment "quietly stopped working" for months:
+    // a successful AI call returning non-JSON still produced a silent null with
+    // no alert, so reply_sentiment went 0 rows for ~12 weeks unnoticed.
+    const cleaned = text.replace(/```(?:json)?/gi, "").trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.warn("Intel extraction returned non-JSON", {
-        via, snippet: text.slice(0, 200),
+      await notifyError({
+        taskId: "intel-extraction",
+        error: new Error(`AI returned non-JSON via ${via}`),
+        context: { via, snippet: text.slice(0, 300) },
+        severity: "WARN",
       });
       return null;
     }
@@ -116,8 +125,11 @@ export async function extractMessageIntel(
     try {
       return JSON.parse(jsonMatch[0]) as ExtractedIntel;
     } catch (parseErr: any) {
-      logger.warn("Intel extraction JSON parse failed", {
-        via, error: parseErr.message, snippet: jsonMatch[0].slice(0, 200),
+      await notifyError({
+        taskId: "intel-extraction",
+        error: new Error(`AI JSON parse failed via ${via}: ${parseErr.message}`),
+        context: { via, snippet: jsonMatch[0].slice(0, 300) },
+        severity: "WARN",
       });
       return null;
     }
@@ -150,8 +162,10 @@ export async function applyExtractedIntel(
   const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
   const fields = intel.extracted_fields;
 
-  // Store sentiment in reply_sentiment table
-  await supabase.from("reply_sentiment").insert({
+  // Store sentiment in reply_sentiment table. Check the error instead of
+  // swallowing it — an unchecked failed insert here would look identical to
+  // "no sentiment" with zero signal.
+  const { error: sentimentErr } = await supabase.from("reply_sentiment").insert({
     [entityColumn]: entityId,
     enrollment_id: enrollmentId || null,
     channel,
@@ -159,6 +173,13 @@ export async function applyExtractedIntel(
     summary: intel.summary,
     analyzed_at: new Date().toISOString(),
   } as any);
+  if (sentimentErr) {
+    await notifyError({
+      taskId: "intel-extraction",
+      error: sentimentErr,
+      context: { stage: "reply_sentiment.insert", entityId, entityType, channel },
+    });
+  }
 
   // Update sentiment on enrollment if provided
   if (enrollmentId) {
