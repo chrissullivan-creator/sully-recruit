@@ -231,19 +231,21 @@ export async function incrementDailySend(
   channel: string,
   estDate: string,
 ): Promise<void> {
-  const { data: existing } = await supabase
-    .from("daily_send_log")
-    .select("id, count")
-    .eq("account_id", accountId)
-    .eq("channel", channel)
-    .eq("send_date", estDate)
-    .maybeSingle();
-
-  if (existing) {
-    await supabase.from("daily_send_log").update({ count: existing.count + 1 }).eq("id", existing.id);
-  } else {
-    await supabase.from("daily_send_log").insert({ account_id: accountId, channel, send_date: estDate, count: 1 });
-  }
+  // Atomic upsert. The old read-then-write (select → branch update/insert)
+  // raced under concurrent/batch sends: two writers read the same count and
+  // one increment was lost, or both inserted and the unique-violation was
+  // silently swallowed — either way the daily cap under-counted and could be
+  // exceeded, risking LinkedIn/email rate-limit strikes. The RPC does an
+  // `INSERT ... ON CONFLICT DO UPDATE SET count = count + 1` in one statement.
+  const { error } = await supabase.rpc("increment_daily_send", {
+    p_account_id: accountId,
+    p_channel: channel,
+    p_send_date: estDate,
+  });
+  // Best-effort: the message has already been sent by the time we get here,
+  // so log rather than throw — throwing would bubble up and retry the step,
+  // causing a duplicate send.
+  if (error) console.error(`[send-time] incrementDailySend failed: ${error.message}`);
 }
 
 /** Local (tz) calendar date string "YYYY-MM-DD" for a UTC instant. */
