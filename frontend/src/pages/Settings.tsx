@@ -50,30 +50,12 @@ import {
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 
-// ---- types ----
-interface IntegrationConfig {
-  [key: string]: string;
-}
-
-interface IntegrationRow {
-  integration_type: string;
-  config: IntegrationConfig;
-  is_active: boolean;
-}
-
-interface LinkedinSeat {
-  account_label: string | null;
-  account_type: string;
-  email_address: string | null;
-  id: string;
-  is_active: boolean;
-  linkedin_capabilities: string[] | null;
-  linkedin_capability: string | null;
-  metadata: Record<string, any> | null;
-  owner_user_id: string | null;
-  unipile_account_id: string | null;
-  updated_at: string;
-}
+import type {
+  IntegrationConfig, IntegrationRow, LinkedinSeat, EnrichmentKey, SchedulingLink, WorkingWindow,
+} from '@/components/settings/settings-types';
+import {
+  ADMIN_EMAILS, ENRICHMENT_KEY_META, SCHEDULE_DAYS, COMMON_TIMEZONES, defaultWorkingHours, textToHtml,
+} from '@/components/settings/settings-constants';
 
 // ---- component ----
 const Settings = () => {
@@ -241,10 +223,6 @@ const Settings = () => {
   const [msConnecting, setMsConnecting] = useState(false);
   const [msDisconnecting, setMsDisconnecting] = useState(false);
 
-  const ADMIN_EMAILS = [
-    'chris.sullivan@emeraldrecruit.com',
-    'emeraldrecruit@theemeraldrecruitinggroup.com',
-  ];
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
 
   // LinkedIn Recruiter connection state
@@ -271,39 +249,6 @@ const Settings = () => {
   // Enrichment-provider API keys (live in app_settings — Apollo + the
   // four Phase 2/3 providers). One state object so a single save
   // handler covers all of them.
-  type EnrichmentKey =
-    | 'APOLLO_API_KEY'
-    | 'BETTERCONTACT_API_KEY'
-    | 'FULLENRICH_API_KEY'
-    | 'PDL_API_KEY'
-    | 'ZEROBOUNCE_API_KEY';
-  const ENRICHMENT_KEY_META: Record<EnrichmentKey, { label: string; help: string; signupUrl: string }> = {
-    APOLLO_API_KEY: {
-      label: 'Apollo',
-      help: 'People match + organization enrich + person_id capture',
-      signupUrl: 'https://app.apollo.io/#/settings/integrations/api',
-    },
-    BETTERCONTACT_API_KEY: {
-      label: 'BetterContact',
-      help: 'Waterfall for work email + mobile (verifies upstream)',
-      signupUrl: 'https://bettercontact.rocks/api',
-    },
-    FULLENRICH_API_KEY: {
-      label: 'FullEnrich',
-      help: 'Primary for personal email, secondary for work email',
-      signupUrl: 'https://app.fullenrich.com/settings/api',
-    },
-    PDL_API_KEY: {
-      label: 'People Data Labs',
-      help: 'Personal email + mobile fallback; company job postings',
-      signupUrl: 'https://dashboard.peopledatalabs.com/api-keys',
-    },
-    ZEROBOUNCE_API_KEY: {
-      label: 'ZeroBounce',
-      help: 'Verifies Apollo + PDL emails before writing',
-      signupUrl: 'https://www.zerobounce.net/members/settings/api/',
-    },
-  };
   const [enrichmentKeys, setEnrichmentKeys] = useState<Record<EnrichmentKey, string>>({
     APOLLO_API_KEY: '',
     BETTERCONTACT_API_KEY: '',
@@ -333,38 +278,6 @@ const Settings = () => {
   // ── Scheduling (Calendly-style self-booking link) ──────────────────
   // One link per recruiter. Loaded on tab open; created lazily on first
   // save via POST /api/schedule-links.
-  type WorkingWindow = { start: string; end: string };
-  type SchedulingLink = {
-    id: string;
-    slug: string;
-    title: string | null;
-    duration_min: number;
-    meeting_type: 'phone' | 'teams' | 'in_person';
-    location: string | null;
-    timezone: string;
-    working_hours: Record<string, WorkingWindow[]>;
-    buffer_min: number;
-    min_notice_hours: number;
-    max_days_out: number;
-    active: boolean;
-  };
-  const SCHEDULE_DAYS: { key: string; label: string }[] = [
-    { key: 'monday', label: 'Mon' },
-    { key: 'tuesday', label: 'Tue' },
-    { key: 'wednesday', label: 'Wed' },
-    { key: 'thursday', label: 'Thu' },
-    { key: 'friday', label: 'Fri' },
-    { key: 'saturday', label: 'Sat' },
-    { key: 'sunday', label: 'Sun' },
-  ];
-  const COMMON_TIMEZONES = [
-    'America/New_York',
-    'America/Chicago',
-    'America/Denver',
-    'America/Los_Angeles',
-    'America/Phoenix',
-    'Europe/London',
-  ];
   const [schedLink, setSchedLink] = useState<SchedulingLink | null>(null);
   const [schedLoaded, setSchedLoaded] = useState(false);
   const [schedSaving, setSchedSaving] = useState(false);
@@ -387,16 +300,6 @@ const Settings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Default working-hours shape used before a link exists (Mon–Fri 9–5).
-  const defaultWorkingHours: Record<string, WorkingWindow[]> = {
-    monday: [{ start: '09:00', end: '17:00' }],
-    tuesday: [{ start: '09:00', end: '17:00' }],
-    wednesday: [{ start: '09:00', end: '17:00' }],
-    thursday: [{ start: '09:00', end: '17:00' }],
-    friday: [{ start: '09:00', end: '17:00' }],
-    saturday: [],
-    sunday: [],
-  };
 
   const schedDraft: SchedulingLink = schedLink ?? {
     id: '',
@@ -915,13 +818,6 @@ Senior Recruiter | Your Company
     }
   };
 
-  /** Convert plain text signature to simple HTML for sending */
-  const textToHtml = (text: string): string => {
-    return text
-      .split('\n')
-      .map(line => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-      .join('<br/>');
-  };
 
   /** Get the final HTML signature (from either mode) for saving */
   const getFinalSignatureHtml = (): string => {
