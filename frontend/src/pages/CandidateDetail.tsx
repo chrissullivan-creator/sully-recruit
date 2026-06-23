@@ -620,8 +620,8 @@ const CandidateDetail = () => {
     const canonical = stageToCanonical(newStage) ?? (newStage as CanonicalStage);
     // Pitch / send out / submitted captures a stage-move note, with
     // the prior pitch note pre-filled so it carries through.
-    if (canonical === 'pitched' || canonical === 'ready_to_send' || canonical === 'submitted') {
-      const prior = canonical === 'pitched' ? null : await fetchLatestStageMoveNote(sendOutId);
+    if (canonical === 'pitch' || canonical === 'ready_to_send' || canonical === 'submitted') {
+      const prior = canonical === 'pitch' ? null : await fetchLatestStageMoveNote(sendOutId);
       setPendingStageMove({ sendOutId, target: canonical, initialNote: prior });
       setSendOutNotesOpen(true);
       return;
@@ -2605,7 +2605,7 @@ const CandidateDetail = () => {
           pendingStageMove
             ? (pendingStageMove.target === 'submitted'
                 ? 'Send to Client'
-                : pendingStageMove.target === 'pitched'
+                : pendingStageMove.target === 'pitch'
                   ? 'Move to Pitch'
                   : 'Move to Send Out')
             : 'Add to Send Out'

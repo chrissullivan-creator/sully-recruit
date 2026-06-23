@@ -774,8 +774,8 @@ const JobDetail = () => {
     // note is then carried forward into the Send Out dialog as the
     // initial value, so the recruiter edits rather than re-types. Other
     // stages commit immediately.
-    if (target === 'pitched' || target === 'ready_to_send' || target === 'submitted') {
-      const prior = target === 'pitched'
+    if (target === 'pitch' || target === 'ready_to_send' || target === 'submitted') {
+      const prior = target === 'pitch'
         ? null
         : await fetchLatestStageMoveNote(row.send_out_id);
       setPendingMove({ row, target, initialNote: prior });
@@ -2199,7 +2199,7 @@ const JobDetail = () => {
         title={
           pendingMove?.target === 'submitted'
             ? 'Send to Client'
-            : pendingMove?.target === 'pitched'
+            : pendingMove?.target === 'pitch'
               ? 'Move to Pitch'
               : 'Move to Send Out'
         }
