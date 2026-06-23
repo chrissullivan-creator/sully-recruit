@@ -16,7 +16,7 @@ import { canonicalChannel } from "../../../../src/server-lib/unipile-v2.js";
 import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
 import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
 import { resolvePerson, type LinkMethod } from "../../identity-resolver.js";
-import { autoCreatePersonFromOutbound } from "../../../../src/server-lib/resolve-counterparty.js";
+import { enrichAndRematch } from "../../enrich-linkedin-identity.js";
 
 /**
  * Process Unipile webhook events (LinkedIn messages, connection updates,
@@ -464,7 +464,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   let entityId: string | null = entityMatch?.entityId ?? null;
   let entityType: "candidate" | "contact" = entityMatch?.entityType ?? "candidate";
   let entityColumn: "candidate_id" | "contact_id" = entityMatch?.entityColumn ?? "candidate_id";
-  const linkMethod: LinkMethod | null = entityMatch?.linkMethod ?? null;
+  let linkMethod: LinkMethod | null = entityMatch?.linkMethod ?? null;
 
   // Find-or-create the conversation row. The lookup MUST match the unique
   // index (integration_account_id, channel, external_conversation_id) so
@@ -521,72 +521,53 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return created?.id ?? null;
   }
 
-  // Auto-add: an inbound LinkedIn message (classic DM OR Recruiter InMail)
-  // from an unknown sender is a real person reaching out, so create the
-  // candidate now instead of dropping it (the Phase-5 fallback below).
-  // matchLinkedinEntity above already deduped (provider id / candidate_channels
-  // / slug), so we only land here when they're genuinely new;
-  // autoCreatePersonFromOutbound mirrors the provider id into candidate_channels
-  // so the next message hard-matches, and the resolve-unipile / find-linkedin
-  // crons backfill title/company/URL. Auto-created people are flagged
-  // needs_classification=true so they surface in Data Cleanup for review.
-  // Scoped to inbound: on outbound the sender id is *us* (that's how direction
-  // is detected), and outbound recipients are auto-added upstream in the send
-  // path — so creating from senderId here is only correct for inbound.
-  if (!entityId && (channel === "linkedin" || channel === "linkedin_recruiter") && direction === "inbound" && integrationAccountId) {
-    const { data: ownerRow } = await supabase
-      .from("integration_accounts")
-      .select("owner_user_id")
-      .eq("id", integrationAccountId)
-      .maybeSingle();
-    const ownerUserId = ownerRow?.owner_user_id ?? null;
-    const senderName =
-      messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
-    if (ownerUserId) {
-      const created = await autoCreatePersonFromOutbound(supabase, {
+  // Auto-match enrichment: before treating an inbound sender as unknown, look
+  // them up on LinkedIn (Unipile v1 profile fetch) and re-run the resolver with
+  // the enriched identity (public_identifier / email / URL). This catches
+  // existing people we only had an opaque provider id for. Webhook-only +
+  // rate-limited (see enrich-linkedin-identity.ts). It NEVER creates a person —
+  // unmatched senders fall through to the "unlinked" path below, where the user
+  // adds them with one click. enrichedName backfills sender_name there.
+  let enrichedName: string | null = null;
+  if (!entityId && (channel === "linkedin" || channel === "linkedin_recruiter") && direction === "inbound" && senderId) {
+    const enrich = await enrichAndRematch(supabase, {
+      providerId: senderId,
+      integrationAccountId,
+      chatId: externalConversationId,
+    });
+    enrichedName =
+      enrich.profile?.full_name
+      || [enrich.profile?.first_name, enrich.profile?.last_name].filter(Boolean).join(" ").trim()
+      || null;
+    if (enrich.resolved?.personId) {
+      entityId = enrich.resolved.personId;
+      entityType = enrich.resolved.personType;
+      entityColumn = enrich.resolved.entityColumn;
+      linkMethod = enrich.resolved.linkMethod;
+      logger.info("Auto-matched inbound LinkedIn sender via profile enrichment", {
+        senderId,
+        personId: entityId,
         channel,
-        address: senderId,
-        name: senderName,
-        ownerUserId,
-        source: channel === "linkedin_recruiter" ? "recruiter_inmail" : "classic_message",
+        linkMethod,
       });
-      if (created) {
-        entityId = created.id;
-        entityType = created.type;
-        entityColumn = created.entityColumn;
-        logger.info("Auto-created candidate from inbound LinkedIn message", {
-          senderId,
-          personId: entityId,
-          channel,
-        });
-      }
     }
   }
 
   if (!entityId) {
-    // Phase 5 fallback: we get here only if the auto-add above couldn't run
-    // (no owner on the integration account, or the insert failed). Inbound
-    // from an unknown sender we couldn't attach is NOT persisted — the live
-    // inbox UI fetches recent LinkedIn messages from Unipile for the "Other"
-    // view. Outbound from us to a non-CRM recipient still persists (it's our
-    // work product) — auto-add of the recipient happens upstream in the
-    // send path.
-    if (direction === "inbound") {
-      logger.info("Dropping inbound LinkedIn from unknown sender (Phase 5 rule)", {
-        senderId,
-        external_message_id: unipileMessageId,
-      });
-      return {
-        action: "dropped",
-        reason: "unknown_sender_inbound",
-        senderId,
-        type: "linkedin_message",
-      };
-    }
-
-    logger.info("Outbound LinkedIn to non-CRM recipient — persisting as unlinked", { senderId });
-
-    const senderName = messageData.sender_name || messageData.from?.name || messageData.from?.display_name || null;
+    // Unknown sender — after the cheap resolver AND profile enrichment both
+    // missed. Persist as an UNLINKED conversation/message so it surfaces in the
+    // inbox "Other" tab, where the user adds them with one click (which writes
+    // the provider id into candidate_channels so future messages hard-match).
+    // Applies to BOTH inbound (a stranger reaching out — e.g. a Recruiter
+    // InMail) and outbound (our work product to a non-CRM recipient). We never
+    // auto-create the person. The previous behavior DROPPED inbound strangers,
+    // which is exactly why InMails from new people never appeared.
+    const senderName =
+      enrichedName
+      || messageData.sender_name
+      || messageData.from?.name
+      || messageData.from?.display_name
+      || null;
     const senderAddress =
       messageData.sender_address
       || messageData.sender?.attendee_profile_url
@@ -631,6 +612,9 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     const conversationUpdate: Record<string, any> = {
       last_message_at: receivedAt,
       last_message_preview: messageBody.substring(0, 100),
+      // Mirror the linked path's status derivation so unlinked threads also
+      // report awaiting-reply correctly in the inbox.
+      status: direction === "inbound" ? "replied" : "awaiting_reply",
     };
     if (direction === "inbound") conversationUpdate.is_read = false;
 
@@ -639,7 +623,8 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       .update(conversationUpdate)
       .eq("id", conversationId);
 
-    return { action: "logged_unlinked", senderId, senderName, direction, type: "linkedin_message" };
+    logger.info("Logged unlinked LinkedIn message", { senderId, senderName, direction, channel });
+    return { action: "logged_unlinked", senderId, senderName, direction, channel, type: "linkedin_message" };
   }
 
   const conversationId = await findOrCreateConversation(entityColumn, entityId);

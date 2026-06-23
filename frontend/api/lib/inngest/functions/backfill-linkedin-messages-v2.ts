@@ -330,6 +330,12 @@ async function processAccountV2(
             counterparty?.id ?? chat.attendee_provider_id ?? chat.provider_id ?? null;
           const profileUrl: string | null =
             counterparty?.profile_url ?? counterparty?.url ?? null;
+          // Display name for unlinked rows so the inbox shows a name, not a URN.
+          const counterpartyName: string | null =
+            counterparty?.name
+            || counterparty?.display_name
+            || [counterparty?.first_name, counterparty?.last_name].filter(Boolean).join(" ").trim()
+            || null;
 
           const entity = await matchByMemberId(supabase, memberId);
           if (!entity) stats.unmatched++;
@@ -422,6 +428,7 @@ async function processAccountV2(
               unipile_message_id: msgId,
               unipile_chat_id: chatId,
               sender_address: senderAddress,
+              sender_name: isSender ? null : counterpartyName,
               sent_at: sentAtIso,
               is_read: true,
               created_at: nowIso,

@@ -42,6 +42,9 @@ export interface InboxThread {
   external_conversation_id: string | null;
   integration_account_id: string | null;
   has_attachments?: boolean | null;
+  // Reply sentiment surfaced from the inbox_threads view (per-person denorm).
+  sentiment?: string | null;
+  sentiment_note?: string | null;
 }
 
 export interface Message {

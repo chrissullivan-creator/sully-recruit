@@ -5,28 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Mail, Linkedin, MessageCircle, PhoneCall, Loader2, Check, X, Edit } from 'lucide-react';
 
-const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
-  positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
-  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A84C]/15', text: 'text-[#C9A84C]' },
-  neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
-  negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
-  not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },
-  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-red-900/20',   text: 'text-red-700' },
-};
-
-export const SentimentChip = ({ sentiment, note }: { sentiment?: string | null; note?: string | null }) => {
-  if (!sentiment) return null;
-  const cfg = SENTIMENT_CONFIG[sentiment] ?? { label: sentiment.replace(/_/g, ' '), bg: 'bg-muted', text: 'text-muted-foreground' };
-  return (
-    <div>
-      <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', cfg.bg, cfg.text)}>
-        {cfg.label}
-      </span>
-      {note && <p className="text-[10px] italic text-muted-foreground mt-0.5 line-clamp-2">{note}</p>}
-    </div>
-  );
-};
+// SentimentChip now lives in components/shared so the inbox + candidate detail
+// share one treatment. Re-exported here to keep existing imports working.
+export { SentimentChip } from '@/components/shared/SentimentChip';
 
 export const ChannelIcon = ({ channel }: { channel?: string | null }) => {
   if (!channel) return null;

@@ -36,6 +36,7 @@ import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
+import { InboxTopBar } from '@/components/inbox/InboxTopBar';
 import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
@@ -55,20 +56,14 @@ import {
   type PendingAttachment,
 } from '@/components/inbox/inbox-helpers';
 import { DateGroupHeader, ThreadItem, MessagePane, BulkActionBar } from '@/components/inbox/InboxComponents';
+import { useInboxScope } from '@/components/inbox/use-inbox-scope';
+import { SENTIMENT_BUCKETS, sentimentBucketKey } from '@/components/shared/SentimentChip';
 
-
-
-// ---------- Admin emails — can see all messages ----------
-const ADMIN_EMAILS = [
-  'chris.sullivan@emeraldrecruit.com',
-  'emeraldrecruit@theemeraldrecruitinggroup.com',
-];
 
 export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [ownerFilter, setOwnerFilter] = useState<string>('all');
 
   // URL-synced state for sidebar nav: ?tab=focused|other &view=unread|archive|... &channel=email|...
   const [searchParams, setSearchParams] = useSearchParams();
@@ -82,6 +77,11 @@ export default function Inbox() {
     const c = searchParams.get('channel');
     const valid: InboxChannel[] = ['all', 'email', 'linkedin', 'recruiter', 'sms'];
     return (valid as string[]).includes(c ?? '') ? (c as InboxChannel) : 'all';
+  })();
+  // Sentiment filter (bucket key from SENTIMENT_BUCKETS, or 'all').
+  const sentimentFilter: string = ((): string => {
+    const s = searchParams.get('sentiment');
+    return SENTIMENT_BUCKETS.some((b) => b.key === s) ? (s as string) : 'all';
   })();
   // Calls is a sibling Hub section tracked via ?section=calls, independent of
   // the view/channel message filters. When active, the Hub swaps the thread
@@ -126,77 +126,19 @@ export default function Inbox() {
   const [density, setDensity] = useInboxDensity();
   const queryClient = useQueryClient();
 
-  // Get current user for permission check
-  const { data: currentUser } = useQuery({
-    queryKey: ['current_user'],
-    queryFn: async () => {
-      const { data } = await supabase.auth.getUser();
-      return data.user;
-    },
-  });
-
-  const userEmail = currentUser?.email?.toLowerCase() || '';
-  const userId = currentUser?.id || '';
-  const isAdmin = ADMIN_EMAILS.includes(userEmail);
-
-  // Get the current user's integration accounts (for non-admin filtering)
-  const { data: myAccounts = [] } = useQuery({
-    queryKey: ['my_integration_accounts', userId],
-    enabled: !!userId && !isAdmin,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('integration_accounts')
-        .select('id')
-        .or(`owner_user_id.eq.${userId},user_id.eq.${userId}`);
-      if (error) throw error;
-      return (data || []).map((a: any) => a.id);
-    },
-  });
-
-  // For admins: load team members with their integration account IDs for the owner filter
-  const { data: teamMembers = [] } = useQuery({
-    queryKey: ['team_members_inbox'],
-    enabled: isAdmin,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('integration_accounts')
-        .select('id, email_address, account_label, owner_user_id')
-        .eq('is_active', true);
-      if (error) throw error;
-
-      // Fetch profile names so the filter shows "Chris Sullivan" not "Chris Sullivan Email"
-      const ownerIds = [...new Set((data || []).map(a => a.owner_user_id).filter(Boolean))];
-      const profileMap: Record<string, string> = {};
-      if (ownerIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', ownerIds);
-        for (const p of profiles || []) {
-          if (p.full_name) profileMap[p.id] = p.full_name;
-        }
-      }
-
-      // Group account IDs by owner (one person may have multiple accounts)
-      const byOwner: Record<string, { label: string; accountIds: string[] }> = {};
-      for (const acct of data || []) {
-        const key = acct.owner_user_id || acct.email_address || 'unknown';
-        if (!byOwner[key]) {
-          byOwner[key] = {
-            label: (acct.owner_user_id && profileMap[acct.owner_user_id]) || acct.account_label || acct.email_address || 'Unknown',
-            accountIds: [],
-          };
-        }
-        byOwner[key].accountIds.push(acct.id);
-      }
-      return Object.entries(byOwner).map(([key, { label, accountIds }]) => ({
-        key,
-        label,
-        accountIds,
-      }));
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  // Per-user scoping (threads + live "Other" tab + embedded Calls). Everyone
+  // defaults to their own communications; admins can switch to Team / a member.
+  const {
+    ready: scopeReady,
+    userId,
+    isAdmin,
+    teamMembers,
+    scope,
+    setScope,
+    memberFilter,
+    setMemberFilter,
+    scopedAccountIds,
+  } = useInboxScope();
 
   const { data: needsClassificationCount = 0 } = useQuery({
     queryKey: ['inbox_needs_classification_count'],
@@ -215,13 +157,20 @@ export default function Inbox() {
   // senders that we don't persist under the Phase 5 storage rule.
   const liveChannel = channel === 'all' ? 'linkedin' : channel;
   const { data: liveData } = useQuery({
-    queryKey: ['inbox_live_threads', liveChannel],
+    queryKey: ['inbox_live_threads', liveChannel, scope, memberFilter],
     enabled: tab === 'other' && !!userId,
     staleTime: 60_000,
     queryFn: async () => {
       const { data: session } = await supabase.auth.getSession();
       const token = session.session?.access_token || '';
-      const res = await fetch(`/api/inbox/live-threads?channel=${liveChannel}&limit=100`, {
+      const qs = new URLSearchParams({ channel: liveChannel, limit: '100' });
+      // Mirror the inbox scope so the live unknown-sender fetch matches the
+      // visible threads. The endpoint re-verifies admin server-side.
+      if (scope === 'team') {
+        qs.set('scope', 'team');
+        if (memberFilter !== 'all') qs.set('member', memberFilter);
+      }
+      const res = await fetch(`/api/inbox/live-threads?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return { items: [] };
@@ -250,39 +199,30 @@ export default function Inbox() {
   }));
 
   const { data: allThreads = [], isLoading } = useQuery({
-    queryKey: ['inbox_threads', isAdmin, userId, myAccounts],
-    enabled: !!userId,
+    queryKey: ['inbox_threads', scope, memberFilter, scopedAccountIds],
+    enabled: scopeReady,
     queryFn: async () => {
+      // Scope every user to their own integration accounts (admins: Team =
+      // no filter, or a selected member). [] → nothing in scope; null → no
+      // filter (admin Team/All, incl. legacy null-account threads).
+      if (scopedAccountIds !== null && scopedAccountIds.length === 0) return [];
       let query = supabase
         .from('inbox_threads').select('*')
         // sort_at = COALESCE(last_inbound_at, last_message_at), so threads
         // bubble up when a new inbound arrives, not when we reply.
         .order('sort_at', { ascending: false, nullsFirst: false });
-
-      // Non-admin: only show threads from this user's integration accounts
-      if (!isAdmin && userId) {
-        if (myAccounts.length > 0) {
-          query = query.in('integration_account_id', myAccounts);
-        } else {
-          return [];
-        }
+      if (scopedAccountIds !== null) {
+        query = query.in('integration_account_id', scopedAccountIds);
       }
-
       const { data, error } = await query;
       if (error) throw error;
       return data as InboxThread[];
     },
   });
 
-  // Threads visible after admin-team filter — used as the base for everything
-  // else (counts, tab split, view filter, channel filter, search).
-  const teamScoped = allThreads.filter((t) => {
-    if (isAdmin && ownerFilter !== 'all') {
-      const member = teamMembers.find((m: any) => m.key === ownerFilter);
-      if (member && !member.accountIds.includes(t.integration_account_id)) return false;
-    }
-    return true;
-  });
+  // The query is already scoped to the active inbox view, so everything
+  // downstream (counts, tab split, view/channel/search filters) builds on it.
+  const scoped = allThreads;
 
   // Helper: is this thread currently snoozed (wake-time in the future)?
   const isCurrentlySnoozed = (t: InboxThread) =>
@@ -296,8 +236,8 @@ export default function Inbox() {
   // Focused = threads tagged to a person in the CRM. Other = unlinked.
   // Both tabs exclude snoozed + archived by default; the Snoozed and Archive
   // views below opt in explicitly.
-  const focusedThreads = teamScoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
-  const persistedOther = teamScoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
+  const focusedThreads = scoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
+  const persistedOther = scoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
   // Other tab unions persisted unlinked threads with live-fetched
   // unknown-sender threads from Unipile. Live results are deduped by
   // external_conversation_id on the API side.
@@ -316,14 +256,14 @@ export default function Inbox() {
     // regardless of tagging.
     let pool: InboxThread[];
     if (view === 'snoozed') {
-      pool = teamScoped.filter(isCurrentlySnoozed);
+      pool = scoped.filter(isCurrentlySnoozed);
     } else if (view === 'archive') {
-      pool = teamScoped.filter((t) => t.is_archived);
+      pool = scoped.filter((t) => t.is_archived);
     } else if (view === 'starred') {
-      pool = teamScoped.filter((t) => t.flagged && visibleByDefault(t));
+      pool = scoped.filter((t) => t.flagged && visibleByDefault(t));
     } else if (view === 'sent') {
       // Every thread where we've sent at least one outbound message.
-      pool = teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t));
+      pool = scoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t));
     } else {
       pool = tabPool;
     }
@@ -341,6 +281,9 @@ export default function Inbox() {
       // Views not yet backed by data — render empty list:
       if (view === 'drafts') return false;
 
+      // Sentiment filter (bucketed)
+      if (sentimentFilter !== 'all' && sentimentBucketKey(t.sentiment) !== sentimentFilter) return false;
+
       // Search
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -356,16 +299,16 @@ export default function Inbox() {
     });
   })();
 
-  const unreadCount = teamScoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
+  const unreadCount = scoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
 
   const sidebarCounts = {
     all: tabPool.length,
     unread: tabPool.filter((t) => !t.is_read).length,
-    archive: teamScoped.filter((t) => t.is_archived).length,
+    archive: scoped.filter((t) => t.is_archived).length,
     awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
-    starred: teamScoped.filter((t) => t.flagged && visibleByDefault(t)).length,
-    snoozed: teamScoped.filter(isCurrentlySnoozed).length,
-    sent: teamScoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
+    starred: scoped.filter((t) => t.flagged && visibleByDefault(t)).length,
+    snoozed: scoped.filter(isCurrentlySnoozed).length,
+    sent: scoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
     needs_classification: needsClassificationCount,
   };
 
@@ -399,17 +342,36 @@ export default function Inbox() {
         title="Communication Hub"
         description={
           callsActive
-            ? 'Calls · Logged across the team'
+            ? (scope === 'team' ? 'Calls · Team' : 'Calls · Yours')
             : unreadCount > 0
-              ? `${unreadCount} unread · All channels`
-              : 'All channels · Unified'
+              ? `${unreadCount} unread · ${scope === 'team' ? 'Team' : 'Your inbox'}`
+              : `${scope === 'team' ? 'Team' : 'Your inbox'} · All channels`
         }
       />
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
 
-      <div className="flex" style={{ height: 'calc(100vh - 7rem)' }}>
-        {/* Inbox-internal sidebar — views + channels */}
+      <div className="flex flex-col" style={{ height: 'calc(100vh - 7rem)' }}>
+        {/* Top control bar — scope, channels, sentiment, awaiting-reply */}
+        <InboxTopBar
+          isAdmin={isAdmin}
+          scope={scope}
+          onScope={setScope}
+          memberFilter={memberFilter}
+          onMember={setMemberFilter}
+          teamMembers={teamMembers}
+          channel={channel}
+          onChannel={(c) => updateChannelParam(c)}
+          callsActive={callsActive}
+          onCalls={selectCalls}
+          sentiment={sentimentFilter}
+          onSentiment={(s) => updateParam('sentiment', s)}
+          view={view}
+          onToggleAwaiting={() => updateViewParam(view === 'awaiting_reply' ? 'all' : 'awaiting_reply')}
+        />
+
+        <div className="flex flex-1 min-h-0">
+        {/* Inbox-internal sidebar — saved views (channels/calls now in top bar) */}
         <InboxSidebar
           view={view}
           channel={channel}
@@ -417,22 +379,7 @@ export default function Inbox() {
           callsActive={callsActive}
           onSelectView={(v) => updateViewParam(v)}
           onSelectChannel={(c) => updateChannelParam(c)}
-          onSelectCalls={selectCalls}
-          footer={
-            isAdmin && teamMembers.length > 0 ? (
-              <select
-                value={ownerFilter}
-                onChange={(e) => setOwnerFilter(e.target.value)}
-                className="w-full text-[11px] font-medium px-2 py-1.5 rounded border border-border bg-background text-muted-foreground hover:border-accent/50 hover:text-foreground transition-colors cursor-pointer"
-                aria-label="Team member filter"
-              >
-                <option value="all">All team</option>
-                {teamMembers.map((m: any) => (
-                  <option key={m.key} value={m.key}>{m.label}</option>
-                ))}
-              </select>
-            ) : null
-          }
+          showChannels={false}
         />
 
         {callsActive ? (
@@ -684,6 +631,7 @@ export default function Inbox() {
         </div>
         </>
         )}
+        </div>
       </div>
 
       {/* Bulk-delete confirm */}

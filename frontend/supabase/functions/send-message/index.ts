@@ -14,7 +14,7 @@ interface OutboundAttachment {
 }
 
 interface SendMessageRequest {
-  channel: 'email' | 'sms' | 'linkedin';
+  channel: 'email' | 'sms' | 'linkedin' | 'linkedin_recruiter';
   conversation_id: string;
   candidate_id?: string;
   contact_id?: string;
@@ -84,7 +84,9 @@ serve(async (req) => {
         externalMessageId = result.id?.toString();
         break;
       case 'linkedin':
-        result = await sendLinkedIn(supabaseClient, user.id, to, body, account_id);
+      case 'linkedin_recruiter':
+        // linkedin_recruiter → LinkedIn Recruiter InMail (different send shape).
+        result = await sendLinkedIn(supabaseClient, user.id, to, body, account_id, channel === 'linkedin_recruiter');
         externalMessageId = result.message_id;
         break;
       default:
@@ -355,7 +357,8 @@ async function sendLinkedIn(
   userId: string,
   recipientId: string,
   message: string,
-  accountId?: string
+  accountId?: string,
+  isInMail = false
 ): Promise<{ message_id: string; sender: string }> {
   const unipileApiKey = Deno.env.get('UNIPILE_API_KEY');
   const unipileBaseUrl = Deno.env.get('UNIPILE_BASE_URL');
@@ -387,6 +390,33 @@ async function sendLinkedIn(
   }
 
   const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
+
+  // Recruiter InMail uses the chats endpoint with the recruiter API flag
+  // (v1: POST /api/v1/chats?account_id=X, body { attendees_ids, text,
+  // linkedin:{ api:'recruiter' } }). InMail credits are reconciled hourly by
+  // the sync-inmail-credits cron, so we don't decrement here.
+  if (isInMail) {
+    const response = await fetch(
+      `${base}/api/v1/chats?account_id=${encodeURIComponent(unipileAccountId)}`,
+      {
+        method: 'POST',
+        headers: { 'X-API-KEY': unipileApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attendees_ids: [recipientId],
+          text: message,
+          linkedin: { api: 'recruiter' },
+        }),
+      },
+    );
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error('Unipile InMail error:', errorData);
+      throw new Error(`Failed to send InMail: ${response.status} ${errorData}`);
+    }
+    const result = await response.json();
+    return { message_id: result.message_id || result.id || 'sent', sender: unipileAccountId };
+  }
+
   const response = await fetch(`${base}/api/v1/messages`, {
     method: 'POST',
     headers: {

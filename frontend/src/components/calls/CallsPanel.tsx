@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useInboxScope } from '@/components/inbox/use-inbox-scope';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -483,7 +484,18 @@ function LinkCallDialog({
 export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [recruiterFilter, setRecruiterFilter] = useState<string>('all');
+  // Per-user scoping shared with the inbox. Everyone sees only their own calls
+  // by default; admins can switch to Team / a member. When embedded, the Hub's
+  // sidebar drives the scope (same URL state), so the in-panel toggle is hidden.
+  const {
+    isAdmin: scopeIsAdmin,
+    scope,
+    setScope,
+    memberFilter,
+    setMemberFilter,
+    teamMembers,
+    scopedOwnerUserId,
+  } = useInboxScope();
   const [logOpen, setLogOpen] = useState(false);
   const [linkCall, setLinkCall] = useState<CallLog | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
@@ -522,13 +534,17 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
   });
 
   const { data: calls = [], isLoading, isError, error: callsError, refetch } = useQuery({
-    queryKey: ['call_logs'],
+    queryKey: ['call_logs', scopedOwnerUserId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('call_logs' as any)
         .select('*')
         .order('started_at', { ascending: false })
         .limit(1000);
+      // Scope to the current user's calls (admins: team = no filter, or a
+      // selected member). owner_id is reliably set when calls are logged.
+      if (scopedOwnerUserId) q = q.eq('owner_id', scopedOwnerUserId);
+      const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as unknown as CallLog[];
     },
@@ -598,10 +614,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
     recruiters.find(r => r.id === call.owner_id)?.full_name ?? null;
 
   const filtered = calls.filter(c => {
-    // Recruiter filter
-    if (recruiterFilter !== 'all' && c.owner_id !== recruiterFilter) return false;
-
-    // Search
+    // Owner scoping is applied server-side (query above); only search here.
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     const name = getCandidateName(c);
@@ -683,34 +696,48 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          {/* Recruiter filter */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setRecruiterFilter('all')}
-              className={cn(
-                'px-3 py-2 text-xs font-medium rounded-md transition-colors',
-                recruiterFilter === 'all'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-              )}
-            >
-              All
-            </button>
-            {recruiters.map(r => (
+          {/* Scope filter — admins only, standalone page only (embedded uses
+              the Hub's sidebar scope control, which shares the same state). */}
+          {!embedded && scopeIsAdmin && (
+            <div className="flex items-center gap-1">
               <button
-                key={r.id}
-                onClick={() => setRecruiterFilter(r.id)}
+                onClick={() => setScope('mine')}
                 className={cn(
                   'px-3 py-2 text-xs font-medium rounded-md transition-colors',
-                  recruiterFilter === r.id
+                  scope === 'mine'
                     ? 'bg-accent text-accent-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                 )}
               >
-                {r.full_name?.split(' ')[0]}
+                Mine
               </button>
-            ))}
-          </div>
+              <button
+                onClick={() => { setScope('team'); setMemberFilter('all'); }}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium rounded-md transition-colors',
+                  scope === 'team' && memberFilter === 'all'
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                )}
+              >
+                All team
+              </button>
+              {teamMembers.map(m => (
+                <button
+                  key={m.userId}
+                  onClick={() => setMemberFilter(m.userId)}
+                  className={cn(
+                    'px-3 py-2 text-xs font-medium rounded-md transition-colors',
+                    scope === 'team' && memberFilter === m.userId
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                  )}
+                >
+                  {m.label?.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground mb-4">{filtered.length} calls</p>

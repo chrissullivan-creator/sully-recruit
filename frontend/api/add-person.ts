@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { inngest } from "./lib/inngest/client.js";
 
 /** Mirror of the Postgres is_consumer_email_domain() helper so the
  *  client-side resolver matches what the contacts INSTEAD-OF trigger
@@ -44,7 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type: rawType, data, conversation_id } = req.body || {};
+  const { type: rawType, data, conversation_id, provider_id } = req.body || {};
+  const providerId: string | null = typeof provider_id === "string" && provider_id.trim()
+    ? provider_id.trim()
+    : null;
   if (!rawType || !data?.first_name || !data?.last_name) {
     return res.status(400).json({ error: "Missing type, first_name, or last_name" });
   }
@@ -174,6 +178,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mergedRoles = (row.roles as string[]) ?? [role];
     }
 
+    // Cache the LinkedIn provider id so future inbound messages from this
+    // sender hard-match — resolvePerson reads candidate_channels first.
+    // candidate_channels.candidate_id holds the person id regardless of type.
+    // Best-effort: a unique-constraint race must not fail the add.
+    if (providerId && personId) {
+      try {
+        await supabase
+          .from("candidate_channels")
+          .upsert(
+            { candidate_id: personId, channel: "linkedin", provider_id: providerId } as any,
+            { onConflict: "candidate_id,channel" },
+          );
+      } catch (e: any) {
+        console.warn("candidate_channels cache failed (non-fatal):", e?.message);
+      }
+    }
+
     // Link conversation if provided. The conversation's foreign key
     // depends on the role we just associated with this person:
     //   candidate role  → candidate_id
@@ -190,6 +211,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update({ [linkCol]: personId })
         .eq("conversation_id", conversation_id)
         .is(linkCol, null);
+
+      // Re-run sentiment/intel now that the (previously unlinked) inbound
+      // messages have a person — closes the new-sender sentiment gap.
+      // Fire-and-forget; a failure here must not fail the add.
+      try {
+        await inngest.send({
+          name: "comms/conversation.linked",
+          data: {
+            conversationId: conversation_id,
+            entityId: personId,
+            entityType: role === "candidate" ? "candidate" : "contact",
+            entityColumn: linkCol,
+          },
+        });
+      } catch (e: any) {
+        console.warn("conversation.linked event failed (non-fatal):", e?.message);
+      }
     }
 
     return res.status(200).json({

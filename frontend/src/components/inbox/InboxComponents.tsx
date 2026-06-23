@@ -35,6 +35,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
+import { SentimentChip } from '@/components/shared/SentimentChip';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
 import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
@@ -306,6 +307,7 @@ export function ThreadItem({
                   Awaiting reply
                 </span>
               )}
+              <SentimentChip compact sentiment={thread.sentiment} note={thread.sentiment_note} />
               {!isLinked && (
                 <span
                   className="text-[10px] text-muted-foreground/70"
@@ -332,6 +334,8 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
   const [linkSearching, setLinkSearching] = useState(false);
   const [linking, setLinking] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  // Pre-picked type for one-click add; undefined → wizard asks (pick_type).
+  const [createType, setCreateType] = useState<'candidate' | 'contact' | undefined>(undefined);
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -557,15 +561,26 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
               <div className="flex-1 h-px bg-border" />
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreateOpen(true)}
-              className="w-full gap-1.5 text-xs"
-            >
-              <UserPlus className="h-3.5 w-3.5 text-accent" />
-              Add Person
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateType('candidate'); setCreateOpen(true); }}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-success" />
+                Candidate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCreateType('contact'); setCreateOpen(true); }}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-info" />
+                Client
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -601,6 +616,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
         externalConversationId={thread.external_conversation_id}
         integrationAccountId={thread.integration_account_id}
         senderProviderId={senderProviderId}
+        initialType={createType}
         onPersonLinked={() => {
           invalidateCommsScope(queryClient);
         }}
@@ -713,6 +729,9 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
     }
   };
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  // Pre-picked type for one-click "Add as candidate/client"; undefined → the
+  // wizard asks (pick_type step).
+  const [createType, setCreateType] = useState<'candidate' | 'contact' | undefined>(undefined);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -893,26 +912,50 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
         toAddress = lastInbound?.sender_address || '';
       } else if (thread.channel === 'sms') {
         toAddress = lastInbound?.sender_address || '';
-      } else if (LINKEDIN_CHANNELS.includes(thread.channel as any)) {
-        // Try candidate_channels first
+      } else if (thread.channel === 'linkedin' || thread.channel === 'linkedin_recruiter') {
+        // Recipient = the sender's LinkedIn provider id. We cache it under
+        // channel='linkedin' in candidate/contact_channels (recruiter InMail ids
+        // included), and people may also carry it in a unipile_*_id column.
+        // NB: must include linkedin_recruiter here — the old LINKEDIN_CHANNELS
+        // check excluded it, so InMail replies found no recipient and errored.
+        const pickPersonProviderId = (p: any): string =>
+          (thread.channel === 'linkedin_recruiter' ? p?.unipile_recruiter_id : p?.unipile_classic_id)
+          || p?.unipile_provider_id || p?.unipile_classic_id || p?.unipile_recruiter_id || '';
         if (thread.candidate_id) {
           const { data: channelData } = await supabase
             .from('candidate_channels')
             .select('provider_id, unipile_id')
             .eq('candidate_id', thread.candidate_id)
-            .eq('channel', 'linkedin')
+            .in('channel', ['linkedin', 'linkedin_recruiter'])
+            .limit(1)
             .maybeSingle();
           toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+          if (!toAddress) {
+            const { data: person } = await supabase
+              .from('people')
+              .select('unipile_recruiter_id, unipile_classic_id, unipile_provider_id')
+              .eq('id', thread.candidate_id)
+              .maybeSingle();
+            toAddress = pickPersonProviderId(person);
+          }
         }
-        // Try contact_channels
         if (!toAddress && thread.contact_id) {
           const { data: channelData } = await supabase
             .from('contact_channels')
             .select('provider_id, unipile_id')
             .eq('contact_id', thread.contact_id)
-            .eq('channel', 'linkedin')
+            .in('channel', ['linkedin', 'linkedin_recruiter'])
+            .limit(1)
             .maybeSingle();
           toAddress = channelData?.provider_id || channelData?.unipile_id || '';
+          if (!toAddress) {
+            const { data: person } = await supabase
+              .from('people')
+              .select('unipile_recruiter_id, unipile_classic_id, unipile_provider_id')
+              .eq('id', thread.contact_id)
+              .maybeSingle();
+            toAddress = pickPersonProviderId(person);
+          }
         }
         // Fall back to the inbound message sender address (works for unlinked too)
         if (!toAddress) {
@@ -924,7 +967,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
       // that received the original message), falling back to looking up the recipient's
       // account from the original inbound message
       let sendAccountId = thread.account_id || '';
-      if (!sendAccountId && LINKEDIN_CHANNELS.includes(thread.channel as any)) {
+      if (!sendAccountId && (thread.channel === 'linkedin' || thread.channel === 'linkedin_recruiter')) {
         // Try to find the account from the last inbound message's recipient_address
         const recipientAddr = lastInbound?.recipient_address;
         if (recipientAddr) {
@@ -1071,7 +1114,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                     senderEmail={senderAddress.includes('@') ? senderAddress : undefined}
                     senderPhone={!senderAddress.includes('@') && senderAddress ? senderAddress : undefined}
                     channel={thread.channel}
-                    onAdd={() => setCreateDialogOpen(true)}
+                    onAdd={() => { setCreateType(undefined); setCreateDialogOpen(true); }}
                   />
                 ) : (
                   (() => {
@@ -1183,11 +1226,20 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
           <div className="px-6 py-2.5 bg-warning/5 border-b border-warning/20 flex items-center gap-2">
             <AlertCircle className="h-3.5 w-3.5 text-warning shrink-0" />
             <p className="text-xs text-warning">
-              <span className="font-medium">Not in your database.</span>{' '}
-              <button onClick={() => setCreateDialogOpen(true)} className="underline hover:no-underline">
-                Add this person
+              <span className="font-medium">Not in your database.</span> Add as{' '}
+              <button
+                onClick={() => { setCreateType('candidate'); setCreateDialogOpen(true); }}
+                className="underline hover:no-underline font-medium"
+              >
+                candidate
               </button>{' '}
-              to track them.
+              or{' '}
+              <button
+                onClick={() => { setCreateType('contact'); setCreateDialogOpen(true); }}
+                className="underline hover:no-underline font-medium"
+              >
+                client
+              </button>.
             </p>
           </div>
         )}
@@ -1563,6 +1615,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
           externalConversationId={thread.external_conversation_id}
           integrationAccountId={thread.integration_account_id}
           senderProviderId={thread.channel?.startsWith('linkedin') && !senderAddress.includes('linkedin.com') ? senderAddress : undefined}
+          initialType={createType}
           onPersonLinked={() => {
             invalidateCommsScope(queryClient);
           }}

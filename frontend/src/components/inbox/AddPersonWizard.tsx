@@ -83,6 +83,8 @@ export interface AddPersonWizardProps {
   externalConversationId?: string | null;
   integrationAccountId?: string | null;
   senderProviderId?: string | null;
+  /** Pre-pick candidate/client and skip the pick_type step (one-click add). */
+  initialType?: PersonType;
   onPersonLinked?: () => void;
 }
 
@@ -98,6 +100,7 @@ export function AddPersonWizard({
   externalConversationId,
   integrationAccountId,
   senderProviderId,
+  initialType,
   onPersonLinked,
 }: AddPersonWizardProps) {
   const queryClient = useQueryClient();
@@ -141,8 +144,10 @@ export function AddPersonWizard({
   useEffect(() => {
     if (!open) return;
     const nameParts = prefill.name.split(' ');
-    setStep('pick_type');
-    setPersonType(null);
+    // One-click add: when a type is pre-picked, skip pick_type and head
+    // straight into the search/enrich flow (kicked off by the effect below).
+    setStep(initialType ? 'searching' : 'pick_type');
+    setPersonType(initialType ?? null);
     setMatches([]);
     enrichedRef.current = false;
     // LinkedIn inbound senders carry a Unipile URN/provider_id (e.g. ACoAAA...,
@@ -160,7 +165,7 @@ export function AddPersonWizard({
       phone: prefill.phone || '',
       linkedin_url: seedLinkedInUrl,
     });
-  }, [open, prefill.name, prefill.email, prefill.phone, prefill.linkedinUrl]);
+  }, [open, prefill.name, prefill.email, prefill.phone, prefill.linkedinUrl, initialType]);
 
   // ── Step 2: Search for duplicates ──────────────────────────────────────────
 
@@ -408,6 +413,9 @@ export function AddPersonWizard({
           type: personType,
           data: resolvedForm,
           conversation_id: threadId,
+          // Cache the LinkedIn provider id on the new person so future inbound
+          // messages from this sender auto-match (and re-run sentiment).
+          provider_id: senderProviderId || null,
         }),
       });
 
@@ -466,6 +474,18 @@ export function AddPersonWizard({
     setPersonType(type);
     searchExisting(type);
   };
+
+  // One-click add: when opened with a pre-picked type, kick off the search
+  // once (the reset effect above already set step='searching'). Guarded by a
+  // ref so it fires a single time per open.
+  const autoPickRef = useRef(false);
+  useEffect(() => {
+    if (!open) { autoPickRef.current = false; return; }
+    if (initialType && !autoPickRef.current) {
+      autoPickRef.current = true;
+      searchExisting(initialType);
+    }
+  }, [open, initialType]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
