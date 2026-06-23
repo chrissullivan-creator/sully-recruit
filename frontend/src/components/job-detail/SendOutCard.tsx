@@ -23,7 +23,7 @@ import { formatComp, formatCompRange } from '@/lib/queries/send-outs';
 // canonical funnel (Submissions / Interviews / Placements / Rejections) so the dashboard
 // funnel and per-job view tell the same story. "Offer" and "Withdrew" are sub-states
 // not represented as their own funnel stages.
-const SEND_OUT_STAGES = [
+export const SEND_OUT_STAGES = [
   { value: 'submitted',    label: 'Submission',  color: 'bg-purple-500/15 text-purple-400' },
   { value: 'interviewing', label: 'Interview',   color: 'bg-emerald-500/15 text-emerald-400' },
   { value: 'offer',        label: 'Offer',       color: 'bg-amber-500/15 text-amber-400' },

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, differenceInMinutes } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { MeetingAttendeePipeline } from '@/components/calendar/MeetingAttendeePipeline';
 
 /**
  * Detail dialog for a calendar meeting.
@@ -234,33 +235,37 @@ export function MeetingDetailDialog({
             ) : (
               <div className="space-y-1.5">
                 {data!.attendees.map((a) => (
-                  <button
+                  <div
                     key={`${a.entity_type}-${a.entity_id}`}
-                    onClick={() => goToAttendee(a)}
-                    className={cn(
-                      'w-full text-left rounded-md border border-card-border bg-white px-3 py-2 hover:border-emerald/40 hover:bg-emerald-light/10 transition-colors group',
-                      'flex items-center justify-between gap-3',
-                    )}
+                    className="rounded-md border border-card-border bg-white px-3 py-2 hover:border-emerald/40 transition-colors group"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">{a.name || a.email || 'Unknown'}</span>
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize">{a.entity_type}</Badge>
-                        {a.status && <Badge variant="secondary" className="text-[9px] capitalize">{a.status.replace(/_/g, ' ')}</Badge>}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground truncate mt-0.5">
-                        {[a.current_title, a.current_company].filter(Boolean).join(' · ') || a.email || ''}
-                      </div>
-                      {!isPast && (a.last_contacted_at || a.last_responded_at) && (
-                        <div className="text-[10px] text-muted-foreground/80 mt-0.5">
-                          {a.last_responded_at && `Last reply ${format(parseISO(a.last_responded_at), 'MMM d')}`}
-                          {a.last_responded_at && a.last_contacted_at && ' · '}
-                          {a.last_contacted_at && `Last reach ${format(parseISO(a.last_contacted_at), 'MMM d')}`}
+                    <button
+                      onClick={() => goToAttendee(a)}
+                      className="w-full text-left flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{a.name || a.email || 'Unknown'}</span>
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize">{a.entity_type}</Badge>
+                          {a.status && <Badge variant="secondary" className="text-[9px] capitalize">{a.status.replace(/_/g, ' ')}</Badge>}
                         </div>
-                      )}
-                    </div>
-                    <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-emerald-dark shrink-0" />
-                  </button>
+                        <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {[a.current_title, a.current_company].filter(Boolean).join(' · ') || a.email || ''}
+                        </div>
+                        {!isPast && (a.last_contacted_at || a.last_responded_at) && (
+                          <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                            {a.last_responded_at && `Last reply ${format(parseISO(a.last_responded_at), 'MMM d')}`}
+                            {a.last_responded_at && a.last_contacted_at && ' · '}
+                            {a.last_contacted_at && `Last reach ${format(parseISO(a.last_contacted_at), 'MMM d')}`}
+                          </div>
+                        )}
+                      </div>
+                      <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-emerald-dark shrink-0" />
+                    </button>
+                    {a.entity_type === 'candidate' && (
+                      <MeetingAttendeePipeline candidateId={a.entity_id} />
+                    )}
+                  </div>
                 ))}
               </div>
             )}
