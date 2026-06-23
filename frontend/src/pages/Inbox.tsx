@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import DOMPurify from 'dompurify';
 import { cn } from '@/lib/utils';
 import { invalidateCommsScope } from '@/lib/invalidate';
 import { format } from 'date-fns';
@@ -872,7 +873,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
     setReplyHtml(draft?.html ?? '');
     setReplyText(draft?.text ?? '');
     requestAnimationFrame(() => {
-      if (editorRef.current) editorRef.current.innerHTML = draft?.html ?? '';
+      if (editorRef.current) editorRef.current.innerHTML = DOMPurify.sanitize(draft?.html ?? '');
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
@@ -1550,7 +1551,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                           )}
                           {displayBody
                             ? thread.channel === 'email'
-                              ? <div dangerouslySetInnerHTML={{ __html: displayBody }} className="prose prose-sm max-w-none [&_*]:text-inherit [&_a]:underline" />
+                              ? <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(displayBody) }} className="prose prose-sm max-w-none [&_*]:text-inherit [&_a]:underline" />
                               : displayBody
                             : <span className="italic opacity-50">(No content)</span>}
                           <MessageAttachmentList attachments={msg.attachments} isOutbound={isOutbound} />
@@ -1661,7 +1662,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                     tmp.innerHTML = template.body;
                     const text = tmp.textContent || '';
                     setReplyText(text);
-                    if (editorRef.current) editorRef.current.innerHTML = template.body;
+                    if (editorRef.current) editorRef.current.innerHTML = DOMPurify.sanitize(template.body);
                     if (threadId) saveDraft(threadId, template.body, text);
                   }}
                 />
@@ -1686,7 +1687,7 @@ function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDelet
                       tmp.innerHTML = nextHtml;
                       const text = tmp.textContent || '';
                       setReplyText(text);
-                      if (editorRef.current) editorRef.current.innerHTML = nextHtml;
+                      if (editorRef.current) editorRef.current.innerHTML = DOMPurify.sanitize(nextHtml);
                       if (threadId) saveDraft(threadId, nextHtml, text);
                     }}
                   >

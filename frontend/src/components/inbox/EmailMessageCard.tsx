@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import DOMPurify from 'dompurify';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatThreadTimestamp, formatAbsoluteTimestamp } from '@/lib/format-time';
@@ -122,7 +123,7 @@ export function EmailMessageCard({
           {cleanBody ? (
             <div
               className="prose prose-sm max-w-none text-foreground [&_a]:text-accent [&_a]:underline"
-              dangerouslySetInnerHTML={{ __html: cleanBody }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cleanBody) }}
             />
           ) : (
             <p className="text-sm italic text-muted-foreground">(No content)</p>

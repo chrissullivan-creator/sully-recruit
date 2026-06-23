@@ -25,6 +25,17 @@ function json(data: unknown, status = 200): Response {
 }
 function randomInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
+/** Constant-time string compare so the shared secret can't be recovered via timing. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
 /**
  * Strip HTML tags and decode common entities.
  */
@@ -310,9 +321,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  if (UNIPILE_WEBHOOK_SECRET) {
+  // Verify the request really came from Unipile. Fail CLOSED: a missing secret
+  // is a misconfiguration, not a license to accept anonymous events. The old
+  // `if (UNIPILE_WEBHOOK_SECRET)` guard silently accepted EVERY request whenever
+  // the env var was unset/empty — any caller could then inject forged inbound
+  // LinkedIn messages / connection-accepts (driving stop-on-reply, sentiment,
+  // fake inbox entries). Set UNIPILE_WEBHOOK_STRICT=false only to temporarily
+  // log-and-accept during a secret rotation.
+  const strict = (Deno.env.get("UNIPILE_WEBHOOK_STRICT") ?? "true").toLowerCase() !== "false";
+  if (strict) {
+    if (!UNIPILE_WEBHOOK_SECRET) {
+      console.error("[unipile-webhook] UNIPILE_WEBHOOK_SECRET not set — refusing (set UNIPILE_WEBHOOK_STRICT=false to bypass during rotation)");
+      return json({ error: "Webhook secret not configured" }, 500);
+    }
     const sig = req.headers.get("x-unipile-signature") ?? "";
-    if (sig !== UNIPILE_WEBHOOK_SECRET) return json({ error: "Unauthorized" }, 401);
+    if (!timingSafeEqualStr(sig, UNIPILE_WEBHOOK_SECRET)) return json({ error: "Unauthorized" }, 401);
   }
 
   let body: Record<string, unknown>;

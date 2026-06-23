@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -2360,7 +2361,7 @@ const CandidateDetail = () => {
                     <div className="space-y-2">
                       {filteredNotes.map((n: any) => (
                         <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
-                          <div className="text-xs prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.note }} />
+                          <div className="text-xs prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(n.note) }} />
                           <p className="text-[10px] text-muted-foreground mt-1.5">
                             {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
                           </p>

@@ -19,6 +19,17 @@ function json(data: unknown, status = 200) {
   });
 }
 
+/** Constant-time string compare so the verification token can't be timed out. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
 // ── Sentiment analysis (SMS inbound) ───────────────────────────────
 async function analyzeSentiment(messageText: string, channel: string): Promise<{ sentiment: string; summary: string } | null> {
   if (!ANTHROPIC_API_KEY || !messageText.trim() || messageText.trim().length < 5) return null;
@@ -206,6 +217,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  // Verify the event really came from RingCentral. This endpoint previously had
+  // NO authentication on POSTs, so anyone who learned the URL could forge SMS /
+  // call events — including supplying an attacker-controlled recording URL that
+  // gets handed to the transcription pipeline. Mirror the canonical Vercel
+  // handler (api/webhooks/ringcentral.ts): RingCentral echoes the subscription's
+  // verificationToken in the `Verification-Token` header on every notification.
+  // Fail closed in strict mode; set RINGCENTRAL_WEBHOOK_STRICT=false to
+  // log-and-accept during a subscription rotation.
+  const expectedToken = Deno.env.get("RINGCENTRAL_WEBHOOK_TOKEN") ?? "";
+  const strict = (Deno.env.get("RINGCENTRAL_WEBHOOK_STRICT") ?? "true").toLowerCase() !== "false";
+  if (strict) {
+    if (!expectedToken) {
+      console.error("[rc-webhook] RINGCENTRAL_WEBHOOK_TOKEN not set — refusing (set RINGCENTRAL_WEBHOOK_STRICT=false to bypass during rotation)");
+      return json({ error: "Webhook token not configured" }, 500);
+    }
+    const incoming = req.headers.get("verification-token") ?? "";
+    if (!timingSafeEqualStr(incoming, expectedToken)) {
+      console.warn("[rc-webhook] verification-token mismatch", { hasHeader: !!incoming });
+      return json({ error: "Invalid verification token" }, 401);
+    }
+  }
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
