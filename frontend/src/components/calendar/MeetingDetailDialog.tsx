@@ -15,6 +15,7 @@ import {
 import { format, parseISO, differenceInMinutes } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { MeetingAttendeePipeline } from '@/components/calendar/MeetingAttendeePipeline';
+import { LinkAttendeeButton } from '@/components/calendar/LinkAttendeeButton';
 
 /**
  * Detail dialog for a calendar meeting.
@@ -47,9 +48,11 @@ export interface MeetingTask {
 }
 
 interface AttendeeRow {
+  attendeeRowId: string;
+  matched: boolean;
   task_id: string;
   entity_type: 'candidate' | 'contact';
-  entity_id: string;
+  entity_id: string | null;
   name: string | null;
   email: string | null;
   current_title: string | null;
@@ -81,11 +84,11 @@ function useMeetingDetails(task: MeetingTask | null) {
       // Attendees
       const { data: links } = await supabase
         .from('meeting_attendees')
-        .select('task_id, entity_type, entity_id')
+        .select('id, task_id, entity_type, entity_id, attendee_name, attendee_email')
         .eq('task_id', task.id);
 
-      const candidateIds = (links ?? []).filter((l: any) => l.entity_type === 'candidate').map((l: any) => l.entity_id);
-      const contactIds = (links ?? []).filter((l: any) => l.entity_type === 'contact').map((l: any) => l.entity_id);
+      const candidateIds = (links ?? []).filter((l: any) => l.entity_type === 'candidate' && l.entity_id).map((l: any) => l.entity_id);
+      const contactIds = (links ?? []).filter((l: any) => l.entity_type === 'contact' && l.entity_id).map((l: any) => l.entity_id);
 
       const [peopleRes, contactsRes] = await Promise.all([
         candidateIds.length
@@ -99,13 +102,16 @@ function useMeetingDetails(task: MeetingTask | null) {
       const contactsById = new Map((contactsRes.data ?? []).map((c: any) => [c.id, c]));
 
       const attendees: AttendeeRow[] = (links ?? []).map((l: any) => {
-        const src = l.entity_type === 'candidate' ? peopleById.get(l.entity_id) : contactsById.get(l.entity_id);
+        const matched = !!l.entity_id;
+        const src = !matched ? null : (l.entity_type === 'candidate' ? peopleById.get(l.entity_id) : contactsById.get(l.entity_id));
         return {
+          attendeeRowId: l.id,
+          matched,
           task_id: l.task_id,
-          entity_type: l.entity_type,
-          entity_id: l.entity_id,
-          name: src?.full_name ?? null,
-          email: src?.email ?? null,
+          entity_type: (l.entity_type ?? 'candidate') as 'candidate' | 'contact',
+          entity_id: l.entity_id ?? null,
+          name: src?.full_name ?? l.attendee_name ?? null,
+          email: src?.email ?? l.attendee_email ?? null,
           current_title: src?.current_title ?? null,
           current_company: src?.current_company ?? null,
           status: src?.status ?? null,
@@ -153,7 +159,7 @@ export function MeetingDetailDialog({
 }) {
   const navigate = useNavigate();
   const open = !!task;
-  const { data, isLoading } = useMeetingDetails(task);
+  const { data, isLoading, refetch } = useMeetingDetails(task);
 
   const start = task?.start_time ? parseISO(task.start_time) : null;
   const end = task?.end_time ? parseISO(task.end_time) : null;
@@ -231,39 +237,60 @@ export function MeetingDetailDialog({
             {isLoading ? (
               <p className="text-xs text-muted-foreground italic">Loading…</p>
             ) : (data?.attendees ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No matched attendees on this event.</p>
+              <p className="text-xs text-muted-foreground italic">No attendees recorded on this event.</p>
             ) : (
               <div className="space-y-1.5">
                 {data!.attendees.map((a) => (
                   <div
-                    key={`${a.entity_type}-${a.entity_id}`}
+                    key={a.attendeeRowId}
                     className="rounded-md border border-card-border bg-white px-3 py-2 hover:border-emerald/40 transition-colors group"
                   >
-                    <button
-                      onClick={() => goToAttendee(a)}
-                      className="w-full text-left flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">{a.name || a.email || 'Unknown'}</span>
-                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize">{a.entity_type}</Badge>
-                          {a.status && <Badge variant="secondary" className="text-[9px] capitalize">{a.status.replace(/_/g, ' ')}</Badge>}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground truncate mt-0.5">
-                          {[a.current_title, a.current_company].filter(Boolean).join(' · ') || a.email || ''}
-                        </div>
-                        {!isPast && (a.last_contacted_at || a.last_responded_at) && (
-                          <div className="text-[10px] text-muted-foreground/80 mt-0.5">
-                            {a.last_responded_at && `Last reply ${format(parseISO(a.last_responded_at), 'MMM d')}`}
-                            {a.last_responded_at && a.last_contacted_at && ' · '}
-                            {a.last_contacted_at && `Last reach ${format(parseISO(a.last_contacted_at), 'MMM d')}`}
+                    {a.matched ? (
+                      <>
+                        <button
+                          onClick={() => goToAttendee(a)}
+                          className="w-full text-left flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium truncate">{a.name || a.email || 'Unknown'}</span>
+                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize">{a.entity_type}</Badge>
+                              {a.status && <Badge variant="secondary" className="text-[9px] capitalize">{a.status.replace(/_/g, ' ')}</Badge>}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+                              {[a.current_title, a.current_company].filter(Boolean).join(' · ') || a.email || ''}
+                            </div>
+                            {!isPast && (a.last_contacted_at || a.last_responded_at) && (
+                              <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                                {a.last_responded_at && `Last reply ${format(parseISO(a.last_responded_at), 'MMM d')}`}
+                                {a.last_responded_at && a.last_contacted_at && ' · '}
+                                {a.last_contacted_at && `Last reach ${format(parseISO(a.last_contacted_at), 'MMM d')}`}
+                              </div>
+                            )}
                           </div>
+                          <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-emerald-dark shrink-0" />
+                        </button>
+                        {a.entity_type === 'candidate' && a.entity_id && (
+                          <MeetingAttendeePipeline candidateId={a.entity_id} />
                         )}
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">{a.name || a.email || 'Unknown invitee'}</span>
+                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-muted-foreground border-muted-foreground/30">Not in CRM</Badge>
+                          </div>
+                          {a.email && a.name && (
+                            <div className="text-[11px] text-muted-foreground truncate mt-0.5">{a.email}</div>
+                          )}
+                        </div>
+                        <LinkAttendeeButton
+                          attendeeRowId={a.attendeeRowId}
+                          defaultQuery={a.name || a.email || ''}
+                          onLinked={() => { refetch(); }}
+                        />
                       </div>
-                      <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-emerald-dark shrink-0" />
-                    </button>
-                    {a.entity_type === 'candidate' && (
-                      <MeetingAttendeePipeline candidateId={a.entity_id} />
                     )}
                   </div>
                 ))}

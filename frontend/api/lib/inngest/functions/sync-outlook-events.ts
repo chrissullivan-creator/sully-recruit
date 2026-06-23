@@ -224,14 +224,23 @@ async function syncMailbox(
     const locationText = event.location?.displayName || "";
     const dateOnly = startDt.slice(0, 10);
 
-    const attendeeEmails: string[] = (event.attendees || [])
-      .map((a: any) => a.emailAddress?.address?.toLowerCase())
-      .filter(Boolean);
+    // Keep EVERY invitee (name + email), with the CRM match when one exists.
+    // Unmatched invitees are still recorded so the meeting dialog can show
+    // them and let the user link them to a profile.
+    const eventAttendees: { name: string | null; email: string }[] = (event.attendees || [])
+      .map((a: any) => ({
+        name: a.emailAddress?.name ?? null,
+        email: (a.emailAddress?.address ?? "").toLowerCase(),
+      }))
+      .filter((a: any) => a.email);
 
-    const attendeeMatches: { entityId: string; entityType: string; email: string }[] = [];
-    for (const e of attendeeEmails) {
-      const m = await matchByEmail(supabase, e);
-      if (m) attendeeMatches.push({ ...m, email: e });
+    const attendeeRows: {
+      name: string | null;
+      email: string;
+      match: { entityId: string; entityType: string } | null;
+    }[] = [];
+    for (const a of eventAttendees) {
+      attendeeRows.push({ name: a.name, email: a.email, match: await matchByEmail(supabase, a.email) });
     }
 
     const { data: taskData, error: taskErr } = await supabase
@@ -261,18 +270,22 @@ async function syncMailbox(
     }
     synced++;
 
-    for (const m of attendeeMatches) {
+    for (const a of attendeeRows) {
       await supabase.from("meeting_attendees").insert({
         task_id: taskData.id,
-        entity_type: m.entityType,
-        entity_id: m.entityId,
+        entity_type: a.match?.entityType ?? null,
+        entity_id: a.match?.entityId ?? null,
+        attendee_name: a.name,
+        attendee_email: a.email,
       } as any);
-      await supabase.from("task_links").insert({
-        task_id: taskData.id,
-        entity_type: m.entityType,
-        entity_id: m.entityId,
-      } as any);
-      matched++;
+      if (a.match) {
+        await supabase.from("task_links").insert({
+          task_id: taskData.id,
+          entity_type: a.match.entityType,
+          entity_id: a.match.entityId,
+        } as any);
+        matched++;
+      }
     }
   }
 
