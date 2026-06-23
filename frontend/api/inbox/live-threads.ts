@@ -57,16 +57,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = keyRow?.value;
   if (!apiKey) return res.status(500).json({ error: "Unipile config missing" });
 
-  // Pick integration accounts. Default scope: the calling user's own
-  // accounts. (Team-wide view is delegated to the existing inbox UI
-  // admin dropdown — keep this endpoint simple.)
-  const { data: accounts } = await supabase
+  // Scope selection. Default: the calling user's own accounts. Admins may
+  // request the whole team (scope=team) or a single member (member=<userId>).
+  // We re-verify admin server-side and never trust the client.
+  const scopeParam = (req.query.scope as string) || "mine";
+  const memberParam = (req.query.member as string) || "all";
+
+  let isAdmin = false;
+  if (scopeParam === "team") {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+    isAdmin = Boolean((profile as any)?.is_admin);
+  }
+
+  let accountsQuery = supabase
     .from("integration_accounts")
     .select("id, unipile_account_id, account_type, email_address, owner_user_id")
     .in("account_type", accountTypeFilter)
-    .eq("owner_user_id", user.id)
     .eq("is_active", true)
     .not("unipile_account_id", "is", null);
+
+  if (scopeParam === "team" && isAdmin) {
+    // Whole team, or a single member when requested.
+    if (memberParam && memberParam !== "all") {
+      accountsQuery = accountsQuery.eq("owner_user_id", memberParam);
+    }
+  } else {
+    // Default + non-admins: own accounts only.
+    accountsQuery = accountsQuery.eq("owner_user_id", user.id);
+  }
+
+  const { data: accounts } = await accountsQuery;
 
   if (!accounts || accounts.length === 0) {
     return res.status(200).json({ items: [], cursors: {} });

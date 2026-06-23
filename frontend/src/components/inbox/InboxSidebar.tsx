@@ -76,6 +76,8 @@ export interface InboxSidebarProps {
   callsActive?: boolean;
   onSelectCalls?: () => void;
   footer?: React.ReactNode;
+  // Channels moved to the top control bar; hide the rail's Channels section.
+  showChannels?: boolean;
 }
 
 export function InboxSidebar({
@@ -87,6 +89,7 @@ export function InboxSidebar({
   callsActive = false,
   onSelectCalls,
   footer,
+  showChannels = true,
 }: InboxSidebarProps) {
   const navItems: NavItem[] = [
     { key: 'all', label: 'All', Icon: InboxIcon, count: counts.all },
@@ -124,24 +127,28 @@ export function InboxSidebar({
           ))}
         </nav>
 
-        <SectionLabel className="mt-4">Channels</SectionLabel>
-        <nav className="px-2 space-y-0.5">
-          <NavRow
-            label="All channels"
-            Icon={InboxIcon}
-            active={!callsActive && channel === 'all'}
-            onClick={() => onSelectChannel('all')}
-          />
-          {CHANNEL_ITEMS.map((c) => (
-            <NavRow
-              key={c.key}
-              label={c.label}
-              Icon={c.Icon}
-              active={!callsActive && channel === c.key}
-              onClick={() => onSelectChannel(c.key)}
-            />
-          ))}
-        </nav>
+        {showChannels && (
+          <>
+            <SectionLabel className="mt-4">Channels</SectionLabel>
+            <nav className="px-2 space-y-0.5">
+              <NavRow
+                label="All channels"
+                Icon={InboxIcon}
+                active={!callsActive && channel === 'all'}
+                onClick={() => onSelectChannel('all')}
+              />
+              {CHANNEL_ITEMS.map((c) => (
+                <NavRow
+                  key={c.key}
+                  label={c.label}
+                  Icon={c.Icon}
+                  active={!callsActive && channel === c.key}
+                  onClick={() => onSelectChannel(c.key)}
+                />
+              ))}
+            </nav>
+          </>
+        )}
 
         {onSelectCalls && (
           <>
