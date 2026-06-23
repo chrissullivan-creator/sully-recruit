@@ -92,9 +92,11 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   const url = new URL(req.url);
+  // searchParams.get() already percent-decodes; an extra decodeURIComponent
+  // here double-decodes and throws on a literal '%' in the token.
   const validationToken = url.searchParams.get('validationToken');
   if (validationToken) {
-    return new Response(decodeURIComponent(validationToken), {
+    return new Response(validationToken, {
       status: 200, headers: { 'Content-Type': 'text/plain' },
     });
   }
@@ -105,7 +107,25 @@ serve(async (req) => {
     const notifications: any[] = body?.value ?? [];
     console.log(`outlook-webhook: received ${notifications.length} notification(s)`);
 
+    // Verify the clientState Microsoft echoes back from subscription creation.
+    // Without this, anyone who guesses the URL + a subscriptionId can trigger
+    // Graph re-fetches / reprocessing. Mirrors the canonical Vercel handler
+    // (api/webhooks/microsoft-graph.ts): per-notification, strict drops a
+    // mismatch; unset env (MICROSOFT_WEBHOOK_CLIENT_STATE) skips the check so
+    // the two handlers stay consistent and a missing secret can't break inflow.
+    const expectedState = Deno.env.get('MICROSOFT_WEBHOOK_CLIENT_STATE') ?? '';
+    const strict = (Deno.env.get('MICROSOFT_WEBHOOK_STRICT') ?? 'true').toLowerCase() !== 'false';
+
     for (const notification of notifications) {
+      if (strict && expectedState) {
+        const got = String(notification?.clientState ?? '');
+        if (got !== expectedState) {
+          console.warn('outlook-webhook: clientState mismatch — dropping notification', {
+            hasState: !!got, subscription: notification?.subscriptionId,
+          });
+          continue;
+        }
+      }
       try { await processNotification(supabase, notification); }
       catch (err: any) { console.error('Error processing notification:', err.message); }
     }
