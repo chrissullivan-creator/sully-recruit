@@ -67,6 +67,7 @@ import { processFollowUps } from "./lib/inngest/functions/process-follow-ups.js"
 import { bestMatchJob, bestMatchHotJobsCron } from "./lib/inngest/functions/best-match-job.js";
 import { joeDailyBrief } from "./lib/inngest/functions/joe-daily-brief.js";
 import { linkedinSyncHealth } from "./lib/inngest/functions/linkedin-sync-health.js";
+import { autoRejectStalePitches } from "./lib/inngest/functions/auto-reject-stale-pitches.js";
 
 /**
  * Inngest Vercel handler. Receives signed event-delivery webhooks from Inngest
@@ -147,5 +148,6 @@ export default serve({
     bestMatchJob,
     bestMatchHotJobsCron,
     joeDailyBrief,
+    autoRejectStalePitches,
   ],
 });
