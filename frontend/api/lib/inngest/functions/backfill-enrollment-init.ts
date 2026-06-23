@@ -5,21 +5,25 @@ import { notifyError } from "../../../../src/server-lib/alerting.js";
 /**
  * Safety-net sweep for the enrollment → init hand-off.
  *
- * `/api/trigger-sequence-enroll` calls into `sequenceEnrollmentInit`
- * (Inngest, post-PR-#200) right after inserting each
- * `sequence_enrollments` row. If that hand-off fails (network blip,
- * endpoint not deployed, the dialog's older code that didn't call it
- * at all) the enrollment sits dormant: the schedule view shows
- * "No scheduled sends" forever and no email/LinkedIn ever fires.
+ * `/api/trigger-sequence-enroll` (and the BD-sequence / bulk paths) call
+ * `sequenceEnrollmentInit` right after inserting each `sequence_enrollments`
+ * row. If that hand-off fails (network blip, endpoint not deployed) the
+ * enrollment sits dormant: the schedule view shows "No scheduled sends" and
+ * nothing ever fires.
  *
- * This sweep finds active enrollments older than 5 minutes with zero
- * step_logs and fires `sequence/enrollment-init.requested` per row.
- * The init function is idempotent on the enrollment id (early-returns
- * when status isn't 'active') and uses concurrency keyed on
- * enrollmentId, so re-runs are safe.
+ * Two cases are healed here, both identified by "zero step_logs":
+ *   1. ACTIVE enrollments older than 5 min — the classic hand-off-failed case.
+ *   2. PAUSED enrollments whose SEQUENCE is active — an orphaned draft
+ *      enrollment (e.g. a BD sequence drafted with its contacts attached, then
+ *      activated without promoting them). These are promoted to active and
+ *      initialised so they actually start. A paused enrollment that already has
+ *      step_logs was deliberately paused mid-flight and is left untouched.
  *
- * Every 10 minutes. Ported from `src/trigger/backfill-enrollment-init.ts`
- * — Inngest is the only scheduler now.
+ * The init function is idempotent on the enrollment id (early-returns when
+ * status isn't 'active', skips actions that already have a live step_log) and
+ * uses concurrency keyed on enrollmentId, so re-runs are safe.
+ *
+ * Every 10 minutes. Inngest is the only scheduler.
  */
 export const backfillEnrollmentInit = inngest.createFunction(
   { id: "backfill-enrollment-init", name: "Backfill stuck enrollment init (Inngest)" },
@@ -29,7 +33,8 @@ export const backfillEnrollmentInit = inngest.createFunction(
 
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-    const { data: candidates, error: enrollErr } = await supabase
+    // (1) Active enrollments past the grace window.
+    const { data: activeRows, error: enrollErr } = await supabase
       .from("sequence_enrollments")
       .select("id, sequence_id, candidate_id, contact_id, enrolled_by")
       .eq("status", "active")
@@ -45,12 +50,27 @@ export const backfillEnrollmentInit = inngest.createFunction(
       });
       return { error: enrollErr.message };
     }
-    const list = (candidates ?? []) as any[];
+
+    // (2) Paused enrollments whose sequence is active — orphaned drafts that
+    // were activated without promotion. Promoted + initialised below.
+    const { data: pausedRows, error: pausedErr } = await supabase
+      .from("sequence_enrollments")
+      .select("id, sequence_id, candidate_id, contact_id, enrolled_by, sequences!inner(status)")
+      .eq("status", "paused")
+      .eq("sequences.status", "active")
+      .limit(200);
+    if (pausedErr) logger.warn("paused-on-active query failed", { error: pausedErr.message });
+
+    const pausedIds = new Set(((pausedRows ?? []) as any[]).map((e) => e.id));
+    const byId = new Map<string, any>();
+    for (const e of [...((activeRows ?? []) as any[]), ...((pausedRows ?? []) as any[])]) byId.set(e.id, e);
+    const list = [...byId.values()];
     if (list.length === 0) {
-      logger.info("No enrollments older than grace window");
+      logger.info("No enrollments to check");
       return { triggered: 0 };
     }
 
+    // Only enrollments with ZERO step_logs are stuck (never initialised).
     const ids = list.map((e) => e.id);
     const { data: hasLogs } = await supabase
       .from("sequence_step_logs")
@@ -64,29 +84,48 @@ export const backfillEnrollmentInit = inngest.createFunction(
       return { triggered: 0, scanned: list.length };
     }
 
+    // Promote stuck paused enrollments to active so init will run (it
+    // early-returns unless status='active'). sequence_enrollments has no
+    // updated_at column.
+    const toPromote = stuck.filter((e) => pausedIds.has(e.id)).map((e) => e.id);
+    if (toPromote.length) {
+      const { error: promErr } = await supabase
+        .from("sequence_enrollments")
+        .update({ status: "active" } as any)
+        .in("id", toPromote);
+      if (promErr) logger.warn("promote paused→active failed", { error: promErr.message });
+    }
+
     logger.warn("Found stuck enrollments — triggering init", {
       stuck_count: stuck.length,
+      promoted: toPromote.length,
       example_ids: stuck.slice(0, 3).map((e) => e.id),
     });
 
     const tsSec = Math.floor(Date.now() / 1000);
-    const events = stuck.map((e) => ({
-      // Distinct id per backfill run — matches the cutover-finalize
-      // pattern so a fresh sweep doesn't get suppressed by a dedup
-      // collision on the original `enrollment-init-{id}` event.
-      id: `enrollment-init-${e.id}-backfill-${tsSec}`,
-      name: "sequence/enrollment-init.requested" as const,
-      data: {
-        enrollmentId: e.id,
-        sequenceId: e.sequence_id,
-        candidateId: e.candidate_id || undefined,
-        contactId: e.contact_id || undefined,
-        enrolledBy: e.enrolled_by,
-      },
-    }));
+    // Stagger so a backlog of stuck enrollments doesn't fire near-identical
+    // times (each ~5–12 min after the previous).
+    let cumStagger = 0;
+    const events = stuck.map((e) => {
+      const staggerMinutes = cumStagger;
+      cumStagger += 5 + Math.floor(Math.random() * 8);
+      return {
+        // Distinct id per backfill run so a fresh sweep isn't suppressed by a
+        // dedup collision on the original `enrollment-init-{id}` event.
+        id: `enrollment-init-${e.id}-backfill-${tsSec}`,
+        name: "sequence/enrollment-init.requested" as const,
+        data: {
+          enrollmentId: e.id,
+          sequenceId: e.sequence_id,
+          candidateId: e.candidate_id || undefined,
+          contactId: e.contact_id || undefined,
+          enrolledBy: e.enrolled_by,
+          staggerMinutes,
+        },
+      };
+    });
 
-    // Inngest's send accepts up to 5000 events per call; chunk at 500
-    // to stay under the network buffer.
+    // Inngest's send accepts up to 5000 events per call; chunk at 500.
     let triggered = 0;
     const chunkSize = 500;
     for (let i = 0; i < events.length; i += chunkSize) {
@@ -99,6 +138,6 @@ export const backfillEnrollmentInit = inngest.createFunction(
       }
     }
 
-    return { triggered, scanned: list.length, stuck: stuck.length };
+    return { triggered, scanned: list.length, stuck: stuck.length, promoted: toPromote.length };
   },
 );
