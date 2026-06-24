@@ -665,6 +665,15 @@ export function MessageAttachmentList({
   );
 }
 
+/** Heuristic: does this string contain real HTML markup (vs. plain text that
+ *  merely includes an angle bracket, e.g. "a < b" or an address in <>)? We
+ *  render bodies with tags as sanitized HTML and everything else as
+ *  whitespace-preserving plain text. Inbound emails are stored as stripped
+ *  plain text (with newlines), while outbound emails we compose are HTML. */
+function looksLikeHtml(s: string): boolean {
+  return /<\/?(p|div|br|span|a|table|tr|td|th|tbody|thead|ul|ol|li|h[1-6]|strong|em|b|i|u|body|html|head|style|blockquote|font|img|hr|pre|code)\b/i.test(s);
+}
+
 export function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
@@ -1412,7 +1421,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                             )}>{msg.subject}</p>
                           )}
                           {displayBody
-                            ? thread.channel === 'email'
+                            ? (thread.channel === 'email' && looksLikeHtml(displayBody))
                               ? <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(displayBody) }} className="prose prose-sm max-w-none [&_*]:text-inherit [&_a]:underline" />
                               : displayBody
                             : <span className="italic opacity-50">(No content)</span>}
