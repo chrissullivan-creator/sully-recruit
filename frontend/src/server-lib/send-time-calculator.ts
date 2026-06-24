@@ -305,38 +305,50 @@ function rollWeekendToMonday(date: Date, sendWindowStart: string, tz: string): D
 export async function calculateSendTime(supabase: any, input: SendTimeInput): Promise<Date> {
   const tz = input.timezone || DEFAULT_TZ;
 
-  // LinkedIn connections bypass everything — fire now
-  if (input.channel === "linkedin_connection") {
-    const result = new Date(input.startTime);
+  // LinkedIn connection requests bypass the send WINDOW (they fire 24/7, no
+  // business-hours gate) and skip the window/jiggle/hot-spot math — but they
+  // STILL honor the per-channel daily/hourly caps below. Previously they
+  // early-returned before the caps, so a batch enrollment scheduled every
+  // connection for ~now and one sweep fired them all at once — blowing past
+  // LinkedIn's daily-invite ceiling and bursting the provider-id lookups into
+  // a 429. Now any configured delay + the batch stagger offset are honored as
+  // raw (24/7) minutes so a batch spreads deterministically, and the cap
+  // roll-forward is a backstop.
+  const isConnection = input.channel === "linkedin_connection";
+
+  let result: Date;
+  if (isConnection) {
+    const rawDelayMin = input.delayHours * 60 + input.delayMinutes;
+    result = new Date(input.startTime.getTime() + rawDelayMin * 60000);
     result.setMinutes(result.getMinutes() + Math.floor(Math.random() * 4));
-    return result;
-  }
+  } else {
+    const totalDelayMinutes = input.delayHours * 60 + input.delayMinutes;
 
-  const totalDelayMinutes = input.delayHours * 60 + input.delayMinutes;
+    result = addWindowMinutes(
+      input.startTime,
+      totalDelayMinutes,
+      input.sendWindowStart,
+      input.sendWindowEnd,
+      tz,
+    );
 
-  let result = addWindowMinutes(
-    input.startTime,
-    totalDelayMinutes,
-    input.sendWindowStart,
-    input.sendWindowEnd,
-    tz,
-  );
+    // Apply jiggle
+    if (input.jiggleMinutes > 0) {
+      const jiggle = Math.floor(Math.random() * input.jiggleMinutes * 2) - input.jiggleMinutes;
+      result = new Date(result.getTime() + jiggle * 60000);
 
-  // Apply jiggle
-  if (input.jiggleMinutes > 0) {
-    const jiggle = Math.floor(Math.random() * input.jiggleMinutes * 2) - input.jiggleMinutes;
-    result = new Date(result.getTime() + jiggle * 60000);
-
-    const z = toZoned(result, tz);
-    const currentMin = z.hours * 60 + z.minutes;
-    const winStart = parseTimeToMinutes(input.sendWindowStart);
-    const winEnd = parseTimeToMinutes(input.sendWindowEnd);
-    if (currentMin < winStart || currentMin >= winEnd) {
-      result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd, tz);
+      const z = toZoned(result, tz);
+      const currentMin = z.hours * 60 + z.minutes;
+      const winStart = parseTimeToMinutes(input.sendWindowStart);
+      const winEnd = parseTimeToMinutes(input.sendWindowEnd);
+      if (currentMin < winStart || currentMin >= winEnd) {
+        result = addWindowMinutes(result, 0, input.sendWindowStart, input.sendWindowEnd, tz);
+      }
     }
   }
 
-  // Check daily cap — roll forward if needed
+  // Check daily cap — roll forward if needed. Applies to ALL channels now,
+  // including linkedin_connection (see note above).
   for (let attempts = 0; attempts < 14; attempts++) {
     const estDate = localDateString(result, tz);
     const dailyCheck = await checkDailyCap(supabase, input.accountId, input.channel, estDate, tz);
@@ -359,8 +371,9 @@ export async function calculateSendTime(supabase: any, input: SendTimeInput): Pr
   }
 
   // Snap to a bursty hot-spot within the assigned hour — unless the caller
-  // applied an explicit stagger (skipHotSpot), which we must not re-cluster.
-  if (!input.skipHotSpot) {
+  // applied an explicit stagger (skipHotSpot), which we must not re-cluster,
+  // or this is a connection (fires 24/7 as scheduled, no window/hot-spot).
+  if (!input.skipHotSpot && !isConnection) {
     result = snapToHotSpot(result, input.sendWindowEnd, tz);
   }
 
