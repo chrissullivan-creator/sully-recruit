@@ -205,10 +205,18 @@ export const fetchEntityHistory = inngest.createFunction(
                 ?? ""
             ).toLowerCase();
             const senderName = fromAttendee.display_name ?? fromAttendee.name ?? fromAttendee.emailAddress?.name ?? null;
+            // Prefer Unipile's explicit flag. Without it, infer from the sender:
+            // the entity's own address ⇒ inbound (they wrote to us). If the sender
+            // can't be parsed at all (fromAddr empty), default to inbound rather
+            // than outbound — these are pulled-in mailbox items, and the old
+            // "outbound" default logged them as phantom sends with a null
+            // sender_address (e.g. inbound newsletters showing as outbound).
             const direction =
               typeof email.is_outbound === "boolean"
                 ? (email.is_outbound ? "outbound" : "inbound")
-                : (fromAddr === lowerEmail ? "inbound" : "outbound");
+                : fromAddr
+                  ? (fromAddr === lowerEmail ? "inbound" : "outbound")
+                  : "inbound";
             const sentAt = email.date || email.timestamp || email.sent_date || email.sentDateTime || null;
             const receivedAt = email.received_date || email.receivedDateTime || sentAt;
             const body = email.body_preview || email.bodyPreview || email.body || email.body_html || "";
@@ -217,6 +225,7 @@ export const fetchEntityHistory = inngest.createFunction(
               conversation_id: convUuid,
               [entityColumn]: entityId,
               channel: "email",
+              message_type: "email",
               direction,
               subject: email.subject ?? null,
               body,
