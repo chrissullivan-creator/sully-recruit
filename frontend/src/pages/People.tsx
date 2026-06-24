@@ -41,16 +41,6 @@ type PersonTab = 'all' | 'candidates' | 'clients' | 'applicants';
 type SortField = 'name' | 'title' | 'company' | 'lastReached' | 'lastResponded' | 'updated' | 'created';
 type SortDir = 'asc' | 'desc';
 
-const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  interested:     { label: 'Interested',     bg: 'bg-[#2A5C42]',     text: 'text-white'           },
-  positive:       { label: 'Positive',       bg: 'bg-green-500/15',  text: 'text-green-500'        },
-  maybe:          { label: 'Maybe',          bg: 'bg-[#C9A84C]/15',  text: 'text-[#C9A84C]'        },
-  neutral:        { label: 'Neutral',        bg: 'bg-gray-500/15',   text: 'text-gray-400'         },
-  negative:       { label: 'Negative',       bg: 'bg-orange-500/15', text: 'text-orange-500'       },
-  not_interested: { label: 'Not Interested', bg: 'bg-red-500/15',    text: 'text-red-500'          },
-  do_not_contact: { label: 'Do Not Contact', bg: 'bg-red-900/20',    text: 'text-red-700'          },
-};
-
 const ChannelBadge = ({ channel }: { channel?: string | null }) => {
   if (!channel) return <span className="text-muted-foreground">—</span>;
   const icon = channel === 'email' ? <Mail className="h-3 w-3" />
@@ -159,7 +149,7 @@ const People = () => {
           'work_email, personal_email, email:primary_email, secondary_emails, mobile_phone, phone, linkedin_url, ' +
           'email_invalid, email_invalid_reason, email_invalid_at, ' +
           'avatar_url, roles, status, ' +
-          'last_contacted_at, last_responded_at, last_comm_channel, last_sequence_sentiment, ' +
+          'last_contacted_at, last_responded_at, last_comm_channel, ' +
           'owner_user_id, created_at, updated_at',
         )
         .or(
@@ -408,7 +398,6 @@ const People = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
                     <span className="flex items-center gap-1">Last Response <SortIcon field="lastResponded" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Date Added <SortIcon field="created" /></span>
@@ -427,10 +416,6 @@ const People = () => {
                   const initials = (
                     (person.first_name?.[0] ?? '') + (person.last_name?.[0] ?? '')
                   ).toUpperCase() || displayName[0]?.toUpperCase() || '?';
-                  const sentiment = person.last_sequence_sentiment;
-                  const sConfig = sentiment
-                    ? (SENTIMENT_CONFIG[sentiment] ?? { label: sentiment, bg: 'bg-muted', text: 'text-muted-foreground' })
-                    : null;
 
                   return (
                     <tr
@@ -512,13 +497,6 @@ const People = () => {
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {person.last_responded_at ? new Date(person.last_responded_at).toLocaleDateString() : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {sConfig ? (
-                          <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', sConfig.bg, sConfig.text)}>
-                            {sConfig.label}
-                          </span>
-                        ) : <span className="text-xs text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3">
                         <ChannelBadge channel={person.last_comm_channel} />
