@@ -4,26 +4,70 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * POST /api/lookup-linkedin
  *
- * Fetches a LinkedIn profile via the Unipile **v2** API and normalizes it to
- * form-compatible fields for the Add Person wizard.
+ * Fetches a LinkedIn profile and normalizes it to form-compatible fields for
+ * the Add Person wizard. **Everything runs on Unipile v2** — addressed on the
+ * v2 host by `acc_xxx` id with UNIPILE_API_KEY_V2.
  *
- * Why v2: the v1 DSN key now points at a Unipile app with ZERO connected
- * accounts, so every v1 short-id call 404s "Account not found". The live
- * accounts are on the v2 host (api.unipile.com/v2), addressed by their canonical
- * `acc_xxx` id with the UNIPILE_API_KEY_V2 key — the same surface the rest of
- * the app already routes through (see src/server-lib/unipile-v2.ts). This
- * endpoint stays self-contained (inlined v2 calls, no shared import) so the
+ * Resolution order (first useful hit wins):
+ *   1. unipile_id / linkedin_url → direct profile read
+ *      (GET {v2Base}/{acc_xxx}/users/{provider_id-or-slug})
+ *   2. chat_id → recover from the thread's chat. Backfilled LinkedIn threads
+ *      frequently store only a chat_id (no URL / resolvable provider id). v2 has
+ *      no chat-attendees route, but every chat message carries the full `sender`
+ *      User object — so we read the chat's messages
+ *      (GET {v2Base}/{acc_xxx}/chats/{chat_id}/messages), take an inbound
+ *      message's sender, and (when it exposes a public identifier) enrich it via
+ *      the direct profile read. The sender object alone is enough to prefill.
+ *
+ * This endpoint stays self-contained (inlined calls, no shared import) so the
  * Vercel bundler can't drop the dependency.
- *
- * Resolution: any connected seat can read any public profile, so we try the
- * thread's own account first, then fall back across every other connected
- * account — one reconnected seat resolves profiles for all threads.
- *
- *   v2 route: GET {v2Base}/{acc_xxx}/users/{provider_id-or-slug}
  *
  * Body: { linkedin_url?, unipile_id?, chat_id?, integration_account_id?, account_id? }
  * Auth: Supabase JWT
  */
+
+/** Loosely-typed Unipile v2 User / profile blob — every field optional. */
+interface UnipileProfile {
+  first_name?: string;
+  last_name?: string;
+  display_name?: string;
+  name?: string;
+  description?: string;
+  headline?: string;
+  title?: string;
+  occupation?: string;
+  phone?: string;
+  phone_number?: string;
+  phone_numbers?: string[];
+  public_picture_url?: string;
+  public_picture_url_large?: string;
+  profile_picture_url?: string;
+  picture_url?: string;
+  location?: string | { name?: string } | null;
+  location_name?: string;
+  profile_url?: string;
+  public_profile_url?: string;
+  url?: string;
+  public_identifier?: string;
+  email?: string;
+  provider_id?: string;
+  id?: string;
+  // v2 nests location + the SELF marker under `specifics`.
+  specifics?: { location?: string; network_distance?: string } | null;
+}
+
+/** A v2 chat message — we only read whether we sent it and its sender. */
+interface UnipileMessage {
+  is_sender?: boolean;
+  sender?: UnipileProfile;
+}
+
+/** Just the columns we read off an integration_accounts row. */
+interface AccountRow {
+  unipile_account_id_v2?: string | null;
+  metadata?: unknown;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
@@ -38,8 +82,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { linkedin_url, unipile_id, integration_account_id, account_id } = req.body || {};
-  if (!linkedin_url && !unipile_id) return res.status(200).json({});
+  const { linkedin_url, unipile_id, chat_id, integration_account_id, account_id } = req.body || {};
+  if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
 
   try {
     const [{ data: baseRow }, { data: keyRow }] = await Promise.all([
@@ -60,8 +104,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const v = (id || "").trim();
       if (v.startsWith("acc_") && !acctIds.includes(v)) acctIds.push(v);
     };
-    const accFromRow = (row: any) =>
-      row?.unipile_account_id_v2 ?? row?.metadata?.unipile_account_id_v2 ?? null;
 
     if (account_id) pushAcc(account_id);
     if (integration_account_id) {
@@ -70,15 +112,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select("unipile_account_id_v2, metadata")
         .eq("id", integration_account_id)
         .maybeSingle();
-      pushAcc(accFromRow(data));
+      pushAcc(accV2FromRow(data));
     }
     const { data: allAccts } = await supabase
       .from("integration_accounts")
       .select("unipile_account_id_v2, metadata")
       .eq("provider", "linkedin")
       .eq("is_active", true);
-    for (const row of allAccts ?? []) pushAcc(accFromRow(row));
+    for (const row of allAccts ?? []) pushAcc(accV2FromRow(row));
 
+    // Every v2 path needs at least one acc_xxx seat — without one we can resolve
+    // neither a direct profile nor a chat's messages.
     if (acctIds.length === 0) {
       console.warn("lookup-linkedin: no connected v2 LinkedIn accounts to resolve with");
       return res.status(200).json({});
@@ -94,30 +138,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     pushId(unipile_id);
     pushId(linkedin_url);
-    if (ids.length === 0) return res.status(200).json({});
+    if (ids.length === 0 && !chat_id) return res.status(200).json({});
 
-    // ── Try each identifier against each account until one resolves ──
-    let profile: any = null;
+    // ── Try each identifier against each account until one resolves usefully ──
+    let profile: UnipileProfile | null = null;
     outer: for (const id of ids) {
       for (const acc of acctIds) {
         const p = await v2GetUser(v2Base, apiKeyV2, acc, id);
-        if (p && (p.first_name || p.last_name || p.display_name)) {
+        if (hasUsefulProfile(p)) {
           profile = p;
           break outer;
         }
       }
     }
+
+    // ── Chat fallback (v2) ──
+    // When the identifier-based lookup turns up nothing (or there were no
+    // identifiers at all), recover a profile from the chat's messages.
+    if (!profile && chat_id) {
+      profile = await resolveFromChat(v2Base, apiKeyV2, acctIds, String(chat_id));
+    }
+
     if (!profile) return res.status(200).json({});
 
-    // ── Normalize the v2 UserProfile → the wizard's form fields ──
-    const display = pickString(profile.display_name);
+    // ── Normalize the profile → the wizard's form fields ──
+    // Don't gate on having a name; emit whatever fields are present.
+    const display = pickString(profile.display_name, profile.name);
     const first = pickString(profile.first_name) || display.split(/\s+/)[0] || "";
     const last = pickString(profile.last_name) || display.split(/\s+/).slice(1).join(" ");
 
-    // v2 surfaces the role line as `description` ("Title at Company"); split it
-    // into structured title/company when possible (company drives the
+    // The role line arrives as `description` ("Title at Company"); split it into
+    // structured title/company when possible (company drives the
     // people↔companies auto-link). Fall back to the whole string as the title.
-    const description = pickString(profile.description);
+    const description = pickString(profile.description, profile.headline, profile.title, profile.occupation);
     let title = "";
     let company = "";
     const split = description.match(/^(.*?)\s+(?:at|@)\s+(.+)$/i);
@@ -137,12 +190,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profile.profile_picture_url,
       profile.picture_url,
     );
+    const locObj = profile.location && typeof profile.location === "object" ? profile.location : null;
     const location = pickString(
       typeof profile.location === "string" ? profile.location : null,
-      profile.location?.name,
+      locObj?.name,
+      profile.location_name,
+      profile.specifics?.location,
     );
     const resolvedUrl =
-      pickString(profile.profile_url) ||
+      pickString(profile.profile_url, profile.public_profile_url, profile.url) ||
       (profile.public_identifier ? `https://www.linkedin.com/in/${profile.public_identifier}` : "") ||
       (typeof linkedin_url === "string" ? linkedin_url : "");
 
@@ -165,6 +221,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+/** Resolve the canonical acc_xxx from an integration_accounts row, coalescing
+ *  the top-level column with the metadata copy (some rows only have one). */
+function accV2FromRow(row: AccountRow | null): string | null {
+  const direct = row?.unipile_account_id_v2;
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const meta = row?.metadata;
+  if (meta && typeof meta === "object") {
+    const v = (meta as Record<string, unknown>).unipile_account_id_v2;
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return null;
+}
+
+/** True when a fetched profile carries at least one field worth prefilling —
+ *  name, role, location, photo, identifier/URL, or contact. Lets sparse
+ *  responses through instead of requiring a name (acts as a type guard). */
+function hasUsefulProfile(p: UnipileProfile | null): p is UnipileProfile {
+  if (!p || typeof p !== "object") return false;
+  const locName = typeof p.location === "string" ? p.location : p.location?.name;
+  return Boolean(
+    p.first_name || p.last_name || p.display_name || p.name ||
+    p.description || p.headline || p.title || p.occupation ||
+    p.public_identifier || p.profile_url || p.public_profile_url || p.url ||
+    p.public_picture_url || p.public_picture_url_large || p.profile_picture_url || p.picture_url ||
+    locName || p.location_name || p.specifics?.location ||
+    p.email || p.phone || p.phone_number ||
+    (Array.isArray(p.phone_numbers) && p.phone_numbers.length > 0),
+  );
+}
+
 /** GET a Unipile v2 user profile, failing fast (null) on any error/timeout so
  *  resolution falls through to the next id/account instead of hanging the
  *  Add Person wizard. */
@@ -173,14 +259,74 @@ async function v2GetUser(
   apiKey: string,
   acc: string,
   id: string,
-): Promise<any | null> {
+): Promise<UnipileProfile | null> {
   try {
     const r = await fetch(
       `${base}/${encodeURIComponent(acc)}/users/${encodeURIComponent(id)}`,
       { headers: { "X-API-KEY": apiKey, Accept: "application/json" }, signal: AbortSignal.timeout(9000) },
     );
     if (!r.ok) return null;
-    return await r.json();
+    return (await r.json()) as UnipileProfile;
+  } catch {
+    return null;
+  }
+}
+
+/** Recover a profile from a chat's messages (v2). v2 has no chat-attendees
+ *  route, but each message carries the full `sender` User object. Take an
+ *  inbound message's sender, then enrich it via the direct profile read when it
+ *  exposes a public identifier — otherwise the sender object alone prefills. */
+async function resolveFromChat(
+  v2Base: string,
+  apiKeyV2: string,
+  v2AcctIds: string[],
+  chatId: string,
+): Promise<UnipileProfile | null> {
+  const sender = await senderFromChatMessages(v2Base, apiKeyV2, v2AcctIds, chatId);
+  if (!sender) return null;
+
+  const slug = pickString(sender.public_identifier);
+  if (slug) {
+    for (const acc of v2AcctIds) {
+      const p = await v2GetUser(v2Base, apiKeyV2, acc, slug);
+      if (hasUsefulProfile(p)) return p;
+    }
+  }
+  return hasUsefulProfile(sender) ? sender : null;
+}
+
+/** Read a chat's messages on the v2 host (trying each connected seat) and
+ *  return the sender of an inbound message — i.e. the other party. */
+async function senderFromChatMessages(
+  v2Base: string,
+  apiKeyV2: string,
+  v2AcctIds: string[],
+  chatId: string,
+): Promise<UnipileProfile | null> {
+  const headers = { "X-API-KEY": apiKeyV2, Accept: "application/json" };
+  const cid = encodeURIComponent(chatId);
+  for (const acc of v2AcctIds) {
+    const r = await safeGet(`${v2Base}/${encodeURIComponent(acc)}/chats/${cid}/messages?limit=30`, headers);
+    if (!r?.ok) continue;
+    const j = (await r.json().catch(() => null)) as { data?: UnipileMessage[] } | null;
+    const msgs = j?.data;
+    if (!Array.isArray(msgs) || msgs.length === 0) continue;
+
+    // Prefer a message we did NOT send; else one whose sender isn't us; else any.
+    const pick =
+      msgs.find((m) => m && m.is_sender === false && m.sender) ??
+      msgs.find((m) => m?.sender && m.sender.specifics?.network_distance !== "SELF") ??
+      msgs.find((m) => m?.sender);
+    if (pick?.sender) return pick.sender;
+  }
+  return null;
+}
+
+/** GET a URL with a hard timeout; fail fast (null) so resolution falls through
+ *  instead of hanging the wizard. */
+async function safeGet(url: string, headers: Record<string, string>): Promise<Response | null> {
+  try {
+    return await fetch(url, { headers, signal: AbortSignal.timeout(9000) });
   } catch {
     return null;
   }
