@@ -234,6 +234,17 @@ export const extractManualCallIntel = inngest.createFunction(
       created_at: new Date().toISOString(),
     } as any, { onConflict: "call_log_id", ignoreDuplicates: false });
 
+    // Refresh the Joe Says brief now that the typed notes enriched the
+    // candidate. Best-effort — never fail the extraction on an event send.
+    try {
+      await inngest.send({
+        name: "ai/joe-says.requested",
+        data: { entityId: candidateId, entityType: "candidate" },
+      });
+    } catch (err: any) {
+      logger.warn("joe-says fire after manual call intel failed", { error: err?.message, candidateId });
+    }
+
     logger.info("Manual call intel extracted", { candidateId, callLogId });
     return {
       success: true,

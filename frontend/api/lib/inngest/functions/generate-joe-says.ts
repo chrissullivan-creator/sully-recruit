@@ -126,6 +126,12 @@ export const generateJoeSays = inngest.createFunction(
     name: "Generate Joe Says brief (Inngest)",
     retries: 2,
     concurrency: [{ key: "event.data.entityId", limit: 1 }],
+    // Collapse bursts: a call landing alongside an email reply + a note for the
+    // same person fires several ai/joe-says.requested events within seconds.
+    // Debounce per entityId so we regenerate the brief once after activity
+    // settles instead of paying for N near-identical Sonnet runs. timeout caps
+    // the delay so a continuously-active person's brief still refreshes.
+    debounce: { key: "event.data.entityId", period: "90s", timeout: "5m" },
   },
   { event: "ai/joe-says.requested" },
   async ({ event, logger }) => {
