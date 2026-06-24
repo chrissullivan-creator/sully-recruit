@@ -4,18 +4,22 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * POST /api/lookup-linkedin
  *
- * Fetches a LinkedIn profile via the Unipile **v1** API and normalizes
- * it to form-compatible fields for the Add Person wizard.
+ * Fetches a LinkedIn profile via the Unipile **v2** API and normalizes it to
+ * form-compatible fields for the Add Person wizard.
  *
- *   v1 paths (account_id is a query parameter, not a path segment):
- *     GET /api/v1/users/{slug-or-provider-id}?account_id=X
- *     GET /api/v1/chats/{chat_id}?account_id=X
- *     GET /api/v1/chats/{chat_id}/attendees?account_id=X
+ * Why v2: the v1 DSN key now points at a Unipile app with ZERO connected
+ * accounts, so every v1 short-id call 404s "Account not found". The live
+ * accounts are on the v2 host (api.unipile.com/v2), addressed by their canonical
+ * `acc_xxx` id with the UNIPILE_API_KEY_V2 key — the same surface the rest of
+ * the app already routes through (see src/server-lib/unipile-v2.ts). This
+ * endpoint stays self-contained (inlined v2 calls, no shared import) so the
+ * Vercel bundler can't drop the dependency.
  *
- * Resolution order (first hit wins):
- *   1. unipile_id           — direct user fetch
- *   2. linkedin_url         — slug extracted from URL
- *   3. chat_id              — fetch chat attendees, pick the "other" one
+ * Resolution: any connected seat can read any public profile, so we try the
+ * thread's own account first, then fall back across every other connected
+ * account — one reconnected seat resolves profiles for all threads.
+ *
+ *   v2 route: GET {v2Base}/{acc_xxx}/users/{provider_id-or-slug}
  *
  * Body: { linkedin_url?, unipile_id?, chat_id?, integration_account_id?, account_id? }
  * Auth: Supabase JWT
@@ -34,227 +38,125 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { linkedin_url, unipile_id, chat_id, integration_account_id, account_id } = req.body || {};
-  if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
+  const { linkedin_url, unipile_id, integration_account_id, account_id } = req.body || {};
+  if (!linkedin_url && !unipile_id) return res.status(200).json({});
 
   try {
-    // Resolve v1 tenant DSN + key. Our v2 app key returns 403 on
-    // /linkedin/users/{slug}, so we use the v1 surface where the
-    // equivalent route is /users/{slug}?account_id=X.
-    const [{ data: v1Row }, { data: v1KeyRow }] = await Promise.all([
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_URL").maybeSingle(),
-      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY").maybeSingle(),
+    const [{ data: baseRow }, { data: keyRow }] = await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_BASE_V2_URL").maybeSingle(),
+      supabase.from("app_settings").select("value").eq("key", "UNIPILE_API_KEY_V2").maybeSingle(),
     ]);
-    const v1Base = (v1Row?.value || "").replace(/\/+$/, "")
-      || "https://api19.unipile.com:14926/api/v1";
-    const apiKey = v1KeyRow?.value;
-    if (!v1Base || !apiKey) {
-      console.error("Unipile v1 config not found in app_settings");
+    const v2Base = (baseRow?.value || "").replace(/\/+$/, "") || "https://api.unipile.com/v2";
+    const apiKeyV2 = keyRow?.value;
+    if (!apiKeyV2) {
+      console.error("lookup-linkedin: UNIPILE_API_KEY_V2 not set in app_settings");
       return res.status(200).json({});
     }
 
-    // Resolve a Unipile account ID — prefer the one associated with this thread's
-    // integration_account, falling back to any active account.
-    let acctId = account_id;
-    if (!acctId && integration_account_id) {
-      const { data: ia } = await supabase
+    // ── Ordered, de-duplicated list of acc_xxx ids to try ──────────────
+    // Thread's own account first, then every other connected LinkedIn seat.
+    const acctIds: string[] = [];
+    const pushAcc = (id?: string | null) => {
+      const v = (id || "").trim();
+      if (v.startsWith("acc_") && !acctIds.includes(v)) acctIds.push(v);
+    };
+    const accFromRow = (row: any) =>
+      row?.unipile_account_id_v2 ?? row?.metadata?.unipile_account_id_v2 ?? null;
+
+    if (account_id) pushAcc(account_id);
+    if (integration_account_id) {
+      const { data } = await supabase
         .from("integration_accounts")
-        .select("unipile_account_id")
+        .select("unipile_account_id_v2, metadata")
         .eq("id", integration_account_id)
         .maybeSingle();
-      acctId = ia?.unipile_account_id ?? undefined;
+      pushAcc(accFromRow(data));
     }
-    if (!acctId) {
-      const { data: accounts } = await supabase
-        .from("integration_accounts")
-        .select("unipile_account_id")
-        .not("unipile_account_id", "is", null)
-        .eq("is_active", true)
-        .limit(1);
-      acctId = accounts?.[0]?.unipile_account_id;
-    }
-    if (!acctId) {
-      console.warn("No active Unipile account found");
+    const { data: allAccts } = await supabase
+      .from("integration_accounts")
+      .select("unipile_account_id_v2, metadata")
+      .eq("provider", "linkedin")
+      .eq("is_active", true);
+    for (const row of allAccts ?? []) pushAcc(accFromRow(row));
+
+    if (acctIds.length === 0) {
+      console.warn("lookup-linkedin: no connected v2 LinkedIn accounts to resolve with");
       return res.status(200).json({});
     }
 
-    const uniHeaders = { "X-API-KEY": apiKey, Accept: "application/json" };
-    const acctParam = encodeURIComponent(acctId);
-    let profileData: any = null;
-    let attendeeData: any = null;
+    // ── Identifiers to resolve (provider id like ACoAA…/AEM…, or vanity slug) ──
+    const ids: string[] = [];
+    const pushId = (raw?: string | null) => {
+      if (!raw) return;
+      const m = String(raw).match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/i);
+      const v = (m ? m[1] : String(raw)).trim();
+      if (v && !ids.includes(v)) ids.push(v);
+    };
+    pushId(unipile_id);
+    pushId(linkedin_url);
+    if (ids.length === 0) return res.status(200).json({});
 
-    // Try direct fetch by Unipile ID — v1: /users/{id}?account_id=X
-    if (unipile_id) {
-      const r = await uniGet(
-        `${v1Base}/users/${encodeURIComponent(unipile_id)}?account_id=${acctParam}`,
-        uniHeaders,
-      );
-      if (r?.ok) profileData = await r.json();
-    }
-
-    // Try resolving by LinkedIn URL slug — v1: /users/{slug}?account_id=X
-    if (!profileData && linkedin_url) {
-      const match = linkedin_url.match(/linkedin\.com\/(?:in|pub)\/([^/?#]+)/);
-      const slug = match?.[1];
-      if (slug) {
-        const r = await uniGet(
-          `${v1Base}/users/${encodeURIComponent(slug)}?account_id=${acctParam}`,
-          uniHeaders,
-        );
-        if (r?.ok) profileData = await r.json();
-      }
-    }
-
-    // Try resolving via chat attendees — used when the inbound message has no
-    // LinkedIn URL (common: backfill-populated LinkedIn threads store only the
-    // Unipile provider_id, not a URL).
-    //   v1: /chats/{id}?account_id=X and /chats/{id}/attendees?account_id=X
-    if (!profileData && chat_id) {
-      let attendees: any[] = [];
-      const chatResp = await uniGet(
-        `${v1Base}/chats/${encodeURIComponent(chat_id)}?account_id=${acctParam}`,
-        uniHeaders,
-      );
-      if (chatResp?.ok) {
-        const chatJson: any = await chatResp.json();
-        attendees = chatJson.attendees ?? chatJson.members ?? chatJson.participants ?? [];
-      }
-      if (attendees.length === 0) {
-        const attResp = await uniGet(
-          `${v1Base}/chats/${encodeURIComponent(chat_id)}/attendees?account_id=${acctParam}`,
-          uniHeaders,
-        );
-        if (attResp?.ok) {
-          const attJson: any = await attResp.json();
-          attendees = attJson.items ?? attJson.attendees ?? [];
-        }
-      }
-
-      const other = attendees.find(
-        (a: any) => a.provider_id !== acctId && a.id !== acctId,
-      ) ?? attendees[0];
-
-      if (other) {
-        attendeeData = other;
-        const providerId = other.provider_id ?? other.id;
-        if (providerId) {
-          const r = await uniGet(
-            `${v1Base}/users/${encodeURIComponent(providerId)}?account_id=${acctParam}`,
-            uniHeaders,
-          );
-          if (r?.ok) profileData = await r.json();
+    // ── Try each identifier against each account until one resolves ──
+    let profile: any = null;
+    outer: for (const id of ids) {
+      for (const acc of acctIds) {
+        const p = await v2GetUser(v2Base, apiKeyV2, acc, id);
+        if (p && (p.first_name || p.last_name || p.display_name)) {
+          profile = p;
+          break outer;
         }
       }
     }
+    if (!profile) return res.status(200).json({});
 
-    // If we couldn't get a full profile but do have attendee data, synthesize
-    // a minimal profile so the form still gets something useful.
-    if (!profileData && attendeeData) {
-      const name = attendeeData.display_name ?? attendeeData.name ?? "";
-      const parts = name.trim().split(/\s+/);
-      profileData = {
-        first_name: parts[0] ?? "",
-        last_name: parts.slice(1).join(" "),
-        headline: attendeeData.headline ?? attendeeData.title ?? undefined,
-        company: attendeeData.company ?? attendeeData.current_company ?? attendeeData.company_name ?? attendeeData.organization ?? undefined,
-        location: attendeeData.location ?? undefined,
-        profile_picture_url:
-          attendeeData.profile_picture_url ?? attendeeData.picture_url ?? undefined,
-        public_profile_url:
-          attendeeData.public_profile_url ??
-          attendeeData.profile_url ??
-          attendeeData.url ??
-          undefined,
-      };
+    // ── Normalize the v2 UserProfile → the wizard's form fields ──
+    const display = pickString(profile.display_name);
+    const first = pickString(profile.first_name) || display.split(/\s+/)[0] || "";
+    const last = pickString(profile.last_name) || display.split(/\s+/).slice(1).join(" ");
+
+    // v2 surfaces the role line as `description` ("Title at Company"); split it
+    // into structured title/company when possible (company drives the
+    // people↔companies auto-link). Fall back to the whole string as the title.
+    const description = pickString(profile.description);
+    let title = "";
+    let company = "";
+    const split = description.match(/^(.*?)\s+(?:at|@)\s+(.+)$/i);
+    if (split) {
+      title = split[1].trim();
+      company = split[2].trim();
+    } else if (description) {
+      title = description;
     }
 
-    if (!profileData) return res.status(200).json({});
-
-    // Extract structured profile fields. Mirrors the canonical enrichment
-    // logic in api/lib/linkedin-finder.ts so the manual "Add Person" path
-    // and the background Unipile resolver agree on title / company /
-    // location / headline / photo. We do NOT parse the headline string for
-    // a job title — the headline is a marketing tagline, not the position.
-    const expArray: any[] =
-      (Array.isArray(profileData.positions) && profileData.positions) ||
-      (Array.isArray(profileData.experience) && profileData.experience) ||
-      (Array.isArray(profileData.work_experience) && profileData.work_experience) ||
-      [];
-    // Prefer the entry flagged current (or with no end date); most-recent-
-    // first ordering isn't guaranteed across Unipile account types.
-    const currentExp =
-      expArray.find(
-        (e: any) => e?.is_current || e?.current || (!e?.end_date && !e?.end && !e?.ends_at && !e?.to),
-      ) ?? expArray[0] ?? null;
-
-    const currentTitle = pickString(
-      currentExp?.title,
-      currentExp?.position,
-      currentExp?.role,
-      profileData.current_position,
-      profileData.current_title,
-      profileData.title,
-    );
-    const currentCompany = pickString(
-      typeof currentExp?.company === "string" ? currentExp.company : null,
-      currentExp?.company?.name,
-      currentExp?.company_name,
-      currentExp?.organization,
-      profileData.current_company,
-      profileData.company,
-      profileData.company_name,
+    const phone = Array.isArray(profile.phone_numbers)
+      ? pickString(...profile.phone_numbers)
+      : pickString(profile.phone, profile.phone_number);
+    const photo = pickString(
+      profile.public_picture_url_large,
+      profile.public_picture_url,
+      profile.profile_picture_url,
+      profile.picture_url,
     );
     const location = pickString(
-      profileData.location,
-      profileData.location?.name,
-      profileData.location?.display_name,
-      profileData.region,
-      profileData.location_name,
+      typeof profile.location === "string" ? profile.location : null,
+      profile.location?.name,
     );
-    const headline = pickString(profileData.headline);
-    // picture_url / image_url are additional fallbacks for the same field
-    // (matches resolve-unipile-ids.ts + linkedin-finder.ts) so every path
-    // lands a consistent avatar.
-    const photo = pickString(
-      profileData.profile_picture_url,
-      profileData.profile_picture_url_large,
-      profileData.picture_url,
-      profileData.image_url,
-      profileData.photo_url,
-      profileData.avatar_url,
-    );
+    const resolvedUrl =
+      pickString(profile.profile_url) ||
+      (profile.public_identifier ? `https://www.linkedin.com/in/${profile.public_identifier}` : "") ||
+      (typeof linkedin_url === "string" ? linkedin_url : "");
 
-    // Normalize to form-compatible fields
     const result: Record<string, string> = {};
-    if (profileData.first_name) result.first_name = profileData.first_name;
-    if (profileData.last_name) result.last_name = profileData.last_name;
-    // Unipile returns contact_info.emails / .phones as arrays (of strings
-    // or objects) for full profiles; fall back to flat fields otherwise.
-    const email = pickString(
-      profileData.email,
-      firstFromArray(profileData?.contact_info?.emails, ["email", "address"]),
-    );
+    if (first) result.first_name = first;
+    if (last) result.last_name = last;
+    const email = pickString(profile.email);
     if (email) result.email = email;
-    const phone = pickString(
-      profileData.phone,
-      profileData.phone_number,
-      firstFromArray(profileData?.contact_info?.phones, ["number", "phone"]),
-    );
     if (phone) result.phone = phone;
-    if (currentTitle) result.title = currentTitle;
-    if (currentCompany) result.company_name = currentCompany;
+    if (title) result.title = title;
+    if (company) result.company_name = company;
     if (location) result.location = location;
-    if (headline) result.headline = headline;
     if (photo) result.photo = photo;
-    // Prefer a real URL over whatever the caller handed us; fall back to
-    // constructing one from public_identifier if needed.
-    if (profileData.public_profile_url) {
-      result.linkedin_url = profileData.public_profile_url;
-    } else if (profileData.public_identifier) {
-      result.linkedin_url = `https://www.linkedin.com/in/${profileData.public_identifier}`;
-    } else if (linkedin_url) {
-      result.linkedin_url = linkedin_url;
-    }
+    if (resolvedUrl) result.linkedin_url = resolvedUrl;
 
     return res.status(200).json(result);
   } catch (err) {
@@ -263,20 +165,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-/** GET a Unipile URL with a hard timeout. The classic v1 chat/user endpoints
- *  don't serve LinkedIn Recruiter (RECRUITER_*) chats / AEM member ids and can
- *  hang, which would freeze the Add Person wizard's enrich step — so fail fast
- *  (return null) and let resolution fall through to the next strategy. */
-async function uniGet(url: string, headers: Record<string, string>): Promise<Response | null> {
+/** GET a Unipile v2 user profile, failing fast (null) on any error/timeout so
+ *  resolution falls through to the next id/account instead of hanging the
+ *  Add Person wizard. */
+async function v2GetUser(
+  base: string,
+  apiKey: string,
+  acc: string,
+  id: string,
+): Promise<any | null> {
   try {
-    return await fetch(url, { headers, signal: AbortSignal.timeout(9000) });
+    const r = await fetch(
+      `${base}/${encodeURIComponent(acc)}/users/${encodeURIComponent(id)}`,
+      { headers: { "X-API-KEY": apiKey, Accept: "application/json" }, signal: AbortSignal.timeout(9000) },
+    );
+    if (!r.ok) return null;
+    return await r.json();
   } catch {
     return null;
   }
 }
 
-/** First non-empty trimmed string among the args (ignores non-strings, so
- *  an object-shaped `location` falls through to the next candidate). */
+/** First non-empty trimmed string among the args (ignores non-strings). */
 function pickString(...vals: unknown[]): string {
   for (const v of vals) {
     if (typeof v === "string") {
@@ -285,21 +195,4 @@ function pickString(...vals: unknown[]): string {
     }
   }
   return "";
-}
-
-/** First usable string from an array whose items may be plain strings or
- *  objects carrying the value under one of `keys` (e.g. Unipile's
- *  contact_info.emails / .phones). */
-function firstFromArray(arr: unknown, keys: string[]): string | null {
-  if (!Array.isArray(arr)) return null;
-  for (const item of arr) {
-    if (typeof item === "string" && item.trim()) return item.trim();
-    if (item && typeof item === "object") {
-      for (const k of keys) {
-        const v = (item as Record<string, unknown>)[k];
-        if (typeof v === "string" && v.trim()) return v.trim();
-      }
-    }
-  }
-  return null;
 }
