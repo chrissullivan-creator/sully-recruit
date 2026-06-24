@@ -104,32 +104,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  // Eagerly resolve the person's Unipile provider_id when we have a
-  // LinkedIn URL — without it, fetch-entity-history's LinkedIn leg has
-  // nothing to match against. Fire-and-forget on the same host so we
-  // don't block the trigger response. resolve-person-now is idempotent
-  // and 200s on every error, so a failure here just falls back to the
-  // every-2h cron sweep.
+  // Eagerly resolve the person's Unipile provider_id when we have a LinkedIn
+  // URL, so it's cached long before they're ever enrolled in a sequence — the
+  // connection step then hits that cache instead of doing the first cold
+  // lookup itself under a batch burst (which tripped Unipile's 1-req/sec cap).
+  // Routed through the resolve-person-on-demand Inngest function, which is
+  // concurrency-limited to 1 and daily-budget-aware: a bulk add resolves
+  // serially instead of firing N concurrent lookups, and anything it can't
+  // reach today stays `pending` for the daily cron.
   let resolveDispatched = false;
   if (hasLinkedin) {
     try {
-      const host = (req.headers["x-forwarded-host"] || req.headers.host) as string | undefined;
-      const proto = (req.headers["x-forwarded-proto"] as string) || "https";
-      const base = host ? `${proto}://${host}` : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-      if (base) {
-        // Don't await — resolve-person-now hits Unipile and can take a
-        // few seconds; the trigger doesn't need the result.
-        void fetch(`${base}/api/resolve-person-now`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ person_id: entityId }),
-        }).catch((err) => {
-          console.warn("resolve-person-now fire-and-forget failed", err?.message);
-        });
-        resolveDispatched = true;
-      }
+      await inngest.send({
+        // De-dupe a flurry of INSERT/UPDATE webhooks for the same person
+        // within the hour into a single resolve.
+        id: `resolve-unipile-${entityId}-${Math.floor(Date.now() / 3_600_000)}`,
+        name: "people/resolve-unipile.requested",
+        data: { person_id: entityId },
+      });
+      resolveDispatched = true;
     } catch (err: any) {
-      console.warn("resolve-person-now dispatch threw", err?.message);
+      console.warn("resolve-unipile dispatch failed", err?.message);
     }
   }
 
