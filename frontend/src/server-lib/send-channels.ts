@@ -28,6 +28,11 @@ const linkedinV2SendPaths = {
   chats: () => "chats",
   usersInvite: () => "users/invite",
   user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
+  // Inbox-scoped "Start a Chat from Inbox" — the ONLY route that accepts a
+  // Recruiter InMail (top-level `chats` 404s for recruiter sends). inboxId is
+  // RECRUITER_PRIMARY for an individual InMail. Confirmed live via
+  // GET /v2/{acc}/inboxes.
+  inboxChats: (inboxId: string) => `inboxes/${encodeURIComponent(inboxId)}/chats`,
 };
 
 /**
@@ -636,6 +641,10 @@ async function sendLinkedInV2(
     isInMailChannel: boolean;
     isConnectionRequest: boolean;
     hasAttachments: boolean;
+    /** Recruiter InMail subject — required by LinkedIn for a recruiter send. */
+    subject?: string;
+    /** Recruiter signature (sender display name) — also required. */
+    signature?: string;
   },
 ): Promise<{ message_id: string; conversation_id: string }> {
   // ── Connection request via v2 ───────────────────────────────────
@@ -665,19 +674,49 @@ async function sendLinkedInV2(
     });
   }
 
-  // ── Regular message + InMail via v2 ─────────────────────────────
-  // v1 equivalent: POST chats { attendees_ids: [providerId], text,
-  // linkedin?: { api: 'recruiter' } }. The verified v2 READ shape uses a
-  // top-level `chats` collection, so a first message is a POST to it.
-  //   path `chats`, body { attendees_ids: [providerId], text, ... }.
-  //   The classic-DM shape is proven by live traffic. The InMail selector
-  //   (here `linkedin.api='recruiter'`) is the least-exercised piece — if
-  //   Recruiter InMail misbehaves, re-check whether v2 expects a
-  //   recruiter/inbox-scoped route (an inmail/subject param, or a
-  //   /linkedin/recruiter/... path) instead.
-  const sendPayload: any = { attendees_ids: [providerId], text: body };
-  if (opts.isInMailChannel) sendPayload.linkedin = { api: "recruiter" };
+  // ── Recruiter InMail via v2 ─────────────────────────────────────
+  // Recruiter InMail is the inbox-scoped "Start a Chat from Inbox" endpoint
+  // against RECRUITER_PRIMARY — NOT the top-level `chats` route, which 404s
+  // "Route Not Found" for recruiter sends (the old `chats` + linkedin.api=
+  // 'recruiter' body was the wrong endpoint entirely). The recipient goes
+  // under `users_ids`, and BOTH subject + signature are required under
+  // options.linkedin.recruiter (LinkedIn rejects a recruiter send missing
+  // either). Shape per Unipile v2 Methods reference (startChatFromInbox);
+  // RECRUITER_PRIMARY confirmed live via GET /v2/{acc}/inboxes.
+  if (opts.isInMailChannel) {
+    try {
+      const data: any = await unipileFetchV2(
+        supabase,
+        acctV2Id,
+        linkedinV2SendPaths.inboxChats("RECRUITER_PRIMARY"),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            users_ids: [providerId],
+            text: body,
+            options: {
+              linkedin: {
+                recruiter: {
+                  signature: opts.signature || "",
+                  subject: opts.subject || "",
+                },
+              },
+            },
+          }),
+        },
+      );
+      await decrementInmailCredit(supabase, resolvedAccountId);
+      return {
+        message_id: data.id || data.message_id || data.chat_id || `msg_${Date.now()}`,
+        conversation_id: data.chat_id || data.conversation_id || data.id || "",
+      };
+    } catch (err: any) {
+      throw new Error(`InMail ${err.message}`);
+    }
+  }
 
+  // ── Classic DM via v2 (proven by live traffic) ──────────────────
+  // First message to a classic chat: POST `chats` { attendees_ids, text }.
   try {
     const data: any = await unipileFetchV2(
       supabase,
@@ -685,18 +724,14 @@ async function sendLinkedInV2(
       linkedinV2SendPaths.chats(),
       {
         method: "POST",
-        body: JSON.stringify(sendPayload),
+        body: JSON.stringify({ attendees_ids: [providerId], text: body }),
       },
     );
-    if (opts.isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
     return {
       message_id: data.id || data.message_id || `msg_${Date.now()}`,
       conversation_id: data.chat_id || data.conversation_id || "",
     };
   } catch (err: any) {
-    if (opts.isInMailChannel && /\b422\b/.test(err.message)) {
-      throw new Error(`InMail ${err.message}`);
-    }
     throw new Error(`Unipile v2 send error: ${err.message}`);
   }
 }
@@ -805,10 +840,15 @@ export async function sendLinkedIn(
     const hasAttachments = Array.isArray(attachmentUrls)
       ? attachmentUrls.filter(Boolean).length > 0
       : !!attachmentUrls;
+    // Recruiter InMail requires a signature (sender display name) alongside
+    // the subject; LinkedIn rejects the send without both.
+    const signature = isInMailChannel ? await getLinkedInSenderName(supabase, userId) : undefined;
     return sendLinkedInV2(supabase, acctV2Id, providerId, body, resolvedAccountId, {
       isInMailChannel,
       isConnectionRequest,
       hasAttachments,
+      subject,
+      signature,
     });
   }
 
