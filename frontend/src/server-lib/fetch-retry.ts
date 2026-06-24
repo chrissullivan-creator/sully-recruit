@@ -86,6 +86,17 @@ export async function fetchWithRetry(
 
       const retryAfter = parseRetryAfter(resp.headers.get("Retry-After"));
       const delay = retryAfter ?? backoffDelay(attempt, baseDelayMs, maxDelayMs);
+      // A server-supplied Retry-After is honored as-is above — but in a
+      // serverless/background context we must never block longer than the cap.
+      // Unipile returns very large Retry-After values under load (observed
+      // ~13319s / ~36901s ≈ 3.7–10h); sleeping that long just hangs the function
+      // until the platform kills it, so the retry never happens AND the slot is
+      // wasted. If the wait exceeds the cap, give up now and return the 429 —
+      // for the crons that dominate these calls, the next scheduled tick retries.
+      if (delay > maxDelayMs) {
+        logger.warn(`${label}: status ${resp.status}, Retry-After ${delay}ms exceeds ${maxDelayMs}ms cap — giving up (attempt ${attempt}/${maxAttempts})`);
+        return resp;
+      }
       logger.warn(`${label}: status ${resp.status}, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
       await sleep(delay);
     } catch (err: any) {
