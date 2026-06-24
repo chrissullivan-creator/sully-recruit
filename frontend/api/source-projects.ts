@@ -612,7 +612,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const p = flattenProfile(raw);
           const incomingEmail = normalizeEmail(p.email);
           const incomingPhone = p.phone || null;
-          const stage = source === 'pipeline'
+          // `source` is narrowed to 'applicants' after the early pipeline
+          // return above; the cast keeps the Phase-2 pipeline branch intact
+          // while satisfying the typechecker (TS2367 on the dead comparison).
+          const stage = (source as string) === 'pipeline'
             ? mapPipelineStage(p.pipeline_stage)
             : 'uncontacted'; // applicants are pre-outreach by definition
 
@@ -688,7 +691,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               roles: ['candidate'],
               status: 'new',
               is_stub: false,
-              source: source === 'pipeline' ? 'linkedin_hiring_project_backfill' : 'linkedin_job_applicant_backfill',
+              source: (source as string) === 'pipeline' ? 'linkedin_hiring_project_backfill' : 'linkedin_job_applicant_backfill',
               source_detail: job_id,
               owner_user_id: user.id,
               created_by_user_id: user.id,

@@ -82,9 +82,15 @@ async function reclassifyOnce(payload: ReclassifyPayload, logger: any) {
 
       const contentType = String(chat.content_type ?? "").toLowerCase() || null;
       const folders: string[] = (chat.folder ?? []).map((f: any) => String(f).toUpperCase());
+      // Recruiter threads use a `RECRUITER_<n>-…` chat id even when Unipile
+      // omits content_type/folder — treat that as an InMail marker so the
+      // bucket matches the webhook classifier (and a force re-run can't flip
+      // a Recruiter thread back to Classic).
+      const isRecruiterChatId = /^RECRUITER_/i.test(conv.external_conversation_id ?? "");
       const isInMail =
         contentType === "inmail" ||
-        folders.includes("INBOX_LINKEDIN_RECRUITER");
+        folders.includes("INBOX_LINKEDIN_RECRUITER") ||
+        isRecruiterChatId;
       const newChannel = canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin");
 
       const needsChannelChange = newChannel !== conv.channel;

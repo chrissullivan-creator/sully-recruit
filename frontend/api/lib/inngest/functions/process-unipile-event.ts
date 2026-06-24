@@ -96,12 +96,26 @@ function classifyLinkedinChannel(messageData: any) {
     .concat(messageData.chat?.folder ?? [])
     .map((f: any) => String(f).toUpperCase());
 
+  // Unipile Recruiter conversations carry a `RECRUITER_<n>-…` chat id. Their
+  // webhook payloads don't always include content_type:'inmail' or the
+  // INBOX_LINKEDIN_RECRUITER folder, so without this prefix check a Recruiter
+  // thread gets mis-bucketed as a Classic DM — i.e. "shows up in regular
+  // LinkedIn, not Recruiter".
+  const chatId = String(
+    messageData.chat_id
+      ?? messageData.conversation_id
+      ?? messageData.chat?.id
+      ?? "",
+  );
+  const isRecruiterChatId = /^RECRUITER_/i.test(chatId);
+
   // Unipile's webhook docs expose account_info.feature, but a Recruiter seat
-  // can still exchange Classic DMs. Keep content_type / folder as the source
-  // of truth for bucketing InMail vs Classic traffic.
+  // can still exchange Classic DMs. Keep content_type / folder / chat-id shape
+  // as the source of truth for bucketing InMail vs Classic traffic.
   const isInMail =
     contentType === "inmail" ||
-    folders.includes("INBOX_LINKEDIN_RECRUITER");
+    folders.includes("INBOX_LINKEDIN_RECRUITER") ||
+    isRecruiterChatId;
 
   return {
     channel: canonicalChannel(isInMail ? "linkedin_recruiter" : "linkedin"),

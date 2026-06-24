@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "./lib/inngest/client.js";
+import { resolvePerson } from "./lib/identity-resolver.js";
 
 /** Mirror of the Postgres is_consumer_email_domain() helper so the
  *  client-side resolver matches what the contacts INSTEAD-OF trigger
@@ -77,20 +78,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // ── Dual-role merge: do we already know this person? ────────
-    // Check primary_email (the renamed legacy column) plus the typed
-    // personal_email / work_email columns. Older rows still carry an
-    // address in primary_email; new rows go through classifyEmail and
-    // land directly in personal_email or work_email.
-    let existing: { id: string; roles: string[] | null } | null = null;
-    const candidates = [email, personalEmail, workEmail].filter(Boolean) as string[];
-    for (const e of candidates) {
-      const { data: rows } = await supabase
+    // ── Dedup / dual-role merge: do we already know this person? ──
+    // Match on email, phone, LinkedIn URL, OR (for inbox adds) the
+    // sender's LinkedIn provider id — via the SAME identity resolver the
+    // inbound-message pipeline uses. This is what stops "add from inbox"
+    // from spawning a duplicate the messages themselves would have matched:
+    // previously we only checked email, so adding someone off a LinkedIn
+    // thread (which carries no email) always inserted a new row even when
+    // their linkedin_url already existed on a record.
+    let existing:
+      | { id: string; roles: string[] | null; linkedin_url: string | null; phone: string | null }
+      | null = null;
+
+    const resolved = await resolvePerson(supabase, "linkedin", {
+      providerId,
+      linkedinUrl: data.linkedin_url?.trim() || null,
+      email: email || personalEmail || workEmail || null,
+      phone: data.phone?.trim() || null,
+    });
+    if (resolved?.personId) {
+      const { data: row } = await supabase
         .from("people")
-        .select("id, roles")
-        .or(`primary_email.ilike.${e},personal_email.ilike.${e},work_email.ilike.${e}`)
-        .limit(1);
-      if (rows?.[0]) { existing = rows[0]; break; }
+        .select("id, roles, linkedin_url, phone")
+        .eq("id", resolved.personId)
+        .maybeSingle();
+      if (row) existing = row as any;
     }
 
     let personId: string;
@@ -104,9 +116,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mergedRoles = currentRoles.includes(role) ? currentRoles : [...currentRoles, role];
       personId = existing.id;
 
+      // Backfill identifiers we matched on but the survivor was missing,
+      // so the next inbound message hard-matches without another lookup.
+      // Conservative: only fills blanks, never overwrites.
+      const patch: Record<string, any> = {
+        roles: mergedRoles,
+        updated_at: new Date().toISOString(),
+      };
+      const formLinkedin = data.linkedin_url?.trim();
+      const formPhone = data.phone?.trim();
+      if (formLinkedin && !existing.linkedin_url) patch.linkedin_url = formLinkedin;
+      if (formPhone && !existing.phone) patch.phone = formPhone;
+
       const { error: upErr } = await supabase
         .from("people")
-        .update({ roles: mergedRoles, updated_at: new Date().toISOString() } as any)
+        .update(patch as any)
         .eq("id", existing.id);
       if (upErr) throw upErr;
     } else {
