@@ -40,6 +40,81 @@ export interface ActionExecutePayload {
   accountId?: string;
 }
 
+/**
+ * Classify a send- or resolve-time error and, when it's a provider
+ * rate-limit or a transient infra blip, reschedule the step (status →
+ * scheduled) and return a result object. Returns null when the error is
+ * NOT retryable, so the caller applies its own terminal handling
+ * (resolve phase → skip, send phase → failed).
+ *
+ * Shared by BOTH the recipient-resolution and the send phases. The
+ * resolve phase MUST use it too: the LinkedIn provider-id lookup hits
+ * Unipile's per-second-capped `users/{slug}` endpoint, so a burst of
+ * enrollments resolving at once gets 429'd. The old code caught a
+ * resolve error in a separate block that marked the step permanently
+ * `skipped` — so a transient 429 silently dropped every LinkedIn step
+ * in a freshly-launched batch (connections skipped → linkedin_messages
+ * stranded in pending_connection forever). Rescheduling lets the step
+ * land once the burst clears (and by then the id is usually cached, so
+ * the next attempt makes no API call at all).
+ *
+ *   rate limit → +2h (LinkedIn channels only)
+ *   transient  → +30 min
+ */
+async function rescheduleIfRetryable(
+  supabase: any,
+  stepLogId: string,
+  channel: string,
+  errMsg: string,
+  phase: "resolve" | "send",
+  logger: Logger,
+): Promise<{ action: string; reason: string; retryAt: string } | null> {
+  const errLower = (errMsg || "").toLowerCase();
+
+  // Provider-side rate limit signal.
+  const isRateLimit =
+    errLower.includes("limit_exceeded") ||
+    errLower.includes("rate limit") ||
+    errLower.includes("429") ||
+    errLower.includes("too many requests");
+
+  // Transient infra failure — Supabase pause, DB connection blip, Unipile
+  // API timeout, missing app_settings on a stale fetch. (A send-time
+  // "Could not resolve LinkedIn profile …: …timeout" is covered by the
+  // plain "timeout" match.)
+  const isTransient =
+    errLower.includes("fetch failed") ||
+    errLower.includes("network") ||
+    errLower.includes("econnreset") ||
+    errLower.includes("timed out") ||
+    errLower.includes("timeout") ||
+    errLower.includes("unipile config missing") ||
+    errLower.includes("unipile api unreachable");
+
+  if (isRateLimit && channel.startsWith("linkedin")) {
+    // Push the step back by 2 hours instead of failing/skipping it.
+    const retryAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    await supabase
+      .from("sequence_step_logs")
+      .update({ scheduled_at: retryAt, status: "scheduled" } as any)
+      .eq("id", stepLogId);
+    logger.warn("LinkedIn rate limit hit — rescheduling step in 2h", { channel, phase, stepLogId, retryAt });
+    return { action: "rate_limited", reason: errMsg, retryAt };
+  }
+
+  if (isTransient) {
+    const retryAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    await supabase
+      .from("sequence_step_logs")
+      .update({ scheduled_at: retryAt, status: "scheduled" } as any)
+      .eq("id", stepLogId);
+    logger.warn("Transient send/resolve error — rescheduling step in 30 min", { channel, phase, stepLogId, err: errMsg, retryAt });
+    return { action: "transient_retry", reason: errMsg, retryAt };
+  }
+
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Action execution — body of what was sequenceActionExecute.run
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,9 +280,19 @@ export async function runSequenceAction(
     to = resolved.to;
     conversationId = resolved.conversationId;
   } catch (err: any) {
-    await markStepSkipped(supabase, payload.stepLogId, `resolve_failed: ${err.message}`);
+    const errMsg = err.message || "";
+    // A rate-limit (Unipile's per-second cap on the provider-id lookup)
+    // or a transient blip during resolution must NOT permanently skip the
+    // step — reschedule it, exactly like a send-time failure. Only a
+    // genuine "no LinkedIn profile / bad URL / no permission" resolve
+    // error falls through to a real skip.
+    const retry = await rescheduleIfRetryable(
+      supabase, payload.stepLogId, action.channel, errMsg, "resolve", logger,
+    );
+    if (retry) return retry;
+    await markStepSkipped(supabase, payload.stepLogId, `resolve_failed: ${errMsg}`);
     await checkSequenceComplete(supabase, enrollment, logger);
-    return { action: "skipped", reason: err.message };
+    return { action: "skipped", reason: errMsg };
   }
 
   // Send
@@ -317,58 +402,13 @@ export async function runSequenceAction(
     }
   } catch (err: any) {
     const errMsg = err.message || "";
-    const errLower = errMsg.toLowerCase();
-
-    // Provider-side rate limit signal — reschedule +2h.
-    const isRateLimit =
-      errLower.includes("limit_exceeded") ||
-      errLower.includes("rate limit") ||
-      errLower.includes("429") ||
-      errLower.includes("too many requests");
-
-    // Transient infra failure — Supabase pause, DB connection blip,
-    // Unipile API timeout, missing app_settings on a stale fetch.
-    // Treating these as transient and rescheduling +30 min so the
-    // next sweep retries.
-    const isTransient =
-      errLower.includes("fetch failed") ||
-      errLower.includes("network") ||
-      errLower.includes("econnreset") ||
-      errLower.includes("timed out") ||
-      errLower.includes("timeout") ||
-      errLower.includes("unipile config missing") ||
-      errLower.includes("unipile api unreachable") ||
-      errLower.includes("could not resolve linkedin profile") && errLower.includes("timeout");
-
-    if (isRateLimit && action.channel.startsWith("linkedin")) {
-      // Push the step back by 2 hours instead of failing it
-      const retryAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-      await supabase
-        .from("sequence_step_logs")
-        .update({ scheduled_at: retryAt, status: "scheduled" } as any)
-        .eq("id", payload.stepLogId);
-      logger.warn("LinkedIn rate limit hit — rescheduling step in 2h", {
-        channel: action.channel,
-        enrollmentId: payload.enrollmentId,
-        retryAt,
-      });
-      return { action: "rate_limited", reason: errMsg, retryAt };
-    }
-
-    if (isTransient) {
-      const retryAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-      await supabase
-        .from("sequence_step_logs")
-        .update({ scheduled_at: retryAt, status: "scheduled" } as any)
-        .eq("id", payload.stepLogId);
-      logger.warn("Transient send error — rescheduling step in 30 min", {
-        channel: action.channel,
-        enrollmentId: payload.enrollmentId,
-        err: errMsg,
-        retryAt,
-      });
-      return { action: "transient_retry", reason: errMsg, retryAt };
-    }
+    // Provider rate-limit (+2h, LinkedIn only) or transient infra blip
+    // (+30 min) → reschedule rather than fail. Same classifier the resolve
+    // phase uses, so a 429/timeout is handled identically wherever it surfaces.
+    const retry = await rescheduleIfRetryable(
+      supabase, payload.stepLogId, action.channel, errMsg, "send", logger,
+    );
+    if (retry) return retry;
 
     logger.error("Send failed", { channel: action.channel, error: errMsg });
     await markStepLog(supabase, payload.stepLogId, "failed");
