@@ -4,14 +4,11 @@ import {
   Linkedin,
   MessageSquare,
   Target,
-  Star,
-  Clock,
-  CornerDownLeft,
-  Send as SendIcon,
-  FileEdit,
-  Archive as ArchiveIcon,
-  HelpCircle,
   Phone,
+  Users,
+  UserPlus,
+  CornerDownLeft,
+  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -24,7 +21,8 @@ export type InboxView =
   | 'sent'
   | 'drafts'
   | 'archive'
-  | 'needs_classification';
+  | 'needs_classification'
+  | 'need_respond';
 
 export type InboxChannel = 'all' | 'email' | 'linkedin' | 'recruiter' | 'sms';
 
@@ -40,129 +38,157 @@ export interface InboxSidebarCounts {
   needs_classification?: number;
 }
 
-interface NavItem {
-  key: InboxView;
+export interface InboxScopeMember {
+  userId: string;
   label: string;
-  Icon: React.ElementType;
-  count?: number;
-  // True for views whose backing data lands in a later phase. The button
-  // still renders so the layout is final, but it's disabled with a hint.
-  comingSoon?: boolean;
 }
 
-interface ChannelItem {
-  key: InboxChannel;
-  label: string;
-  Icon: React.ElementType;
+export interface InboxSidebarProps {
+  // Viewing Inbox (per-user scope) — rendered as a dropdown at the top of the
+  // rail. Non-admins only ever see "My Inbox"; admins also get Team + members.
+  isAdmin: boolean;
+  scope: 'mine' | 'team';
+  memberFilter: string;
+  teamMembers: InboxScopeMember[];
+  onScope: (s: 'mine' | 'team') => void;
+  onMember: (userId: string) => void;
+  currentUserLabel?: string;
+
+  // Channels (with unread counts).
+  channel: InboxChannel;
+  channelCounts?: Partial<Record<InboxChannel, number>>;
+  onSelectChannel: (channel: InboxChannel) => void;
+  callsActive?: boolean;
+  onSelectCalls?: () => void;
+
+  // Views: People we know (focused) / Other (unlinked) / Need to respond.
+  tab: 'focused' | 'other';
+  tabCounts?: { focused?: number; other?: number };
+  onSelectTab: (tab: 'focused' | 'other') => void;
+  needRespondCount?: number;
+  needRespondActive?: boolean;
+  onSelectNeedRespond: () => void;
+
+  footer?: React.ReactNode;
 }
 
-const CHANNEL_ITEMS: ChannelItem[] = [
+const CHANNEL_ITEMS: { key: InboxChannel; label: string; Icon: React.ElementType }[] = [
+  { key: 'all', label: 'All Inbox', Icon: InboxIcon },
   { key: 'email', label: 'Email', Icon: Mail },
   { key: 'linkedin', label: 'LinkedIn', Icon: Linkedin },
-  { key: 'recruiter', label: 'Recruiter', Icon: Target },
+  { key: 'recruiter', label: 'InMail', Icon: Target },
   { key: 'sms', label: 'SMS', Icon: MessageSquare },
 ];
 
-export interface InboxSidebarProps {
-  view: InboxView;
-  channel: InboxChannel;
-  counts: InboxSidebarCounts;
-  onSelectView: (view: InboxView) => void;
-  onSelectChannel: (channel: InboxChannel) => void;
-  // Calls is a sibling section of the Hub, not a message view/channel — so it
-  // stays out of the InboxView/InboxChannel unions and rides on its own props.
-  // When active, the Hub swaps the thread list/detail for the embedded
-  // CallsPanel; selecting any view/channel deactivates it (handled by Inbox).
-  callsActive?: boolean;
-  onSelectCalls?: () => void;
-  footer?: React.ReactNode;
-  // Channels moved to the top control bar; hide the rail's Channels section.
-  showChannels?: boolean;
-}
-
 export function InboxSidebar({
-  view,
+  isAdmin,
+  scope,
+  memberFilter,
+  teamMembers,
+  onScope,
+  onMember,
+  currentUserLabel,
   channel,
-  counts,
-  onSelectView,
+  channelCounts = {},
   onSelectChannel,
   callsActive = false,
   onSelectCalls,
+  tab,
+  tabCounts = {},
+  onSelectTab,
+  needRespondCount,
+  needRespondActive = false,
+  onSelectNeedRespond,
   footer,
-  showChannels = true,
 }: InboxSidebarProps) {
-  const navItems: NavItem[] = [
-    { key: 'all', label: 'All', Icon: InboxIcon, count: counts.all },
-    { key: 'unread', label: 'Unread', Icon: InboxIcon, count: counts.unread },
-    { key: 'awaiting_reply', label: 'Awaiting reply', Icon: CornerDownLeft, count: counts.awaiting_reply },
-    { key: 'starred', label: 'Starred', Icon: Star, count: counts.starred },
-    { key: 'snoozed', label: 'Snoozed', Icon: Clock, count: counts.snoozed },
-    { key: 'sent', label: 'Sent', Icon: SendIcon, count: counts.sent },
-    { key: 'drafts', label: 'Drafts', Icon: FileEdit, count: counts.drafts, comingSoon: true },
-    { key: 'archive', label: 'Archive', Icon: ArchiveIcon, count: counts.archive },
-    {
-      key: 'needs_classification',
-      label: 'Needs classification',
-      Icon: HelpCircle,
-      count: counts.needs_classification,
-    },
-  ];
+  // The scope dropdown encodes scope + member into one value: 'mine' shows the
+  // recruiter's own inbox, 'team' shows everyone, and a userId picks one member.
+  const scopeValue = scope === 'mine' ? 'mine' : memberFilter === 'all' ? 'team' : memberFilter;
+  const onScopeChange = (val: string) => {
+    if (val === 'mine') {
+      onScope('mine');
+    } else if (val === 'team') {
+      onScope('team');
+      onMember('all');
+    } else {
+      onScope('team');
+      onMember(val);
+    }
+  };
 
   return (
     <aside className="w-52 shrink-0 border-r border-border/60 bg-muted/20 flex flex-col">
       <div className="flex-1 overflow-y-auto py-3 text-sm">
-        <SectionLabel>Inbox</SectionLabel>
+        {/* Viewing Inbox — per-user scope */}
+        <SectionLabel>Viewing Inbox</SectionLabel>
+        <div className="px-2 mb-1">
+          <div className="relative">
+            <select
+              value={scopeValue}
+              onChange={(e) => onScopeChange(e.target.value)}
+              disabled={!isAdmin}
+              aria-label="Viewing inbox"
+              className={cn(
+                'w-full appearance-none rounded-md border border-border bg-background pl-2.5 pr-7 py-1.5 text-xs font-medium text-foreground transition-colors',
+                'focus:outline-none focus:ring-1 focus:ring-accent/40',
+                isAdmin ? 'hover:border-accent/50 cursor-pointer' : 'opacity-90 cursor-default',
+              )}
+            >
+              <option value="mine">My Inbox{currentUserLabel ? ` · ${currentUserLabel}` : ''}</option>
+              {isAdmin && <option value="team">Team · everyone</option>}
+              {isAdmin &&
+                teamMembers.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.label}
+                  </option>
+                ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+        </div>
+
+        {/* Channels */}
+        <SectionLabel className="mt-4">Channels</SectionLabel>
         <nav className="px-2 space-y-0.5">
-          {navItems.map((item) => (
+          {CHANNEL_ITEMS.map((c) => (
             <NavRow
-              key={item.key}
-              label={item.label}
-              Icon={item.Icon}
-              count={item.count}
-              active={!callsActive && view === item.key}
-              disabled={item.comingSoon}
-              onClick={() => onSelectView(item.key)}
-              hint={item.comingSoon ? 'Coming soon' : undefined}
+              key={c.key}
+              label={c.label}
+              Icon={c.Icon}
+              count={channelCounts[c.key]}
+              active={!callsActive && channel === c.key}
+              onClick={() => onSelectChannel(c.key)}
             />
           ))}
+          {onSelectCalls && (
+            <NavRow label="Calls" Icon={Phone} active={callsActive} onClick={onSelectCalls} />
+          )}
         </nav>
 
-        {showChannels && (
-          <>
-            <SectionLabel className="mt-4">Channels</SectionLabel>
-            <nav className="px-2 space-y-0.5">
-              <NavRow
-                label="All channels"
-                Icon={InboxIcon}
-                active={!callsActive && channel === 'all'}
-                onClick={() => onSelectChannel('all')}
-              />
-              {CHANNEL_ITEMS.map((c) => (
-                <NavRow
-                  key={c.key}
-                  label={c.label}
-                  Icon={c.Icon}
-                  active={!callsActive && channel === c.key}
-                  onClick={() => onSelectChannel(c.key)}
-                />
-              ))}
-            </nav>
-          </>
-        )}
-
-        {onSelectCalls && (
-          <>
-            <SectionLabel className="mt-4">Calls</SectionLabel>
-            <nav className="px-2 space-y-0.5">
-              <NavRow
-                label="Call log"
-                Icon={Phone}
-                active={callsActive}
-                onClick={onSelectCalls}
-              />
-            </nav>
-          </>
-        )}
+        {/* Views — People we know / Other / Need to respond. No section label. */}
+        <nav className="px-2 space-y-0.5 mt-4">
+          <NavRow
+            label="People we know"
+            Icon={Users}
+            count={tabCounts.focused}
+            active={!callsActive && !needRespondActive && tab === 'focused'}
+            onClick={() => onSelectTab('focused')}
+          />
+          <NavRow
+            label="Other"
+            Icon={UserPlus}
+            count={tabCounts.other}
+            active={!callsActive && !needRespondActive && tab === 'other'}
+            onClick={() => onSelectTab('other')}
+          />
+          <NavRow
+            label="Need to respond"
+            Icon={CornerDownLeft}
+            count={needRespondCount}
+            active={!callsActive && needRespondActive}
+            onClick={onSelectNeedRespond}
+          />
+        </nav>
       </div>
       {footer ? <div className="p-2 border-t border-border/60">{footer}</div> : null}
     </aside>
@@ -171,7 +197,12 @@ export function InboxSidebar({
 
 function SectionLabel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80', className)}>
+    <div
+      className={cn(
+        'px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80',
+        className,
+      )}
+    >
       {children}
     </div>
   );

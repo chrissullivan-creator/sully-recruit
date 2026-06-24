@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 import DOMPurify from 'dompurify';
 import { cn } from '@/lib/utils';
 import { invalidateCommsScope } from '@/lib/invalidate';
@@ -36,7 +37,6 @@ import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
-import { InboxTopBar } from '@/components/inbox/InboxTopBar';
 import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
@@ -70,7 +70,7 @@ export default function Inbox() {
   const tab: 'focused' | 'other' = searchParams.get('tab') === 'other' ? 'other' : 'focused';
   const view: InboxView = ((): InboxView => {
     const v = searchParams.get('view');
-    const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification'];
+    const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification', 'need_respond'];
     return (valid as string[]).includes(v ?? '') ? (v as InboxView) : 'all';
   })();
   const channel: InboxChannel = ((): InboxChannel => {
@@ -97,13 +97,6 @@ export default function Inbox() {
     setSearchParams(next, { replace: true });
   };
   // Selecting a normal view/channel always leaves the Calls section.
-  const updateViewParam = (value: string | null) => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('section');
-    if (!value || value === 'all') next.delete('view');
-    else next.set('view', value);
-    setSearchParams(next, { replace: true });
-  };
   const updateChannelParam = (value: string | null) => {
     const next = new URLSearchParams(searchParams);
     next.delete('section');
@@ -114,6 +107,33 @@ export default function Inbox() {
   const selectCalls = () => {
     const next = new URLSearchParams(searchParams);
     next.set('section', 'calls');
+    setSearchParams(next, { replace: true });
+  };
+  // People we know (focused) / Other (unlinked) now live in the rail. Selecting
+  // one always leaves the Calls section.
+  const selectTab = (t: 'focused' | 'other') => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    next.delete('view'); // leaving the Need-to-respond view
+    if (t === 'other') next.set('tab', 'other');
+    else next.delete('tab');
+    setSearchParams(next, { replace: true });
+  };
+  // "Need to respond" — known people whose latest message is inbound and still
+  // unanswered. Lives in the rail's Views group, next to the focused/other tabs.
+  const selectNeedRespond = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    next.set('view', 'need_respond');
+    setSearchParams(next, { replace: true });
+  };
+  // Switching scope (mine/team/member) drops the Need-to-respond view so the
+  // rail falls back to a normal People-we-know/Other highlight for the new
+  // scope instead of leaving a filtered view with no tab selected.
+  const exitNeedRespond = () => {
+    if (view !== 'need_respond') return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('view');
     setSearchParams(next, { replace: true });
   };
   // Bulk-select state: thread IDs the user has checked. The toolbar
@@ -140,17 +160,6 @@ export default function Inbox() {
     scopedAccountIds,
   } = useInboxScope();
 
-  const { data: needsClassificationCount = 0 } = useQuery({
-    queryKey: ['inbox_needs_classification_count'],
-    queryFn: async () => {
-      const { count, error } = await (supabase as any)
-        .from('people')
-        .select('id', { count: 'exact', head: true })
-        .eq('needs_classification', true);
-      if (error) throw error;
-      return count ?? 0;
-    },
-  });
 
   // Live fetch from Unipile for the "Other" tab — only fires when the
   // user is actually viewing that tab. Returns threads from unknown
@@ -177,7 +186,17 @@ export default function Inbox() {
       return res.json();
     },
   });
-  const liveThreads: InboxThread[] = (liveData?.items ?? []).map((it: any) => ({
+  const liveThreads: InboxThread[] = ((liveData?.items ?? []) as Array<{
+    id: string;
+    channel: string;
+    subject: string | null;
+    last_message_at: string | null;
+    last_message_preview: string | null;
+    sender_name: string | null;
+    account_id?: string | null;
+    external_conversation_id: string | null;
+    integration_account_id: string | null;
+  }>).map((it) => ({
     id: it.id,
     channel: it.channel,
     subject: it.subject,
@@ -250,12 +269,22 @@ export default function Inbox() {
     : persistedOther;
   const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
 
+  // "Need to respond": known-person threads where the latest message is inbound
+  // (from them) and we haven't replied since.
+  const needRespondThreads = focusedThreads.filter((t) => {
+    if (!t.last_inbound_at) return false;
+    if (!t.last_outbound_at) return true;
+    return new Date(t.last_inbound_at).getTime() > new Date(t.last_outbound_at).getTime();
+  });
+
   const filtered = (() => {
     // The Snoozed and Archive views ignore the Focused/Other split — they
     // pull from the full team-scoped set since the user wants to see them
     // regardless of tagging.
     let pool: InboxThread[];
-    if (view === 'snoozed') {
+    if (view === 'need_respond') {
+      pool = needRespondThreads;
+    } else if (view === 'snoozed') {
       pool = scoped.filter(isCurrentlySnoozed);
     } else if (view === 'archive') {
       pool = scoped.filter((t) => t.is_archived);
@@ -272,7 +301,7 @@ export default function Inbox() {
       // Channel filter
       if (channel === 'email' && t.channel !== 'email') return false;
       if (channel === 'sms' && t.channel !== 'sms') return false;
-      if (channel === 'linkedin' && !LINKEDIN_CHANNELS.includes(t.channel as any)) return false;
+      if (channel === 'linkedin' && !(LINKEDIN_CHANNELS as readonly string[]).includes(t.channel)) return false;
       if (channel === 'recruiter' && t.channel !== 'linkedin_recruiter') return false;
 
       // View filter (only the views that aren't already pool-defined above)
@@ -301,22 +330,28 @@ export default function Inbox() {
 
   const unreadCount = scoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
 
-  const sidebarCounts = {
-    all: tabPool.length,
-    unread: tabPool.filter((t) => !t.is_read).length,
-    archive: scoped.filter((t) => t.is_archived).length,
-    awaiting_reply: tabPool.filter((t) => !t.last_inbound_at && !!t.last_message_at).length,
-    starred: scoped.filter((t) => t.flagged && visibleByDefault(t)).length,
-    snoozed: scoped.filter(isCurrentlySnoozed).length,
-    sent: scoped.filter((t) => !!t.last_outbound_at && visibleByDefault(t)).length,
-    needs_classification: needsClassificationCount,
+  // Per-channel unread badges for the rail's Channels section.
+  const channelUnread: Partial<Record<InboxChannel, number>> = {
+    all: unreadCount,
+    email: scoped.filter((t) => t.channel === 'email' && !t.is_read && visibleByDefault(t)).length,
+    linkedin: scoped.filter((t) => t.channel === 'linkedin' && !t.is_read && visibleByDefault(t)).length,
+    recruiter: scoped.filter((t) => t.channel === 'linkedin_recruiter' && !t.is_read && visibleByDefault(t)).length,
+    sms: scoped.filter((t) => t.channel === 'sms' && !t.is_read && visibleByDefault(t)).length,
   };
+
+  // Title shown above the thread list.
+  const listTitle =
+    view === 'need_respond'
+      ? 'Need to respond'
+      : tab === 'focused'
+        ? 'People we know'
+        : 'Other';
 
   // Mutation helpers — used by the per-row hover actions.
   const updateThread = async (threadId: string, patch: Record<string, unknown>) => {
     const { error } = await supabase
       .from('conversations')
-      .update(patch as any)
+      .update(patch as TablesUpdate<'conversations'>)
       .eq('id', threadId);
     if (error) {
       toast.error(`Update failed: ${error.message}`);
@@ -352,34 +387,26 @@ export default function Inbox() {
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
 
       <div className="flex flex-col" style={{ height: 'calc(100vh - 7rem)' }}>
-        {/* Top control bar — scope, channels, sentiment, awaiting-reply */}
-        <InboxTopBar
+        <div className="flex flex-1 min-h-0">
+        {/* Left rail — Viewing Inbox (scope), Channels, People we know / Other, Filters */}
+        <InboxSidebar
           isAdmin={isAdmin}
           scope={scope}
-          onScope={setScope}
           memberFilter={memberFilter}
-          onMember={setMemberFilter}
           teamMembers={teamMembers}
+          onScope={(s) => { exitNeedRespond(); setScope(s); }}
+          onMember={(m) => { exitNeedRespond(); setMemberFilter(m); }}
           channel={channel}
-          onChannel={(c) => updateChannelParam(c)}
-          callsActive={callsActive}
-          onCalls={selectCalls}
-          sentiment={sentimentFilter}
-          onSentiment={(s) => updateParam('sentiment', s)}
-          view={view}
-          onToggleAwaiting={() => updateViewParam(view === 'awaiting_reply' ? 'all' : 'awaiting_reply')}
-        />
-
-        <div className="flex flex-1 min-h-0">
-        {/* Inbox-internal sidebar — saved views (channels/calls now in top bar) */}
-        <InboxSidebar
-          view={view}
-          channel={channel}
-          counts={sidebarCounts}
-          callsActive={callsActive}
-          onSelectView={(v) => updateViewParam(v)}
+          channelCounts={channelUnread}
           onSelectChannel={(c) => updateChannelParam(c)}
-          showChannels={false}
+          callsActive={callsActive}
+          onSelectCalls={selectCalls}
+          tab={tab}
+          tabCounts={{ focused: focusedThreads.length, other: persistedOther.length }}
+          onSelectTab={selectTab}
+          needRespondCount={needRespondThreads.length}
+          needRespondActive={view === 'need_respond'}
+          onSelectNeedRespond={selectNeedRespond}
         />
 
         {callsActive ? (
@@ -434,42 +461,26 @@ export default function Inbox() {
             </Button>
           </div>
 
-          {/* Focused / Other tab strip */}
-          <div className="px-3 pt-2.5 pb-1.5 flex items-center gap-4 border-b border-border/40">
-            <button
-              type="button"
-              onClick={() => updateParam('tab', 'focused')}
-              className={cn(
-                'relative pb-2 text-xs font-medium transition-colors',
-                tab === 'focused'
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="Threads tied to a candidate or client in the CRM"
+          {/* List header — active view, count, and quick filters (Awaiting +
+              Sentiment). The People-we-know / Other split now lives in the rail. */}
+          <div className="px-3 pt-2.5 pb-2 flex items-center gap-2 border-b border-border/40">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-foreground truncate">{listTitle}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {filtered.length} conversation{filtered.length === 1 ? '' : 's'}
+              </div>
+            </div>
+            <select
+              value={sentimentFilter}
+              onChange={(e) => updateParam('sentiment', e.target.value)}
+              className="h-7 text-[11px] rounded-md border border-border bg-background px-1.5 text-muted-foreground hover:text-foreground hover:border-accent/50 transition-colors cursor-pointer"
+              aria-label="Filter by sentiment"
             >
-              Focused
-              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{focusedThreads.length}</span>
-              {tab === 'focused' && (
-                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => updateParam('tab', 'other')}
-              className={cn(
-                'relative pb-2 text-xs font-medium transition-colors',
-                tab === 'other'
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="Threads from people not yet in the CRM"
-            >
-              Other
-              <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">{otherThreads.length}</span>
-              {tab === 'other' && (
-                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" aria-hidden />
-              )}
-            </button>
+              <option value="all">All sentiment</option>
+              {SENTIMENT_BUCKETS.map((b) => (
+                <option key={b.key} value={b.key}>{b.label}</option>
+              ))}
+            </select>
           </div>
 
           {/* Bulk-action toolbar — only shown while at least one row is checked. */}
@@ -494,7 +505,7 @@ export default function Inbox() {
                 const ids = Array.from(checkedIds);
                 const { error } = await supabase
                   .from('conversations')
-                  .update({ is_read: true } as any)
+                  .update({ is_read: true })
                   .in('id', ids);
                 setBulkBusy(false);
                 if (error) {
@@ -510,7 +521,7 @@ export default function Inbox() {
                 const ids = Array.from(checkedIds);
                 const { error } = await supabase
                   .from('conversations')
-                  .update({ is_read: false } as any)
+                  .update({ is_read: false })
                   .in('id', ids);
                 setBulkBusy(false);
                 if (error) {
@@ -526,7 +537,7 @@ export default function Inbox() {
                 const ids = Array.from(checkedIds);
                 const { error } = await supabase
                   .from('conversations')
-                  .update({ is_archived: true } as any)
+                  .update({ is_archived: true })
                   .in('id', ids);
                 setBulkBusy(false);
                 if (error) {
@@ -675,8 +686,8 @@ export default function Inbox() {
                   setConfirmBulkDelete(false);
                   toast.success(`${ids.length} deleted`);
                   invalidateCommsScope(queryClient);
-                } catch (err: any) {
-                  toast.error(`Delete failed: ${err.message}`);
+                } catch (err) {
+                  toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
                 } finally {
                   setBulkBusy(false);
                 }

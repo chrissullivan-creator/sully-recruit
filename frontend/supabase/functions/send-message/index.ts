@@ -85,8 +85,16 @@ serve(async (req) => {
         break;
       case 'linkedin':
       case 'linkedin_recruiter':
-        // linkedin_recruiter → LinkedIn Recruiter InMail (different send shape).
-        result = await sendLinkedIn(supabaseClient, user.id, to, body, account_id, channel === 'linkedin_recruiter');
+        // All LinkedIn sends run on Unipile v2. A reply posts to the existing
+        // chat (chat_id resolved from the conversation); new outreach starts one.
+        result = await sendLinkedIn(serviceClient, user.id, {
+          recipientId: to,
+          message: body,
+          conversationId: conversation_id,
+          accountIdHint: account_id,
+          subject,
+          isInMail: channel === 'linkedin_recruiter',
+        });
         externalMessageId = result.message_id;
         break;
       default:
@@ -352,93 +360,171 @@ async function sendSms(
   return { id: smsResult.id, sender: config.phone_number };
 }
 
+type DbClient = ReturnType<typeof createClient>;
+
+interface AccountRowLite {
+  unipile_account_id_v2?: string | null;
+  metadata?: unknown;
+}
+
+interface SendLinkedInArgs {
+  recipientId: string;
+  message: string;
+  conversationId?: string;
+  accountIdHint?: string;
+  subject?: string;
+  isInMail?: boolean;
+}
+
+// All LinkedIn sends run on Unipile v2 (api.unipile.com/v2), addressed by the
+// account's acc_xxx id with UNIPILE_API_KEY_V2 — the same surface the rest of
+// the app sends on. The v1 DSN app has no live accounts, so the old v1 send
+// path (/api/v1/messages, /api/v1/chats) 404'd.
 async function sendLinkedIn(
-  supabase: any,
+  serviceClient: DbClient,
   userId: string,
-  recipientId: string,
-  message: string,
-  accountId?: string,
-  isInMail = false
+  args: SendLinkedInArgs,
 ): Promise<{ message_id: string; sender: string }> {
-  const unipileApiKey = Deno.env.get('UNIPILE_API_KEY');
-  const unipileBaseUrl = Deno.env.get('UNIPILE_BASE_URL');
+  const { recipientId, message, conversationId, accountIdHint, subject, isInMail } = args;
 
-  if (!unipileApiKey || !unipileBaseUrl) {
-    throw new Error('Unipile API not configured. Contact admin to set up LinkedIn integration.');
+  const apiKeyV2 = await getAppSetting(serviceClient, 'UNIPILE_API_KEY_V2');
+  const baseRaw = await getAppSetting(serviceClient, 'UNIPILE_BASE_V2_URL');
+  const v2Base = (baseRaw || '').replace(/\/+$/, '') || 'https://api.unipile.com/v2';
+  if (!apiKeyV2) {
+    throw new Error('Unipile v2 not configured (UNIPILE_API_KEY_V2 missing in app_settings).');
   }
 
-  let unipileAccountId = accountId;
-
-  if (!unipileAccountId) {
-    const { data: accounts } = await supabase
-      .from('integration_accounts')
-      .select('unipile_account_id, account_label')
-      .eq('owner_user_id', userId)
-      .eq('provider', 'linkedin')
-      .eq('is_active', true)
-      .limit(1);
-
-    if (!accounts || accounts.length === 0) {
-      throw new Error('No LinkedIn account connected. Go to Settings to connect LinkedIn.');
-    }
-
-    unipileAccountId = accounts[0].unipile_account_id;
+  // Resolve the existing chat id + owning account from the conversation. A reply
+  // posts to that chat; only fresh outreach (no chat) needs to start one.
+  let chatId = '';
+  let integrationAccountId: string | null = null;
+  let convAccountId: string | null = null;
+  if (conversationId) {
+    const { data: conv } = await serviceClient
+      .from('conversations')
+      .select('external_conversation_id, integration_account_id, account_id')
+      .eq('id', conversationId)
+      .maybeSingle();
+    chatId = conv?.external_conversation_id || '';
+    integrationAccountId = conv?.integration_account_id || null;
+    convAccountId = conv?.account_id || null;
   }
 
-  if (!unipileAccountId) {
-    throw new Error('LinkedIn account not properly configured');
+  const acc = await resolveAccV2(serviceClient, integrationAccountId, accountIdHint || convAccountId);
+  if (!acc) {
+    throw new Error('No connected LinkedIn account (acc_xxx) found to send from.');
   }
 
-  const base = unipileBaseUrl.replace(/\/api\/v1\/?$/, '');
+  const headers = { 'X-API-KEY': apiKeyV2, 'Content-Type': 'application/json' };
 
-  // Recruiter InMail uses the chats endpoint with the recruiter API flag
-  // (v1: POST /api/v1/chats?account_id=X, body { attendees_ids, text,
-  // linkedin:{ api:'recruiter' } }). InMail credits are reconciled hourly by
-  // the sync-inmail-credits cron, so we don't decrement here.
-  if (isInMail) {
-    const response = await fetch(
-      `${base}/api/v1/chats?account_id=${encodeURIComponent(unipileAccountId)}`,
-      {
-        method: 'POST',
-        headers: { 'X-API-KEY': unipileApiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          attendees_ids: [recipientId],
-          text: message,
-          linkedin: { api: 'recruiter' },
-        }),
-      },
+  // Reply to an existing chat (classic OR recruiter) — the inbox case.
+  if (chatId) {
+    const resp = await fetch(
+      `${v2Base}/${encodeURIComponent(acc)}/chats/${encodeURIComponent(chatId)}/messages/send`,
+      { method: 'POST', headers, body: JSON.stringify({ text: message }) },
     );
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('Unipile InMail error:', errorData);
-      throw new Error(`Failed to send InMail: ${response.status} ${errorData}`);
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Unipile v2 send error:', errText);
+      throw new Error(`Failed to send LinkedIn message: ${resp.status} ${errText}`);
     }
-    const result = await response.json();
-    return { message_id: result.message_id || result.id || 'sent', sender: unipileAccountId };
+    const result = await resp.json();
+    return { message_id: normalizeMessageId(result?.message_id), sender: acc };
   }
 
-  const response = await fetch(`${base}/api/v1/messages`, {
-    method: 'POST',
-    headers: {
-      'X-API-KEY': unipileApiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      account_id: unipileAccountId,
-      attendee_provider_id: recipientId,
-      text: message,
-    }),
-  });
+  // No existing chat → start one. Recruiter requires subject + signature.
+  if (!recipientId) {
+    throw new Error('No recipient id to start a LinkedIn chat.');
+  }
+  const specifics = isInMail
+    ? { linkedin: { recruiter: { subject: subject || 'Message', signature: await resolveSignature(serviceClient, userId) } } }
+    : { linkedin: { classic: {} } };
+  const resp = await fetch(
+    `${v2Base}/${encodeURIComponent(acc)}/chats/send`,
+    { method: 'POST', headers, body: JSON.stringify({ text: message, users_ids: [recipientId], specifics }) },
+  );
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('Unipile v2 start-chat error:', errText);
+    throw new Error(`Failed to start LinkedIn chat: ${resp.status} ${errText}`);
+  }
+  const result = await resp.json();
+  return { message_id: normalizeMessageId(result?.message_id), sender: acc };
+}
 
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('Unipile error:', errorData);
-    throw new Error(`Failed to send LinkedIn message: ${response.status}`);
+/** Read a single app_settings value. */
+async function getAppSetting(serviceClient: DbClient, key: string): Promise<string | null> {
+  const { data } = await serviceClient.from('app_settings').select('value').eq('key', key).maybeSingle();
+  return data?.value ?? null;
+}
+
+/** Canonical acc_xxx from an integration_accounts row (column → metadata copy). */
+function accV2FromRow(row: AccountRowLite | null): string | null {
+  if (!row) return null;
+  const direct = row.unipile_account_id_v2;
+  if (typeof direct === 'string' && direct.trim()) return direct;
+  const meta = row.metadata;
+  if (meta && typeof meta === 'object') {
+    const v = (meta as Record<string, unknown>).unipile_account_id_v2;
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return null;
+}
+
+/** Resolve the v2 acc_xxx to send from: an explicit acc_xxx hint, else via the
+ *  conversation's integration_account_id, else via a v1 short id, else any
+ *  active LinkedIn seat. */
+async function resolveAccV2(
+  serviceClient: DbClient,
+  integrationAccountId: string | null,
+  shortOrAccId: string | null,
+): Promise<string | null> {
+  const hint = (shortOrAccId || '').trim();
+  if (hint.startsWith('acc_')) return hint;
+
+  if (integrationAccountId) {
+    const { data } = await serviceClient
+      .from('integration_accounts')
+      .select('unipile_account_id_v2, metadata')
+      .eq('id', integrationAccountId)
+      .maybeSingle();
+    const acc = accV2FromRow(data);
+    if (acc) return acc;
   }
 
-  const result = await response.json();
-  return {
-    message_id: result.message_id || result.id || 'sent',
-    sender: unipileAccountId
-  };
+  if (hint) {
+    const { data } = await serviceClient
+      .from('integration_accounts')
+      .select('unipile_account_id_v2, metadata')
+      .eq('unipile_account_id', hint)
+      .maybeSingle();
+    const acc = accV2FromRow(data);
+    if (acc) return acc;
+  }
+
+  const { data } = await serviceClient
+    .from('integration_accounts')
+    .select('unipile_account_id_v2, metadata')
+    .eq('provider', 'linkedin')
+    .eq('is_active', true);
+  for (const row of data ?? []) {
+    const acc = accV2FromRow(row);
+    if (acc) return acc;
+  }
+  return null;
+}
+
+/** Best-effort sender signature for new Recruiter chats (reply path never uses it). */
+async function resolveSignature(serviceClient: DbClient, userId: string): Promise<string> {
+  const { data } = await serviceClient.from('profiles').select('email').eq('id', userId).maybeSingle();
+  const email: string = data?.email || '';
+  const namePart = email.split('@')[0]?.replace(/[._]+/g, ' ').trim();
+  return namePart || 'Recruiter';
+}
+
+/** v2 returns message_id as string | string[] | null. */
+function normalizeMessageId(mid: unknown): string {
+  if (Array.isArray(mid)) return (mid[0] as string) || 'sent';
+  if (typeof mid === 'string' && mid) return mid;
+  return 'sent';
 }
