@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Sparkles, Play, Building, Mail, Linkedin, UserCheck } from 'lucide-react';
+import { Send, Loader2, Martini, Play, Building, Mail, Linkedin, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { authHeaders } from '@/lib/api-auth';
@@ -189,7 +189,7 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
         {/* Header */}
         <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-accent" />
+            <Martini className="h-5 w-5 text-accent" />
             Ask Joe — Search Candidates &amp; Contacts
           </DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">

@@ -27,7 +27,7 @@ import { SentimentChip, ChannelIcon, EditableField, EditableTextarea } from '@/c
 import {
   ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
-  FileText, Sparkles, Loader2, X, ExternalLink, RefreshCw,
+  FileText, Martini, Loader2, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
   Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download,
@@ -1025,7 +1025,7 @@ const CandidateDetail = () => {
                 Fetch History
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setActiveTab('joe')}>
-                <Sparkles className="h-3.5 w-3.5 mr-2" /> Ask Joe
+                <Martini className="h-3.5 w-3.5 mr-2" /> Ask Joe
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setMergeOpen(true)}>
                 <Merge className="h-3.5 w-3.5 mr-2" /> Merge with another candidate
@@ -1284,7 +1284,7 @@ const CandidateDetail = () => {
                 "swipeable" feel without breaking shadcn TabsList layout. */}
             <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <TabsList className="bg-white border border-card-border inline-flex w-max">
-                <TabsTrigger value="joe" className="gap-1.5 snap-start"><Sparkles className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
+                <TabsTrigger value="joe" className="gap-1.5 snap-start"><Martini className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
                 <TabsTrigger value="background" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5 snap-start"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
@@ -1297,7 +1297,7 @@ const CandidateDetail = () => {
               <TabsContent value="joe" className="px-8 py-5 mt-0">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-accent" />
+                    <Martini className="h-5 w-5 text-accent" />
                     <h2 className="text-base font-semibold">Joe Says</h2>
                     {c.joe_says_updated_at && (
                       <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
@@ -1326,11 +1326,11 @@ const CandidateDetail = () => {
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No Joe Says yet</p>
                     <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
                     <Button variant="gold" size="sm" onClick={generateJoeSays}>
-                      <Sparkles className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
+                      <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
                     </Button>
                   </div>
                 )}

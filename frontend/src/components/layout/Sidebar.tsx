@@ -137,12 +137,12 @@ export function Sidebar() {
       </button>
 
       {/* ── Logo ── */}
-      <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border">
+      <div className="flex h-20 items-center justify-between px-5 border-b border-sidebar-border">
         <div className="flex items-center justify-center flex-1">
           <img
             src={logo}
             alt="Emerald"
-            className="h-12 w-12 object-contain drop-shadow-[0_0_6px_hsl(43_68%_50%/0.35)]"
+            className="h-16 w-16 object-contain drop-shadow-[0_0_8px_hsl(43_68%_50%/0.4)]"
           />
         </div>
         <NotificationBell />
