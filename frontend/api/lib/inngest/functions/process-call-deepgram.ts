@@ -21,5 +21,21 @@ export const processCallDeepgram = inngest.createFunction(
     concurrency: [{ key: "event.data.call_log_id", limit: 1 }],
   },
   { event: "call/transcribe.requested" },
-  async ({ event, logger }) => runProcessCallDeepgram(event.data, logger),
+  async ({ event, logger }) => {
+    const result = await runProcessCallDeepgram(event.data, logger);
+    // Refresh the Joe Says brief for everyone this call enriched, so the
+    // freshly extracted transcript intel lands in their summary. Best-effort:
+    // a failed event send must not fail the (already-committed) transcription.
+    for (const t of (result as any)?.joeSaysTargets ?? []) {
+      try {
+        await inngest.send({
+          name: "ai/joe-says.requested",
+          data: { entityId: t.entityId, entityType: t.entityType },
+        });
+      } catch (err: any) {
+        logger.warn("joe-says fire after deepgram failed", { error: err?.message, entityId: t.entityId });
+      }
+    }
+    return result;
+  },
 );

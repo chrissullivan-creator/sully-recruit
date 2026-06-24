@@ -206,6 +206,13 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
     joe_error: 0, insert_error: 0, dry_run_ready: 0,
   };
 
+  // People whose record this run enriched. The Inngest wrapper fires
+  // ai/joe-says.requested for each so the brief picks up the freshly
+  // extracted call intel — the call-time joe-says fire (process-ringcentral-
+  // event) runs before the transcript exists, so it misses all of this.
+  const joeSaysTargets: Array<{ entityId: string; entityType: "candidate" | "contact" }> = [];
+  const joeSaysSeen = new Set<string>();
+
   for (const cl of toProcess) {
     stats.processed++;
     const token = tokens[cl.owner_id];
@@ -425,6 +432,11 @@ Field rules:
     if (entityId) { clUpdate.linked_entity_type = entityType; clUpdate.linked_entity_id = entityId; }
     await supabase.from("call_logs").update(clUpdate).eq("id", cl.id);
 
+    if (entityId && (entityType === "candidate" || entityType === "contact")) {
+      const key = `${entityType}:${entityId}`;
+      if (!joeSaysSeen.has(key)) { joeSaysSeen.add(key); joeSaysTargets.push({ entityId, entityType }); }
+    }
+
     if (entityType === "candidate" && entityId) {
       const updates: Record<string, any> = { updated_at: now };
       // Status flip at ≥60s — a substantive call earns "engaged".
@@ -547,7 +559,7 @@ Field rules:
   }
 
   logger.info("Batch complete", stats);
-  return stats;
+  return { ...stats, joeSaysTargets };
 }
 
 async function getRCToken(supabase: any, ownerId: string): Promise<string | null> {
