@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Send, Loader2, Sparkles } from 'lucide-react';
+import { Search, Send, Loader2, Martini } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { authHeaders } from '@/lib/api-auth';
@@ -141,7 +141,7 @@ export function AskJoeAdvancedSearch({ open, onOpenChange, mode = 'candidate_sea
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-accent" />
+            <Martini className="h-5 w-5 text-accent" />
             {title}
           </DialogTitle>
         </DialogHeader>
