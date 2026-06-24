@@ -21,13 +21,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const ANTHROPIC_API_KEY =
+// Provider keys default to the edge-function secrets but are refreshed from
+// app_settings on each request (see refreshKeysFromAppSettings). app_settings is
+// the app-wide source the Vercel functions read and keep current; the Deno.env
+// edge secrets drift stale — that's what silently broke Joe ("No provider
+// succeeded"). `let` so the per-request refresh can override them.
+let ANTHROPIC_API_KEY =
   Deno.env.get("ANTHROPIC_API_KEY") ??
   Deno.env.get("anthropic_api_key") ??
   "";
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+let OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+let GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
+let OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -1073,8 +1078,38 @@ async function streamOpenRouter(
 
 // ─── Handler ─────────────────────────────────────────────────────────────
 
+/**
+ * Pull the provider keys from app_settings and prefer them over the Deno.env
+ * edge secrets. The Vercel side reads keys from app_settings (getOpenAIKey, …),
+ * so that store stays current while the separately-managed edge secrets go
+ * stale — which left every Joe turn falling through the cascade to "No provider
+ * succeeded". Best-effort: any failure keeps the env values.
+ */
+async function refreshKeysFromAppSettings(): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    const ks = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data } = await ks
+      .from("app_settings")
+      .select("key,value")
+      .in("key", ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]);
+    for (const row of data ?? []) {
+      const v = String((row as any).value ?? "").trim();
+      if (!v) continue;
+      if (row.key === "OPENAI_API_KEY") OPENAI_API_KEY = v;
+      else if (row.key === "ANTHROPIC_API_KEY") ANTHROPIC_API_KEY = v;
+      else if (row.key === "GEMINI_API_KEY") GEMINI_API_KEY = v;
+      else if (row.key === "OPENROUTER_API_KEY") OPENROUTER_API_KEY = v;
+    }
+  } catch (_e) {
+    // keep whatever the Deno.env secrets provided
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  await refreshKeysFromAppSettings();
 
   if (!ANTHROPIC_API_KEY && !OPENAI_API_KEY && !GEMINI_API_KEY && !OPENROUTER_API_KEY) {
     return new Response(JSON.stringify({ error: "No AI keys configured" }), {
