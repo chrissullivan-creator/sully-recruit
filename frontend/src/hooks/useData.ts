@@ -327,13 +327,27 @@ export function useCompanies() {
   return useQuery({
     queryKey: ['companies'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies')
-        .select('*, jobs(id)')
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data.map((c) => ({
+      // Page through ALL companies. A plain select caps at PostgREST's default
+      // 1000 rows; ordered created_at desc, that silently dropped the oldest
+      // companies from the list, the search box, AND every CompanyCombobox
+      // picker — so an older company that exists looked un-addable + unfindable.
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let from = 0;
+      for (;;) {
+        const { data, error } = await supabase
+          .from('companies')
+          .select('*, jobs(id)')
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      return allData.map((c) => ({
         ...c,
         job_count: c.jobs?.length ?? 0,
       }));
