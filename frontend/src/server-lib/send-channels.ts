@@ -28,11 +28,14 @@ const linkedinV2SendPaths = {
   chats: () => "chats",
   usersInvite: () => "users/invite",
   user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
-  // New-chat send (classic DM + Recruiter InMail). Proven live shape (the
-  // Comm Hub send-message edge fn sends on this exact route); classic vs
-  // recruiter is selected by the body's `specifics.linkedin`. The top-level
-  // `chats` route and the inbox-scoped `inboxes/{id}/chats` route both 404.
+  // Classic DM new-chat send (body `specifics.linkedin.classic`).
   chatsSend: () => "chats/send",
+  // Recruiter InMail new-chat send. Recruiter is NOT supported on the
+  // top-level `chats/send` (returns 501 "use the inbox endpoint"); it must
+  // start the chat from the RECRUITER_PRIMARY inbox. Same body shape
+  // { text, users_ids, specifics:{linkedin:{recruiter:{subject,signature}}} }.
+  // Route + `specifics` key (NOT `options`) both confirmed live.
+  inboxChatsSend: (inboxId: string) => `inboxes/${encodeURIComponent(inboxId)}/chats/send`,
 };
 
 /**
@@ -675,22 +678,25 @@ async function sendLinkedInV2(
   }
 
   // ── New-chat send (classic DM + Recruiter InMail) via v2 ─────────
-  // Proven live shape, lifted verbatim from the Comm Hub send-message edge
-  // fn (the path that actually delivered classic DMs AND Recruiter InMails):
-  //   POST /v2/{acc}/chats/send
+  // Body shape is identical for both (confirmed live):
   //   { text, users_ids: [providerId], specifics: { linkedin: {...} } }
-  // `specifics.linkedin.recruiter` (with subject + signature, both required)
-  // selects InMail; `specifics.linkedin.classic` selects a classic DM. The
-  // top-level `chats` route and the inbox-scoped `inboxes/{id}/chats` route
-  // both 404 ("Route Not Found") for this — `chats/send` is the live one.
+  // `specifics.linkedin.recruiter` (subject + signature, both required)
+  // selects InMail; `specifics.linkedin.classic` selects a classic DM.
+  // Routes differ: classic posts to the top-level `chats/send`; recruiter
+  // InMail 501s there ("use the inbox endpoint") and must post to the
+  // RECRUITER_PRIMARY inbox's `chats/send`. The `options` key and the
+  // `chats` / `inboxes/{id}/chats` routes were all rejected (400/404/501).
   const specifics = opts.isInMailChannel
     ? { linkedin: { recruiter: { subject: opts.subject || "Message", signature: opts.signature || "" } } }
     : { linkedin: { classic: {} } };
+  const sendPath = opts.isInMailChannel
+    ? linkedinV2SendPaths.inboxChatsSend("RECRUITER_PRIMARY")
+    : linkedinV2SendPaths.chatsSend();
   try {
     const data: any = await unipileFetchV2(
       supabase,
       acctV2Id,
-      linkedinV2SendPaths.chatsSend(),
+      sendPath,
       {
         method: "POST",
         body: JSON.stringify({ text: body, users_ids: [providerId], specifics }),
