@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
+import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCompanies } from '@/hooks/useData';
@@ -16,19 +17,41 @@ import { invalidatePersonScope } from '@/lib/invalidate';
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When set, the new contact is linked to this job via job_contacts. */
+  jobId?: string;
+  /** Pre-select this company in the combobox. */
+  defaultCompanyId?: string;
+  /** Called with the new person id after a successful create (+ optional job link). */
+  onCreated?: (personId: string) => void;
 }
 
-export function AddContactDialog({ open, onOpenChange }: Props) {
+const emptyForm = {
+  first_name: '', last_name: '', email: '', phone: '',
+  linkedin_url: '', title: '',
+  company_id: '', status: 'new',
+};
+
+export function AddContactDialog({ open, onOpenChange, jobId, defaultCompanyId, onCreated }: Props) {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useCompanies();
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    first_name: '', last_name: '', email: '', phone: '',
-    linkedin_url: '', title: '', department: '',
-    company_id: '', status: 'new',
-  });
+  const [form, setForm] = useState({ ...emptyForm, company_id: defaultCompanyId || '' });
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [products, setProducts] = useState<string[]>([]);
+
+  // Keep the company combobox seeded with the job's company while the dialog
+  // is closed/reopened from a job page.
+  useEffect(() => {
+    if (open) setForm((prev) => ({ ...prev, company_id: prev.company_id || defaultCompanyId || '' }));
+  }, [open, defaultCompanyId]);
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
+
+  const resetForm = () => {
+    setForm({ ...emptyForm, company_id: defaultCompanyId || '' });
+    setDepartments([]);
+    setProducts([]);
+  };
 
   const handleSave = async () => {
     if (!form.first_name.trim() && !form.last_name.trim()) { toast.error('Name is required'); return; }
@@ -54,7 +77,11 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         phone: form.phone.trim() || null,
         linkedin_url: linkedinUrl,
         title: form.title.trim() || null,
-        department: form.department.trim() || null,
+        // Keep the legacy free-text `department` populated (first selected) for
+        // back-compat while the new departments[] array is the source of truth.
+        department: departments[0] || null,
+        departments: departments.length ? departments : null,
+        products: products.length ? products : null,
         company_id: form.company_id || null,
         status: form.status,
         owner_user_id: userId,
@@ -64,6 +91,27 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         unipile_resolve_status: linkedinUrl ? 'pending' : null,
       } as any).select('id').single();
       if (error) throw error;
+
+      // Link the new contact to the job (when launched from a job page).
+      if (jobId && inserted?.id) {
+        try {
+          const { count } = await supabase
+            .from('job_contacts')
+            .select('id', { count: 'exact', head: true })
+            .eq('job_id', jobId);
+          const { error: linkErr } = await supabase.from('job_contacts').insert({
+            job_id: jobId,
+            contact_id: inserted.id,
+            is_primary: (count ?? 0) === 0,
+          });
+          // 23505 = already linked (unique job_id+contact_id) — treat as success.
+          if (linkErr && (linkErr as any).code !== '23505') throw linkErr;
+        } catch (linkErr: any) {
+          if (linkErr?.code !== '23505') {
+            toast.error(`Contact created, but linking to the job failed: ${linkErr.message}`);
+          }
+        }
+      }
 
       invalidatePersonScope(queryClient);
       toast.success('Contact created');
@@ -77,7 +125,8 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
         }).catch(() => {});
       }
 
-      setForm({ first_name: '', last_name: '', email: '', phone: '', linkedin_url: '', title: '', department: '', company_id: '', status: 'new' });
+      if (inserted?.id) onCreated?.(inserted.id);
+      resetForm();
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create contact');
@@ -88,7 +137,7 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Contact</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -111,15 +160,17 @@ export function AddContactDialog({ open, onOpenChange }: Props) {
               <Input value={form.phone} onChange={(e) => update('phone', e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Title</Label>
-              <Input value={form.title} onChange={(e) => update('title', e.target.value)} placeholder="e.g. VP of Engineering" />
-            </div>
-            <div className="space-y-2">
-              <Label>Department</Label>
-              <Input value={form.department} onChange={(e) => update('department', e.target.value)} />
-            </div>
+          <div className="space-y-2">
+            <Label>Title</Label>
+            <Input value={form.title} onChange={(e) => update('title', e.target.value)} placeholder="e.g. VP of Engineering" />
+          </div>
+          <div className="space-y-2">
+            <Label>Department</Label>
+            <PicklistMultiSelect category="department" value={departments} onChange={setDepartments} />
+          </div>
+          <div className="space-y-2">
+            <Label>Products</Label>
+            <PicklistMultiSelect category="products" value={products} onChange={setProducts} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

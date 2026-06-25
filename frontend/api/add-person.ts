@@ -177,6 +177,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload.avatar_url = photo;
       }
 
+      // Shared picklist arrays (department / products) — only write when the
+      // caller actually provided a non-empty array.
+      if (Array.isArray(data.departments) && data.departments.length) {
+        payload.departments = data.departments;
+      }
+      if (Array.isArray(data.products) && data.products.length) {
+        payload.products = data.products;
+      }
+
       if (role === "candidate") {
         payload.current_title = data.title?.trim() || null;
         payload.current_company = data.company?.trim() || null;

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -23,6 +24,9 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
   const [form, setForm] = useState({
     name: '', domain: '', location: '', linkedin_url: '', company_type: 'none',
   });
+  const [industries, setIndustries] = useState<string[]>([]);
+  const [strategies, setStrategies] = useState<string[]>([]);
+  const showStrategy = industries.includes('Hedge Fund');
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
@@ -36,11 +40,16 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
         location: form.location.trim() || null,
         linkedin_url: form.linkedin_url.trim() || null,
         company_type: form.company_type === 'none' ? null : form.company_type,
-      });
+        industries: industries.length ? industries : null,
+        // Strategy only applies to hedge funds.
+        strategies: showStrategy && strategies.length ? strategies : null,
+      } as any);
       if (error) throw error;
       invalidateCompanyScope(queryClient);
       toast.success('Company created');
       setForm({ name: '', domain: '', location: '', linkedin_url: '', company_type: 'none' });
+      setIndustries([]);
+      setStrategies([]);
       onOpenChange(false);
     } catch (err: any) {
       // The company already exists (unique name OR unique domain). Rather than
@@ -78,7 +87,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Company</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -112,6 +121,16 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
               <Input value={form.linkedin_url} onChange={(e) => update('linkedin_url', e.target.value)} placeholder="https://linkedin.com/company/..." />
             </div>
           </div>
+          <div className="space-y-2">
+            <Label>Industry</Label>
+            <PicklistMultiSelect category="industry" value={industries} onChange={setIndustries} />
+          </div>
+          {showStrategy && (
+            <div className="space-y-2">
+              <Label>Strategy</Label>
+              <PicklistMultiSelect category="strategy" value={strategies} onChange={setStrategies} />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>

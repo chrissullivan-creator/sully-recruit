@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, ChevronsUpDown, Building2 } from 'lucide-react';
+import { Check, ChevronsUpDown, Building2, Plus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +15,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateCompanyScope } from '@/lib/invalidate';
+import { toast } from 'sonner';
 
 interface Company {
   id: string;
@@ -27,6 +31,9 @@ interface CompanyComboboxProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** When true, typing a name with no match offers a "Create" item that
+   *  inserts a companies row and selects it. */
+  allowCreate?: boolean;
 }
 
 export function CompanyCombobox({
@@ -35,13 +42,67 @@ export function CompanyCombobox({
   onChange,
   placeholder = 'Select company...',
   className,
+  allowCreate = false,
 }: CompanyComboboxProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
+  const queryClient = useQueryClient();
 
   const selected = companies.find((c) => c.id === value);
 
+  const query = search.trim();
+  // Only offer create when there's a non-empty query that doesn't already
+  // exactly match an existing company name (case-insensitive).
+  const hasExact = query
+    ? companies.some((c) => c.name.toLowerCase() === query.toLowerCase())
+    : false;
+  const showCreate = allowCreate && !!query && !hasExact;
+
+  const createCompany = async () => {
+    const name = query;
+    if (!name) return;
+    setCreating(true);
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .insert({ name })
+        .select('id, name')
+        .single();
+      if (error) {
+        // Unique violation — the company already exists. Look it up by name
+        // and select that instead of erroring.
+        if ((error as any).code === '23505') {
+          const { data: existing } = await supabase
+            .from('companies')
+            .select('id')
+            .ilike('name', name)
+            .limit(1)
+            .maybeSingle();
+          if (existing?.id) {
+            onChange(existing.id);
+            invalidateCompanyScope(queryClient);
+            setOpen(false);
+            setSearch('');
+            return;
+          }
+        }
+        throw error;
+      }
+      invalidateCompanyScope(queryClient);
+      onChange(data.id);
+      toast.success(`"${data.name}" created`);
+      setOpen(false);
+      setSearch('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create company');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch(''); }}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -71,9 +132,30 @@ export function CompanyCombobox({
         align="start"
       >
         <Command>
-          <CommandInput placeholder="Search companies..." className="h-9" />
+          <CommandInput
+            placeholder="Search companies..."
+            className="h-9"
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
-            <CommandEmpty>No company found.</CommandEmpty>
+            {!showCreate && <CommandEmpty>No company found.</CommandEmpty>}
+            {showCreate && (
+              <CommandGroup>
+                <CommandItem
+                  value={`__create__${query}`}
+                  onSelect={createCompany}
+                  disabled={creating}
+                >
+                  {creating ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  Create &quot;{query}&quot;
+                </CommandItem>
+              </CommandGroup>
+            )}
             <CommandGroup>
               {/* Clear selection option */}
               <CommandItem
@@ -81,6 +163,7 @@ export function CompanyCombobox({
                 onSelect={() => {
                   onChange('');
                   setOpen(false);
+                  setSearch('');
                 }}
               >
                 <Check
@@ -98,6 +181,7 @@ export function CompanyCombobox({
                   onSelect={() => {
                     onChange(company.id);
                     setOpen(false);
+                    setSearch('');
                   }}
                 >
                   <Check

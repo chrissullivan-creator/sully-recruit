@@ -216,6 +216,28 @@ export function useCustomFieldDefs(entityType: string | undefined, includeInacti
   });
 }
 
+// Shared admin-editable option lists (picklist_options). Returns the active
+// option value strings for a category ('department' | 'products' | 'industry'
+// | 'strategy'), ordered by sort_order. picklist_options isn't in the generated
+// Supabase types yet — cast to any so the query builder doesn't resolve to
+// `never`.
+export function usePicklist(category: string | undefined) {
+  return useQuery({
+    queryKey: ['picklist_options', category],
+    enabled: !!category,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await (supabase.from('picklist_options' as any) as any)
+        .select('value, sort_order, is_active')
+        .eq('category', category!)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      return ((data ?? []) as any[]).map((r) => r.value as string);
+    },
+  });
+}
+
 // Notes for an entity
 export function useNotes(entityId: string | undefined, entityType: string) {
   return useQuery({

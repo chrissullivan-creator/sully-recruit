@@ -12,6 +12,7 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { useCandidate, useNotes, useCandidateConversations, useJobs } from '@/hooks/useData';
 import { CustomFieldsSection } from '@/components/custom-fields/CustomFieldsSection';
+import { PicklistEditSection } from '@/components/shared/PicklistEditSection';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useEntityTasks, Task } from '@/hooks/useTasks';
@@ -1006,6 +1007,9 @@ const CandidateDetail = () => {
               <DropdownMenuItem onClick={() => setScheduleMeetingOpen(true)}>
                 <CalendarPlus className="h-3.5 w-3.5 mr-2" /> Schedule meeting
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setCreateTaskOpen(true)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Add task
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setEnrollOpen(true)}>
                 <Play className="h-3.5 w-3.5 mr-2" /> Enroll in sequence
               </DropdownMenuItem>
@@ -1099,11 +1103,11 @@ const CandidateDetail = () => {
         </div>
       )}
 
-      {/* Main content: left panel + right sidebar */}
+      {/* Main content — full width (right info sidebar removed) */}
       <div className="flex flex-1 overflow-hidden bg-page-bg">
 
-        {/* ============ LEFT PANEL (70-75%) ============ */}
-        <div className="flex-1 flex flex-col overflow-hidden" style={{ flex: '3 1 0%' }}>
+        {/* ============ MAIN PANEL (full width) ============ */}
+        <div className="flex-1 flex flex-col overflow-hidden">
 
           {/* Contact info grid */}
           <div className="px-8 py-5 border-b border-border">
@@ -1535,6 +1539,20 @@ const CandidateDetail = () => {
                     </CollapsibleContent>
                   </Collapsible>
                 </div>
+
+                {id && (
+                  <PicklistEditSection
+                    table="people"
+                    recordId={id}
+                    record={candidate as any}
+                    disabled={!canEdit}
+                    fields={[
+                      { column: 'departments', category: 'department', label: 'Department' },
+                      { column: 'products', category: 'products', label: 'Products' },
+                    ]}
+                    invalidateKeys={[['candidate', id], ['candidates']]}
+                  />
+                )}
 
                 {id && (
                   <CustomFieldsSection
@@ -2206,206 +2224,6 @@ const CandidateDetail = () => {
           </Tabs>
         </div>
 
-        {/* ============ RIGHT SIDEBAR (25-30%) ============ */}
-        <aside className="w-80 shrink-0 border-l border-border flex flex-col overflow-hidden" style={{ flex: '0 0 320px' }}>
-          {/* Sidebar sub-tabs */}
-          <div className="px-4 pt-4 pb-2 border-b border-border space-y-3">
-            <div className="flex items-center gap-1 flex-wrap">
-              {(['all', 'notes', 'tasks', 'meetings'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setSidebarTab(tab)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize',
-                    sidebarTab === tab
-                      ? 'bg-accent/15 text-accent'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  )}
-                >
-                  {tab === 'all' ? 'All' : tab === 'notes' ? 'Notes & Calls' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search activity..."
-                value={sidebarSearch}
-                onChange={e => setSidebarSearch(e.target.value)}
-                className="w-full h-8 pl-8 pr-3 rounded-md border border-input bg-background text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-          </div>
-
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4">
-              {/* NOTES section (shown on all, notes tabs) */}
-              {(sidebarTab === 'all' || sidebarTab === 'notes') && (
-                <div className="space-y-3">
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Notes</h3>
-                  <RichTextEditor
-                    value={noteText}
-                    onChange={setNoteText}
-                    placeholder="Add a note..."
-                    minHeight="60px"
-                  />
-                  <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()} className="w-full">
-                    {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
-                  </Button>
-                  {filteredNotes.length > 0 ? (
-                    <div className="space-y-2">
-                      {filteredNotes.map((n: any) => (
-                        <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
-                          <div className="text-xs prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(n.note) }} />
-                          <p className="text-[10px] text-muted-foreground mt-1.5">
-                            {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No notes yet.</p>
-                  )}
-                </div>
-              )}
-
-              {/* CALLS section (shown on all, notes tabs) */}
-              {(sidebarTab === 'all' || sidebarTab === 'notes') && (
-                <div>
-                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <PhoneCall className="h-3 w-3" /> Calls
-                    <span className="text-muted-foreground font-normal">({(callLogs as any[]).length})</span>
-                  </h3>
-                  {filteredCallLogs.length === 0 && (callNotes as any[]).length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No calls yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredCallLogs.map((call: any) => {
-                        const isOut = call.direction === 'outbound';
-                        const dur = call.duration_seconds;
-                        const durStr = dur ? `${Math.floor(dur / 60)}:${(dur % 60).toString().padStart(2, '0')}` : '--:--';
-                        const aiNote = (callNotes as any[]).find((n: any) => n.call_log_id === call.id || n.external_call_id === call.external_call_id);
-                        return (
-                          <button
-                            key={call.id}
-                            onClick={() => setSelectedCall({ call, aiNote })}
-                            className="w-full text-left rounded-md border border-border bg-secondary/30 p-2.5 hover:border-accent/40 transition-all"
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full', isOut ? 'bg-info/10 text-info' : 'bg-success/10 text-success')}>
-                                {isOut ? <PhoneOutgoing className="h-3.5 w-3.5" /> : <PhoneIncoming className="h-3.5 w-3.5" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-medium text-foreground">{isOut ? 'Outbound' : 'Inbound'}</span>
-                                  {call.audio_url && <Volume2 className="h-2.5 w-2.5 text-accent shrink-0" />}
-                                  {aiNote && <Badge variant="secondary" className="text-[8px] px-1 py-0">AI</Badge>}
-                                </div>
-                                <p className="text-[10px] text-muted-foreground">{call.started_at ? format(new Date(call.started_at), 'MMM d, h:mm a') : '—'} · {durStr}</p>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                      {/* Orphan AI notes */}
-                      {(callNotes as any[]).filter((n: any) => !(callLogs as any[]).some((cl: any) => cl.id === n.call_log_id || (cl.external_call_id && cl.external_call_id === n.external_call_id))).map((note: any, idx: number) => (
-                        <button
-                          key={note.id ?? idx}
-                          onClick={() => setSelectedCall({ call: { id: note.id, direction: note.call_direction || 'outbound', phone_number: note.phone_number || '', duration_seconds: note.call_duration_seconds, started_at: note.call_started_at || note.created_at, audio_url: note.recording_url, summary: note.ai_summary, notes: note.extracted_notes, linked_entity_name: c.full_name }, aiNote: note })}
-                          className="w-full text-left rounded-md border border-border bg-secondary/30 p-2.5 hover:border-accent/40 transition-all"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
-                              <PhoneCall className="h-3.5 w-3.5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-medium text-foreground">Call Notes</span>
-                                <Badge variant="secondary" className="text-[8px] px-1 py-0">AI</Badge>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground">{note.call_started_at ? format(new Date(note.call_started_at), 'MMM d, h:mm a') : note.created_at ? format(new Date(note.created_at), 'MMM d') : '—'}</p>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TASKS section (shown on all, tasks tabs) */}
-              {/* TASKS section */}
-              {(sidebarTab === 'all' || sidebarTab === 'tasks') && (
-                <div>
-                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                      <FileText className="h-3 w-3" /> Tasks ({regularTasks.length})
-                    </h3>
-                    <button onClick={() => setCreateTaskOpen(true)} className="text-[10px] text-accent hover:underline">+ Add</button>
-                  </div>
-                  {regularTasks.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No tasks yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {regularTasks.map((t: Task) => <TaskCard key={t.id} task={t} />)}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* MEETINGS section */}
-              {(sidebarTab === 'all' || sidebarTab === 'meetings') && (
-                <div>
-                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                      <Calendar className="h-3 w-3" /> Meetings ({meetings.length})
-                    </h3>
-                  </div>
-                  {meetings.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {meetings.map((m: Task) => (
-                        <div key={m.id} className="rounded-lg border border-border bg-card p-3 space-y-1.5">
-                          <p className="text-sm font-medium truncate">{m.title}</p>
-                          {m.start_time && (
-                            <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              {format(new Date(m.start_time), 'MMM d, yyyy')}
-                              {' '}
-                              {format(new Date(m.start_time), 'h:mm a')}
-                              {m.end_time && ` – ${format(new Date(m.end_time), 'h:mm a')}`}
-                            </p>
-                          )}
-                          {m.location && (
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                              <MapPin className="h-3 w-3 shrink-0" /> {m.location}
-                            </p>
-                          )}
-                          {m.meeting_url && (
-                            <a href={m.meeting_url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline flex items-center gap-1">
-                              <ExternalLink className="h-3 w-3" /> Join Meeting
-                            </a>
-                          )}
-                          <button
-                            onClick={() => setEditingMeeting(m)}
-                            className="text-[10px] text-accent hover:underline mt-1"
-                          >
-                            Edit Details
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-        </aside>
       </div>
 
       {/* CallDetailModal — rendered at component root for proper portal behavior */}

@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { PicklistEditSection } from '@/components/shared/PicklistEditSection';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
@@ -1142,6 +1143,22 @@ const JobDetail = () => {
                     />
                   </div>
                 )}
+
+                {/* Department / Products */}
+                {id && (
+                  <div className="border-t border-border pt-5">
+                    <PicklistEditSection
+                      table="jobs"
+                      recordId={id}
+                      record={job as any}
+                      fields={[
+                        { column: 'departments', category: 'department', label: 'Department' },
+                        { column: 'products', category: 'products', label: 'Products' },
+                      ]}
+                      invalidateKeys={[['job', id], ['jobs']]}
+                    />
+                  </div>
+                )}
               </TabsContent>
 
               {/* ── Marketing Tab ──────────────────────────── */}
@@ -1659,7 +1676,16 @@ const JobDetail = () => {
         </DialogContent>
       </Dialog>
 
-      <AddContactDialog open={addContactOpen} onOpenChange={setAddContactOpen} />
+      <AddContactDialog
+        open={addContactOpen}
+        onOpenChange={setAddContactOpen}
+        jobId={id}
+        defaultCompanyId={job?.company_id ?? undefined}
+        onCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['job_contacts', id] });
+          invalidateJobScope(queryClient);
+        }}
+      />
       {id && <CreateBdSequenceDialog jobId={id} open={bdSeqOpen} onOpenChange={setBdSeqOpen} />}
       {taskPanel && (
         <TaskSlidePanel
