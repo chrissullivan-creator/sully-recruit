@@ -26,7 +26,11 @@ import { notifyError } from "./alerting.js";
 const linkedinV2SendPaths = {
   chatMessages: (chatId: string) => `chats/${encodeURIComponent(chatId)}/messages`,
   chats: () => "chats",
-  usersInvite: () => "users/invite",
+  // Connection request (bi-directional relation request). The v2 route is
+  // `users/me/relation-requests` (operationId createRelationRequest), NOT
+  // `users/invite` (which 404s — it's a v1-only path and our account isn't on
+  // the v1 host). Body: { user_id, message? }. Confirmed live.
+  relationRequests: () => "users/me/relation-requests",
   user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
   // Classic DM new-chat send (body `specifics.linkedin.classic`).
   chatsSend: () => "chats/send",
@@ -656,13 +660,17 @@ async function sendLinkedInV2(
   //   send path; if invites start failing, re-check whether v2 wants
   //   `identifier`/`recipient` for the key or `body` for the message field.
   if (opts.isConnectionRequest) {
+    // v2 connection request: POST users/me/relation-requests with the target
+    // under `user_id` (NOT `provider_id`) and an optional note under `message`.
+    const reqBody: Record<string, string> = { user_id: providerId };
+    if (body && body.trim()) reqBody.message = body;
     const data: any = await unipileFetchV2(
       supabase,
       acctV2Id,
-      linkedinV2SendPaths.usersInvite(),
+      linkedinV2SendPaths.relationRequests(),
       {
         method: "POST",
-        body: JSON.stringify({ provider_id: providerId, message: body }),
+        body: JSON.stringify(reqBody),
       },
     );
     return {
