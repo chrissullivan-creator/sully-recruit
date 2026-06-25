@@ -170,7 +170,7 @@ export default function CalendarPage() {
       />
 
       <div className="border-b border-border bg-card/30 px-8 py-3">
-        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }]} />
+        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }, { label: 'Interviews', href: '/interviews' }]} />
       </div>
 
       <ScheduleMeetingDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />

@@ -37,6 +37,7 @@ const SequenceScheduleView = lazy(() => import("./pages/SequenceScheduleView"));
 const SequenceAnalyticsPage = lazy(() => import("./pages/SequenceAnalyticsPage"));
 const Calls = lazy(() => import("./pages/Calls"));
 const Tasks = lazy(() => import("./pages/Tasks"));
+const Interviews = lazy(() => import("./pages/Interviews"));
 const Calendar = lazy(() => import("./pages/Calendar"));
 const Reports = lazy(() => import("./pages/Reports"));
 const AuditLog = lazy(() => import("./pages/AuditLog"));
@@ -102,6 +103,7 @@ const App = () => (
             <Route path="/today" element={<ProtectedRoute><Today /></ProtectedRoute>} />
             <Route path="/calls" element={<ProtectedRoute><Calls /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="/interviews" element={<ProtectedRoute><Interviews /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
             <Route path="/audit" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />

@@ -11,7 +11,7 @@ import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 
 interface EntityNotesTabProps {
   /** Polymorphic notes target. Mirrors notes.entity_type values. */
-  entityType: 'job' | 'candidate' | 'contact';
+  entityType: 'job' | 'candidate' | 'contact' | 'interview';
   entityId: string;
   /** Placeholder shown in the textarea. */
   placeholder?: string;

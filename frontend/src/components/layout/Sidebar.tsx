@@ -160,7 +160,7 @@ export function Sidebar() {
                 : item.href === '/inbox?section=calls'
                   ? onCallsSection
                   : item.href === '/calendar'
-                    ? ['/calendar', '/tasks'].some(p =>
+                    ? ['/calendar', '/tasks', '/interviews'].some(p =>
                         location.pathname === p || location.pathname.startsWith(p + '/'))
                     : item.href === '/people'
                       ? ['/people', '/candidates', '/contacts'].some(p =>

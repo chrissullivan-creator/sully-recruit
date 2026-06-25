@@ -280,7 +280,7 @@ export default function Tasks() {
       } />
 
       <div className="border-b border-border bg-card/30 px-8 py-3">
-        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }]} />
+        <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }, { label: 'Interviews', href: '/interviews' }]} />
       </div>
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 space-y-4">
