@@ -7,7 +7,7 @@ import { classifyEmail, normalizeEmail } from "../src/lib/email-classifier.js";
 // is keyword-based rather than exact. Unmatched stages default to
 // uncontacted (the safest starting point — auto-transitions will bump
 // them as activity arrives).
-function mapPipelineStage(rawStage?: string | null): 'uncontacted' | 'contacted' | 'replied' | 'back_of_resume' {
+export function mapPipelineStage(rawStage?: string | null): 'uncontacted' | 'contacted' | 'replied' | 'back_of_resume' {
   const s = String(rawStage || '').toLowerCase();
   if (/phone|interview|screen|meeting|on[- ]?site|back[- ]?of[- ]?resume|hired|placed/.test(s)) return 'back_of_resume';
   if (/repl(y|ied)|respond|engaged|interest|accept/.test(s)) return 'replied';
@@ -18,7 +18,7 @@ function mapPipelineStage(rawStage?: string | null): 'uncontacted' | 'contacted'
 // Pull a profile out of any of the three Unipile shapes (PipelineCandidate,
 // JobApplicant, PeopleSearchResult) into a flat object the upsert below
 // can consume directly.
-function flattenProfile(raw: any) {
+export function flattenProfile(raw: any) {
   const profile = raw?.profile && typeof raw.profile === 'object' ? raw.profile : raw;
   const work = (profile?.work_experience && profile.work_experience[0]) || {};
   const display: string = profile?.display_name
@@ -48,9 +48,9 @@ function flattenProfile(raw: any) {
 // id. Source still sends the v1 short id, but the live accounts are on the v2
 // app — see the list_projects migration note. Returns an error envelope the
 // caller can hand straight to res.status().json().
-type V2Ctx = { accV2: string; v2Key: string; v2Base: string };
-type V2CtxError = { status: number; error: string; code?: string };
-async function resolveV2Ctx(supabase: any, accountId: string): Promise<V2Ctx | V2CtxError> {
+export type V2Ctx = { accV2: string; v2Key: string; v2Base: string };
+export type V2CtxError = { status: number; error: string; code?: string };
+export async function resolveV2Ctx(supabase: any, accountId: string): Promise<V2Ctx | V2CtxError> {
   const { data: acctRow } = await supabase
     .from("integration_accounts")
     .select("unipile_account_id_v2, metadata")

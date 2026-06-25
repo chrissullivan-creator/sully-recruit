@@ -744,6 +744,18 @@ const Settings = () => {
                         <Link to="/import">Open Importer</Link>
                       </Button>
                     </div>
+                    <div className="rounded-lg border border-border bg-card p-6 flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                        <Upload className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold text-foreground">Import from LinkedIn Recruiter</h3>
+                        <p className="text-xs text-muted-foreground">Paste a LinkedIn Recruiter search URL and import the people as candidates or contacts.</p>
+                      </div>
+                      <Button asChild variant="gold" size="sm">
+                        <Link to="/admin/linkedin-recruiter-import">Open</Link>
+                      </Button>
+                    </div>
                   </div>
                 )}
 
