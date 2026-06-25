@@ -140,9 +140,15 @@ export function AddPersonWizard({
     return data.session?.access_token || '';
   };
 
-  // Reset state when dialog opens/closes
+  // Reset state when dialog opens/closes. Initialize ONCE per open: the parent
+  // recomputes `prefill` whenever the thread's messages load/refetch, and
+  // without this guard that re-ran the reset and wiped the LinkedIn-enriched
+  // form back to the bare name mid-lookup (the reported "doesn't prefill" bug).
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) { initializedRef.current = false; return; }
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     const nameParts = prefill.name.split(' ');
     // One-click add: when a type is pre-picked, skip pick_type and head
     // straight into the search/enrich flow (kicked off by the effect below).
