@@ -55,7 +55,7 @@ const BASE_SYSTEM_PROMPT = `You are Joe — the AI backbone of Sully Recruit, bu
 
 Valid person statuses: new | reached_out | engaged. Never filter by back_of_resume or placed.
 
-You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications).
+You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications). For "who are the contacts/people at <company>" questions, use list_company_people (it resolves the company and lists everyone linked to it) rather than search_people.
 
 When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people.`;
 
@@ -172,6 +172,20 @@ const TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "list_company_people",
+    description:
+      "List the people at a company — the contacts/clients you work with there plus any candidates who work there. Use this for \"who are the contacts/people at <company>\" or \"who do we know at <company>\". Resolves the company by name and returns everyone linked to it (by the canonical company link, plus a company-name text fallback): id, name, title, role (candidate or client), status, email, linkedin. Prefer this over search_people for company-roster questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        company: { type: "string", description: "Company name, e.g. 'Jain Global'." },
+        role: { type: "string", enum: ["candidate", "client"], description: "Optional: restrict to candidates or clients (contacts) only." },
+        limit: { type: "number", description: "Max rows (1-100). Default 50." },
+      },
+      required: ["company"],
+    },
+  },
 ];
 
 // ── Agentic write-tools (Phase 2) ──────────────────────────────────────────
@@ -198,14 +212,18 @@ const WRITE_TOOLS = [
   {
     name: "enroll_in_sequence",
     description:
-      "Propose enrolling a person into an outreach sequence (the recruiter confirms — this does NOT enroll). Returns a proposal card.",
+      "Propose enrolling one or more people into an outreach sequence. The recruiter approves a single card that then enrolls everyone on it — this tool itself does NOT enroll. List every person to add in person_ids (enroll several at once in ONE call, not one call each). do_not_contact people are dropped automatically. Returns a proposal card.",
     input_schema: {
       type: "object",
       properties: {
-        person_id: { type: "string", description: "uuid of the person" },
-        sequence_query: { type: "string", description: "Name/keywords of the sequence to enroll into." },
+        person_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "uuids of the people to enroll (one or more). Get them from search_people first.",
+        },
+        sequence_query: { type: "string", description: "Name (or distinctive keywords) of the sequence to enroll into." },
       },
-      required: ["person_id", "sequence_query"],
+      required: ["person_ids", "sequence_query"],
     },
   },
   {
@@ -291,6 +309,10 @@ function statusFromToolCall(name: string, input: any): string {
     case "get_job_detail": return "Joe is pulling the job…";
     case "match_candidates_to_job": return "Joe is matching candidates to the job…";
     case "search_companies": return "Joe is searching companies…";
+    case "list_company_people": {
+      const c = String(input?.company ?? "").slice(0, 60);
+      return `Joe is pulling people at ${c || "the company"}…`;
+    }
     default: return `Joe is running ${name}…`;
   }
 }
@@ -643,6 +665,63 @@ async function toolSearchCompanies(supabase: any, input: any): Promise<string> {
   return JSON.stringify({ items: data ?? [] });
 }
 
+async function toolListCompanyPeople(supabase: any, input: any): Promise<string> {
+  const companyQ = String(input?.company ?? "").trim();
+  if (!companyQ) return JSON.stringify({ error: "company required" });
+  const role = input?.role === "candidate" || input?.role === "client" ? input.role : null;
+  const limit = Math.min(Math.max(Number(input?.limit) || 50, 1), 100);
+
+  // Resolve company ids by name so we can filter on the canonical company_id
+  // link — the reliable way to list a company's people (company text is messy:
+  // clients keep their firm in company_name with current_company null).
+  const { data: companyRows } = await supabase
+    .from("companies").select("id, name").ilike("name", `%${companyQ}%`).limit(10);
+  const companyIds = ((companyRows as any[]) ?? []).map((c) => c.id).filter(Boolean);
+
+  const cols =
+    "id, full_name, current_title, current_company, company_name, type, status, primary_email, linkedin_url, do_not_contact";
+  const byId = new Map<string, any>();
+
+  // Primary: linked by company_id.
+  if (companyIds.length) {
+    let q = supabase.from("people").select(cols).in("company_id", companyIds).is("deleted_at", null).limit(limit * 2);
+    if (role) q = q.eq("type", role);
+    const { data } = await q;
+    for (const r of (data as any[]) ?? []) byId.set(r.id, { ...r, linked: true });
+  }
+
+  // Fallback: company-name text on either field — catches people not yet linked
+  // (e.g. a name variant the auto-link trigger hasn't claimed).
+  {
+    let q = supabase.from("people").select(cols)
+      .or(`current_company.ilike.%${companyQ}%,company_name.ilike.%${companyQ}%`)
+      .is("deleted_at", null).limit(limit * 2);
+    if (role) q = q.eq("type", role);
+    const { data } = await q;
+    for (const r of (data as any[]) ?? []) if (!byId.has(r.id)) byId.set(r.id, { ...r, linked: false });
+  }
+
+  const people = [...byId.values()].slice(0, limit).map((r) => ({
+    id: r.id,
+    name: r.full_name,
+    title: r.current_title,
+    company: r.current_company ?? r.company_name,
+    role: r.type,
+    status: r.status,
+    email: r.primary_email ?? null,
+    linkedin_url: r.linkedin_url ?? null,
+    do_not_contact: !!r.do_not_contact,
+    linked_by_company: !!r.linked,
+  }));
+
+  return JSON.stringify({
+    company_query: companyQ,
+    matched_companies: ((companyRows as any[]) ?? []).map((c) => c.name),
+    count: people.length,
+    people,
+  });
+}
+
 async function getPersonBrief(supabase: any, personId: string): Promise<any> {
   const { data } = await supabase
     .from("people")
@@ -656,6 +735,107 @@ function personName(p: any): string {
   return p?.full_name || [p?.first_name, p?.last_name].filter(Boolean).join(" ") || "this person";
 }
 
+// Resolve the sequence (by name) + the people, drop do_not_contact, and emit a
+// SINGLE enroll card the client executes on approval. Never enrolls here — the
+// recruiter's approval is what triggers the actual enrollment client-side.
+async function handleEnrollProposal(
+  supabase: any,
+  input: any,
+  emitAction: (a: any) => void,
+): Promise<string> {
+  const rawIds = Array.isArray(input?.person_ids)
+    ? input.person_ids
+    : input?.person_id
+      ? [input.person_id]
+      : [];
+  const ids = [...new Set(rawIds.map((s: any) => String(s ?? "").trim()).filter(Boolean))];
+  const seqQuery = String(input?.sequence_query ?? "").trim();
+  if (ids.length === 0) return JSON.stringify({ error: "person_ids required" });
+  if (!seqQuery) return JSON.stringify({ error: "sequence_query required" });
+
+  // Resolve the sequence by name. One match → use it; several → prefer an exact
+  // (case-insensitive) name, else ask which; none → ask for the exact name.
+  // Never guess across multiple sequences.
+  const { data: seqRows } = await supabase
+    .from("sequences")
+    .select("id, name, status")
+    .ilike("name", `%${seqQuery}%`)
+    .limit(10);
+  const matches = ((seqRows as any[]) ?? []).filter((s) => s?.id);
+  let seq: any = null;
+  if (matches.length === 1) {
+    seq = matches[0];
+  } else if (matches.length > 1) {
+    seq = matches.find((s) => String(s.name ?? "").trim().toLowerCase() === seqQuery.toLowerCase()) ?? null;
+    if (!seq) {
+      return JSON.stringify({
+        ambiguous: true,
+        reason: `Several sequences match "${seqQuery}". Ask the recruiter which one, then call again.`,
+        options: matches.map((s) => ({ name: s.name, status: s.status })),
+      });
+    }
+  }
+  if (!seq) {
+    return JSON.stringify({
+      not_found: true,
+      reason: `No sequence matches "${seqQuery}". Ask the recruiter for the exact sequence name.`,
+    });
+  }
+
+  // Resolve people; silently drop do_not_contact (outreach guard) + unknown ids.
+  const { data: peopleRows } = await supabase
+    .from("people")
+    .select("id, full_name, first_name, last_name, type, roles, do_not_contact")
+    .in("id", ids)
+    .is("deleted_at", null);
+  const byId = new Map(((peopleRows as any[]) ?? []).map((p) => [p.id, p]));
+
+  const people: any[] = [];
+  const blocked: string[] = [];
+  let unresolved = 0;
+  for (const id of ids) {
+    const p: any = byId.get(id);
+    if (!p) { unresolved++; continue; }
+    if (p.do_not_contact) { blocked.push(personName(p)); continue; }
+    people.push({ person_id: p.id, name: personName(p), type: p.type, roles: p.roles ?? [] });
+  }
+
+  if (people.length === 0) {
+    return JSON.stringify({
+      refused: true,
+      reason: blocked.length
+        ? `Everyone requested is marked do_not_contact (${blocked.join(", ")}) — nothing to enroll.`
+        : "None of those people could be resolved — re-check the ids with search_people.",
+    });
+  }
+
+  const actionId = crypto.randomUUID();
+  const names = people.map((p) => p.name);
+  const previewParts = [names.join(", ")];
+  if (blocked.length) previewParts.push(`· skipping ${blocked.length} do-not-contact (${blocked.join(", ")})`);
+
+  emitAction({
+    id: actionId,
+    type: "enroll_in_sequence",
+    title: `Enroll ${people.length} ${people.length === 1 ? "person" : "people"} in ${seq.name}`,
+    params: { sequence_id: seq.id, sequence_name: seq.name, people },
+    preview: previewParts.join(" "),
+    route: null,
+    entity_type: "candidate",
+  });
+
+  return JSON.stringify({
+    proposed: true,
+    action_id: actionId,
+    awaiting_recruiter_approval: true,
+    sequence: seq.name,
+    enrolling: names,
+    skipped_do_not_contact: blocked,
+    unresolved_count: unresolved,
+    note: "An approval card is showing. In one line, tell the recruiter who you queued for the sequence (and any do_not_contact you skipped); it enrolls only when they approve. Do NOT claim it is done.",
+  });
+}
+
 // Build + emit an approve/edit/reject proposal. Never writes to the DB; the
 // recruiter's client performs the action only on approval.
 async function handleWriteTool(
@@ -664,7 +844,10 @@ async function handleWriteTool(
   input: any,
   emitAction: (a: any) => void,
 ): Promise<string> {
-  const outreach = name === "draft_message" || name === "enroll_in_sequence";
+  // enroll_in_sequence has its own multi-person + sequence-resolution path.
+  if (name === "enroll_in_sequence") return await handleEnrollProposal(supabase, input, emitAction);
+
+  const outreach = name === "draft_message";
   let person: any = null;
   if (input?.person_id) person = await getPersonBrief(supabase, input.person_id);
   if (outreach && person?.do_not_contact) {
@@ -692,10 +875,6 @@ async function handleWriteTool(
     case "draft_message":
       title = `Draft ${input.channel} to ${personName(person)}`;
       preview = input.purpose ?? "";
-      break;
-    case "enroll_in_sequence":
-      title = `Enroll ${personName(person)} in a sequence`;
-      preview = `Sequence: ${input.sequence_query ?? ""}`;
       break;
     case "move_pipeline_stage":
       title = `Move ${personName(person)} → ${input.to_stage}`;
@@ -747,6 +926,7 @@ async function runTool(
       case "get_job_detail": return await toolGetJobDetail(supabase, input);
       case "match_candidates_to_job": return await toolMatchCandidatesToJob(supabase, input);
       case "search_companies": return await toolSearchCompanies(supabase, input);
+      case "list_company_people": return await toolListCompanyPeople(supabase, input);
       default: return JSON.stringify({ error: `unknown tool ${name}` });
     }
   };
