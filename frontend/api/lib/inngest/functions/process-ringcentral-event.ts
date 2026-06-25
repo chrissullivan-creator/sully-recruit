@@ -170,13 +170,40 @@ export const processRingcentralEvent = inngest.createFunction(
 
       logger.info("SMS logged", { entityId: match.entityId, direction });
     } else {
-      // Call event
+      // Call event.
+      // Carry an interview tag from a recent click-to-dial (ringout) row for the
+      // same number + owner — that's how a debrief call placed from an interview
+      // reaches the transcribed row and its ai_call_notes. Best-effort and
+      // narrow (owner + last-10 digits + short recency), so normal calls — which
+      // have no interview-tagged ringout — are unaffected (interviewId stays null).
+      let interviewId: string | null = null;
+      try {
+        const last10 = (otherPhone || "").replace(/[^0-9]/g, "").slice(-10);
+        if (last10.length === 10) {
+          const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+          let q = supabase
+            .from("call_logs")
+            .select("interview_id, started_at")
+            .not("interview_id", "is", null)
+            .ilike("phone_number", `%${last10}`)
+            .gte("started_at", sinceIso)
+            .order("started_at", { ascending: false })
+            .limit(1);
+          if (ownerId) q = q.eq("owner_id", ownerId);
+          const { data: priorTagged } = await q.maybeSingle();
+          interviewId = priorTagged?.interview_id ?? null;
+        }
+      } catch {
+        /* correlation is best-effort — never block call logging */
+      }
+
       const { data: callLog, error: callLogError } = await supabase
         .from("call_logs")
         .insert({
           [match.entityColumn]: match.entityId,
           linked_entity_type: match.entityType,
           linked_entity_id: match.entityId,
+          interview_id: interviewId,
           direction,
           phone_number: otherPhone,
           status: eventBody.result || eventBody.status || "completed",

@@ -13,7 +13,8 @@ import { authHeaders } from '@/lib/api-auth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X } from 'lucide-react';
+import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X, PhoneCall } from 'lucide-react';
+import { CallButton } from '@/components/shared/CallButton';
 
 const INTERVIEW_TYPES = [
   { value: 'phone', label: 'Phone' },
@@ -60,7 +61,7 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
       const { data, error } = await supabase
         .from('interviews')
         .select(`*,
-          candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company),
+          candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, phone, mobile_phone),
           jobs(id, title, company_name)`)
         .eq('id', interviewId!)
         .maybeSingle();
@@ -80,6 +81,23 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
         .order('is_primary', { ascending: false });
       if (error) throw error;
       return data as any[];
+    },
+  });
+
+  // Recorded debrief call (ai_call_notes tagged to this interview). interview_id
+  // is a new column not in the generated types yet, so cast the table to any.
+  const { data: debrief } = useQuery({
+    queryKey: ['interview_debrief', interviewId],
+    enabled: !!interviewId && open,
+    queryFn: async () => {
+      const { data, error } = await (supabase.from('ai_call_notes' as any) as any)
+        .select('id, ai_summary, ai_action_items, transcript, recording_url, call_started_at, call_duration_formatted')
+        .eq('interview_id', interviewId!)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
     },
   });
 
@@ -335,7 +353,38 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
                 <Button variant="outline" size="sm" onClick={() => patch({ debrief_notes: form.debrief_notes || null, debrief_at: new Date().toISOString(), debrief_source: 'manual' }, 'Debrief saved')} disabled={saving}>
                   Save debrief
                 </Button>
-                <p className="text-[11px] text-muted-foreground">A recorded RingCentral debrief call that auto-fills these notes is coming next.</p>
+
+                {/* Recorded RingCentral debrief call — its transcript/summary attaches here. */}
+                <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-foreground flex items-center gap-1.5"><PhoneCall className="h-3.5 w-3.5 text-accent" /> Recorded debrief call</span>
+                    {(() => {
+                      const phone = cand?.phone || cand?.mobile_phone;
+                      return phone ? (
+                        <CallButton phone={phone} interviewId={interviewId} variant="outline" size="sm" label="Debrief Call" title="Record a debrief call with the candidate — its notes attach here" />
+                      ) : <span className="text-[11px] text-muted-foreground">No candidate phone on file</span>;
+                    })()}
+                  </div>
+                  {debrief ? (
+                    <div className="space-y-2">
+                      {debrief.ai_summary && <p className="text-sm text-foreground whitespace-pre-wrap">{debrief.ai_summary}</p>}
+                      {Array.isArray(debrief.ai_action_items) && debrief.ai_action_items.length > 0 && (
+                        <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-0.5">
+                          {debrief.ai_action_items.map((a: any, i: number) => <li key={i}>{typeof a === 'string' ? a : JSON.stringify(a)}</li>)}
+                        </ul>
+                      )}
+                      {debrief.transcript && (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Full transcript</summary>
+                          <p className="mt-1 whitespace-pre-wrap text-muted-foreground max-h-48 overflow-y-auto">{debrief.transcript}</p>
+                        </details>
+                      )}
+                      {debrief.recording_url && <a href={debrief.recording_url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">Open recording</a>}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">Place a debrief call — its transcript &amp; summary appear here automatically a couple minutes after you hang up.</p>
+                  )}
+                </div>
               </section>
 
               {/* Lifecycle actions */}

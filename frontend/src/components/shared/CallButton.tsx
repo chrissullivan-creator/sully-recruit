@@ -18,6 +18,7 @@ export function CallButton({
   phone,
   candidateId,
   contactId,
+  interviewId,
   size = 'sm',
   variant = 'outline',
   label = 'Call',
@@ -28,6 +29,8 @@ export function CallButton({
   phone: string | null | undefined;
   candidateId?: string | null;
   contactId?: string | null;
+  /** When set, the resulting call is tagged to this interview (debrief call). */
+  interviewId?: string | null;
   size?: 'sm' | 'default' | 'icon';
   variant?: 'outline' | 'ghost' | 'gold' | 'default';
   /** Button text. Ignored when iconOnly. */
@@ -53,6 +56,7 @@ export function CallButton({
           to: phone,
           candidate_id: candidateId || undefined,
           contact_id: contactId || undefined,
+          interview_id: interviewId || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));

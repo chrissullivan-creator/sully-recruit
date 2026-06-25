@@ -143,7 +143,7 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
   if (payload.call_log_id) {
     const { data } = await supabase
       .from("call_logs")
-      .select("id, owner_id, external_call_id, phone_number, direction, duration_seconds, started_at, ended_at, linked_entity_type, linked_entity_id")
+      .select("id, owner_id, external_call_id, phone_number, direction, duration_seconds, started_at, ended_at, linked_entity_type, linked_entity_id, interview_id")
       .eq("id", payload.call_log_id)
       .single();
     if (data) toProcess = [data];
@@ -151,7 +151,7 @@ export async function runProcessCallDeepgram(payload: CallDeepgramPayload, logge
     const limit = payload.limit ?? 50;
     const { data: eligible } = await supabase
       .from("call_logs")
-      .select("id, owner_id, external_call_id, phone_number, direction, duration_seconds, started_at, ended_at, linked_entity_type, linked_entity_id")
+      .select("id, owner_id, external_call_id, phone_number, direction, duration_seconds, started_at, ended_at, linked_entity_type, linked_entity_id, interview_id")
       .not("external_call_id", "is", null)
       .gte("duration_seconds", 30)
       .order("started_at", { ascending: false });
@@ -396,6 +396,7 @@ Field rules:
     const { error: upsertErr } = await supabase.from("ai_call_notes").upsert({
       candidate_id: entityType === "candidate" ? entityId : null,
       contact_id: entityType === "contact" ? entityId : null,
+      interview_id: cl.interview_id ?? null,
       phone_number: cl.phone_number,
       source: "ringcentral",
       call_direction: cl.direction ?? "outbound",
@@ -437,7 +438,9 @@ Field rules:
       if (!joeSaysSeen.has(key)) { joeSaysSeen.add(key); joeSaysTargets.push({ entityId, entityType }); }
     }
 
-    if (entityType === "candidate" && entityId) {
+    // Debrief calls (tagged to an interview) capture interview feedback — they
+    // must NOT mutate the candidate's record (comp / skills / status / owner).
+    if (entityType === "candidate" && entityId && !cl.interview_id) {
       const updates: Record<string, any> = { updated_at: now };
       // Status flip at ≥60s — a substantive call earns "engaged".
       // Owner transfer waits until ≥120s — short calls (intro pings,

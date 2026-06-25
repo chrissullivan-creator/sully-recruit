@@ -81,10 +81,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  const { to, candidate_id, contact_id } = (req.body || {}) as {
+  const { to, candidate_id, contact_id, interview_id } = (req.body || {}) as {
     to?: string;
     candidate_id?: string;
     contact_id?: string;
+    interview_id?: string;
   };
 
   const toNumber = toE164(to || "");
@@ -242,6 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       external_call_id: externalCallId,
       candidate_id: candidate_id || null,
       contact_id: contact_id || null,
+      interview_id: interview_id || null,
       linked_entity_type: candidate_id ? "candidate" : contact_id ? "contact" : null,
       linked_entity_id: candidate_id || contact_id || null,
     } as any);
