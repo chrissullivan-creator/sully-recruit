@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { supabase } from '@/integrations/supabase/client';
 import { classifyEmail, normalizeEmail } from '@/lib/email-classifier';
 import { authHeaders } from '@/lib/api-auth';
@@ -45,6 +46,8 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
   const [currentCompany, setCurrentCompany] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [locationText, setLocationText] = useState('');
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [products, setProducts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
@@ -56,6 +59,7 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
   const resetForm = () => {
     setFirstName(''); setLastName(''); setEmail(''); setPhone('');
     setCurrentTitle(''); setCurrentCompany(''); setLinkedinUrl(''); setLocationText('');
+    setDepartments([]); setProducts([]);
     setResumeFile(null); setResumeStoragePath(null);
   };
 
@@ -130,13 +134,15 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             current_company: currentCompany || null,
             linkedin_url: trimmedLinkedin,
             location_text: locationText || null,
+            departments: departments.length ? departments : null,
+            products: products.length ? products : null,
             status: 'new',
             owner_user_id: userId,
             // Queue the resolve-unipile-ids cron (v2 lookup) to populate
             // unipile_provider_id. No live API call here — keeps the dialog
             // snappy and avoids the v1 endpoint that's been returning 404s.
             unipile_resolve_status: trimmedLinkedin ? 'pending' : null,
-          },
+          } as any,
         ])
         .select('id')
         .single();
@@ -329,6 +335,14 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
                 <Label className="text-xs">LinkedIn</Label>
                 <Input value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/in/..." />
               </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Department</Label>
+              <PicklistMultiSelect category="department" value={departments} onChange={setDepartments} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Products</Label>
+              <PicklistMultiSelect category="products" value={products} onChange={setProducts} />
             </div>
           </div>
           <DialogFooter>

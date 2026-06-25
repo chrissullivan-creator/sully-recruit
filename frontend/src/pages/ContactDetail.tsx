@@ -9,7 +9,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
-import { useNotes, useJobs } from '@/hooks/useData';
+import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
+import { PicklistEditSection } from '@/components/shared/PicklistEditSection';
+import { useNotes, useJobs, useCompanies } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { authHeaders } from '@/lib/api-auth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -259,6 +261,23 @@ const ContactDetail = () => {
   const { data: conversations = [] } = useContactConversations(id);
   const { data: sendOuts = [] } = useContactSendOuts(id);
   const { data: linkedJobs = [] } = useContactJobs(id);
+  const { data: companies = [] } = useCompanies();
+
+  // The `contacts` view doesn't expose the new picklist array columns, so read
+  // departments/products straight off the underlying `people` row (1:1 by id).
+  const { data: peoplePicklist } = useQuery({
+    queryKey: ['contact_picklist', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('people')
+        .select('departments, products')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+  });
 
   // Call logs
   const { data: callLogs = [] } = useQuery({
@@ -711,11 +730,11 @@ const ContactDetail = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Main content: left panel + right sidebar */}
+      {/* Main content — full width (right info sidebar removed) */}
       <div className="flex flex-1 overflow-hidden bg-page-bg">
 
-        {/* ============ LEFT PANEL (70-75%) ============ */}
-        <div className="flex-1 flex flex-col overflow-hidden" style={{ flex: '3 1 0%' }}>
+        {/* ============ MAIN PANEL (full width) ============ */}
+        <div className="flex-1 flex flex-col overflow-hidden">
 
           {/* Contact info section */}
           <div className="px-8 py-5 border-b border-border">
@@ -725,8 +744,24 @@ const ContactDetail = () => {
               <EditableField label="Title" value={contact.title} onSave={v => updateField('title', v)} placeholder="e.g. VP, Talent Acquisition" />
               <EditableField label="Phone" value={contact.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
               <div className="flex items-end gap-2">
-                <div className="flex-1 min-w-0">
-                  <EditableField label="Company" value={companyName} onSave={v => updateField('company_name', v)} placeholder="Company name" />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <Label className="text-xs text-muted-foreground">Company</Label>
+                  <CompanyCombobox
+                    companies={companies}
+                    value={(c as any).company_id || ''}
+                    allowCreate
+                    onChange={async (companyId) => {
+                      // company_id lives on the underlying people row; write it
+                      // there (1:1 by id) so view-write quirks don't bite.
+                      const { error } = await supabase
+                        .from('people')
+                        .update({ company_id: companyId || null })
+                        .eq('id', id!);
+                      if (error) { toast.error('Failed to update company'); return; }
+                      invalidatePersonScope(queryClient);
+                      queryClient.invalidateQueries({ queryKey: ['contact', id] });
+                    }}
+                  />
                 </div>
                 {(c as any).company_id && (
                   <button
@@ -801,6 +836,22 @@ const ContactDetail = () => {
               </span>
               <span>Created {format(new Date(contact.created_at), 'MMM d, yyyy')}</span>
             </div>
+
+            {/* Department / Products — saved to the underlying people row */}
+            {id && (
+              <div className="mt-5">
+                <PicklistEditSection
+                  table="people"
+                  recordId={id}
+                  record={peoplePicklist}
+                  fields={[
+                    { column: 'departments', category: 'department', label: 'Department' },
+                    { column: 'products', category: 'products', label: 'Products' },
+                  ]}
+                  invalidateKeys={[['contact_picklist', id], ['contact', id], ['contacts']]}
+                />
+              </div>
+            )}
           </div>
 
           {/* ---- Tabs ---- */}
@@ -1301,94 +1352,6 @@ const ContactDetail = () => {
           </Tabs>
         </div>
 
-        {/* ============ RIGHT SIDEBAR (25-30%) ============ */}
-        <aside className="w-80 shrink-0 border-l border-border flex flex-col overflow-hidden" style={{ flex: '0 0 320px' }}>
-          {/* Sidebar sub-tabs */}
-          <div className="px-4 pt-4 pb-2 border-b border-border space-y-3">
-            <div className="flex items-center gap-1 flex-wrap">
-              {(['all', 'notes', 'tasks', 'meetings'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setSidebarTab(tab)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize',
-                    sidebarTab === tab
-                      ? 'bg-accent/15 text-accent'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  )}
-                >
-                  {tab === 'all' ? 'All' : tab === 'notes' ? 'Notes & Calls' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search activity..."
-                value={sidebarSearch}
-                onChange={e => setSidebarSearch(e.target.value)}
-                className="w-full h-8 pl-8 pr-3 rounded-md border border-input bg-background text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-          </div>
-
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4">
-              {/* NOTES section (shown on all, notes tabs) */}
-              {(sidebarTab === 'all' || sidebarTab === 'notes') && (
-                <div className="space-y-3">
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Notes</h3>
-                  <RichTextEditor
-                    value={noteText}
-                    onChange={setNoteText}
-                    placeholder="Add a note..."
-                    minHeight="60px"
-                  />
-                  <Button variant="gold" size="sm" onClick={handleSaveNote} disabled={savingNote || !noteText.trim()} className="w-full">
-                    {savingNote && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save Note
-                  </Button>
-                  {filteredNotes.length > 0 ? (
-                    <div className="space-y-2">
-                      {filteredNotes.map((n: any) => (
-                        <div key={n.id} className="rounded-md border border-border bg-secondary/50 p-3">
-                          <div className="text-xs prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(n.note) }} />
-                          <p className="text-[10px] text-muted-foreground mt-1.5">
-                            {format(new Date(n.created_at), 'MMM d, yyyy h:mm a')}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No notes yet.</p>
-                  )}
-                </div>
-              )}
-
-              {/* TASKS section (shown on all, tasks tabs) */}
-              {(sidebarTab === 'all' || sidebarTab === 'tasks') && id && (
-                <div>
-                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <FileText className="h-3 w-3" /> Tasks
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No tasks yet.</p>
-                </div>
-              )}
-
-              {/* MEETINGS section (shown on all, meetings tabs) */}
-              {(sidebarTab === 'all' || sidebarTab === 'meetings') && (
-                <div>
-                  {sidebarTab === 'all' && <div className="border-t border-border my-3" />}
-                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                    <Calendar className="h-3 w-3" /> Meetings
-                  </h3>
-                  <p className="text-xs text-muted-foreground">No meetings scheduled.</p>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-        </aside>
       </div>
     </MainLayout>
   );

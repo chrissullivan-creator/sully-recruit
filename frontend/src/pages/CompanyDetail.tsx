@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { JobPostingsTab } from '@/components/companies/JobPostingsTab';
+import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
@@ -58,6 +59,72 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
             {value || placeholder || '—'}
           </span>
           <Edit className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Industry / Strategy classification for a company. Strategy is only relevant
+// for hedge funds, so its field is shown only when Industry includes
+// "Hedge Fund" (reactive to in-progress edits). Saves to companies.industries /
+// companies.strategies.
+const CompanyClassification = ({ companyId, industries, strategies, onSaved }: {
+  companyId: string;
+  industries: string[];
+  strategies: string[];
+  onSaved: () => void;
+}) => {
+  const [indDraft, setIndDraft] = useState<string[] | null>(null);
+  const [stratDraft, setStratDraft] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const ind = indDraft ?? (Array.isArray(industries) ? industries : []);
+  const strat = stratDraft ?? (Array.isArray(strategies) ? strategies : []);
+  const showStrategy = ind.includes('Hedge Fund');
+  const dirty = indDraft !== null || stratDraft !== null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const patch: Record<string, any> = {};
+      if (indDraft !== null) patch.industries = indDraft.length ? indDraft : null;
+      // Clear strategies when the company is no longer a hedge fund.
+      if (stratDraft !== null || !showStrategy) {
+        const next = showStrategy ? strat : [];
+        patch.strategies = next.length ? next : null;
+      }
+      const { error } = await supabase.from('companies').update(patch).eq('id', companyId);
+      if (error) throw error;
+      setIndDraft(null);
+      setStratDraft(null);
+      onSaved();
+      toast.success('Saved');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Classification</h3>
+        {dirty && (
+          <Button variant="gold" size="sm" className="h-6 text-[11px] px-2" onClick={save} disabled={saving}>
+            {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+          </Button>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Industry</Label>
+        <PicklistMultiSelect category="industry" value={ind} onChange={setIndDraft} />
+      </div>
+      {showStrategy && (
+        <div className="space-y-1.5">
+          <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Strategy</Label>
+          <PicklistMultiSelect category="strategy" value={strat} onChange={setStratDraft} />
         </div>
       )}
     </div>
@@ -504,6 +571,16 @@ const CompanyDetail = () => {
               <EditableField label="Location" value={company.location} onSave={v => updateField('location', v)} placeholder="City, State" />
               <EditableField label="HQ Location" value={company.hq_location} onSave={v => updateField('hq_location', v)} placeholder="Headquarters" />
             </div>
+
+            <CompanyClassification
+              companyId={id!}
+              industries={(company as any).industries ?? []}
+              strategies={(company as any).strategies ?? []}
+              onSaved={() => {
+                invalidateCompanyScope(queryClient);
+                queryClient.invalidateQueries({ queryKey: ['company', id] });
+              }}
+            />
 
             <div className="space-y-3">
               <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Online</h3>

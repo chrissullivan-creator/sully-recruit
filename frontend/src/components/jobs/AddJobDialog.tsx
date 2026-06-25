@@ -4,10 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
+import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
+import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCompanies, useJobFunctions } from '@/hooks/useData';
+import { useCompanies, useJobFunctions, useContacts } from '@/hooks/useData';
 import { toast } from 'sonner';
 import { Loader2, Globe, FileUp, PenLine, ArrowLeft, ExternalLink, Check, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,6 +31,8 @@ type JobForm = {
   job_url: string;
   job_function_id: string;
   num_openings: number;
+  departments: string[];
+  products: string[];
 };
 
 const emptyForm: JobForm = {
@@ -42,6 +46,8 @@ const emptyForm: JobForm = {
   job_url: '',
   job_function_id: '',
   num_openings: 1,
+  departments: [],
+  products: [],
 };
 
 type Step = 'source' | 'pick' | 'form';
@@ -50,6 +56,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useCompanies();
   const { data: jobFunctions = [] } = useJobFunctions();
+  const { data: contacts = [] } = useContacts();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<Step>('source');
@@ -58,6 +65,9 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [url, setUrl] = useState('');
   const [form, setForm] = useState<JobForm>({ ...emptyForm });
+  // Optional contact to attach to the new job (single-job form step only).
+  const [contactId, setContactId] = useState('');
+  const [addContactOpen, setAddContactOpen] = useState(false);
 
   // Multi-job state
   const [parsedJobs, setParsedJobs] = useState<JobForm[]>([]);
@@ -76,6 +86,7 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
     setParsedJobs([]);
     setSelectedJobIndexes(new Set());
     setEditingIndex(null);
+    setContactId('');
   };
 
   const handleOpenChange = (val: boolean) => {
@@ -124,6 +135,8 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         job_url: url.trim(),
         job_function_id: '',
         num_openings: 1,
+        departments: [],
+        products: [],
       });
       setStep('form');
     } catch (err: any) {
@@ -167,6 +180,8 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         job_url: '',
         job_function_id: '',
         num_openings: 1,
+        departments: [],
+        products: [],
       };
     });
   };
@@ -326,9 +341,30 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         job_function_id: form.job_function_id || null,
         job_code: jobCode,
         num_openings: form.num_openings || 1,
+        departments: form.departments.length ? form.departments : null,
+        products: form.products.length ? form.products : null,
       };
-      const { error } = await supabase.from('jobs').insert(insert);
+      // Attach the chosen contact (single-job path only) — set jobs.contact_id
+      // up front so it lands in one insert, then mirror it into job_contacts.
+      if (editingIndex === null && contactId) insert.contact_id = contactId;
+
+      const { data: newJob, error } = await supabase.from('jobs').insert(insert).select('id').single();
       if (error) throw error;
+
+      // Link the contact via job_contacts as primary (it's the job's only
+      // contact at creation). Best-effort: a unique-violation must not fail the
+      // create.
+      if (editingIndex === null && contactId && newJob?.id) {
+        const { error: linkErr } = await supabase.from('job_contacts').insert({
+          job_id: newJob.id,
+          contact_id: contactId,
+          is_primary: true,
+        });
+        if (linkErr && (linkErr as any).code !== '23505') {
+          toast.error(`Job created, but linking the contact failed: ${linkErr.message}`);
+        }
+      }
+
       invalidateJobScope(queryClient);
 
       // If editing one from multi-job list, go back to pick step
@@ -384,6 +420,8 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
           job_function_id: j.job_function_id || null,
           job_code: jobCode,
           num_openings: j.num_openings || 1,
+          departments: j.departments.length ? j.departments : null,
+          products: j.products.length ? j.products : null,
         });
       }
       const { error } = await supabase.from('jobs').insert(inserts);
@@ -581,6 +619,31 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
               </div>
             </div>
 
+            {/* Optional hiring-manager / contact to attach to this job. */}
+            {editingIndex === null && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Contact</Label>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs text-accent" onClick={() => setAddContactOpen(true)}>
+                    + Create new contact
+                  </Button>
+                </div>
+                <SearchableSelect
+                  options={(contacts as any[]).map((c: any) => ({
+                    value: c.id,
+                    label: c.full_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || 'Unnamed',
+                    sublabel: c.companies?.name || c.company_name || undefined,
+                  }))}
+                  value={contactId}
+                  onChange={setContactId}
+                  placeholder="Attach a contact (optional)"
+                  searchPlaceholder="Search contacts..."
+                  clearLabel="No contact"
+                  emptyText="No contact found."
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Location</Label>
               <Input value={form.location} onChange={e => update('location', e.target.value)} placeholder="e.g. New York, NY" />
@@ -589,6 +652,24 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
             <div className="space-y-2">
               <Label>Compensation</Label>
               <Input value={form.compensation} onChange={e => update('compensation', e.target.value)} placeholder="e.g. $120,000 - $150,000" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Department</Label>
+              <PicklistMultiSelect
+                category="department"
+                value={form.departments}
+                onChange={v => setForm(prev => ({ ...prev, departments: v }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Products</Label>
+              <PicklistMultiSelect
+                category="products"
+                value={form.products}
+                onChange={v => setForm(prev => ({ ...prev, products: v }))}
+              />
             </div>
 
             <div className="space-y-2">
@@ -665,6 +746,18 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
           </DialogFooter>
         )}
       </DialogContent>
+
+      {/* Create-new-contact flow. The job doesn't exist yet, so we don't pass
+          jobId — we just select the new contact and link it on job create. */}
+      <AddContactDialog
+        open={addContactOpen}
+        onOpenChange={setAddContactOpen}
+        defaultCompanyId={form.company_id || undefined}
+        onCreated={(personId) => {
+          setContactId(personId);
+          queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        }}
+      />
     </Dialog>
   );
 }

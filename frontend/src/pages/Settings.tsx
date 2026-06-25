@@ -45,6 +45,7 @@ import {
   Gauge,
   Sparkles,
   Upload,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -63,6 +64,7 @@ import { EmailSignatureSection } from '@/components/settings/EmailSignatureSecti
 import { LinkedInSafetyLimitsSection } from '@/components/settings/LinkedInSafetyLimitsSection';
 import { SchedulingSection } from '@/components/settings/SchedulingSection';
 import { JobFunctionsSection } from '@/components/settings/JobFunctionsSection';
+import { OptionListsSection } from '@/components/settings/OptionListsSection';
 
 // ---- component ----
 const Settings = () => {
@@ -677,6 +679,7 @@ const Settings = () => {
     { id: 'general', label: 'General', icon: SettingsIcon },
     ...(isAdmin ? [
       { id: 'custom_fields', label: 'Custom Fields', icon: Sparkles },
+      { id: 'option_lists', label: 'Option Lists', icon: ListChecks },
       { id: 'admin', label: 'Admin Tools', icon: Wrench },
     ] : []),
   ];
@@ -1704,6 +1707,11 @@ const Settings = () => {
                 {/* ============ CUSTOM FIELDS TAB ============ */}
                 {activeTab === 'custom_fields' && isAdmin && (
                   <CustomFieldsManager />
+                )}
+
+                {/* ============ OPTION LISTS TAB ============ */}
+                {activeTab === 'option_lists' && isAdmin && (
+                  <OptionListsSection />
                 )}
 
                 {/* ============ DATA HYGIENE TAB ============ */}
