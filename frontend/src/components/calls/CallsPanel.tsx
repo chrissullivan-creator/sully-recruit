@@ -484,6 +484,7 @@ function LinkCallDialog({
 export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
   // Per-user scoping shared with the inbox. Everyone sees only their own calls
   // by default; admins can switch to Team / a member. When embedded, the Hub's
   // sidebar drives the scope (same URL state), so the in-panel toggle is hidden.
@@ -626,6 +627,10 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
       c.notes?.toLowerCase().includes(q) ||
       ai?.ai_summary?.toLowerCase().includes(q)
     );
+  }).sort((a, b) => {
+    const ta = new Date(a.started_at || 0).getTime();
+    const tb = new Date(b.started_at || 0).getTime();
+    return sortOrder === 'newest' ? tb - ta : ta - tb;
   });
 
   const formatDuration = (seconds?: number | null) => {
@@ -696,6 +701,13 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
               className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
+          <button
+            onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+            className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-input bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            title="Toggle date sort"
+          >
+            {sortOrder === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
+          </button>
           {/* Scope filter — admins only, standalone page only (embedded uses
               the Hub's sidebar scope control, which shares the same state). */}
           {!embedded && scopeIsAdmin && (
