@@ -28,7 +28,8 @@ export function QuickStats({ jobId, compMin, compMax, feePct, createdAt, closedA
       const { data, error } = await supabase
         .from('candidate_jobs')
         .select('pipeline_stage, max_pipeline_stage')
-        .eq('job_id', jobId);
+        .eq('job_id', jobId)
+        .is('deleted_at', null);
       if (error) throw error;
       return (data ?? []) as { pipeline_stage: string | null; max_pipeline_stage: string | null }[];
     },
