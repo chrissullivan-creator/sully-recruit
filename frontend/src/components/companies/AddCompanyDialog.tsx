@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { invalidateCompanyScope } from '@/lib/invalidate';
+import { useNavigate } from 'react-router-dom';
 
 interface Props {
   open: boolean;
@@ -17,6 +18,7 @@ interface Props {
 
 export function AddCompanyDialog({ open, onOpenChange }: Props) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '', domain: '', location: '', linkedin_url: '', company_type: 'none',
@@ -41,6 +43,33 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
       setForm({ name: '', domain: '', location: '', linkedin_url: '', company_type: 'none' });
       onOpenChange(false);
     } catch (err: any) {
+      // The company already exists (unique name OR unique domain). Rather than
+      // dump a raw Postgres constraint error, find the existing row and take the
+      // user straight to it so they can add contacts — that's what they wanted.
+      const isDup = err?.code === '23505' || /duplicate key|unique constraint/i.test(err?.message || '');
+      if (isDup) {
+        const name = form.name.trim();
+        const domain = form.domain.trim();
+        let existing: any = null;
+        const byName = await supabase.from('companies').select('id, name, deleted_at').ilike('name', name).limit(1).maybeSingle();
+        existing = byName.data;
+        if (!existing && domain) {
+          const byDomain = await supabase.from('companies').select('id, name, deleted_at').ilike('domain', domain).limit(1).maybeSingle();
+          existing = byDomain.data;
+        }
+        if (existing && !existing.deleted_at) {
+          toast.info(`"${existing.name}" already exists — opening it.`);
+          onOpenChange(false);
+          navigate(`/companies/${existing.id}`);
+          return;
+        }
+        if (existing?.deleted_at) {
+          toast.error(`"${existing.name}" already exists but was deleted. Restore it from Settings → Data Hygiene.`);
+          return;
+        }
+        toast.error('A company with this name or domain already exists.');
+        return;
+      }
       toast.error(err.message || 'Failed to create company');
     } finally {
       setSaving(false);
