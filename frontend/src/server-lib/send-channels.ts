@@ -28,11 +28,11 @@ const linkedinV2SendPaths = {
   chats: () => "chats",
   usersInvite: () => "users/invite",
   user: (providerId: string) => `users/${encodeURIComponent(providerId)}`,
-  // Inbox-scoped "Start a Chat from Inbox" — the ONLY route that accepts a
-  // Recruiter InMail (top-level `chats` 404s for recruiter sends). inboxId is
-  // RECRUITER_PRIMARY for an individual InMail. Confirmed live via
-  // GET /v2/{acc}/inboxes.
-  inboxChats: (inboxId: string) => `inboxes/${encodeURIComponent(inboxId)}/chats`,
+  // New-chat send (classic DM + Recruiter InMail). Proven live shape (the
+  // Comm Hub send-message edge fn sends on this exact route); classic vs
+  // recruiter is selected by the body's `specifics.linkedin`. The top-level
+  // `chats` route and the inbox-scoped `inboxes/{id}/chats` route both 404.
+  chatsSend: () => "chats/send",
 };
 
 /**
@@ -674,64 +674,35 @@ async function sendLinkedInV2(
     });
   }
 
-  // ── Recruiter InMail via v2 ─────────────────────────────────────
-  // Recruiter InMail is the inbox-scoped "Start a Chat from Inbox" endpoint
-  // against RECRUITER_PRIMARY — NOT the top-level `chats` route, which 404s
-  // "Route Not Found" for recruiter sends (the old `chats` + linkedin.api=
-  // 'recruiter' body was the wrong endpoint entirely). The recipient goes
-  // under `users_ids`, and BOTH subject + signature are required under
-  // options.linkedin.recruiter (LinkedIn rejects a recruiter send missing
-  // either). Shape per Unipile v2 Methods reference (startChatFromInbox);
-  // RECRUITER_PRIMARY confirmed live via GET /v2/{acc}/inboxes.
-  if (opts.isInMailChannel) {
-    try {
-      const data: any = await unipileFetchV2(
-        supabase,
-        acctV2Id,
-        linkedinV2SendPaths.inboxChats("RECRUITER_PRIMARY"),
-        {
-          method: "POST",
-          body: JSON.stringify({
-            users_ids: [providerId],
-            text: body,
-            options: {
-              linkedin: {
-                recruiter: {
-                  signature: opts.signature || "",
-                  subject: opts.subject || "",
-                },
-              },
-            },
-          }),
-        },
-      );
-      await decrementInmailCredit(supabase, resolvedAccountId);
-      return {
-        message_id: data.id || data.message_id || data.chat_id || `msg_${Date.now()}`,
-        conversation_id: data.chat_id || data.conversation_id || data.id || "",
-      };
-    } catch (err: any) {
-      throw new Error(`InMail ${err.message}`);
-    }
-  }
-
-  // ── Classic DM via v2 (proven by live traffic) ──────────────────
-  // First message to a classic chat: POST `chats` { attendees_ids, text }.
+  // ── New-chat send (classic DM + Recruiter InMail) via v2 ─────────
+  // Proven live shape, lifted verbatim from the Comm Hub send-message edge
+  // fn (the path that actually delivered classic DMs AND Recruiter InMails):
+  //   POST /v2/{acc}/chats/send
+  //   { text, users_ids: [providerId], specifics: { linkedin: {...} } }
+  // `specifics.linkedin.recruiter` (with subject + signature, both required)
+  // selects InMail; `specifics.linkedin.classic` selects a classic DM. The
+  // top-level `chats` route and the inbox-scoped `inboxes/{id}/chats` route
+  // both 404 ("Route Not Found") for this — `chats/send` is the live one.
+  const specifics = opts.isInMailChannel
+    ? { linkedin: { recruiter: { subject: opts.subject || "Message", signature: opts.signature || "" } } }
+    : { linkedin: { classic: {} } };
   try {
     const data: any = await unipileFetchV2(
       supabase,
       acctV2Id,
-      linkedinV2SendPaths.chats(),
+      linkedinV2SendPaths.chatsSend(),
       {
         method: "POST",
-        body: JSON.stringify({ attendees_ids: [providerId], text: body }),
+        body: JSON.stringify({ text: body, users_ids: [providerId], specifics }),
       },
     );
+    if (opts.isInMailChannel) await decrementInmailCredit(supabase, resolvedAccountId);
     return {
-      message_id: data.id || data.message_id || `msg_${Date.now()}`,
+      message_id: data.message_id || data.id || `msg_${Date.now()}`,
       conversation_id: data.chat_id || data.conversation_id || "",
     };
   } catch (err: any) {
+    if (opts.isInMailChannel) throw new Error(`InMail ${err.message}`);
     throw new Error(`Unipile v2 send error: ${err.message}`);
   }
 }
