@@ -285,6 +285,7 @@ export function useCandidateSendOuts(candidateId: string | undefined) {
         .from('send_outs')
         .select('*, jobs:job_id (id, title, location_text, comp_min, comp_max)')
         .eq('candidate_id', candidateId!)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (rows ?? []) as any[];
@@ -729,6 +730,7 @@ export function useSendOutBoard() {
       const { data: rows, error } = await supabase
         .from('send_outs')
         .select('*')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -898,6 +900,7 @@ export function useDashboardMetrics(range: { from: Date; to: Date }, ownerUserId
         // cards count as "in stage" only when the transition happened in-window.
         applyOwner(supabase.from('candidate_jobs')
           .select('id, candidate_id, job_id, pipeline_stage, stage_updated_at, updated_at')
+          .is('deleted_at', null)
           .gte('stage_updated_at', fromIso).lte('stage_updated_at', toIso)),
 
         // Submission count — send_outs sent to client in range (stage-specific ts)

@@ -75,6 +75,7 @@ function useCandidateJobsForFunnel() {
           'job:jobs(id, title, company_name), ' +
           'candidate:candidates(id, full_name, first_name, last_name, avatar_url, current_title, current_company, location_text, email, phone, owner_user_id, updated_at)',
         )
+        .is('deleted_at', null)
         .order('updated_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as CandidateJobRow[];

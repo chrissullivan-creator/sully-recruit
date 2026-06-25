@@ -45,7 +45,8 @@ export function useJobKanbanRows(jobId: string) {
           id, candidate_id, job_id, pipeline_stage, stage_updated_at,
           candidate:people!candidate_id(id, full_name, first_name, last_name, current_company, avatar_url, target_total_comp, target_base_comp, type)
         `)
-        .eq('job_id', jobId);
+        .eq('job_id', jobId)
+        .is('deleted_at', null);
       if (cjErr) throw cjErr;
       const cjRows = (cjData ?? []) as any[];
       if (cjRows.length === 0) return [] as KanbanRow[];
@@ -55,7 +56,8 @@ export function useJobKanbanRows(jobId: string) {
         .from('send_outs')
         .select('id, candidate_id, candidate_job_id, job_id')
         .eq('job_id', jobId)
-        .in('candidate_id', candidateIds);
+        .in('candidate_id', candidateIds)
+        .is('deleted_at', null);
 
       const soByCandidate = new Map<string, string>();
       const soByCandidateJob = new Map<string, string>();

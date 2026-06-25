@@ -70,7 +70,8 @@ export function OrgActivityFeed() {
         const { data } = await supabase
           .from('candidate_jobs')
           .select('id, candidate_id')
-          .in('id', cjIds);
+          .in('id', cjIds)
+          .is('deleted_at', null);
         for (const r of data ?? []) {
           if (r.id && r.candidate_id) cjMap.set(r.id, r.candidate_id);
         }

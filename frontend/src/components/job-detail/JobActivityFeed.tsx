@@ -30,7 +30,8 @@ export function JobActivityFeed({ jobId, limit = 10 }: JobActivityFeedProps) {
       const { data: cjRows } = await supabase
         .from('candidate_jobs')
         .select('id, candidate_id')
-        .eq('job_id', jobId);
+        .eq('job_id', jobId)
+        .is('deleted_at', null);
       const cjIds = (cjRows ?? []).map((r) => r.id);
       const candidateIds = (cjRows ?? []).map((r) => r.candidate_id).filter(Boolean) as string[];
       // Map candidate_jobs.id → candidate_id so stage rows can link back to the person.

@@ -59,6 +59,7 @@ function useSendOutMetrics(start: Date, end: Date) {
           candidate:people!send_outs_candidate_id_fkey(target_total_comp, target_base_comp),
           job:jobs!send_outs_job_id_fkey(id, title, company_name, company_id)
         `)
+        .is('deleted_at', null)
         .gte('created_at', start.toISOString())
         .lte('created_at', end.toISOString());
       if (error) throw error;
