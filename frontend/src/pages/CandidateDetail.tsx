@@ -32,10 +32,7 @@ import {
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
   Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download,
-  Tag, Sparkles, Award, CheckSquare,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { SkillsEditor } from '@/components/candidate-detail/SkillsEditor';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -147,11 +144,10 @@ const CandidateDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('joe');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
-  const [addNoteOpen, setAddNoteOpen] = useState(false);
 
   const handleDeleteCandidate = async () => {
     if (!id) return;
@@ -174,7 +170,6 @@ const CandidateDetail = () => {
   const [joeChatInput, setJoeChatInput] = useState('');
   const [joeChatLoading, setJoeChatLoading] = useState(false);
   const joeChatScrollRef = useRef<HTMLDivElement>(null);
-  const askJoeScrollRef = useRef<HTMLDivElement>(null);
 
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const handleFetchHistory = async () => {
@@ -922,147 +917,85 @@ const CandidateDetail = () => {
 
   return (
     <MainLayout>
-      {/* ============ STICKY ATS HEADER ============ */}
-      <div className="sticky top-0 z-30 bg-white border-b border-border shadow-sm">
-        {/* Identity + quick-contact + actions row */}
-        <div className="flex items-start gap-3 px-8 py-4">
-          <Button variant="ghost" size="icon" className="mt-0.5" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4" /></Button>
-          {c.avatar_url ? (
-            <img src={c.avatar_url} alt={fullName} className="h-11 w-11 shrink-0 rounded-full object-cover" />
-          ) : (
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">{initials}</div>
-          )}
-          <div className="flex-1 min-w-0">
-            {/* Top line: name + status + role badges */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
-              <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
-              {(() => {
-                const roles: string[] = c.roles ?? ['candidate'];
-                return (
-                  <div className="flex items-center gap-1">
-                    {roles.includes('candidate') && (
-                      <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
-                        Candidate
-                      </span>
-                    )}
-                    {roles.includes('client') && (
-                      <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
-                        Client
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-              {candidateJobMatch && (
-                <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums',
-                  (candidateJobMatch as any).overall_score >= 80 ? 'text-green-500 bg-green-500/15' :
-                  (candidateJobMatch as any).overall_score >= 60 ? 'text-yellow-500 bg-yellow-500/15' :
-                  'text-muted-foreground bg-muted'
-                )}>
-                  Match {(candidateJobMatch as any).overall_score}%
-                </span>
-              )}
-            </div>
-            {/* Meta line: title · company · location · owner · last activity */}
-            <div className="mt-1 flex items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground flex-wrap">
-              {candidate.current_title && <span className="truncate">{candidate.current_title}</span>}
-              {candidate.current_title && candidate.current_company && <span className="text-border">·</span>}
-              {candidate.current_company && (
-                <span className="inline-flex items-center gap-1">
-                  <Building className="h-3 w-3" />
-                  <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
-                </span>
-              )}
-              {c.location_text && (
-                <>
-                  <span className="text-border">·</span>
-                  <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {c.location_text}</span>
-                </>
-              )}
-              {(() => {
-                const ownerName = profiles.find(p => p.id === (candidate as any).owner_user_id)?.full_name;
-                return ownerName ? (
-                  <>
-                    <span className="text-border">·</span>
-                    <span className="inline-flex items-center gap-1"><User className="h-3 w-3" /> {ownerName}</span>
-                  </>
-                ) : null;
-              })()}
-              <span className="text-border">·</span>
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                Last activity {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}
-              </span>
-            </div>
-          </div>
-
-          {/* Quick-contact icons */}
-          <div className="flex items-center gap-1.5 shrink-0">
+      {/* Top header bar — ContactDetail style */}
+      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4" /></Button>
+        {c.avatar_url ? (
+          <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">{initials}</div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
+            <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
             {(() => {
-              const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
-              return mailto ? (
-                <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
-                  <Mail className="h-4 w-4" />
-                </a>
-              ) : null;
+              const roles: string[] = c.roles ?? ['candidate'];
+              return (
+                <div className="flex items-center gap-1">
+                  {roles.includes('candidate') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
+                      Candidate
+                    </span>
+                  )}
+                  {roles.includes('client') && (
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                      Client
+                    </span>
+                  )}
+                </div>
+              );
             })()}
-            {c.mobile_phone && (
-              <CallButton
-                phone={c.mobile_phone}
-                candidateId={candidate.id}
-                iconOnly
-                title={`Call ${c.mobile_phone} (RingCentral RingOut)`}
-              />
-            )}
-            {candidate.linkedin_url && (
-              <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
-                <Linkedin className="h-4 w-4" />
-              </a>
-            )}
-            {id && (
-              <PersonRolesMenu
-                personId={id}
-                roles={(candidate as any)?.roles}
-                currentType={(candidate as any)?.type}
-              />
-            )}
           </div>
+          <p className="text-sm text-muted-foreground truncate">
+            {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}
+            {candidate.current_company && (
+              <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
+            )}
+          </p>
         </div>
 
-        {/* Surfaced action button row */}
-        <div className="flex items-center gap-1.5 px-8 pb-3 flex-wrap">
-          {candidate.phone || c.mobile_phone ? (
-            <CallButton phone={c.mobile_phone || candidate.phone} candidateId={candidate.id} />
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => toast.error('No phone number on file')}>
-              <Phone className="h-3.5 w-3.5 mr-1" /> Call
-            </Button>
+        {/* Social / contact links */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {(() => {
+            // Prefer personal_email for candidate outreach (sequences send to
+            // personal_email; work_email is shown for context). Fall back to
+            // the legacy email column during the migration off it.
+            const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
+            return mailto ? (
+              <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
+                <Mail className="h-4 w-4" />
+              </a>
+            ) : null;
+          })()}
+          {candidate.phone && (
+            <CallButton
+              phone={candidate.phone}
+              candidateId={candidate.id}
+              iconOnly
+              title={`Call ${candidate.phone} (RingCentral RingOut)`}
+            />
           )}
-          <Button variant="outline" size="sm" onClick={() => {
-            const to = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
-            if (to) { window.location.href = `mailto:${to}`; }
-            else { toast.error('No email address on file'); }
-          }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
-          <Button variant="outline" size="sm" onClick={() => {
-            if (candidate.phone || c.mobile_phone) { window.location.href = `sms:${c.mobile_phone || candidate.phone}`; }
-            else { toast.error('No phone number on file'); }
-          }}><MessageSquare className="h-3.5 w-3.5 mr-1" /> Text</Button>
-          <Button variant="outline" size="sm" onClick={() => setScheduleMeetingOpen(true)}>
-            <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Schedule
-          </Button>
+          {candidate.linkedin_url && (
+            <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
+              <Linkedin className="h-4 w-4" />
+            </a>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Primary actions inline. Everything else lives behind the
+              "More" dropdown to keep the header from overflowing on
+              narrower screens. */}
           <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
-            <FileText className="h-3.5 w-3.5 mr-1" /> Submit to Job
+            <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setAddNoteOpen(true)}>
-            <StickyNote className="h-3.5 w-3.5 mr-1" /> Add Note
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setCreateTaskOpen(true)}>
-            <CheckSquare className="h-3.5 w-3.5 mr-1" /> Create Task
-          </Button>
-          <Button variant="gold-outline" size="sm" onClick={() => { setActiveTab('overview'); askJoeScrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }}>
-            <Martini className="h-3.5 w-3.5 mr-1" /> Ask Joe
-          </Button>
+          {id && (
+            <EnrichButton
+              peopleIds={[id]}
+              invalidateKeys={[['candidate', id], ['candidates'], ['candidate_work_history', id]]}
+            />
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1071,17 +1004,16 @@ const CandidateDetail = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              {id && (
-                <div className="px-1 py-1">
-                  <EnrichButton
-                    peopleIds={[id]}
-                    invalidateKeys={[['candidate', id], ['candidates'], ['candidate_work_history', id]]}
-                  />
-                </div>
-              )}
+              <DropdownMenuItem onClick={() => setScheduleMeetingOpen(true)}>
+                <CalendarPlus className="h-3.5 w-3.5 mr-2" /> Schedule meeting
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setCreateTaskOpen(true)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Add task
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setEnrollOpen(true)}>
                 <Play className="h-3.5 w-3.5 mr-2" /> Enroll in sequence
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {resumeUrl && (
                 <DropdownMenuItem onClick={() => setShowResume(!showResume)}>
                   <FileText className="h-3.5 w-3.5 mr-2" />
@@ -1095,6 +1027,9 @@ const CandidateDetail = () => {
                   <History className="h-3.5 w-3.5 mr-2" />
                 )}
                 Fetch History
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setActiveTab('joe')}>
+                <Martini className="h-3.5 w-3.5 mr-2" /> Ask Joe
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setMergeOpen(true)}>
                 <Merge className="h-3.5 w-3.5 mr-2" /> Merge with another candidate
@@ -1126,6 +1061,13 @@ const CandidateDetail = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {id && (
+            <PersonRolesMenu
+              personId={id}
+              roles={(candidate as any)?.roles}
+              currentType={(candidate as any)?.type}
+            />
+          )}
           <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
@@ -1161,447 +1103,288 @@ const CandidateDetail = () => {
         </div>
       )}
 
-      {/* ============ BODY: 2-column ATS layout ============ */}
+      {/* Main content — full width (right info sidebar removed) */}
       <div className="flex flex-1 overflow-hidden bg-page-bg">
 
-        {/* ============ LEFT SIDEBAR ============ */}
-        <aside className="hidden lg:flex w-[300px] shrink-0 flex-col border-r border-border bg-white overflow-y-auto">
-          <div className="divide-y divide-border">
-            {/* ── Contact ─────────────────────────────────────────── */}
-            <Collapsible defaultOpen>
-              <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-3 group">
-                <div className="flex items-center gap-2">
-                  <User className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Contact</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {canEdit && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => { e.stopPropagation(); setEditingInfo(!editingInfo); }}
-                      className={cn(
-                        'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
-                        editingInfo ? 'bg-accent/15 text-accent' : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      <Edit className="h-2.5 w-2.5" /> {editingInfo ? 'Done' : 'Edit'}
-                    </span>
-                  )}
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-data-[state=open]:rotate-180 transition-transform" />
-                </div>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-4 pb-4 space-y-3">
-                <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 min-w-0">
-                    <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
-                  </div>
-                  {(candidate as any).company_id && (
-                    <button
-                      onClick={() => navigate(`/companies/${(candidate as any).company_id}`)}
-                      title="View company"
-                      className="shrink-0 mb-1 p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-                <EditableField
-                  label={
-                    <span className="inline-flex items-center gap-2">
-                      Work Email
-                      <EmailBounceBadge
-                        emailInvalid={(candidate as any).email_invalid}
-                        reason={(candidate as any).email_invalid_reason}
-                        invalidatedAt={(candidate as any).email_invalid_at}
-                      />
-                    </span>
-                  }
-                  value={c.work_email}
-                  onSave={v => updateField('work_email', v)}
-                  type="email"
-                  placeholder="work@firm.com"
-                  disabled={!canEdit}
-                  highlight={editingInfo}
-                />
-                <EditableField
-                  label={
-                    <span className="inline-flex items-center gap-2">
-                      Personal Email
-                      <EmailBounceBadge
-                        emailInvalid={(candidate as any).email_invalid}
-                        reason={(candidate as any).email_invalid_reason}
-                        invalidatedAt={(candidate as any).email_invalid_at}
-                      />
-                    </span>
-                  }
-                  value={c.personal_email}
-                  onSave={v => updateField('personal_email', v)}
-                  type="email"
-                  placeholder="personal@gmail.com"
-                  disabled={!canEdit}
-                  highlight={editingInfo}
-                />
-                <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
-                  await updateField('mobile_phone', v);
-                  if (v) await updateField('phone', v);
-                }} placeholder="+1 (212) 555-0000" disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Visa Status" value={c.visa_status} onSave={v => updateField('visa_status', v)} placeholder="US Citizen, H-1B, GC" disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Notice Period" value={c.notice_period} onSave={v => updateField('notice_period', v)} placeholder="2 weeks, 30 days" disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
-                <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
-
-                {/* Owner */}
-                <div className="space-y-1 pt-1">
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                  <SearchableSelect
-                    options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
-                    value={(candidate as any).owner_user_id ?? ''}
-                    onChange={(val) => {
-                      const newOwnerId = val || null;
-                      if (newOwnerId && newOwnerId !== user?.id) {
-                        setPendingOwnerId(newOwnerId);
-                      } else {
-                        (async () => {
-                          try {
-                            const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
-                            if (error) { toast.error('Failed to update owner'); return; }
-                            queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                            queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                            toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                          } catch (err: any) {
-                            toast.error(err?.message || 'Failed to update owner');
-                          }
-                        })();
-                      }
-                    }}
-                    placeholder="Assign owner…"
-                    searchPlaceholder="Search team…"
-                    clearLabel="— Unassigned —"
-                    className="h-7 text-xs w-full"
-                  />
-                </div>
-
-                {/* Status signals */}
-                <div className="flex flex-col gap-1.5 pt-1 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Send className="h-3 w-3" /> Reached out: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <MessageSquare className="h-3 w-3" /> Last response: {c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}
-                  </span>
-                  {c.last_comm_channel && (
-                    <span className="inline-flex items-center gap-1 capitalize">
-                      <ChannelIcon channel={c.last_comm_channel} />
-                      {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
-                    </span>
-                  )}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
-                    <OutOfOfficeBadge oooUntil={(candidate as any).ooo_until} />
-                  </div>
-                  <span>Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</span>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* ── Compensation ────────────────────────────────────── */}
-            <Collapsible defaultOpen>
-              <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-3 group">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Compensation</span>
-                </div>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-data-[state=open]:rotate-180 transition-transform" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-4 pb-4 space-y-3">
-                <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
-                <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
-                <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
-                <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
-                <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
-                <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* ── Skills (NEW) ────────────────────────────────────── */}
-            <Collapsible defaultOpen>
-              <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-3 group">
-                <div className="flex items-center gap-2">
-                  <Award className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Skills</span>
-                  {Array.isArray(c.skills) && c.skills.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground">({c.skills.length})</span>
-                  )}
-                </div>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-data-[state=open]:rotate-180 transition-transform" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-4 pb-4">
-                <SkillsEditor personId={id} skills={c.skills} disabled={!canEdit} />
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* ── Tags (picklists + custom fields) ────────────────── */}
-            <Collapsible defaultOpen>
-              <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-3 group">
-                <div className="flex items-center gap-2">
-                  <Tag className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Tags</span>
-                </div>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-data-[state=open]:rotate-180 transition-transform" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-4 pb-4 space-y-4">
-                {id && (
-                  <PicklistEditSection
-                    table="people"
-                    recordId={id}
-                    record={candidate as any}
-                    disabled={!canEdit}
-                    fields={[
-                      { column: 'departments', category: 'department', label: 'Department' },
-                      { column: 'products', category: 'products', label: 'Products' },
-                    ]}
-                    invalidateKeys={[['candidate', id], ['candidates']]}
-                  />
-                )}
-                {id && (
-                  <CustomFieldsSection
-                    entityType="candidate"
-                    recordId={id}
-                    value={(candidate as any)?.custom_fields}
-                    invalidateKeys={[['candidate', id]]}
-                  />
-                )}
-              </CollapsibleContent>
-            </Collapsible>
-          </div>
-        </aside>
-
-        {/* ============ MAIN PANEL ============ */}
+        {/* ============ MAIN PANEL (full width) ============ */}
         <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Contact info grid */}
+          <div className="px-8 py-5 border-b border-border">
+            {canEdit && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setEditingInfo(!editingInfo)}
+                  className={cn(
+                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                    editingInfo
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  )}
+                >
+                  <Edit className="h-3 w-3" />
+                  {editingInfo ? 'Done Editing' : 'Edit Info'}
+                </button>
+              </div>
+            )}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
+              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
+              <div className="flex items-end gap-2">
+                <div className="flex-1 min-w-0">
+                  <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
+                </div>
+                {(candidate as any).company_id && (
+                  <button
+                    onClick={() => navigate(`/companies/${(candidate as any).company_id}`)}
+                    title="View company"
+                    className="shrink-0 mb-1 p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
+              <EditableField
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Work Email
+                    <EmailBounceBadge
+                      emailInvalid={(candidate as any).email_invalid}
+                      reason={(candidate as any).email_invalid_reason}
+                      invalidatedAt={(candidate as any).email_invalid_at}
+                    />
+                  </span>
+                }
+                value={c.work_email}
+                onSave={v => updateField('work_email', v)}
+                type="email"
+                placeholder="work@firm.com"
+                disabled={!canEdit}
+                highlight={editingInfo}
+              />
+              <EditableField
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    Personal Email
+                    <EmailBounceBadge
+                      emailInvalid={(candidate as any).email_invalid}
+                      reason={(candidate as any).email_invalid_reason}
+                      invalidatedAt={(candidate as any).email_invalid_at}
+                    />
+                  </span>
+                }
+                value={c.personal_email}
+                onSave={v => updateField('personal_email', v)}
+                type="email"
+                placeholder="personal@gmail.com"
+                disabled={!canEdit}
+                highlight={editingInfo}
+              />
+              <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
+                await updateField('mobile_phone', v);
+                // Keep legacy phone in sync
+                if (v) await updateField('phone', v);
+              }} placeholder="+1 (212) 555-0000" disabled={!canEdit} highlight={editingInfo} />
+            </div>
+
+            {/* Compensation — collapsible */}
+            <div className="mt-4">
+              <Collapsible open={compExpanded} onOpenChange={setCompExpanded}>
+                <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  <DollarSign className="h-3 w-3" /> Compensation
+                  {compExpanded ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
+                    <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
+                    <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
+                    <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
+                    <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
+                    <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
+                    <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+
+            {/* Timestamps + sentiment row */}
+            <div className="flex items-center gap-6 mt-4 text-xs text-muted-foreground flex-wrap">
+              <span className="flex items-center gap-1">
+                <Send className="h-3 w-3" /> Last Reached Out: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}
+              </span>
+              <span className="flex items-center gap-1">
+                <MessageSquare className="h-3 w-3" /> Last Response: {c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}
+              </span>
+              {c.last_comm_channel && (
+                <span className="inline-flex items-center gap-1 capitalize">
+                  <ChannelIcon channel={c.last_comm_channel} />
+                  {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
+                </span>
+              )}
+              <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
+              <OutOfOfficeBadge oooUntil={(candidate as any).ooo_until} />
+              <span>Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</span>
+            </div>
+
+            {/* Owner + Job assignment row */}
+            <div className="flex items-center gap-4 mt-4 flex-wrap">
+              <div className="space-y-1">
+                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
+                <SearchableSelect
+                  options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
+                  value={(candidate as any).owner_user_id ?? ''}
+                  onChange={(val) => {
+                    const newOwnerId = val || null;
+                    if (newOwnerId && newOwnerId !== user?.id) {
+                      setPendingOwnerId(newOwnerId);
+                    } else {
+                      (async () => {
+                        try {
+                          const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
+                          if (error) { toast.error('Failed to update owner'); return; }
+                          queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                          queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                          toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Failed to update owner');
+                        }
+                      })();
+                    }
+                  }}
+                  placeholder="Assign owner…"
+                  searchPlaceholder="Search team…"
+                  clearLabel="— Unassigned —"
+                  className="h-7 text-xs w-44"
+                />
+              </div>
+
+              {/* Match score badge */}
+              {candidateJobMatch && (
+                <div className="flex items-center gap-2">
+                  <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums',
+                    (candidateJobMatch as any).overall_score >= 80 ? 'text-green-400 bg-green-500/15' :
+                    (candidateJobMatch as any).overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' :
+                    'text-muted-foreground bg-muted'
+                  )}>
+                    Match: {(candidateJobMatch as any).overall_score}%
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            {/* Horizontally scrollable strip — many tabs overflow on smaller
+            {/* Horizontally scrollable strip — 9 tabs overflow on smaller
                 viewports; scroll-snap + hidden scrollbar give a clean
                 "swipeable" feel without breaking shadcn TabsList layout. */}
             <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <TabsList className="bg-white border border-card-border inline-flex w-max">
-                <TabsTrigger value="overview" className="gap-1.5 snap-start"><Info className="h-3.5 w-3.5" /> Overview</TabsTrigger>
-                <TabsTrigger value="experience" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Experience</TabsTrigger>
-                <TabsTrigger value="jobs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Jobs</TabsTrigger>
-                <TabsTrigger value="emails" className="gap-1.5 snap-start"><Mail className="h-3.5 w-3.5" /> Emails</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5 snap-start"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-                <TabsTrigger value="calls" className="gap-1.5 snap-start"><PhoneCall className="h-3.5 w-3.5" /> Calls</TabsTrigger>
-                <TabsTrigger value="tasks" className="gap-1.5 snap-start"><CheckSquare className="h-3.5 w-3.5" /> Tasks</TabsTrigger>
-                <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
-                <TabsTrigger value="compensation" className="gap-1.5 snap-start"><DollarSign className="h-3.5 w-3.5" /> Compensation</TabsTrigger>
+                <TabsTrigger value="joe" className="gap-1.5 snap-start"><Martini className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
+                <TabsTrigger value="background" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
                 <TabsTrigger value="activity" className="gap-1.5 snap-start"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+                <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
+                <TabsTrigger value="send-outs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5 snap-start"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
-              {/* ============ AI PANEL — Joe Says + Ask Joe (always visible) ============ */}
-              <div ref={askJoeScrollRef} className="px-8 pt-5">
-                <Collapsible defaultOpen>
-                  <div className="rounded-xl border border-accent/20 bg-accent/5">
-                    <div className="flex items-center justify-between px-4 py-3">
-                      <CollapsibleTrigger className="flex items-center gap-2 group">
-                        <Sparkles className="h-4 w-4 text-accent" />
-                        <h2 className="text-sm font-semibold">AI — Joe</h2>
-                        {c.joe_says_updated_at && (
-                          <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
-                        )}
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-data-[state=open]:rotate-180 transition-transform" />
-                      </CollapsibleTrigger>
-                      <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
-                        {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                        {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
-                      </Button>
-                    </div>
-                    <CollapsibleContent className="px-4 pb-4 space-y-4">
-                      {generatingJoe ? (
-                        <div className="flex items-center gap-3 py-6 text-muted-foreground">
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                          <span className="text-sm">Joe is analyzing this candidate...</span>
-                        </div>
-                      ) : c.joe_says ? (
-                        <div className="rounded-lg border border-accent/20 bg-white p-4 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
-                          {(c.joe_says as string).split('\n').map((line: string, i: number) => {
-                            if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
-                            if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
-                            return line.trim() ? (
-                              <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
-                            ) : <div key={i} className="h-1" />;
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-border bg-white p-6 text-center">
-                          <Martini className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
-                          <p className="text-sm font-medium mb-1">No Joe Says yet</p>
-                          <p className="text-xs text-muted-foreground mb-3">AI brief using resume, notes, communications, and sequence history.</p>
-                          <Button variant="gold" size="sm" onClick={generateJoeSays}>
-                            <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
-                          </Button>
-                        </div>
-                      )}
+              <TabsContent value="joe" className="px-8 py-5 mt-0">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Martini className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Joe Says</h2>
+                    {c.joe_says_updated_at && (
+                      <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
+                    )}
+                  </div>
+                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                    {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                    {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
+                  </Button>
+                </div>
 
-                      {/* ── Ask Joe Chat ─────────────────────────────────── */}
-                      <div className="rounded-lg border border-border bg-white">
-                        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-muted/30 rounded-t-lg">
-                          <Martini className="h-4 w-4 text-accent" />
-                          <h3 className="text-sm font-semibold">Ask Joe about this candidate</h3>
-                        </div>
-                        <div ref={joeChatScrollRef} className="h-56 overflow-y-auto p-4 space-y-3">
-                          {joeChatMessages.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get comp insights, pitch ideas...</p>
-                          )}
-                          {joeChatMessages.map((msg, i) => (
-                            <div key={i} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
-                              <div className={cn(
-                                'max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
-                                msg.role === 'user' ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground'
-                              )}>
-                                {msg.content}
-                              </div>
-                            </div>
-                          ))}
-                          {joeChatLoading && joeChatMessages[joeChatMessages.length - 1]?.role === 'user' && (
-                            <div className="flex justify-start">
-                              <div className="bg-muted rounded-lg px-3 py-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="border-t border-border p-3">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={joeChatInput}
-                              onChange={(e) => setJoeChatInput(e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && handleJoeChatSend()}
-                              placeholder="Ask Joe anything about this candidate..."
-                              disabled={joeChatLoading}
-                              className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
-                            />
-                            <Button size="icon" variant="gold" onClick={handleJoeChatSend} disabled={joeChatLoading}>
-                              <Send className="h-4 w-4" />
-                            </Button>
-                          </div>
+                {generatingJoe ? (
+                  <div className="flex items-center gap-3 py-10 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-sm">Joe is analyzing this candidate...</span>
+                  </div>
+                ) : c.joe_says ? (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                    {(c.joe_says as string).split('\n').map((line: string, i: number) => {
+                      if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
+                      if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
+                      return line.trim() ? (
+                        <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
+                      ) : <div key={i} className="h-1" />;
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">No Joe Says yet</p>
+                    <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
+                    <Button variant="gold" size="sm" onClick={generateJoeSays}>
+                      <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
+                    </Button>
+                  </div>
+                )}
+
+                {/* ── Ask Joe Chat ───────────────────────────────────────── */}
+                <div className="mt-6 rounded-xl border border-border">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30 rounded-t-xl">
+                    <Martini className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold">Ask Joe about this candidate</h3>
+                  </div>
+                  <div ref={joeChatScrollRef} className="h-64 overflow-y-auto p-4 space-y-3">
+                    {joeChatMessages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get comp insights, pitch ideas...</p>
+                    )}
+                    {joeChatMessages.map((msg, i) => (
+                      <div key={i} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                        <div className={cn(
+                          'max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
+                          msg.role === 'user' ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground'
+                        )}>
+                          {msg.content}
                         </div>
                       </div>
-                    </CollapsibleContent>
+                    ))}
+                    {joeChatLoading && joeChatMessages[joeChatMessages.length - 1]?.role === 'user' && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted rounded-lg px-3 py-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+                      </div>
+                    )}
                   </div>
-                </Collapsible>
-              </div>
-
-              {/* ============ ACTIVITY TIMELINE — centerpiece ============ */}
-              <div className="px-8 py-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <History className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Activity Timeline</h2>
-                </div>
-                {(() => {
-                  // Build merged timeline from all data sources
-                  const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
-
-                  // Call logs
-                  (callLogs as any[]).forEach((cl) => {
-                    const dur = cl.duration_seconds ? `${Math.floor(cl.duration_seconds / 60)}:${(cl.duration_seconds % 60).toString().padStart(2, '0')}` : '';
-                    events.push({
-                      date: cl.started_at,
-                      icon: cl.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5 text-info" /> : <PhoneIncoming className="h-3.5 w-3.5 text-success" />,
-                      title: `${cl.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call${dur ? ` (${dur})` : ''}`,
-                      detail: cl.summary?.slice(0, 120) || '',
-                      type: 'call',
-                    });
-                  });
-
-                  // AI call notes — Joe's structured summary of a call
-                  (callNotes as any[]).forEach((cn) => {
-                    const when = cn.updated_candidates_at || cn.created_at;
-                    const body = (cn.summary || cn.note || cn.transcript || '').toString().replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-                    events.push({
-                      date: when,
-                      icon: <Sparkles className="h-3.5 w-3.5 text-accent" />,
-                      title: 'AI Call Note',
-                      detail: body.slice(0, 160),
-                      type: 'ai_call_note',
-                    });
-                  });
-
-                  // Conversations (latest message)
-                  (conversations as any[]).forEach((conv) => {
-                    events.push({
-                      date: conv.last_message_at,
-                      icon: <ChannelIcon channel={conv.channel} />,
-                      title: `${conv.channel === 'linkedin' ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1)} conversation`,
-                      detail: conv.subject ? `${conv.subject} — ${conv.last_message_preview || ''}` : conv.last_message_preview || '',
-                      type: 'message',
-                    });
-                  });
-
-                  // Notes
-                  (notes as any[]).forEach((n) => {
-                    const text = n.note?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
-                    events.push({
-                      date: n.created_at,
-                      icon: <Edit className="h-3.5 w-3.5 text-muted-foreground" />,
-                      title: 'Note added',
-                      detail: text.slice(0, 120),
-                      type: 'note',
-                    });
-                  });
-
-                  // Send-outs
-                  sendOuts.forEach((s: any) => {
-                    events.push({
-                      date: s.created_at,
-                      icon: <Briefcase className="h-3.5 w-3.5 text-accent" />,
-                      title: `Submitted to ${(s.jobs as any)?.title || 'job'}`,
-                      detail: `${(s.jobs as any)?.company_name || ''} — Stage: ${s.stage || '—'}`,
-                      type: 'sendout',
-                    });
-                  });
-
-                  // Sort by date descending
-                  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-                  if (events.length === 0) {
-                    return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
-                  }
-
-                  return (
-                    <div className="space-y-3">
-                      {events.map((ev, i) => (
-                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-white p-3">
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                            {ev.icon}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '—'}
-                              </span>
-                            </div>
-                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
-                          </div>
-                        </div>
-                      ))}
+                  <div className="border-t border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={joeChatInput}
+                        onChange={(e) => setJoeChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJoeChatSend()}
+                        placeholder="Ask Joe anything about this candidate..."
+                        disabled={joeChatLoading}
+                        className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                      />
+                      <Button size="icon" variant="gold" onClick={handleJoeChatSend} disabled={joeChatLoading}>
+                        <Send className="h-4 w-4" />
+                      </Button>
                     </div>
-                  );
-                })()}
-              </div>
+                  </div>
+                </div>
+              </TabsContent>
 
-              {/* ============ OVERVIEW TAB ============ */}
-              <TabsContent value="overview" className="px-8 py-5 mt-0 space-y-6">
+              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
@@ -1612,12 +1395,9 @@ const CandidateDetail = () => {
                 </div>
                 <EditableTextarea label="Where Interviewed" value={c.where_interviewed} onSave={v => updateField('where_interviewed', v)} placeholder="Firms / companies currently interviewing at..." rows={2} />
                 <EditableTextarea label="Where Submitted" value={c.where_submitted} onSave={v => updateField('where_submitted', v)} placeholder="Firms / companies submitted to by other recruiters..." rows={2} />
-              </TabsContent>
 
-              {/* ============ EXPERIENCE TAB ============ */}
-              <TabsContent value="experience" className="px-8 py-5 mt-0 space-y-6">
                 {/* ── Work History ──────────────────────────────────────── */}
-                <div>
+                <div className="border-t border-border pt-5">
                   <Collapsible open={workHistoryOpen} onOpenChange={setWorkHistoryOpen}>
                     <CollapsibleTrigger className="flex items-center justify-between w-full group">
                       <div className="flex items-center gap-2">
@@ -1759,10 +1539,139 @@ const CandidateDetail = () => {
                     </CollapsibleContent>
                   </Collapsible>
                 </div>
+
+                {id && (
+                  <PicklistEditSection
+                    table="people"
+                    recordId={id}
+                    record={candidate as any}
+                    disabled={!canEdit}
+                    fields={[
+                      { column: 'departments', category: 'department', label: 'Department' },
+                      { column: 'products', category: 'products', label: 'Products' },
+                    ]}
+                    invalidateKeys={[['candidate', id], ['candidates']]}
+                  />
+                )}
+
+                {id && (
+                  <CustomFieldsSection
+                    entityType="candidate"
+                    recordId={id}
+                    value={(candidate as any)?.custom_fields}
+                    invalidateKeys={[['candidate', id]]}
+                  />
+                )}
               </TabsContent>
 
-              {/* ============ ACTIVITY TAB — conversation drill-down + recaps ============ */}
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-6">
+                {/* Quick-action bar (was its own Communications tab — merged in) */}
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const to = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
+                    if (to) { window.location.href = `mailto:${to}`; }
+                    else { toast.error('No email address on file'); }
+                  }}><Mail className="h-3.5 w-3.5 mr-1" /> Email</Button>
+                  {candidate.phone ? (
+                    <CallButton phone={candidate.phone} candidateId={candidate.id} />
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={() => toast.error('No phone number on file')}>
+                      <Phone className="h-3.5 w-3.5 mr-1" /> Call
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.linkedin_url) { window.open(candidate.linkedin_url, '_blank'); }
+                    else { toast.error('No LinkedIn URL on file'); }
+                  }}><Linkedin className="h-3.5 w-3.5 mr-1" /> LinkedIn</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (candidate.phone) { window.location.href = `sms:${candidate.phone}`; }
+                    else { toast.error('No phone number on file'); }
+                  }}><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5 text-accent" />
+                  <h2 className="text-base font-semibold">Activity Timeline</h2>
+                </div>
+                {(() => {
+                  // Build merged timeline from all data sources
+                  const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
+
+                  // Call logs
+                  (callLogs as any[]).forEach((cl) => {
+                    const dur = cl.duration_seconds ? `${Math.floor(cl.duration_seconds / 60)}:${(cl.duration_seconds % 60).toString().padStart(2, '0')}` : '';
+                    events.push({
+                      date: cl.started_at,
+                      icon: cl.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5 text-info" /> : <PhoneIncoming className="h-3.5 w-3.5 text-success" />,
+                      title: `${cl.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call${dur ? ` (${dur})` : ''}`,
+                      detail: cl.summary?.slice(0, 120) || '',
+                      type: 'call',
+                    });
+                  });
+
+                  // Conversations (latest message)
+                  (conversations as any[]).forEach((conv) => {
+                    events.push({
+                      date: conv.last_message_at,
+                      icon: <ChannelIcon channel={conv.channel} />,
+                      title: `${conv.channel === 'linkedin' ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1)} conversation`,
+                      detail: conv.subject ? `${conv.subject} — ${conv.last_message_preview || ''}` : conv.last_message_preview || '',
+                      type: 'message',
+                    });
+                  });
+
+                  // Notes
+                  (notes as any[]).forEach((n) => {
+                    const text = n.note?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+                    events.push({
+                      date: n.created_at,
+                      icon: <Edit className="h-3.5 w-3.5 text-muted-foreground" />,
+                      title: 'Note added',
+                      detail: text.slice(0, 120),
+                      type: 'note',
+                    });
+                  });
+
+                  // Send-outs
+                  sendOuts.forEach((s: any) => {
+                    events.push({
+                      date: s.created_at,
+                      icon: <Briefcase className="h-3.5 w-3.5 text-accent" />,
+                      title: `Submitted to ${(s.jobs as any)?.title || 'job'}`,
+                      detail: `${(s.jobs as any)?.company_name || ''} — Stage: ${s.stage || '—'}`,
+                      type: 'sendout',
+                    });
+                  });
+
+                  // Sort by date descending
+                  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                  if (events.length === 0) {
+                    return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {events.map((ev, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                            {ev.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '—'}
+                              </span>
+                            </div>
+                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
                 {/* Meeting recaps — was its own tab, now lives under Activity */}
                 <div className="pt-2">
                   <MeetingRecapsTab
@@ -1841,172 +1750,6 @@ const CandidateDetail = () => {
                       })}
                     </div>
                   )}
-                </div>
-              </TabsContent>
-
-              {/* ============ EMAILS TAB (conversations filtered to email) ============ */}
-              <TabsContent value="emails" className="px-8 py-5 mt-0 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Emails</h2>
-                </div>
-                {(() => {
-                  const emailConvs = (conversations as any[]).filter((conv) => conv.channel === 'email');
-                  if (emailConvs.length === 0) {
-                    return <p className="text-sm text-muted-foreground">No email conversations yet.</p>;
-                  }
-                  return (
-                    <div className="space-y-3">
-                      {emailConvs.map((conv) => {
-                        const messages = (conv.messages || []).sort(
-                          (a: any, b: any) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime()
-                        );
-                        return (
-                          <Collapsible key={conv.id}>
-                            <div className="rounded-lg border border-border">
-                              <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                                    <span className="text-sm font-medium">Email</span>
-                                    <Badge variant="secondary" className="text-[9px]">{messages.length} msg{messages.length !== 1 ? 's' : ''}</Badge>
-                                  </div>
-                                  <span className="text-xs text-muted-foreground">
-                                    {conv.last_message_at ? format(new Date(conv.last_message_at), 'MMM d, yyyy') : ''}
-                                  </span>
-                                </div>
-                                {conv.subject && <p className="text-sm mt-1">{conv.subject}</p>}
-                                {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
-                              </CollapsibleTrigger>
-                              <CollapsibleContent>
-                                <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
-                                  {messages.map((msg: any) => (
-                                    <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
-                                      <div className={cn(
-                                        'max-w-[80%] rounded-lg px-3 py-2 text-sm',
-                                        msg.direction === 'outbound' ? 'bg-accent/15 text-foreground' : 'bg-muted text-foreground'
-                                      )}>
-                                        {msg.subject && <p className="text-xs font-medium mb-1">{msg.subject}</p>}
-                                        <p className="text-xs whitespace-pre-wrap break-words">{
-                                          (msg.body || msg.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)
-                                        }</p>
-                                        <p className="text-[10px] text-muted-foreground mt-1">
-                                          {msg.sent_at || msg.created_at ? format(new Date(msg.sent_at || msg.created_at), 'MMM d, h:mm a') : ''}
-                                          {msg.direction === 'outbound' ? ' · Sent' : ' · Received'}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  {messages.length === 0 && (
-                                    <p className="text-xs text-muted-foreground text-center py-2">No messages in this conversation.</p>
-                                  )}
-                                </div>
-                              </CollapsibleContent>
-                            </div>
-                          </Collapsible>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </TabsContent>
-
-              {/* ============ CALLS TAB (call_logs) ============ */}
-              <TabsContent value="calls" className="px-8 py-5 mt-0 space-y-3">
-                <div className="flex items-center gap-2">
-                  <PhoneCall className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Calls</h2>
-                  <span className="text-xs text-muted-foreground">({(callLogs as any[]).length})</span>
-                </div>
-                {(callLogs as any[]).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No calls logged yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {(callLogs as any[]).map((cl) => {
-                      const dur = cl.duration_seconds ? `${Math.floor(cl.duration_seconds / 60)}:${(cl.duration_seconds % 60).toString().padStart(2, '0')}` : '';
-                      const aiNote = (callNotes as any[]).find((n) => n.call_log_id === cl.id || n.call_id === cl.id) ?? null;
-                      return (
-                        <button
-                          key={cl.id}
-                          onClick={() => setSelectedCall({ call: cl, aiNote })}
-                          className="w-full text-left flex items-start gap-3 rounded-lg border border-border bg-white p-3 hover:bg-muted/30 transition-colors"
-                        >
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                            {cl.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5 text-info" /> : <PhoneIncoming className="h-3.5 w-3.5 text-success" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-foreground">
-                                {cl.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call{dur ? ` (${dur})` : ''}
-                                {cl.status && <span className="ml-2 text-xs text-muted-foreground capitalize">{cl.status}</span>}
-                              </p>
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                {cl.started_at ? format(new Date(cl.started_at), 'MMM d, yyyy h:mm a') : '—'}
-                              </span>
-                            </div>
-                            {cl.summary && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{cl.summary}</p>}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* ============ TASKS TAB ============ */}
-              <TabsContent value="tasks" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckSquare className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Tasks &amp; Meetings</h2>
-                    <span className="text-xs text-muted-foreground">({candidateTasks.length})</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setScheduleMeetingOpen(true)}>
-                      <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Schedule
-                    </Button>
-                    <Button variant="gold" size="sm" onClick={() => setCreateTaskOpen(true)}>
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Add Task
-                    </Button>
-                  </div>
-                </div>
-                {candidateTasks.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <CheckSquare className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No tasks or meetings</p>
-                    <p className="text-xs text-muted-foreground">Create a task or schedule a meeting to track follow-ups for this candidate.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {meetings.length > 0 && (
-                      <div className="space-y-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Meetings</h3>
-                        {meetings.map((t: Task) => <TaskCard key={t.id} task={t} />)}
-                      </div>
-                    )}
-                    {regularTasks.length > 0 && (
-                      <div className="space-y-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</h3>
-                        {regularTasks.map((t: Task) => <TaskCard key={t.id} task={t} />)}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* ============ COMPENSATION TAB ============ */}
-              <TabsContent value="compensation" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Compensation</h2>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-                  <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
-                  <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
-                  <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
-                  <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
-                  <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
-                  <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
                 </div>
               </TabsContent>
 
@@ -2297,8 +2040,8 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              {/* ── Jobs Tab (Source pre-funnel + Send Outs) ──────────── */}
-              <TabsContent value="jobs" className="px-8 py-5 mt-0 space-y-6">
+              {/* ── Pipeline Tab (Source pre-funnel + Send Outs) ──────────── */}
+              <TabsContent value="send-outs" className="px-8 py-5 mt-0 space-y-6">
                 {/* Source funnel — was its own tab, merged in */}
                 {id && (
                   <div>
@@ -2620,26 +2363,6 @@ const CandidateDetail = () => {
         onOpenChange={setCreateTaskOpen}
         defaultLinks={id ? [{ entity_type: 'candidate', entity_id: id }] : []}
       />
-
-      {/* Add note dialog — surfaced from the header action */}
-      <Dialog open={addNoteOpen} onOpenChange={(v) => { if (!savingNote) setAddNoteOpen(v); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Add a note</DialogTitle>
-          </DialogHeader>
-          <RichTextEditor value={noteText} onChange={setNoteText} placeholder="Call summary, screening notes, anything the team should see…" />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setAddNoteOpen(false)} disabled={savingNote}>Cancel</Button>
-            <Button
-              variant="gold"
-              disabled={savingNote || !noteText.replace(/<[^>]*>/g, '').trim()}
-              onClick={async () => { await handleSaveNote(); setAddNoteOpen(false); }}
-            >
-              {savingNote ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Save note
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </MainLayout>
   );
 };
