@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
+import { authHeaders } from '@/lib/api-auth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -117,6 +118,27 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
     invalidate();
   };
 
+  // Drop / update / remove the non-blocking interview marker on the owner's
+  // calendar + always Chris's (server resolves the mailboxes). Fire-and-forget
+  // after a schedule change; a failure here never blocks the DB save.
+  const syncCalendar = async (calAction: 'upsert' | 'delete') => {
+    if (!interviewId) return;
+    try {
+      const resp = await fetch('/api/interview-calendar-sync', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ interview_id: interviewId, action: calAction }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+      if (calAction === 'upsert' && Array.isArray(data?.synced) && data.synced.length > 0) {
+        toast.success('Added to calendar (owner + Chris) — non-blocking');
+      }
+    } catch (e: any) {
+      toast.error(`Calendar sync failed: ${e.message}`);
+    }
+  };
+
   const saveSchedule = async () => {
     const updates: any = {
       scheduled_at: form.scheduled_at ? new Date(form.scheduled_at).toISOString() : null,
@@ -129,6 +151,8 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
     // First time we put a date on it, advance the lifecycle from "to schedule".
     if (updates.scheduled_at && (iv?.stage === 'to_be_scheduled' || !iv?.stage)) updates.stage = 'scheduled';
     await patch(updates, 'Interview updated');
+    // Reflect the schedule onto calendars (server deletes the marker if there's no date).
+    await syncCalendar('upsert');
   };
 
   // ── interviewer search/add ─────────────────────────────────────────
@@ -242,6 +266,7 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
                 <Button variant="gold" size="sm" onClick={saveSchedule} disabled={saving}>
                   {saving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Save schedule
                 </Button>
+                <p className="text-[11px] text-muted-foreground">Saving drops a non-blocking marker on the owner's calendar + Chris's (won't block anyone's time).</p>
               </section>
 
               {/* Interviewers */}
@@ -321,7 +346,7 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
                   </Button>
                 )}
                 {!iv.cancelled_at && (
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-red-500" onClick={() => patch({ cancelled_at: new Date().toISOString(), stage: 'cancelled' }, 'Interview cancelled')}>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-red-500" onClick={async () => { await patch({ cancelled_at: new Date().toISOString(), stage: 'cancelled' }, 'Interview cancelled'); await syncCalendar('delete'); }}>
                     <X className="h-3.5 w-3.5 mr-1" /> Cancel interview
                   </Button>
                 )}
