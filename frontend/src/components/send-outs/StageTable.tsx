@@ -96,7 +96,7 @@ export function StageTable({
                   <th className="w-8" />
                   <th className="w-8" />
                   <th className="px-3 py-2">Candidate</th>
-                  <th className="hidden md:table-cell px-3 py-2">Current Role</th>
+                  <th className="hidden md:table-cell px-3 py-2">Submitting For</th>
                   <th className="px-3 py-2">Comp</th>
                   <th className="hidden md:table-cell px-3 py-2">RTW</th>
                   <th className="hidden lg:table-cell px-3 py-2">Last Touch</th>

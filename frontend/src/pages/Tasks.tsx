@@ -198,15 +198,22 @@ export default function Tasks() {
     return true;
   });
 
+  // The To-Do list shows real tasks only — calendar items (meetings and
+  // Outlook-synced 📅 events) belong on the Calendar, not the to-do list.
+  // The calendar view below still renders the full `filtered` set.
+  const isCalendarItem = (t: any) =>
+    (t?.task_type === 'meeting') || (((t?.title ?? '') as string).startsWith('📅'));
+  const todoTasks = filtered.filter((t) => !isCalendarItem(t));
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
   const toggleAll = () => {
-    if (selectedIds.length === filtered.length) {
+    if (selectedIds.length === todoTasks.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filtered.map((t) => t.id));
+      setSelectedIds(todoTasks.map((t) => t.id));
     }
   };
 
@@ -227,7 +234,7 @@ export default function Tasks() {
 
   return (
     <MainLayout>
-      <PageHeader title="To-Do's" description={`${filtered.length} task${filtered.length !== 1 ? 's' : ''}${isAdmin ? ' · Master View' : ''}`} actions={
+      <PageHeader title="To-Do's" description={`${todoTasks.length} task${todoTasks.length !== 1 ? 's' : ''}${isAdmin ? ' · Master View' : ''}`} actions={
         <div className="flex items-center gap-2">
           <div className="flex items-center border border-border rounded-lg overflow-hidden">
             <button
@@ -333,7 +340,7 @@ export default function Tasks() {
                 recruiter action. Self-hides when there are no open rows. */}
             <PipelineTodoList userId={user?.id} isAdmin={isAdmin} />
 
-            {filtered.length === 0 ? (
+            {todoTasks.length === 0 ? (
               <div className="text-center py-12 space-y-2">
                 <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
                 <p className="text-sm text-muted-foreground">No tasks match your filters</p>
@@ -342,12 +349,12 @@ export default function Tasks() {
               <div className="space-y-2 max-w-3xl">
                 <div className="flex items-center gap-2 px-3 py-1">
                   <Checkbox
-                    checked={selectedIds.length === filtered.length && filtered.length > 0}
+                    checked={selectedIds.length === todoTasks.length && todoTasks.length > 0}
                     onCheckedChange={toggleAll}
                   />
                   <span className="text-xs text-muted-foreground">Select all</span>
                 </div>
-                {filtered.map((task) => (
+                {todoTasks.map((task) => (
                   <div key={task.id} className="flex items-start gap-2">
                     <Checkbox
                       checked={selectedIds.includes(task.id)}

@@ -37,6 +37,7 @@ function useSidebarCounts(userId: string | undefined) {
         .from('tasks')
         .select('id', { count: 'exact', head: true })
         .neq('status', 'completed')
+        .neq('task_type', 'meeting') // To-Do badge counts real tasks, not calendar meetings
         .or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
       return count ?? 0;
     },

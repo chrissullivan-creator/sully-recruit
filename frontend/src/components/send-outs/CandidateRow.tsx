@@ -86,21 +86,35 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
           )}
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground truncate">{name}</p>
-            {j?.title && (
+            {/* Subtitle = the candidate's CURRENT role (who they are today). The
+                role we're submitting them FOR lives in its own labeled column. */}
+            {(c?.current_title || c?.current_company) && (
               <p className="text-[11px] text-muted-foreground truncate">
-                <JobLink id={j.id} title={j.title} stopPropagation className="text-muted-foreground" />
-                {j.company_name ? (
-                  <> · <CompanyLink name={j.company_name} stopPropagation className="text-muted-foreground" /></>
-                ) : null}
+                {c?.current_title ?? ''}
+                {c?.current_title && c?.current_company ? ' · ' : ''}
+                {c?.current_company ?? ''}
               </p>
             )}
           </div>
         </div>
       </td>
 
+      {/* "Submitting For" = the role we're sending this candidate out for. */}
       <td className="hidden md:table-cell px-3 py-2.5 text-sm text-muted-foreground min-w-[160px]">
-        <p className="truncate">{c?.current_title ?? '—'}</p>
-        {c?.current_company && <p className="text-[11px] truncate text-muted-foreground/70">{c.current_company}</p>}
+        {j?.title ? (
+          <>
+            <p className="truncate">
+              <JobLink id={j.id} title={j.title} stopPropagation className="text-foreground" />
+            </p>
+            {j.company_name && (
+              <p className="text-[11px] truncate text-muted-foreground/70">
+                <CompanyLink name={j.company_name} stopPropagation className="text-muted-foreground/70" />
+              </p>
+            )}
+          </>
+        ) : (
+          <span className="text-muted-foreground/50">—</span>
+        )}
       </td>
 
       <td className="px-3 py-2.5 text-sm text-gold-deep tabular-nums min-w-[110px] leading-tight">
