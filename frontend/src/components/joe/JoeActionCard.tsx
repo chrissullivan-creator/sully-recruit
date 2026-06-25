@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Check, X, ExternalLink, Loader2, Wand2 } from 'lucide-react';
+import { enrollPeopleInSequence } from '@/lib/enrollPeople';
 
 /**
  * Renders an approve/edit/reject card for a Joe-proposed action (Phase 2,
@@ -47,7 +48,7 @@ export function JoeActionCard({
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
 
-  const inlineExecutable = action.type === 'add_note';
+  const inlineExecutable = action.type === 'add_note' || action.type === 'enroll_in_sequence';
 
   const approve = async () => {
     if (busy) return;
@@ -62,6 +63,20 @@ export function JoeActionCard({
         } as any);
         if (error) throw error;
         toast.success('Note added');
+      } else if (action.type === 'enroll_in_sequence') {
+        const seqId = action.params.sequence_id as string | undefined;
+        const ids = ((action.params.people as any[]) ?? [])
+          .map((p) => p?.person_id)
+          .filter(Boolean);
+        if (!seqId || ids.length === 0) throw new Error('Nothing to enroll');
+        const r = await enrollPeopleInSequence(seqId, ids);
+        const parts: string[] = [];
+        if (r.enrolled) parts.push(`${r.enrolled} enrolled`);
+        if (r.skipped) parts.push(`${r.skipped} already in sequence`);
+        if (r.blocked) parts.push(`${r.blocked} skipped (do-not-contact)`);
+        if (r.unresolved) parts.push(`${r.unresolved} not found`);
+        if (r.initFailed) toast.warning(`${r.initFailed} didn't pre-schedule — re-enroll those`);
+        toast.success(parts.join(' · ') || 'No changes');
       }
       onResolve(action.id);
     } catch (e: any) {
