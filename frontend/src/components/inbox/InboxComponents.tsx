@@ -194,7 +194,7 @@ export function ThreadItem({
               {/* Persistent flag indicator — shown whenever flagged, even
                   not on hover */}
               {thread.flagged && (
-                <Star className="h-3.5 w-3.5 fill-[#C9A84C] text-[#C9A84C] shrink-0" aria-label="Flagged" />
+                <Star className="h-3.5 w-3.5 fill-accent text-accent shrink-0" aria-label="Flagged" />
               )}
               {/* Hover actions — wired to handlers */}
               <div className="hidden group-hover:flex items-center gap-0.5">
@@ -203,12 +203,12 @@ export function ThreadItem({
                   onClick={(e) => { e.stopPropagation(); onToggleFlag(); }}
                   className={cn(
                     'p-1 rounded hover:bg-muted',
-                    thread.flagged ? 'text-[#C9A84C]' : 'text-muted-foreground hover:text-foreground',
+                    thread.flagged ? 'text-accent' : 'text-muted-foreground hover:text-foreground',
                   )}
                   title={thread.flagged ? 'Unflag' : 'Flag'}
                   aria-label={thread.flagged ? 'Unflag' : 'Flag'}
                 >
-                  <Star className={cn('h-3.5 w-3.5', thread.flagged && 'fill-[#C9A84C]')} />
+                  <Star className={cn('h-3.5 w-3.5', thread.flagged && 'fill-accent')} />
                 </button>
                 <SnoozeMenu
                   currentSnoozedUntil={thread.snoozed_until ?? null}
@@ -1399,7 +1399,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                       {isInbound && (
                         <div className="w-7 shrink-0">
                           {!sameSenderAsPrev ? (
-                            <div className="h-7 w-7 rounded-full bg-[#2A5C42] flex items-center justify-center">
+                            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center">
                               <span className="text-[10px] font-bold text-white">{inboundInitials}</span>
                             </div>
                           ) : <div className="h-7" />}
@@ -1411,7 +1411,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                         <div className={cn(
                           'px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words',
                           isOutbound
-                            ? 'bg-[#2A5C42] text-white rounded-2xl rounded-br-md'
+                            ? 'bg-primary text-white rounded-2xl rounded-br-md'
                             : 'bg-secondary text-foreground rounded-2xl rounded-bl-md'
                         )}>
                           {msg.subject && thread.channel === 'email' && displayBody !== msg.subject && (
@@ -1456,7 +1456,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                       {isOutbound && (
                         <div className="w-7 shrink-0">
                           {!sameSenderAsPrev ? (
-                            <div className="h-7 w-7 rounded-full bg-[#C9A84C] flex items-center justify-center">
+                            <div className="h-7 w-7 rounded-full bg-accent flex items-center justify-center">
                               <span className="text-[10px] font-bold text-white">{outboundInitials}</span>
                             </div>
                           ) : <div className="h-7" />}

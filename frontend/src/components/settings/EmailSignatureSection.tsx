@@ -24,7 +24,7 @@ export function EmailSignatureSection({
     if (signatureConfig.signature_mode === 'html') {
       const template = `<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; font-size: 13px; color: #333;">
   <tr>
-    <td style="padding-right: 16px; border-right: 2px solid #b8860b;">
+    <td style="padding-right: 16px; border-right: 2px solid #C9A227;">
       <strong style="font-size: 15px; color: #1a3a1a;">Your Name</strong><br/>
       <span style="color: #666;">Senior Recruiter</span><br/>
       <span style="color: #666;">Your Company</span>

@@ -36,8 +36,8 @@ const stages = [
   { key: 'lead', label: 'Lead', headerClass: '' },
   { key: 'hot', label: 'Hot', headerClass: '' },
   { key: 'offer_made', label: 'Offer Made', headerClass: '' },
-  { key: 'filled', label: 'Filled', headerClass: 'bg-[#1C3D2E] text-white border-[#1C3D2E]' },
-  { key: 'closed_lost', label: 'Closed Lost', headerClass: 'bg-[#FEF2F2] text-[#DC2626] border-[#FEF2F2]' },
+  { key: 'filled', label: 'Filled', headerClass: 'bg-emerald-dark text-white border-emerald-dark' },
+  { key: 'closed_lost', label: 'Closed Lost', headerClass: 'bg-destructive/10 text-destructive border-destructive/10' },
 ];
 
 function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {

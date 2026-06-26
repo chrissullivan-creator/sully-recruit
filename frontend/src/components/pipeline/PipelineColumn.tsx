@@ -48,9 +48,9 @@ export function PipelineColumn<T>({
 // Job stage colors
 export const jobStageColors: Record<JobStage, string> = {
   lead: 'bg-gray-400',
-  hot: 'bg-[#C9A84C]',
-  offer_made: 'bg-[#2A5C42]',
-  filled: 'bg-[#1C3D2E]',
+  hot: 'bg-accent',
+  offer_made: 'bg-primary',
+  filled: 'bg-emerald-dark',
   closed_lost: 'bg-[#DC2626]',
 };
 

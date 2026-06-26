@@ -32,9 +32,9 @@ import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
+  interested:       { label: 'Interested',       bg: 'bg-primary',    text: 'text-white' },
   positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
-  maybe:            { label: 'Maybe',            bg: 'bg-[#C9A84C]/15', text: 'text-[#C9A84C]' },
+  maybe:            { label: 'Maybe',            bg: 'bg-accent/15', text: 'text-accent' },
   neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
   negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
   not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },
@@ -406,7 +406,7 @@ const Contacts = () => {
                           return (
                             <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                               {roles.includes('client') && (
-                                <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                                <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-accent/10 text-accent border border-accent/20">
                                   Client
                                 </span>
                               )}

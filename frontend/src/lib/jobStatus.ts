@@ -25,10 +25,10 @@ export interface JobStatusMeta {
 
 export const JOB_STATUSES: JobStatusMeta[] = [
   { value: "lead",        label: "Lead",        group: "active", pillClass: "bg-gray-100 text-gray-600",      dotClass: "bg-gray-400" },
-  { value: "hot",         label: "Hot",         group: "active", pillClass: "bg-[#C9A84C]/10 text-[#C9A84C]", dotClass: "bg-[#C9A84C]" },
-  { value: "offer_made",  label: "Offer Made",  group: "active", pillClass: "bg-[#2A5C42]/10 text-[#2A5C42]", dotClass: "bg-[#2A5C42]" },
-  { value: "filled",      label: "Filled",      group: "closed", pillClass: "bg-[#1C3D2E] text-white",        dotClass: "bg-[#1C3D2E]" },
-  { value: "closed_lost", label: "Closed Lost", group: "closed", pillClass: "bg-[#FEF2F2] text-[#DC2626]",    dotClass: "bg-[#DC2626]" },
+  { value: "hot",         label: "Hot",         group: "active", pillClass: "bg-accent/10 text-accent", dotClass: "bg-accent" },
+  { value: "offer_made",  label: "Offer Made",  group: "active", pillClass: "bg-primary/10 text-primary", dotClass: "bg-primary" },
+  { value: "filled",      label: "Filled",      group: "closed", pillClass: "bg-emerald-dark text-white",        dotClass: "bg-emerald-dark" },
+  { value: "closed_lost", label: "Closed Lost", group: "closed", pillClass: "bg-destructive/10 text-destructive",    dotClass: "bg-destructive" },
 ];
 
 export const JOB_STATUS_VALUES: JobStatus[] = JOB_STATUSES.map((s) => s.value);

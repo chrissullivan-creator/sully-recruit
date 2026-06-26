@@ -66,7 +66,7 @@ const RoleBadges = ({ roles, sourceTable }: { roles: string[] | null; sourceTabl
         </span>
       )}
       {r.includes('client') && (
-        <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+        <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-accent/10 text-accent border border-accent/20">
           <Users className="h-2.5 w-2.5" /> Client
         </span>
       )}

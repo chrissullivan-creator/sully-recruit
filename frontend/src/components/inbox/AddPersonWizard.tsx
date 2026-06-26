@@ -813,7 +813,7 @@ export function AddPersonWizard({
               {/* Form fields */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">First Name <span className="text-[#D4AF37]">*</span></Label>
+                  <Label className="text-xs">First Name <span className="text-accent">*</span></Label>
                   <Input
                     value={form.first_name}
                     onChange={(e) => update('first_name', e.target.value)}
@@ -826,7 +826,7 @@ export function AddPersonWizard({
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Last Name <span className="text-[#D4AF37]">*</span></Label>
+                  <Label className="text-xs">Last Name <span className="text-accent">*</span></Label>
                   <Input
                     value={form.last_name}
                     onChange={(e) => update('last_name', e.target.value)}

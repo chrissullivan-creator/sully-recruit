@@ -939,7 +939,7 @@ const CandidateDetail = () => {
                     </span>
                   )}
                   {roles.includes('client') && (
-                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20">
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-accent/10 text-accent border border-accent/20">
                       Client
                     </span>
                   )}

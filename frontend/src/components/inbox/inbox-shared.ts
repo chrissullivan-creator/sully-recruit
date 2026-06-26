@@ -91,5 +91,5 @@ export const CHANNEL_COLORS: Record<string, string> = {
   linkedin_recruiter: 'bg-[hsl(199_89%_48%/0.1)] text-[hsl(199_89%_48%)]',
   sms: 'bg-success/10 text-success',
   phone: 'bg-accent/10 text-accent',
-  call: 'bg-[#C9A84C]/10 text-[#C9A84C]',
+  call: 'bg-accent/10 text-accent',
 };
