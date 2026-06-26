@@ -219,7 +219,7 @@ export function MeetingDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
+        <ScrollArea className="flex-1 min-h-0 -mx-6 px-6">
           {task.description && task.description.trim() && (
             <div className="text-sm text-foreground/80 whitespace-pre-wrap mb-4 px-1">
               {task.description}
