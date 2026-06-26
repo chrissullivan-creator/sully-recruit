@@ -5,6 +5,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { MetricCard } from '@/components/dashboard/MetricCard';
+import { CommandCenter } from '@/components/dashboard/CommandCenter';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
@@ -27,18 +28,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Briefcase, Users, Calendar, FileText, Target, Mail,
-  Plus, Martini, User, ChevronDown, ChevronUp,
+  Plus, User, ChevronDown, ChevronUp,
   Building, Send, Award, XCircle, Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-
-const getGreeting = () => {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-};
 
 // ── Shared list item for a candidate row ─────────────────────────────
 const CandidateRow = ({
@@ -251,11 +245,6 @@ const Dashboard = () => {
   const sendOutList   = m?.sendOutList   ?? [];
   const interviewList = m?.interviewList ?? [];
 
-  const ownerLabel =
-    ownerScope === 'all' ? 'Whole Team' :
-    ownerScope === 'me'  ? 'Me' :
-    team.find((t: any) => t.id === ownerScope)?.full_name || 'User';
-
   return (
     <MainLayout>
       <PageHeader
@@ -282,35 +271,13 @@ const Dashboard = () => {
 
       <div className="p-8 space-y-8">
 
-        {/* Welcome Banner */}
-        <div className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-sidebar via-card to-card p-6">
-          <div className="relative z-10 flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gold/10 border border-gold/20">
-              <Martini className="h-7 w-7 text-gold" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-foreground">{getGreeting()}, {displayName}</h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {isLoading ? 'Loading your stats…' : (
-                  <>
-                    <span className="font-semibold text-foreground">{m?.activeJobs ?? 0} active jobs</span>
-                    {' · '}
-                    <span className="font-semibold text-foreground">{engaged} engaged</span>
-                    {' · '}
-                    <span className="font-semibold text-foreground">{sendOuts} send out{sendOuts !== 1 ? 's' : ''}</span>
-                    {' · '}
-                    <span className="font-semibold text-foreground">{interviews} interview{interviews !== 1 ? 's' : ''}</span>
-                    {' · '}
-                    <span className="font-semibold text-foreground">{offers} offer{offers !== 1 ? 's' : ''}</span>
-                    {' · '}
-                    <span className="text-muted-foreground/80">{range.label.toLowerCase()} · {ownerLabel.toLowerCase()}</span>
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-gold/5 blur-2xl" />
-          <div className="absolute -right-2 -bottom-8 h-24 w-24 rounded-full bg-accent/5 blur-xl" />
+        {/* AI Command Center — the morning intelligence hero */}
+        <CommandCenter displayName={displayName} />
+
+        {/* ── Pipeline detail (date-range scoped) ───────────────────────── */}
+        <div className="flex items-center gap-2 pt-2">
+          <h2 className="text-base font-semibold text-foreground">Pipeline detail</h2>
+          <span className="text-xs text-muted-foreground">— scoped to the range below</span>
         </div>
 
         {/* Date range + owner filter */}
