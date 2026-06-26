@@ -3,10 +3,11 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
+import { JobPipelineStageBadge } from '@/components/pipeline/JobPipelineStageBadge';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useJobs } from '@/hooks/useData';
+import { useJobs, useJobPipelineStages } from '@/hooks/useData';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers } from 'lucide-react';
 import { useState } from 'react';
@@ -43,6 +44,9 @@ const Jobs = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const queryClient = useQueryClient();
   const { data: jobs = [], isLoading } = useJobs(showClosed);
+  // Derived candidate-pipeline stage per job (furthest stage its candidates
+  // have reached) — ties out with the candidate profile + send-outs.
+  const { data: pipelineStages = {} } = useJobPipelineStages();
 
   const JOB_STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
@@ -229,7 +233,7 @@ const Jobs = () => {
         )}
 
         {isLoading ? (
-          <TableSkeleton rows={6} cols={6} />
+          <TableSkeleton rows={6} cols={7} />
         ) : filteredJobs.length === 0 && !searchQuery ? (
           <EmptyState
             icon={Briefcase}
@@ -252,6 +256,7 @@ const Jobs = () => {
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Openings</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Pipeline</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
                   <th className="w-10 px-4 py-3"></th>
                 </tr>
@@ -293,6 +298,9 @@ const Jobs = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
+                    <td className="px-4 py-3">
+                      <JobPipelineStageBadge stage={pipelineStages[job.id] ?? null} showLabel />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
                         <span className={cn(
