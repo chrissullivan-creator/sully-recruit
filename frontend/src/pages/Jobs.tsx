@@ -341,9 +341,9 @@ const Jobs = () => {
             )}
           </div>
         ) : (
-          <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1200}>
+          <HorizontalTableScroll stickyHeader minWidth={1200}>
             <table className="w-full">
-              <thead className="table-header-green">
+              <thead className="table-header-green sticky top-0 z-20">
                 <tr>
                   <th className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAll} aria-label="Select all" />

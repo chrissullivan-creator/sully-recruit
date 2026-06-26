@@ -269,9 +269,9 @@ export function ApplicantsTab() {
         </div>
       )}
 
-      <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1100}>
+      <HorizontalTableScroll stickyHeader minWidth={1100}>
         <table className="w-full">
-          <thead className="table-header-green">
+          <thead className="table-header-green sticky top-0 z-20">
             <tr>
               <th className="w-10 px-4 py-3"><Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" /></th>
               <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>

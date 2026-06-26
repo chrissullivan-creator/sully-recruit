@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { CommandCenter } from '@/components/dashboard/CommandCenter';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
@@ -46,9 +47,6 @@ const CandidateRow = ({
 }) => {
   const name = candidate.full_name ||
     `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`.trim() || '—';
-  const initials = (
-    (candidate.first_name?.[0] ?? '') + (candidate.last_name?.[0] ?? '')
-  ).toUpperCase() || name[0]?.toUpperCase() || '?';
   return (
     <div
       onClick={onClick}
@@ -57,9 +55,7 @@ const CandidateRow = ({
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } }}
       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left group cursor-pointer"
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
-        {initials}
-      </div>
+      <PersonAvatar name={name} src={candidate.profile_picture_url ?? candidate.avatar_url} size="sm" />
       <div className="flex-1 min-w-0">
         <PersonLink
           id={candidate.id}

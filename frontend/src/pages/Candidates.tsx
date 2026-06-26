@@ -599,9 +599,9 @@ const Candidates = () => {
           <CandidatePipeline />
         ) : (
           <>
-          <div className="rounded-lg border border-border overflow-x-auto">
+          <div className="rounded-lg border border-border overflow-auto max-h-[75vh]">
             <table className="w-full min-w-[900px]">
-              <thead className="table-header-green">
+              <thead className="table-header-green sticky top-0 z-20">
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <Checkbox
