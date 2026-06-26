@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-[#2A5C42]',    text: 'text-white' },
@@ -392,13 +393,11 @@ const Contacts = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        {(contact as any).avatar_url ? (
-                          <img src={(contact as any).avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-                        ) : (
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
-                            {(contact.first_name?.[0] ?? '')}{(contact.last_name?.[0] ?? '')}
-                          </div>
-                        )}
+                        <PersonAvatar
+                          name={contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`}
+                          src={(contact as any).profile_picture_url ?? (contact as any).avatar_url}
+                          size="md"
+                        />
                         <span className="text-sm font-medium text-foreground">
                           {contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`}
                         </span>

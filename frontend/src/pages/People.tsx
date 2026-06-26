@@ -35,6 +35,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 
 type PersonTab = 'all' | 'candidates' | 'clients' | 'applicants';
@@ -428,13 +429,7 @@ const People = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          {person.avatar_url ? (
-                            <img src={person.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-                          ) : (
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-medium text-accent">
-                              {initials}
-                            </div>
-                          )}
+                          <PersonAvatar name={displayName} src={person.profile_picture_url ?? person.avatar_url} size="md" />
                           <span className="text-sm font-medium text-foreground">{displayName}</span>
                         </div>
                       </td>

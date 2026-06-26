@@ -21,6 +21,7 @@ import {
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { JobPostingsTab } from '@/components/companies/JobPostingsTab';
 import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
@@ -508,6 +509,7 @@ const CompanyDetail = () => {
     <MainLayout>
       <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
         <Button variant="ghost" size="icon" onClick={() => navigate('/companies')}><ArrowLeft className="h-4 w-4" /></Button>
+        <CompanyLogo name={company.name} domain={company.domain} logoUrl={company.logo_url} size="md" />
         <div className="flex-1">
           <h1 className="text-lg font-semibold text-foreground">{company.name}</h1>
           <p className="text-sm text-muted-foreground">
