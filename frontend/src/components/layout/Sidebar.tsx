@@ -143,7 +143,7 @@ export function Sidebar() {
           <img
             src={logo}
             alt="Emerald"
-            className="h-16 w-16 object-contain drop-shadow-[0_0_8px_hsl(43_68%_50%/0.4)]"
+            className="h-16 w-16 object-contain drop-shadow-[0_0_10px_hsl(46_68%_47%/0.35)]"
           />
         </div>
         <NotificationBell />
@@ -174,8 +174,8 @@ export function Sidebar() {
               className={cn(
                 'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150',
                 isActive
-                  ? 'bg-sidebar-accent text-sidebar-primary'
-                  : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+                  ? 'bg-sidebar-primary/10 text-sidebar-primary font-semibold'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
               )}
             >
               <item.icon
@@ -214,7 +214,7 @@ export function Sidebar() {
       {/* ── User section ── */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 border border-accent/25 text-xs font-semibold text-sidebar-primary">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/10 border border-sidebar-primary/20 text-xs font-semibold text-sidebar-primary">
             {initials}
           </div>
           <div className="flex-1 min-w-0">

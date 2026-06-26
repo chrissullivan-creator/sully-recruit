@@ -5,54 +5,54 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Sully Recruit Design System — Wall Street Aesthetic */
-/* Dark forest green sidebar, warm off-white content area, burnished gold accents */
+/* Sully Recruit Design System — Premium Fintech Aesthetic */
+/* Pure-white canvas, thin cool-gray borders, deep emerald primary, gold used sparingly */
 
 @layer base {
   :root {
-    --background:         40 6% 98%;
-    --foreground:         150 20% 12%;
+    --background:         0 0% 100%;   /* #FFFFFF */
+    --foreground:         0 0% 13%;    /* #222222 */
 
     --card:               0 0% 100%;
-    --card-foreground:    150 20% 12%;
+    --card-foreground:    0 0% 13%;
 
     --popover:            0 0% 100%;
-    --popover-foreground: 150 20% 12%;
+    --popover-foreground: 0 0% 13%;
 
-    --primary:            148 60% 22%;
-    --primary-foreground: 43 65% 90%;
+    --primary:            152 76% 18%; /* emerald #0B4F2F */
+    --primary-foreground: 0 0% 100%;   /* white text on emerald */
 
-    --secondary:          148 18% 90%;
-    --secondary-foreground: 150 30% 18%;
+    --secondary:          0 0% 96%;
+    --secondary-foreground: 0 0% 13%;
 
-    --muted:              40 6% 95%;
-    --muted-foreground:   150 10% 42%;
+    --muted:              0 0% 96%;
+    --muted-foreground:   0 0% 40%;    /* #666666 */
 
-    --accent:             43 68% 50%;
-    --accent-foreground:  150 60% 10%;
+    --accent:             46 68% 47%;  /* gold #C9A227 */
+    --accent-foreground:  152 60% 12%; /* deep emerald text on gold */
 
-    --destructive:        0 72% 51%;
+    --destructive:        2 64% 58%;   /* soft red #D9534F */
     --destructive-foreground: 0 0% 100%;
 
-    --border:             148 15% 82%;
-    --input:              148 15% 88%;
-    --ring:               43 68% 50%;
+    --border:             0 0% 93%;    /* #ECECEC */
+    --input:              0 0% 93%;
+    --ring:               152 76% 18%; /* emerald focus ring */
 
-    --radius: 0.5rem;
+    --radius: 0.875rem;                /* 14px cards */
 
-    --sidebar-background:          148 60% 13%;
-    --sidebar-foreground:          43 35% 85%;
-    --sidebar-primary:             43 68% 50%;
-    --sidebar-primary-foreground:  148 60% 10%;
-    --sidebar-accent:              148 55% 18%;
-    --sidebar-accent-foreground:   43 60% 70%;
-    --sidebar-border:              148 45% 10%;
-    --sidebar-ring:                43 68% 50%;
+    --sidebar-background:          0 0% 100%;  /* white sidebar */
+    --sidebar-foreground:          0 0% 40%;   /* muted nav text */
+    --sidebar-primary:             152 76% 18%;/* emerald active pill */
+    --sidebar-primary-foreground:  0 0% 100%;
+    --sidebar-accent:              0 0% 96%;   /* hover */
+    --sidebar-accent-foreground:   0 0% 13%;
+    --sidebar-border:              0 0% 93%;
+    --sidebar-ring:                152 76% 18%;
 
-    --success: 142 71% 38%;
-    --success-foreground: 150 25% 9%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 150 25% 9%;
+    --success: 152 55% 30%;            /* emerald success */
+    --success-foreground: 0 0% 100%;
+    --warning: 46 68% 47%;             /* gold warning */
+    --warning-foreground: 0 0% 13%;
     --info: 199 89% 40%;
     --info-foreground: 0 0% 100%;
 
@@ -62,11 +62,11 @@
     --stage-offer:    142 71% 38%;
     --stage-hold:     40 10% 50%;
 
-    --gradient-gold: linear-gradient(135deg, hsl(43 68% 55%), hsl(38 62% 42%));
-    --gradient-dark: linear-gradient(180deg, hsl(148 60% 13%), hsl(148 60% 9%));
+    --gradient-gold: linear-gradient(135deg, hsl(46 70% 52%), hsl(42 64% 40%));
+    --gradient-dark: linear-gradient(180deg, hsl(152 76% 18%), hsl(152 76% 12%));
 
-    --chart-1: 148 60% 22%;
-    --chart-2: 43 68% 50%;
+    --chart-1: 152 76% 18%;
+    --chart-2: 46 68% 47%;
     --chart-3: 199 89% 40%;
     --chart-4: 0 72% 51%;
     --chart-5: 142 71% 38%;
@@ -90,15 +90,15 @@
     --color-error: 0 72% 51%;
 
     /* ── Spec theme tokens (Job Detail / Send Outs / new pages) ─────── */
-    --emerald-dark:  #1C2A1E;
-    --emerald:       #266D2C;
+    --emerald-dark:  #06351F;
+    --emerald:       #0B4F2F;
     --emerald-light: #E8F0E9;
-    --gold:          #B08D3F;
-    --gold-deep:     #8B6F2F;
+    --gold:          #C9A227;
+    --gold-deep:     #A07E1A;
     --gold-light:    #F5EAC9;
     --gold-bg:       #FBF6E5;
-    --page-bg:       #FAFAF8;
-    --card-border:   #EAE3D2;
+    --page-bg:       #FFFFFF;
+    --card-border:   #ECECEC;
 
     --font-display: 'Sora', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   }
@@ -169,9 +169,11 @@
 @layer components {
   .text-gold { color: hsl(var(--accent)); }
 
-  thead.table-header-green { background: hsl(148 60% 15%); }
+  /* Clean, modern table header — light fill, muted label text, thin divider.
+     (Class name kept for back-compat; no longer a dark-green bar.) */
+  thead.table-header-green { background: hsl(var(--muted)); border-bottom: 1px solid hsl(var(--border)); }
   thead.table-header-green th {
-    color: hsl(43 68% 55%);
+    color: hsl(var(--muted-foreground));
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
