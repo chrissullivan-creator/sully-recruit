@@ -339,7 +339,7 @@ const Dashboard = () => {
             title="Engaged"
             count={engagedList.length}
             icon={<FileText className="h-4 w-4" />}
-            accentColor="bg-indigo-500/10 text-indigo-400"
+            accentColor="bg-primary/10 text-primary"
             defaultOpen={engagedList.length > 0}
           >
             {engagedList.map((c: any) => (
@@ -357,7 +357,7 @@ const Dashboard = () => {
             title="Send Outs"
             count={sendOutList.length}
             icon={<Send className="h-4 w-4" />}
-            accentColor="bg-blue-500/10 text-blue-400"
+            accentColor="bg-accent/10 text-accent"
             defaultOpen={sendOutList.length > 0}
           >
             {sendOutList.map((so: any) => {
@@ -378,7 +378,7 @@ const Dashboard = () => {
             title="Interviews"
             count={interviewList.length}
             icon={<Calendar className="h-4 w-4" />}
-            accentColor="bg-emerald-500/10 text-emerald-400"
+            accentColor="bg-info/10 text-info"
             defaultOpen={interviewList.length > 0}
           >
             {interviewList.map((so: any) => {

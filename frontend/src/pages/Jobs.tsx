@@ -30,11 +30,12 @@ import {
 } from '@/components/ui/alert-dialog';
 
 // Leads board columns = the lead sub-stages (jobs.lead_stage).
+// Cold → warming → won, in brand tones (gray → light gold → gold → emerald).
 const LEAD_DOTS: Record<string, string> = {
-  new: 'bg-gray-400',
-  contacts_added: 'bg-sky-400',
-  reached_out: 'bg-amber-400',
-  market_over: 'bg-violet-400',
+  new: 'bg-muted-foreground',
+  contacts_added: 'bg-accent/40',
+  reached_out: 'bg-accent',
+  market_over: 'bg-primary',
 };
 const LEAD_COLUMNS: BoardColumn[] = LEAD_STAGES.map((s) => ({
   key: s.value,

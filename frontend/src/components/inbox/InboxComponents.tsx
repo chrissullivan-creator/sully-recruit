@@ -295,7 +295,7 @@ export function ThreadItem({
               )}
               {thread.snoozed_until && new Date(thread.snoozed_until).getTime() > Date.now() && (
                 <span
-                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-[#7C3AED]/10 text-[#7C3AED] inline-flex items-center gap-1"
+                  className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-info/10 text-info inline-flex items-center gap-1"
                   title={`Snoozed until ${formatAbsoluteTimestamp(thread.snoozed_until)}`}
                 >
                   <ClockIcon className="h-2.5 w-2.5" />
@@ -1256,15 +1256,15 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
         {/* Wake-from-snooze banner — shows when the cron fired in the last
             24h and the user hasn't dismissed it in this session. */}
         {!wakeDismissed && thread.woke_from_snooze_at && (Date.now() - new Date(thread.woke_from_snooze_at).getTime()) < 24 * 60 * 60 * 1000 && (
-          <div className="px-6 py-2.5 bg-[#7C3AED]/5 border-b border-[#7C3AED]/20 flex items-center gap-2">
-            <Sun className="h-3.5 w-3.5 text-[#7C3AED] shrink-0" />
-            <p className="text-xs text-[#7C3AED] flex-1">
+          <div className="px-6 py-2.5 bg-info/5 border-b border-info/20 flex items-center gap-2">
+            <Sun className="h-3.5 w-3.5 text-info shrink-0" />
+            <p className="text-xs text-info flex-1">
               <span className="font-medium">Welcome back —</span> this thread woke from snooze {formatSmartTimestamp(thread.woke_from_snooze_at)}.
             </p>
             <button
               type="button"
               onClick={handleDismissWake}
-              className="text-xs text-[#7C3AED] hover:text-[#7C3AED]/80"
+              className="text-xs text-info hover:text-info/80"
               title="Dismiss"
             >
               <XIcon className="h-3.5 w-3.5" />

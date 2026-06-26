@@ -4,15 +4,18 @@ import { cn } from '@/lib/utils';
 // so the inbox (thread rows + filter) and the candidate detail render one
 // consistent sentiment treatment. Values match reply_sentiment.sentiment /
 // people.last_sequence_sentiment.
+// Sentiment spectrum in brand/semantic tokens (emerald → gold → muted → amber
+// → soft red), with one amber caution tier and an info-blue OOO — the only
+// hues outside the brand pair, kept because the spectrum needs them to read.
 export const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  interested:       { label: 'Interested',       bg: 'bg-primary',     text: 'text-white' },
-  positive:         { label: 'Positive',         bg: 'bg-green-500/15',  text: 'text-green-500' },
-  maybe:            { label: 'Maybe',            bg: 'bg-accent/15',  text: 'text-accent' },
-  neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',   text: 'text-gray-400' },
-  negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
-  not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',    text: 'text-red-500' },
-  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-red-900/20',    text: 'text-red-700' },
-  ooo:              { label: 'Out of Office',     bg: 'bg-blue-500/15',   text: 'text-blue-500' },
+  interested:       { label: 'Interested',       bg: 'bg-primary',        text: 'text-white' },
+  positive:         { label: 'Positive',         bg: 'bg-success/15',     text: 'text-success' },
+  maybe:            { label: 'Maybe',            bg: 'bg-accent/15',      text: 'text-accent' },
+  neutral:          { label: 'Neutral',          bg: 'bg-muted',          text: 'text-muted-foreground' },
+  negative:         { label: 'Negative',         bg: 'bg-orange-500/10',  text: 'text-orange-600' },
+  not_interested:   { label: 'Not Interested',   bg: 'bg-destructive/15', text: 'text-destructive' },
+  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-destructive/25', text: 'text-destructive' },
+  ooo:              { label: 'Out of Office',     bg: 'bg-info/10',        text: 'text-info' },
 };
 
 // Buckets for the inbox sentiment filter (collapses the raw values into the

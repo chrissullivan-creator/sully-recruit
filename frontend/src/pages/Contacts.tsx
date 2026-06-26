@@ -32,13 +32,13 @@ import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  interested:       { label: 'Interested',       bg: 'bg-primary',    text: 'text-white' },
-  positive:         { label: 'Positive',         bg: 'bg-green-500/15', text: 'text-green-500' },
-  maybe:            { label: 'Maybe',            bg: 'bg-accent/15', text: 'text-accent' },
-  neutral:          { label: 'Neutral',          bg: 'bg-gray-500/15',  text: 'text-gray-400' },
-  negative:         { label: 'Negative',         bg: 'bg-orange-500/15', text: 'text-orange-500' },
-  not_interested:   { label: 'Not Interested',   bg: 'bg-red-500/15',   text: 'text-red-500' },
-  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-red-900/20',   text: 'text-red-700' },
+  interested:       { label: 'Interested',       bg: 'bg-primary',        text: 'text-white' },
+  positive:         { label: 'Positive',         bg: 'bg-success/15',     text: 'text-success' },
+  maybe:            { label: 'Maybe',            bg: 'bg-accent/15',      text: 'text-accent' },
+  neutral:          { label: 'Neutral',          bg: 'bg-muted',          text: 'text-muted-foreground' },
+  negative:         { label: 'Negative',         bg: 'bg-orange-500/10',  text: 'text-orange-600' },
+  not_interested:   { label: 'Not Interested',   bg: 'bg-destructive/15', text: 'text-destructive' },
+  do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-destructive/25', text: 'text-destructive' },
 };
 
 const ChannelBadge = ({ channel }: { channel?: string | null }) => {
