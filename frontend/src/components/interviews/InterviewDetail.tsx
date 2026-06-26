@@ -16,19 +16,24 @@ import { cn } from '@/lib/utils';
 import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X, PhoneCall, Plus } from 'lucide-react';
 import { CallButton } from '@/components/shared/CallButton';
 
+// Labels are what recruiters see; the stored `value` must satisfy the DB
+// interviews_interview_type_check constraint (phone_screen|video|onsite|
+// technical|case_study|partner|final).
 const INTERVIEW_TYPES = [
-  { value: 'phone', label: 'Phone' },
+  { value: 'phone_screen', label: 'Phone' },
   { value: 'video', label: 'Video' },
-  { value: 'onsite', label: 'Onsite' },
-  { value: 'other', label: 'Other' },
+  { value: 'onsite', label: 'In-person' },
+  { value: 'technical', label: 'Technical assessment' },
 ];
 
+// Values must satisfy interviews_outcome_check (passed|rejected|no_show|
+// cancelled|pending).
 const OUTCOMES = [
   { value: 'pending', label: 'Pending' },
-  { value: 'advanced', label: 'Advanced' },
   { value: 'passed', label: 'Passed (move on)' },
   { value: 'rejected', label: 'Rejected' },
-  { value: 'offer', label: 'Offer' },
+  { value: 'no_show', label: 'No show' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
 
 /** ISO timestamptz → the `YYYY-MM-DDTHH:mm` shape a datetime-local input wants (local time). */
@@ -434,12 +439,12 @@ export function InterviewDetail({ interviewId, open, onOpenChange, onNavigate }:
                   {addingRound ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Plus className="h-3.5 w-3.5 mr-1" />} New round
                 </Button>
                 {!iv.completed_at && !iv.cancelled_at && (
-                  <Button variant="outline" size="sm" onClick={() => patch({ completed_at: new Date().toISOString(), stage: 'completed' }, 'Marked completed')}>
+                  <Button variant="outline" size="sm" onClick={() => patch({ completed_at: new Date().toISOString(), stage: 'interview_debrief' }, 'Marked completed')}>
                     <Check className="h-3.5 w-3.5 mr-1" /> Mark completed
                   </Button>
                 )}
                 {!iv.cancelled_at && (
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-red-500" onClick={async () => { await patch({ cancelled_at: new Date().toISOString(), stage: 'cancelled' }, 'Interview cancelled'); await syncCalendar('delete'); }}>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-red-500" onClick={async () => { await patch({ cancelled_at: new Date().toISOString() }, 'Interview cancelled'); await syncCalendar('delete'); }}>
                     <X className="h-3.5 w-3.5 mr-1" /> Cancel interview
                   </Button>
                 )}

@@ -114,13 +114,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const job: any = (iv as any).jobs;
     const roleLine = [job?.title, job?.company_name].filter(Boolean).join(" @ ");
     const subject = `Interview: ${candName}${roleLine ? ` — ${roleLine}` : ""}`;
-    const startIso = new Date(scheduledAt).toISOString();
+    const startMs = new Date(scheduledAt).getTime();
+    const startIso = new Date(startMs).toISOString();
     // Near-zero-duration marker by default (1 min — Outlook rejects equal
     // start/end). showAs:'free' below is what actually keeps it from blocking
-    // anyone's time. Honor an explicit end if one was set.
-    const endIso = (iv as any).end_at
+    // anyone's time. Honor an explicit end if one was set, but never let it be
+    // at/before the start (mis-entered end dates would otherwise 400 on Graph).
+    let endIso = (iv as any).end_at
       ? new Date((iv as any).end_at).toISOString()
-      : new Date(new Date(scheduledAt).getTime() + 60_000).toISOString();
+      : new Date(startMs + 60_000).toISOString();
+    if (new Date(endIso).getTime() <= startMs) endIso = new Date(startMs + 60_000).toISOString();
     const descLines = [
       roleLine ? `Role: ${roleLine}` : null,
       (iv as any).round ? `Round: ${(iv as any).round}` : null,
