@@ -15,7 +15,7 @@ import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { CreateBdSequenceDialog } from '@/components/jobs/CreateBdSequenceDialog';
-import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions, useJobPipelineStage } from '@/hooks/useData';
+import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
 import { supabase } from '@/integrations/supabase/client';
 import { authHeaders } from '@/lib/api-auth';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -48,7 +48,6 @@ import { cn } from '@/lib/utils';
 import DOMPurify from 'dompurify';
 import { FunnelStrip } from '@/components/job-detail/FunnelStrip';
 import { QuickStats } from '@/components/job-detail/QuickStats';
-import { JobPipelineStageBadge } from '@/components/pipeline/JobPipelineStageBadge';
 import { JobActivityFeed } from '@/components/job-detail/JobActivityFeed';
 import { JobPipelineKanban, useJobKanbanRows, type KanbanRow } from '@/components/job-detail/JobPipelineKanban';
 import { SendOutTableRow } from '@/components/job-detail/SendOutCard';
@@ -153,7 +152,6 @@ const JobDetail = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: job, isLoading } = useJob(id);
-  const { data: pipelineStage } = useJobPipelineStage(id);
   const { data: contacts = [] } = useContacts();
   const { data: companies = [] } = useCompanies();
   const { data: sendOuts = [] } = useJobSendOuts(id);
@@ -801,9 +799,6 @@ const JobDetail = () => {
             )}>
               {jobStatusLabel(job.status)}
             </span>
-            {/* Derived candidate-pipeline stage — furthest stage the job's
-                candidates have reached (ties out with QuickStats + send-outs). */}
-            <JobPipelineStageBadge stage={pipelineStage ?? null} />
             {/* Priority badge — gold treatment */}
             {(job as any).priority && (job as any).priority !== 'normal' && (
               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gold/15 text-gold-deep text-[10px] font-semibold uppercase tracking-wider border border-gold/30">

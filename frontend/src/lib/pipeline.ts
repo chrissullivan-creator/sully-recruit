@@ -149,41 +149,6 @@ export function prevStage(key: CanonicalStage): CanonicalStage | null {
   return CANONICAL_PIPELINE[i - 1].key;
 }
 
-/**
- * Linear "progress" ordering for funnel rollups. Terminal `withdrawn`
- * is intentionally absent — it's an exit, not a step, and ranks -1 so a
- * withdrawn/rejected row never counts as forward progress. Matches the
- * ladder QuickStats uses, so the job-level rollup ties out with the
- * candidate + send-out surfaces.
- */
-export const PROGRESSION: CanonicalStage[] = [
-  'pitch', 'ready_to_send', 'submitted', 'interview', 'offer', 'placed',
-];
-
-/** Rank of a canonical stage on the progression ladder, or -1 for withdrawn/unknown/null. */
-export function progressionRank(key: CanonicalStage | null | undefined): number {
-  return key ? PROGRESSION.indexOf(key) : -1;
-}
-
-/**
- * Furthest pipeline stage reached across a set of raw stage values
- * (candidate_jobs.max_pipeline_stage / pipeline_stage and/or
- * send_outs.stage). Normalises each via stageToCanonical, ranks on
- * PROGRESSION, and returns the highest — or null when nothing has
- * progressed past a terminal/unknown value. This is how a job derives a
- * single pipeline badge from all its candidates' rows.
- */
-export function furthestStage(
-  stageValues: Array<string | null | undefined>,
-): CanonicalStage | null {
-  let best = -1;
-  for (const v of stageValues) {
-    const r = progressionRank(stageToCanonical(v));
-    if (r > best) best = r;
-  }
-  return best >= 0 ? PROGRESSION[best] : null;
-}
-
 /** Days between a timestamp and now. Returns 0 if invalid. */
 export function daysSince(ts: string | null | undefined): number {
   if (!ts) return 0;
