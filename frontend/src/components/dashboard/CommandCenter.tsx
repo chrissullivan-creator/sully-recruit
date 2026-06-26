@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useCommandCenter, type JoeRec } from '@/hooks/useCommandCenter';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { cn } from '@/lib/utils';
 import {
   Phone, CalendarClock, Award, Trophy, Briefcase, Timer,
@@ -92,14 +94,15 @@ function Signal({
   );
 }
 
-function MiniRow({ primary, secondary, badge, onClick }: {
-  primary: string; secondary?: string; badge?: React.ReactNode; onClick: () => void;
+function MiniRow({ primary, secondary, badge, leading, onClick }: {
+  primary: string; secondary?: string; badge?: React.ReactNode; leading?: React.ReactNode; onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/60"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/60"
     >
+      {leading}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{primary}</span>
         {secondary && <span className="block truncate text-xs text-muted-foreground">{secondary}</span>}
@@ -158,7 +161,7 @@ export function CommandCenter({ displayName }: { displayName: string }) {
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:col-span-2">
           <Signal title="Ready to move" count={d?.ready_to_move_count ?? 0} tone="emerald" icon={<Flame className="h-4 w-4" />} onClickAll={() => navigate('/people?status=engaged')}>
             {(d?.ready_to_move ?? []).slice(0, 4).map((p) => (
-              <MiniRow key={p.id} primary={p.name ?? '—'} secondary={[p.title, p.company].filter(Boolean).join(' · ')} badge={<SentimentDot s={p.sentiment} />} onClick={() => navigate(`/candidates/${p.id}`)} />
+              <MiniRow key={p.id} leading={<PersonAvatar name={p.name} src={p.avatar} size="sm" />} primary={p.name ?? '—'} secondary={[p.title, p.company].filter(Boolean).join(' · ')} badge={<SentimentDot s={p.sentiment} />} onClick={() => navigate(`/candidates/${p.id}`)} />
             ))}
             {!isLoading && (d?.ready_to_move?.length ?? 0) === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">Nobody flagged right now.</p>}
           </Signal>
@@ -176,7 +179,7 @@ export function CommandCenter({ displayName }: { displayName: string }) {
 
           <Signal title="Below market pay" count={d?.below_market_count ?? 0} tone="gold" icon={<TrendingDown className="h-4 w-4" />} onClickAll={() => navigate('/people')}>
             {(d?.below_market ?? []).slice(0, 4).map((p) => (
-              <MiniRow key={p.id} primary={p.name ?? '—'} secondary={[p.title, p.company].filter(Boolean).join(' · ')}
+              <MiniRow key={p.id} leading={<PersonAvatar name={p.name} src={p.avatar} size="sm" />} primary={p.name ?? '—'} secondary={[p.title, p.company].filter(Boolean).join(' · ')}
                 badge={<span className="shrink-0 text-xs font-semibold tabular-nums text-accent">{money(p.cur)}→{money(p.tgt)}</span>}
                 onClick={() => navigate(`/candidates/${p.id}`)} />
             ))}
@@ -185,7 +188,7 @@ export function CommandCenter({ displayName }: { displayName: string }) {
 
           <Signal title="Searches at risk" count={d?.searches_at_risk_count ?? 0} tone="rose" icon={<AlertTriangle className="h-4 w-4" />} onClickAll={() => navigate('/jobs')}>
             {(d?.at_risk ?? []).slice(0, 4).map((j) => (
-              <MiniRow key={j.id} primary={j.title ?? '—'} secondary={j.company ?? undefined}
+              <MiniRow key={j.id} leading={<CompanyLogo name={j.company ?? '—'} domain={j.company_domain} logoUrl={j.company_logo} size="sm" />} primary={j.title ?? '—'} secondary={j.company ?? undefined}
                 badge={<span className="shrink-0 text-[10px] font-medium text-destructive">stale</span>}
                 onClick={() => navigate(`/jobs/${j.id}`)} />
             ))}

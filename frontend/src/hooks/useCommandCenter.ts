@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 // Shapes returned by the command_center_summary() RPC (one round-trip).
-export interface ReadyToMovePerson { id: string; name: string | null; title: string | null; company: string | null; sentiment: string | null }
-export interface BelowMarketPerson { id: string; name: string | null; title: string | null; company: string | null; cur: number | null; tgt: number | null }
-export interface AtRiskSearch { id: string; title: string | null; company: string | null; last_sourced_at: string | null }
+export interface ReadyToMovePerson { id: string; name: string | null; title: string | null; company: string | null; sentiment: string | null; avatar: string | null; company_domain: string | null; company_logo: string | null }
+export interface BelowMarketPerson { id: string; name: string | null; title: string | null; company: string | null; cur: number | null; tgt: number | null; avatar: string | null; company_domain: string | null; company_logo: string | null }
+export interface AtRiskSearch { id: string; title: string | null; company: string | null; last_sourced_at: string | null; company_domain: string | null; company_logo: string | null }
 export interface JoeRec { id: string; entity_type: string | null; entity_id: string | null; category: string | null; headline: string | null; rationale: string | null; score: number | null }
 
 export interface CommandCenterData {
