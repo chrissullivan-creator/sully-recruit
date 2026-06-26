@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
+import { progressionRank, stageToCanonical, PROGRESSION, type CanonicalStage } from '@/lib/pipeline';
 
 // Candidates — queries the people table (was renamed from candidates) and filters
 // to type='candidate'. The `candidates` backwards-compat view still exists for
@@ -341,6 +342,53 @@ export function useJob(id: string | undefined) {
         .maybeSingle();
       if (error) throw error;
       return data;
+    },
+  });
+}
+
+// Derived per-job pipeline stage — the furthest canonical stage (Pitch →
+// Send Out → Submission → Interview → Offer → Placed) any of a job's
+// candidates have reached. Powers the Hot Jobs board (each job is placed in
+// the column of its furthest-along candidate). Unions BOTH source tables so
+// it ties out with every other surface: candidate_jobs (what the candidate
+// profile + QuickStats read) AND send_outs (the Send Outs board) — ~100
+// active send-outs have no candidate_jobs row, so candidate_jobs alone would
+// under-report. Returns Record<jobId, CanonicalStage | null> (null = no
+// candidate has entered the pipeline yet → the board's "Sourcing" column).
+export function useJobPipelineStages() {
+  return useQuery({
+    queryKey: ['job_pipeline_stages'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const [cjRes, soRes] = await Promise.all([
+        supabase.from('candidate_jobs')
+          .select('job_id, pipeline_stage, max_pipeline_stage')
+          .is('deleted_at', null),
+        supabase.from('send_outs')
+          .select('job_id, stage')
+          .is('deleted_at', null),
+      ]);
+      if (cjRes.error) throw cjRes.error;
+      if (soRes.error) throw soRes.error;
+
+      // Track the best progression rank per job_id, then resolve to a stage key.
+      const bestRank: Record<string, number> = {};
+      const bump = (jobId: string | null | undefined, value: string | null | undefined) => {
+        if (!jobId) return;
+        const r = progressionRank(stageToCanonical(value));
+        if (r > (bestRank[jobId] ?? -1)) bestRank[jobId] = r;
+      };
+      for (const r of (cjRes.data ?? []) as any[]) {
+        bump(r.job_id, r.max_pipeline_stage);
+        bump(r.job_id, r.pipeline_stage);
+      }
+      for (const r of (soRes.data ?? []) as any[]) bump(r.job_id, r.stage);
+
+      const out: Record<string, CanonicalStage | null> = {};
+      for (const [jobId, rank] of Object.entries(bestRank)) {
+        out[jobId] = rank >= 0 ? PROGRESSION[rank] : null;
+      }
+      return out;
     },
   });
 }

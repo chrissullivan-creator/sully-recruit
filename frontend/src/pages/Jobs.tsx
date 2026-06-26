@@ -2,16 +2,17 @@ import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { JobPipeline } from '@/components/pipeline/JobPipeline';
+import { JobStageBoard, type BoardColumn } from '@/components/pipeline/JobStageBoard';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
-import { useJobs } from '@/hooks/useData';
+import { useJobs, useJobPipelineStages } from '@/hooks/useData';
 import { CompanyLink } from '@/components/shared/EntityLinks';
-import { Plus, LayoutGrid, List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers } from 'lucide-react';
+import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VALUES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
+import { PROGRESSION, canonicalConfig } from '@/lib/pipeline';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
@@ -28,9 +29,33 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
+// Leads board columns = the lead sub-stages (jobs.lead_stage).
+const LEAD_DOTS: Record<string, string> = {
+  new: 'bg-gray-400',
+  contacts_added: 'bg-sky-400',
+  reached_out: 'bg-amber-400',
+  market_over: 'bg-violet-400',
+};
+const LEAD_COLUMNS: BoardColumn[] = LEAD_STAGES.map((s) => ({
+  key: s.value,
+  label: s.label,
+  dotClass: LEAD_DOTS[s.value] ?? 'bg-muted-foreground',
+}));
+
+// Hot Jobs board columns = candidate-pipeline progression, with a leading
+// "Sourcing" bucket for jobs whose candidates haven't entered the pipeline yet.
+const HOT_COLUMNS: BoardColumn[] = [
+  { key: 'none', label: 'Sourcing', dotClass: 'bg-muted-foreground' },
+  ...PROGRESSION.map((stage) => ({
+    key: stage,
+    label: canonicalConfig(stage).shortLabel,
+    dotClass: canonicalConfig(stage).dotColor,
+  })),
+];
+
 const Jobs = () => {
   const navigate = useNavigate();
-  const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
+  const [view, setView] = useState<'leads' | 'jobs' | 'list'>('jobs');
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -43,6 +68,8 @@ const Jobs = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const queryClient = useQueryClient();
   const { data: jobs = [], isLoading } = useJobs(showClosed);
+  // Furthest candidate-pipeline stage per job — places each job on the Hot board.
+  const { data: pipelineStages = {} } = useJobPipelineStages();
 
   const JOB_STATUS_OPTIONS = JOB_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
@@ -64,6 +91,23 @@ const Jobs = () => {
       toast.success(`Lead stage set to ${LEAD_STAGES.find(s => s.value === leadStage)?.label ?? leadStage}`);
       invalidateJobScope(queryClient);
     } catch (err: any) {
+      toast.error(err.message || 'Failed to update lead stage');
+    }
+  };
+
+  // Leads board drag — optimistically reorder, persist lead_stage, revert on error.
+  const handleLeadMove = async (jobId: string, leadStage: string) => {
+    const key = ['jobs', showClosed];
+    const prev = queryClient.getQueryData<any[]>(key);
+    queryClient.setQueryData(key, (old: any[] | undefined) =>
+      (old ?? []).map((j) => (j.id === jobId ? { ...j, lead_stage: leadStage } : j)),
+    );
+    try {
+      const { error } = await supabase.from('jobs').update({ lead_stage: leadStage }).eq('id', jobId);
+      if (error) throw new Error(error.message);
+      invalidateJobScope(queryClient);
+    } catch (err: any) {
+      if (prev) queryClient.setQueryData(key, prev);
       toast.error(err.message || 'Failed to update lead stage');
     }
   };
@@ -128,6 +172,23 @@ const Jobs = () => {
     }
   };
 
+  // Board splits: Leads (status='lead') vs everything else actively worked.
+  const leadJobs = filteredJobs.filter((j) => j.status === 'lead');
+  const hotJobs = filteredJobs.filter((j) => j.status !== 'lead');
+  const leadColumnKey = (job: any) => {
+    const s = (job as any).lead_stage || 'new';
+    return (LEAD_STAGE_VALUES as string[]).includes(s) ? s : 'new';
+  };
+  const hotColumnKey = (job: any) => (pipelineStages as Record<string, string | null>)[job.id] ?? 'none';
+  const hotCardMeta = (job: any) => (
+    <span className={cn(
+      'mt-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+      jobStatusMeta(job.status)?.pillClass ?? 'bg-gray-100 text-gray-600',
+    )}>
+      {jobStatusLabel(job.status)}
+    </span>
+  );
+
   return (
     <MainLayout>
       <PageHeader 
@@ -137,20 +198,30 @@ const Jobs = () => {
           <div className="flex items-center gap-2">
             <div className="flex items-center border border-border rounded-lg overflow-hidden">
               <button
-                onClick={() => setView('pipeline')}
+                onClick={() => setView('leads')}
                 className={cn(
-                  'p-2 transition-colors',
-                  view === 'pipeline' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+                  view === 'leads' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                <LayoutGrid className="h-4 w-4" />
+                <Target className="h-4 w-4" /> Leads
+              </button>
+              <button
+                onClick={() => setView('jobs')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-l border-border',
+                  view === 'jobs' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Flame className="h-4 w-4" /> Jobs
               </button>
               <button
                 onClick={() => setView('list')}
                 className={cn(
-                  'p-2 transition-colors',
+                  'p-2 transition-colors border-l border-border',
                   view === 'list' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
+                title="List view"
               >
                 <List className="h-4 w-4" />
               </button>
@@ -237,8 +308,38 @@ const Jobs = () => {
             description="Track open roles, send candidates out, and manage the pipeline. Create your first job to get started."
             action={{ label: 'Add Job', icon: Plus, onClick: () => setAddOpen(true) }}
           />
-        ) : view === 'pipeline' ? (
-          <JobPipeline />
+        ) : view === 'leads' ? (
+          <div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Leads by stage — drag a card to advance it. Convert a lead to a worked job with “Convert to Hot” on its page.
+            </p>
+            {leadJobs.length === 0 ? (
+              <EmptyState icon={Target} title="No leads" description="New job leads land here. Add a job as a lead to start working it." />
+            ) : (
+              <JobStageBoard
+                jobs={leadJobs}
+                columns={LEAD_COLUMNS}
+                getColumnKey={leadColumnKey}
+                onMove={(id, key) => handleLeadMove(id, key)}
+              />
+            )}
+          </div>
+        ) : view === 'jobs' ? (
+          <div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Each job sits in the column of its furthest-along candidate. Move candidates through the pipeline to change it.
+            </p>
+            {hotJobs.length === 0 ? (
+              <EmptyState icon={Flame} title="No active jobs" description="Jobs you’re actively recruiting for appear here, grouped by how far their candidates have progressed." />
+            ) : (
+              <JobStageBoard
+                jobs={hotJobs}
+                columns={HOT_COLUMNS}
+                getColumnKey={hotColumnKey}
+                renderCardMeta={hotCardMeta}
+              />
+            )}
+          </div>
         ) : (
           <HorizontalTableScroll className="rounded-lg border border-border overflow-hidden" minWidth={1200}>
             <table className="w-full">
