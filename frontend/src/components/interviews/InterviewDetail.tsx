@@ -13,7 +13,7 @@ import { authHeaders } from '@/lib/api-auth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X, PhoneCall } from 'lucide-react';
+import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X, PhoneCall, Plus } from 'lucide-react';
 import { CallButton } from '@/components/shared/CallButton';
 
 const INTERVIEW_TYPES = [
@@ -41,6 +41,8 @@ interface Props {
   interviewId: string | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Jump the drawer to another interview (used after adding a new round). */
+  onNavigate?: (interviewId: string) => void;
 }
 
 /**
@@ -50,7 +52,7 @@ interface Props {
  * with, prep notes, and the debrief. Everything stays tagged to the candidate,
  * job, and interviewer contacts.
  */
-export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
+export function InterviewDetail({ interviewId, open, onOpenChange, onNavigate }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -118,6 +120,7 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
   }, [iv?.id]);
 
   const [saving, setSaving] = useState(false);
+  const [addingRound, setAddingRound] = useState(false);
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['interview', interviewId] });
     queryClient.invalidateQueries({ queryKey: ['interviews'] });
@@ -171,6 +174,44 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
     await patch(updates, 'Interview updated');
     // Reflect the schedule onto calendars (server deletes the marker if there's no date).
     await syncCalendar('upsert');
+  };
+
+  // Spin up the next interview round for this same candidate + job as its own
+  // record (own date / interviewers / notes / debrief) and jump the drawer to it.
+  const addRound = async () => {
+    if (!iv) return;
+    setAddingRound(true);
+    try {
+      const { data: maxRow } = await supabase
+        .from('interviews')
+        .select('round')
+        .eq('candidate_id', iv.candidate_id)
+        .eq('job_id', iv.job_id)
+        .order('round', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const nextRound = (Number((maxRow as any)?.round) || Number(iv.round) || 1) + 1;
+      const { data, error } = await supabase
+        .from('interviews')
+        .insert({
+          candidate_id: iv.candidate_id,
+          job_id: iv.job_id,
+          send_out_id: iv.send_out_id,
+          owner_id: iv.owner_id,
+          round: nextRound,
+          stage: 'to_be_scheduled',
+        } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+      toast.success(`Round ${nextRound} added`);
+      queryClient.invalidateQueries({ queryKey: ['interviews'] });
+      if ((data as any)?.id) onNavigate?.((data as any).id);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to add round');
+    } finally {
+      setAddingRound(false);
+    }
   };
 
   // ── interviewer search/add ─────────────────────────────────────────
@@ -388,7 +429,10 @@ export function InterviewDetail({ interviewId, open, onOpenChange }: Props) {
               </section>
 
               {/* Lifecycle actions */}
-              <section className="flex items-center gap-2 border-t border-border pt-5">
+              <section className="flex items-center gap-2 border-t border-border pt-5 flex-wrap">
+                <Button variant="outline" size="sm" onClick={addRound} disabled={addingRound} title="Add the next interview round for this candidate + job">
+                  {addingRound ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Plus className="h-3.5 w-3.5 mr-1" />} New round
+                </Button>
                 {!iv.completed_at && !iv.cancelled_at && (
                   <Button variant="outline" size="sm" onClick={() => patch({ completed_at: new Date().toISOString(), stage: 'completed' }, 'Marked completed')}>
                     <Check className="h-3.5 w-3.5 mr-1" /> Mark completed

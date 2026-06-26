@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format, isToday, isPast } from 'date-fns';
-import { CalendarClock, Briefcase, Loader2, ChevronRight } from 'lucide-react';
+import { CalendarClock, Briefcase, Loader2, ChevronRight, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { InterviewDetail } from '@/components/interviews/InterviewDetail';
+import { NewInterviewDialog } from '@/components/interviews/NewInterviewDialog';
 
 type Filter = 'upcoming' | 'to_schedule' | 'completed' | 'all';
 
@@ -21,6 +24,13 @@ type Filter = 'upcoming' | 'to_schedule' | 'completed' | 'all';
 export default function Interviews() {
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('upcoming');
+  const [newOpen, setNewOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  // Deep-link: /interviews?interview=<id> opens that interview (e.g. from a send-out).
+  useEffect(() => {
+    const pid = searchParams.get('interview');
+    if (pid) setSelected(pid);
+  }, [searchParams]);
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['interviews'],
@@ -60,7 +70,15 @@ export default function Interviews() {
 
   return (
     <MainLayout>
-      <PageHeader title="Interviews" description={`${total} interview${total !== 1 ? 's' : ''}`} />
+      <PageHeader
+        title="Interviews"
+        description={`${total} interview${total !== 1 ? 's' : ''}`}
+        actions={
+          <Button variant="gold" onClick={() => setNewOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New Interview
+          </Button>
+        }
+      />
 
       <div className="border-b border-border bg-card/30 px-8 py-3">
         <SegmentedNav items={[
@@ -111,7 +129,8 @@ export default function Interviews() {
         )}
       </div>
 
-      <InterviewDetail interviewId={selected} open={!!selected} onOpenChange={(v) => { if (!v) setSelected(null); }} />
+      <InterviewDetail interviewId={selected} open={!!selected} onOpenChange={(v) => { if (!v) setSelected(null); }} onNavigate={(nid) => setSelected(nid)} />
+      <NewInterviewDialog open={newOpen} onOpenChange={setNewOpen} onCreated={(id) => setSelected(id)} />
     </MainLayout>
   );
 }

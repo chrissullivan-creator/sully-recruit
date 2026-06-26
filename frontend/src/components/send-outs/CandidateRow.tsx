@@ -2,7 +2,9 @@ import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical, Trash2, StickyNote } from 'lucide-react';
+import { Mail, MessageSquare, ArrowRight, MoreHorizontal, Linkedin, Phone, GripVertical, Trash2, StickyNote, CalendarPlus } from 'lucide-react';
+import { toast } from 'sonner';
+import { createInterview } from '@/lib/createInterview';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -196,6 +198,24 @@ export function CandidateRow({ row, stage, index, selected, onToggleSelect, onAd
           >
             <StickyNote className="h-3.5 w-3.5" />
           </button>
+          {c?.id && j?.id && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  const id = await createInterview({ candidateId: c.id, jobId: j.id, sendOutId: row.id });
+                  toast.success('Interview created');
+                  navigate(`/interviews?interview=${id}`);
+                } catch (err: any) {
+                  toast.error(err?.message || 'Failed to create interview');
+                }
+              }}
+              title="New interview"
+              className="p-1.5 rounded text-muted-foreground hover:bg-emerald-light hover:text-emerald transition-colors"
+            >
+              <CalendarPlus className="h-3.5 w-3.5" />
+            </button>
+          )}
           {next && (
             <button
               onClick={() => onAdvance(row)}
