@@ -84,14 +84,20 @@ const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
-/** Default cascade order. */
-const DEFAULT_ORDER: AIProvider[] = ["claude", "openai", "gemini", "openrouter"];
+/**
+ * Default cascade order. OpenRouter is intentionally OFF the chain: that
+ * account has no credits ("never purchased credits"), so as the last fallback
+ * it only ever returned a 402 that masked the real upstream error and spammed
+ * alerts. Callers may still pass openRouterKey; re-add "openrouter" here (and in
+ * RESUME_PARSE_ORDER) if the account is ever funded.
+ */
+const DEFAULT_ORDER: AIProvider[] = ["claude", "openai", "gemini"];
 
 /**
- * Resume parsing leads with OpenAI, then falls back to Claude → Gemini →
- * OpenRouter. Pass as `order` from the resume-parsing call sites.
+ * Resume parsing leads with OpenAI, then falls back to Claude → Gemini.
+ * Pass as `order` from the resume-parsing call sites.
  */
-export const RESUME_PARSE_ORDER: AIProvider[] = ["openai", "claude", "gemini", "openrouter"];
+export const RESUME_PARSE_ORDER: AIProvider[] = ["openai", "claude", "gemini"];
 
 const FALLBACK_REGEX =
   /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
