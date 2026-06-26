@@ -2216,8 +2216,71 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              <TabsContent value="notes" className="px-8 py-5 mt-0">
-                <EntityNotesTab entityType="candidate" entityId={id!} placeholder="Add a note about this candidate — call summary, screening notes, anything the team should see…" />
+              <TabsContent value="notes" className="px-8 py-5 mt-0 space-y-6">
+                {/* Detailed AI call notes — every recorded call's summary, action
+                    items, extracted notes, recording + full transcript. */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <PhoneCall className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">Call Notes</h2>
+                    <span className="text-xs text-muted-foreground">({(callNotes as any[]).length})</span>
+                  </div>
+                  {(callNotes as any[]).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No call notes yet — recorded calls (30s+) are transcribed and summarized here automatically.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {(callNotes as any[]).map((n: any) => {
+                        const when = n.call_started_at || n.created_at;
+                        const dur = n.call_duration_formatted || (n.call_duration_seconds ? `${Math.floor(n.call_duration_seconds / 60)}m ${n.call_duration_seconds % 60}s` : '');
+                        return (
+                          <div key={n.id} className="rounded-lg border border-border bg-white p-4 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
+                                {n.call_direction === 'inbound' ? <PhoneIncoming className="h-4 w-4 text-success" /> : <PhoneOutgoing className="h-4 w-4 text-info" />}
+                                {n.call_direction === 'inbound' ? 'Inbound' : 'Outbound'} call
+                                {dur && <span className="text-xs text-muted-foreground font-normal">· {dur}</span>}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground shrink-0">{when ? format(new Date(when), 'MMM d, yyyy h:mm a') : ''}</span>
+                            </div>
+                            {n.ai_summary && <p className="text-sm text-foreground/90 whitespace-pre-wrap">{n.ai_summary}</p>}
+                            {n.ai_action_items && n.ai_action_items !== '- None' && (
+                              <div className="rounded-md bg-muted/40 p-2.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Action items</p>
+                                <p className="text-xs text-foreground/90 whitespace-pre-wrap">{n.ai_action_items}</p>
+                              </div>
+                            )}
+                            {n.extracted_notes && (
+                              <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
+                                <p className="text-xs text-foreground/90 whitespace-pre-wrap">{n.extracted_notes}</p>
+                              </div>
+                            )}
+                            {(n.recording_url || n.transcript) && (
+                              <div className="flex items-center gap-4 pt-1">
+                                {n.recording_url && (
+                                  <a href={n.recording_url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline inline-flex items-center gap-1">
+                                    <Volume2 className="h-3 w-3" /> Recording
+                                  </a>
+                                )}
+                                {n.transcript && (
+                                  <details className="text-xs flex-1">
+                                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Full transcript</summary>
+                                    <p className="mt-1 whitespace-pre-wrap text-muted-foreground max-h-72 overflow-y-auto rounded-md bg-muted/30 p-2">{n.transcript}</p>
+                                  </details>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Manual notes */}
+                <div className="border-t border-border pt-5">
+                  <EntityNotesTab entityType="candidate" entityId={id!} placeholder="Add a note about this candidate — call summary, screening notes, anything the team should see…" />
+                </div>
               </TabsContent>
 
             </ScrollArea>
