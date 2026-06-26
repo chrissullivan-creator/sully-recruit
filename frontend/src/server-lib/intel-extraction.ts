@@ -145,6 +145,13 @@ export async function extractMessageIntel(
   }
 }
 
+// Sentiment values the DB accepts (reply_sentiment_sentiment_check). Clamp the
+// model's output to this set so an off-vocab hallucination can't fail the insert.
+const ALLOWED_SENTIMENTS = new Set([
+  'positive', 'interested', 'neutral', 'negative', 'not_interested', 'maybe',
+  'do_not_contact', 'ooo', 'booked_meeting',
+]);
+
 /**
  * Apply extracted intelligence to a candidate or contact record.
  * Only updates fields that were explicitly extracted (non-null).
@@ -161,6 +168,7 @@ export async function applyExtractedIntel(
   const table = entityType === "candidate" ? "candidates" : "contacts";
   const entityColumn = entityType === "candidate" ? "candidate_id" : "contact_id";
   const fields = intel.extracted_fields;
+  const safeSentiment = ALLOWED_SENTIMENTS.has(intel.sentiment as any) ? intel.sentiment : 'neutral';
 
   // Store sentiment in reply_sentiment table. Check the error instead of
   // swallowing it — an unchecked failed insert here would look identical to
@@ -169,7 +177,7 @@ export async function applyExtractedIntel(
     [entityColumn]: entityId,
     enrollment_id: enrollmentId || null,
     channel,
-    sentiment: intel.sentiment,
+    sentiment: safeSentiment,
     summary: intel.summary,
     analyzed_at: new Date().toISOString(),
   } as any);
@@ -186,7 +194,7 @@ export async function applyExtractedIntel(
     await supabase
       .from("sequence_enrollments")
       .update({
-        reply_sentiment: intel.sentiment,
+        reply_sentiment: safeSentiment,
         reply_sentiment_note: intel.summary,
       } as any)
       .eq("id", enrollmentId);
@@ -196,7 +204,7 @@ export async function applyExtractedIntel(
   await supabase
     .from(table)
     .update({
-      last_sequence_sentiment: intel.sentiment,
+      last_sequence_sentiment: safeSentiment,
       last_sequence_sentiment_note: intel.summary,
     } as any)
     .eq("id", entityId);
@@ -206,7 +214,7 @@ export async function applyExtractedIntel(
   // the enrollment guard (enrollment-init-runner / sequence-runner) can refuse
   // to message them again. Reply-stop of the active enrollment is handled by
   // the webhook caller separately.
-  if (intel.sentiment === "do_not_contact") {
+  if (safeSentiment === "do_not_contact") {
     await supabase
       .from("people")
       .update({ do_not_contact: true } as any)
