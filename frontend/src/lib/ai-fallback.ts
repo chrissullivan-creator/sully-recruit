@@ -100,7 +100,7 @@ const DEFAULT_ORDER: AIProvider[] = ["claude", "openai", "gemini"];
 export const RESUME_PARSE_ORDER: AIProvider[] = ["openai", "claude", "gemini"];
 
 const FALLBACK_REGEX =
-  /credit balance|insufficient|429|rate.?limit|401|403|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500/i;
+  /credit balance|insufficient|429|rate.?limit|401|403|404|invalid.?api.?key|overloaded|quota|exhausted|unavailable|503|500|model_not_found|does not exist|unsupported_value|unsupported.?parameter/i;
 
 function isFallbackable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? "");
@@ -188,12 +188,18 @@ async function tryOpenAI(opts: CallAIOptions): Promise<string> {
     { role: "system", content: opts.systemPrompt },
     { role: "user", content: opts.userContent as string },
   ];
-  const body: any = {
-    model: opts.fallbackModel || DEFAULT_OPENAI_MODEL,
-    temperature: opts.temperature ?? 0,
-    max_tokens: opts.maxTokens ?? 1024,
-    messages,
-  };
+  const model = opts.fallbackModel || DEFAULT_OPENAI_MODEL;
+  // GPT-5 family and o-series reasoning models changed the Chat Completions
+  // contract: they take `max_completion_tokens` (not `max_tokens`) and only
+  // accept the default temperature. gpt-4o/mini keep the legacy params.
+  const isReasoningModel = /^(gpt-5|o\d)/i.test(model);
+  const body: any = { model, messages };
+  if (isReasoningModel) {
+    body.max_completion_tokens = opts.maxTokens ?? 1024;
+  } else {
+    body.temperature = opts.temperature ?? 0;
+    body.max_tokens = opts.maxTokens ?? 1024;
+  }
   if (opts.jsonOutput) body.response_format = { type: "json_object" };
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {

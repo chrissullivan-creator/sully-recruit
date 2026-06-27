@@ -128,6 +128,9 @@ export default function SendOut() {
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [formattedHtml, setFormattedHtml] = useState('');
   const [feedback, setFeedback] = useState('');
+  // Cumulative corrections across Modify clicks — each re-run regenerates from
+  // the source résumé honoring every note so far (not a diff on prior HTML).
+  const [appliedNotes, setAppliedNotes] = useState('');
   const [reformatting, setReformatting] = useState(false);
   const [logoSrc, setLogoSrc] = useState<string>(emeraldLogo);
 
@@ -226,12 +229,12 @@ export default function SendOut() {
   }, [formattedHtml, logoSrc]);
 
   // ── Format the résumé via AI ─────────────────────────────────────────────
-  const runFormat = async (mode: NameMode, opts?: { feedback?: string; priorHtml?: string }) => {
-    if (!resumeText.trim() && !opts?.priorHtml) {
+  const runFormat = async (mode: NameMode, opts?: { feedback?: string; revision?: boolean }) => {
+    if (!resumeText.trim()) {
       toast.error('No résumé text found — pick a résumé on file or paste one.');
       return;
     }
-    const isRevision = !!opts?.priorHtml;
+    const isRevision = !!opts?.revision;
     if (isRevision) setReformatting(true); else setStep('formatting');
     try {
       const resp = await fetch(`${BACKEND_URL}/api/format-resume-ai`, {
@@ -244,7 +247,6 @@ export default function SendOut() {
           job_title: selectedJob?.title,
           job_description: (selectedJob as any)?.description,
           feedback: opts?.feedback,
-          prior_html: opts?.priorHtml,
         }),
       });
       const data = await resp.json();
@@ -498,7 +500,7 @@ export default function SendOut() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {NAME_OPTIONS.map((opt) => (
                     <button key={opt.value}
-                      onClick={() => { setNameMode(opt.value); runFormat(opt.value); }}
+                      onClick={() => { setNameMode(opt.value); setAppliedNotes(''); setFeedback(''); runFormat(opt.value); }}
                       className="rounded-lg border-2 border-card-border p-4 text-left transition-all hover:border-gold hover:bg-gold-bg/40">
                       <opt.icon className="h-5 w-5 text-gold-deep mb-2" />
                       <p className="text-sm font-semibold">{opt.label}</p>
@@ -541,7 +543,11 @@ export default function SendOut() {
                   placeholder="e.g. Shorten the 2018 role, fix the second bullet, use 'VP' not 'Vice President'…" />
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" disabled={reformatting || !feedback.trim()}
-                    onClick={() => runFormat(nameMode, { feedback, priorHtml: formattedHtml })}>
+                    onClick={() => {
+                      const combined = [appliedNotes, feedback.trim()].filter(Boolean).join('\n');
+                      setAppliedNotes(combined);
+                      runFormat(nameMode, { feedback: combined, revision: true });
+                    }}>
                     {reformatting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
                     {reformatting ? 'Re-formatting…' : 'Modify / re-run'}
                   </Button>

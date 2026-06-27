@@ -20,9 +20,11 @@ import { requireAuth } from "./lib/auth.js";
  *  - name_mode        'all_contact' | 'name_only' | 'first_name'
  *  - display_name     resolved header name (e.g. "Jay" or "Marshall L. Duggs")
  *  - job_title, job_description   optional, to emphasise relevant experience
- *  - feedback         optional free-text revision request (the "modify" loop)
- *  - prior_html       optional previously-generated HTML to revise
+ *  - feedback         optional cumulative correction notes (the "modify" loop) —
+ *                     regenerated from source each time, not a diff on prior HTML
  */
+export const maxDuration = 60;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -38,10 +40,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       job_title,
       job_description,
       feedback,
-      prior_html,
     } = req.body ?? {};
 
-    if (!resume_text && !prior_html) {
+    if (!resume_text) {
       return res.status(400).json({ error: "Missing required field: resume_text" });
     }
 
@@ -88,24 +89,35 @@ EMERALD RESUME FORMATTING RULES:
 - Place the Emerald logo in the TOP RIGHT corner. Use exactly this <img> with the placeholder src token (the host app replaces it): <img src="__EMERALD_LOGO_SRC__" alt="Emerald Recruiting Group" style="position:absolute;top:0;right:0;width:96px;height:auto;" />. Wrap the whole document body in a container with position:relative so the logo anchors top-right, and reserve right padding so the name does not overlap it.
 - Brand colors: dark green #1e3d2e for section headers and the name, gold #b4963c as a subtle accent (e.g. the rule under section headers). Body text near-black #212121.
 - Company names and job titles start FLUSH with the left margin — never indented away from the margin.
-- Dates go on the SAME ROW as the company name or job title, right-aligned in a fixed right-hand date column. Never stack dates on their own line or under the company/title. Use a two-column flex/table row: left = company or title, right = right-aligned dates.
-- One role at a company: Company Name, Location in BOLD left-aligned with company dates BOLD right-aligned on the same row; Job Title in ITALIC left-aligned with role dates (if different) ITALIC right-aligned on the same row; bullets directly under the role.
-- Multiple roles at the same company: list the company ONCE with overarching company dates (bold, same-row right-aligned); then each role underneath as italic title left + italic role dates right on the same row, bullets under each role. Do not bold job titles.
+- Dates go on the SAME ROW as the company name or job title, right-aligned in a fixed right-hand date column. Never stack dates on their own line or under the company/title. Use a two-column row (e.g. flex with justify-content:space-between): left = company or title, right = right-aligned dates.
 - Use bullet points (<ul><li>) for all experience detail.
 - Clean up grammar, punctuation, spacing. Do NOT invent information. Do NOT add achievements, responsibilities, technologies, locations, compensation, visa status, or qualifications not present in the resume. Preserve the candidate's original substance. Remove only obvious duplicate bullets.
 - ${nameRule}
 - If contact info is removed, do NOT leave blank lines or awkward gaps where it used to be.
 
+WORK EXPERIENCE — STRICT (read carefully, this is the most common mistake):
+- GROUP BY COMPANY. If the candidate held MULTIPLE roles at the SAME company (consecutive titles/promotions), you MUST output that company HEADER EXACTLY ONCE: a single bold "Company Name, Location" on the left with the OVERARCHING date range on the right (earliest role start → latest role end), on one row. Then list EACH role beneath it: italic job title on the left with that role's OWN dates italic on the right (same row), with that role's bullets under it. NEVER repeat the company name as a separate block for a second role at the same company.
+- One role at a company: bold "Company Name, Location" left + bold company dates right on one row; italic job title left + italic role dates right on one row (omit the role-date row if identical to the company dates); bullets under the role. Do not bold job titles.
+- DATES: ALWAYS spell the month out in FULL with the year — "January 2020 – Present", "March 2018 – December 2019". NEVER abbreviate the month (no "Jan", "Feb", "Sept") and NEVER use numeric months (no "01/2020", no "2020-01"). Use an en dash "–" between start and end. Use "Present" for a current role.
+
+WORKED EXAMPLE of a company with two roles (follow this structure exactly):
+<div style="display:flex;justify-content:space-between;"><span style="font-weight:bold;">Goldman Sachs, New York, NY</span><span style="font-weight:bold;">June 2016 – Present</span></div>
+<div style="display:flex;justify-content:space-between;"><span style="font-style:italic;">Vice President, Cross-Asset Quant Strats</span><span style="font-style:italic;">January 2020 – Present</span></div>
+<ul><li>Bullet for the VP role.</li></ul>
+<div style="display:flex;justify-content:space-between;"><span style="font-style:italic;">Associate, Quant Strats</span><span style="font-style:italic;">June 2016 – December 2019</span></div>
+<ul><li>Bullet for the Associate role.</li></ul>
+
 OUTPUT: Return ONLY the HTML document, starting with <!doctype html> or <div>. No markdown fences, no commentary before or after.`;
 
-    const userPrompt = prior_html
-      ? `Revise the following formatted resume HTML according to this instruction, keeping all the Emerald formatting rules intact and not fabricating anything:
-
-INSTRUCTION: ${feedback || "Improve clarity and formatting."}
-
-CURRENT HTML:
-${prior_html}`
-      : `Format this resume into Emerald-styled HTML following all the rules.${jobContext}${feedback ? `\n\nAdditional instruction: ${feedback}` : ""}
+    // Always (re)generate from the source résumé. The "modify" loop passes the
+    // recruiter's cumulative corrections in `feedback` rather than round-tripping
+    // the prior HTML (which a model tends to echo back verbatim). Regenerating
+    // from source reliably applies the requested changes.
+    const userPrompt = `Format this resume into Emerald-styled HTML following ALL the rules above.${jobContext}${
+      feedback
+        ? `\n\nApply these corrections from the recruiter (they OVERRIDE the defaults — follow them exactly):\n${feedback}`
+        : ""
+    }
 
 RESUME TEXT:
 ${resume_text}`;
@@ -116,9 +128,10 @@ ${resume_text}`;
       geminiKey: geminiKey || undefined,
       openRouterKey: openRouterKey || undefined,
       order: RESUME_PARSE_ORDER,
+      fallbackModel: "gpt-5.4",
       systemPrompt,
       userContent: userPrompt,
-      maxTokens: 4096,
+      maxTokens: 12000,
       temperature: 0,
     });
 

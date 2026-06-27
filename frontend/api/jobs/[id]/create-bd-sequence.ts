@@ -110,12 +110,15 @@ Email 1 has a sharp subject line. Emails 2 and 3 have an empty subject (they rep
         openaiKey: openaiKey || undefined,
         geminiKey: geminiKey || undefined,
         openRouterKey: openRouterKey || undefined,
+        // BD copy runs on GPT-5.4 first; Claude/Gemini remain as fallbacks.
+        order: ["openai", "claude", "gemini", "openrouter"],
+        fallbackModel: "gpt-5.4",
         systemPrompt: "You are Joe, a Wall Street BD copywriter. Output strictly valid JSON.",
         userContent: prompt,
         model: "claude-sonnet-4-6",
         maxTokens: 1400,
       }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ai_timeout")), 12_000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ai_timeout")), 22_000)),
     ]);
     const { text } = ai as { text: string };
     const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
@@ -133,6 +136,9 @@ Email 1 has a sharp subject line. Emails 2 and 3 have an empty subject (they rep
     return fallbackEmails(opts.jobName);
   }
 }
+
+// Headroom for the 22s AI race below (GPT-5.4 reasoning can be slow).
+export const maxDuration = 30;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
