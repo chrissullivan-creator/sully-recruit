@@ -876,20 +876,57 @@ async function handleEnrollProposal(
   }
 
   // Resolve people; silently drop do_not_contact (outreach guard) + unknown ids.
-  const { data: peopleRows } = await supabase
-    .from("people")
-    .select("id, full_name, first_name, last_name, type, roles, do_not_contact")
-    .in("id", ids)
-    .is("deleted_at", null);
-  const byId = new Map(((peopleRows as any[]) ?? []).map((p) => [p.id, p]));
+  // Tolerant: each identifier may be a CRM uuid (preferred) OR a name/email —
+  // Joe doesn't always carry the uuid across turns, and failing to resolve a
+  // person it just listed reads as nonsense to the recruiter. uuids resolve by
+  // id; everything else resolves by email (if it looks like one) then name.
+  const PCOLS = "id, full_name, first_name, last_name, type, roles, do_not_contact";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const byKey = new Map<string, any>(); // original identifier -> resolved person
+
+  const uuids = ids.filter((x: string) => UUID_RE.test(String(x)));
+  const terms = ids.filter((x: string) => !UUID_RE.test(String(x)));
+
+  if (uuids.length) {
+    const { data } = await supabase.from("people").select(PCOLS).in("id", uuids).is("deleted_at", null);
+    const m = new Map(((data as any[]) ?? []).map((p) => [p.id, p]));
+    for (const u of uuids) { const p = m.get(u); if (p) byKey.set(u, p); }
+  }
+
+  for (const term of terms) {
+    const t = String(term).trim();
+    if (!t) continue;
+    let row: any = null;
+    if (t.includes("@")) {
+      const lc = t.toLowerCase();
+      const { data } = await supabase
+        .from("people").select(PCOLS)
+        .or(`work_email.ilike.${lc},personal_email.ilike.${lc}`)
+        .is("deleted_at", null).limit(2);
+      row = (data as any[])?.[0] ?? null;
+    } else {
+      const { data } = await supabase
+        .from("people").select(PCOLS)
+        .ilike("full_name", `%${t}%`)
+        .is("deleted_at", null).limit(5);
+      const rows = (data as any[]) ?? [];
+      // Prefer an exact case-insensitive full-name hit; else the lone match.
+      row = rows.find((p) => String(p.full_name ?? "").trim().toLowerCase() === t.toLowerCase())
+        ?? (rows.length ? rows[0] : null);
+    }
+    if (row) byKey.set(term, row);
+  }
 
   const people: any[] = [];
   const blocked: string[] = [];
   let unresolved = 0;
+  const addedIds = new Set<string>();
   for (const id of ids) {
-    const p: any = byId.get(id);
+    const p: any = byKey.get(id);
     if (!p) { unresolved++; continue; }
     if (p.do_not_contact) { blocked.push(personName(p)); continue; }
+    if (addedIds.has(p.id)) continue; // two identifiers resolved to the same person
+    addedIds.add(p.id);
     people.push({ person_id: p.id, name: personName(p), type: p.type, roles: p.roles ?? [] });
   }
 
