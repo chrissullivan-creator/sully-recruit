@@ -21,6 +21,21 @@ If you're returning to this codebase, these are the recent invariants that bite:
 - **Proactive & Agentic Joe (2026-06-21).** Joe became an operating layer. New tables: **`joe_briefings`** (per-recruiter "Today" feed — `owner_user_id`, `entity_type` candidate|client|job, `category` hot_lead|going_cold|stalled|reply_waiting|ops_warning, `headline`, `rationale`, `score`, `status`, owner-RLS) and **`joe_action_queue`** (agent inbox, owner-RLS); new column **`people.next_action`** (+ `next_action_updated_at`). Neither table is in generated types → cast `from('joe_briefings' as any)` / `from('joe_action_queue' as any)`. Two `app_settings` flags read server-side: **`JOE_PROACTIVE_ENABLED`** (ON — gates `joe-daily-brief.ts` cron + `generate-joe-says` next_action) and **`JOE_AGENTIC_ENABLED`** (OFF — gates `ask-joe` write tools). New Inngest fn `joe-daily-brief` (cron `0 11 * * *`) registered in `frontend/api/inngest.ts`. **`ask-joe` is OpenAI-first** and its write tools are propose-only (emit `action` SSE, client executes on approval). All these surfaces pass `RESUME_PARSE_ORDER` (OpenAI-first). See SKILL-joe.md / SKILL-frontend.md.
 - **External MCP server (2026-06-21).** `frontend/api/mcp.ts` (`/api/mcp`, a Vercel fn) exposes the CRM over MCP — read + write — for ChatGPT (Developer Mode), Claude, Claude Code. Per-user tokens in `mcp_tokens` (sha256→user) attribute writes; **discovery (`initialize`/`tools/list`) is unauthenticated, `tools/call` is token-gated**; `query` runs read-only SQL via `mcp_run_read_query()` (ON by default, `service_role`-only). **`jobs.status` is actually `lead|hot|closed_lost`** — not the `open/closed` this skill used to list (now corrected below). Full detail in the "MCP Server — `/api/mcp`" section.
 
+### What changed week of 2026-06-27 — new schema you'll hit
+
+Full feature list is in CLAUDE.md ("Shipped week of 2026-06-27"); the DB/backend facts that bite:
+
+- **AI cascade default dropped OpenRouter (`360dac0`).** `DEFAULT_ORDER` = Claude → OpenAI → Gemini; `RESUME_PARSE_ORDER` = OpenAI → Claude → Gemini. `gpt-5.4` is opt-in via `fallbackModel` for `format-resume-ai.ts` + `jobs/[id]/create-bd-sequence.ts`. `ask-joe` keeps its own OpenRouter-tailed cascade. (Fix the "All AI goes through Claude/Anthropic" line in the AI Stack section below — it's been false since the multi-provider cascade.)
+- **`interviews` stage table now has a real UI + CHECK constraints** (see "Stage tables" below). Multiple rounds = one row per round (`interviews.round`). New: `interview_interviewers` junction, `interviews.calendar_event_ids jsonb`, `call_logs.interview_id` + `ai_call_notes.interview_id` FKs, `notes.entity_type` now allows `'interview'`.
+- **Send-Out → Submission flow** added `scheduled_messages` (`status ∈ {scheduled,sent,canceled,failed}`, owner-RLS + service-role) and new `send_outs` columns (`total_comp_min/max, additional_notes, submission_email jsonb, offer_base/bonus/details`). Endpoints `/api/format-resume-ai`, `/api/send-sendout`; Inngest `send-message-scheduled` (event `messages/send.scheduled.requested`).
+- **Soft-delete cascade (`20260625020000`).** Setting `people.deleted_at` soft-deletes its `send_outs` + `candidate_jobs` (new `cascade_deleted_at` cols) and stops active enrollments; restore reverses exactly that cascade. **All reads must filter `deleted_at IS NULL`.** Funnel fix: `candidate_jobs.max_pipeline_stage` ratchet triggers (`20260625010000`).
+- **Picklist multi-selects (`20260625000000`, #370).** New `picklist_options` table (`category ∈ department|products|industry|strategy`) + `text[]` columns: `people.departments`/`products`, `jobs.departments`/`products`, `companies.industries`/`strategies` (default `'{}'`; legacy `people.department` backfilled). Not all in generated types.
+- **Fuzzy person-matching is now shared.** `frontend/api/lib/fuzzy-match-person.ts` (`findPersonMatches` / `diceSimilarity` — Sørensen–Dice over name 0.6 / firm 0.25 / title 0.15, exact email/linkedin/phone pins ≥0.95) backs dedup scan (`/api/dedup/scan` Pass 2), inbox Add (`/api/search-person`, `/api/update-person`, `/api/inbox/reconcile-unknown`), and the LinkedIn-Recruiter import review (`/api/match-people`). `add-person.ts` gained a `merge_into` mode (keeps existing email+phone, overwrites title/company/LinkedIn/headline/photo, re-queues Unipile resolve).
+- **Unipile id resolution is throttled.** New people with a `linkedin_url` get `unipile_resolve_status='pending'`; the `resolve-unipile-ids` Inngest cron (`0 3 * * *`) resolves under a per-account daily budget (`linkedin_resolve_budget` table, default 80, `app_settings.LINKEDIN_RESOLVE_DAILY_CAP`). Person cols: `unipile_resolve_status/attempts/last_attempt_at/last_error`.
+- **`reply_sentiment` CHECK widened** to 9 values (adds `ooo`, `booked_meeting`); `intel-extraction.ts` clamps off-vocab → `neutral`.
+- **LinkedIn v2 SEND routes finalized** (relation-requests / inbox-scoped chats-send) — see CLAUDE.md Unipile section; the `frontend/src/trigger/` helper path is dead, use `frontend/src/server-lib/`.
+- **`inbox_threads` view** recreated to expose `sender_name` + `avatar_url`.
+
 ---
 
 ## Project Overview
@@ -172,6 +187,16 @@ Each row = one entry into a stage. `candidate_jobs.pipeline_stage` tracks curren
 **UI labels match table names** (pitches → "Pitches", send_outs → "Send Outs", submissions → "Submissions", interviews → "Interviews", placements → "Placements", rejections → "Rejections").
 
 `pitches`, `send_outs`, `submissions`, `placements`, `rejections` carry rich detail: rejection_reason, salary, prior_stage, interviewer_name, etc.
+
+**`interviews` (now a real UI surface — 2026-06-25).** One row per interview **round** for a `candidate_id + job_id` (`interviews.round` int; `frontend/src/lib/createInterview.ts` auto-increments). Auto-created when a send-out reaches an interview stage (`frontend/src/lib/interviewWorkflow.ts`, idempotent on `(send_out_id, round)`). **CHECK constraints (authoritative — fixed `606da`):**
+```
+interview_type  ∈ {phone_screen, video, onsite, technical, case_study, partner, final}
+outcome         ∈ {passed, rejected, no_show, cancelled, pending}
+stage           ∈ {to_be_scheduled, scheduled, interview_debrief}   ← "completed" sets stage='interview_debrief', NOT 'completed'; "cancel" only stamps cancelled_at
+ai_sentiment    ∈ {positive, neutral, negative, mixed}
+debrief_source  ∈ {manual, call_log, email, linkedin, ai}
+```
+Related: `interview_interviewers (interview_id, contact_id, is_primary)` junction (FK `contact_id → people(id)`); `interviews.calendar_event_ids jsonb` ([{email,id}] per mailbox, written by `/api/interview-calendar-sync` — non-blocking marker to the owner mailbox + always Chris).
 
 ### `v_person_activity` view — record of truth
 Unified per-person timeline that joins 13 activity sources. Filter by `person_id` for a chronological feed.
@@ -416,10 +441,12 @@ Add an entry to `TOOLS` (name/description/`inputSchema`) and a `case` in `runToo
 
 | Service | Purpose | Model |
 |---|---|---|
-| Anthropic Claude | Resume parsing, Joe assistant, sentiment, step writing, campaign suggestions | `claude-sonnet-4-20250514` (Sonnet), `claude-haiku-4-5-20251001` (Haiku for fast tasks) |
+| Anthropic Claude | Joe assistant, sentiment, step writing, campaign suggestions, drafting | `claude-sonnet-4-6` (Sonnet), `claude-haiku-4-5-20251001` (Haiku for fast tasks) |
+| OpenAI | Resume parsing (lead), in-app résumé formatter + BD sequences (`gpt-5.4` opt-in), Joe fallback | `gpt-4o-mini` default; `gpt-5.4` via `fallbackModel` |
+| Google Gemini | Cascade fallback | `gemini-2.5-flash` |
 | Voyage Finance-2 | Candidate embeddings for semantic search | `voyage-finance-2` via voyageai.com |
 
-**⚠️ No OpenAI, Eden AI, or Lovable gateway. All AI goes through Claude/Anthropic.**
+**⚠️ Multi-provider cascade — see `frontend/src/lib/ai-fallback.ts` and CLAUDE.md "Key Rules".** `DEFAULT_ORDER` = Claude → OpenAI → Gemini; `RESUME_PARSE_ORDER` = OpenAI → Claude → Gemini. **OpenRouter was dropped from the default orders 2026-06-26** (provider still exists; re-add if funded). `ask-joe` keeps its own OpenAI → Claude → Gemini → OpenRouter cascade. No Eden AI, no Lovable gateway.
 
 **Semantic search RPC:** `match_candidates(query_embedding, match_count, min_similarity, filter_status)`
 

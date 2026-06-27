@@ -4,6 +4,15 @@ End-to-end setup for the ChatGPT custom GPT that drafts a branded sendout
 (blurb + reformatted resume) from a candidate + job pairing, tags the
 job, and moves the candidate to **Submission** stage in Sully Recruit.
 
+> **Update 2026-06-27 — there is now an IN-APP path too.** `pages/SendOut.tsx`
+> (`/candidates/:id/sendout`) formats résumés **server-side** via
+> `/api/format-resume-ai` (Emerald-house HTML, `gpt-5.4`) and renders the PDF
+> **client-side** (`html2canvas` + `jsPDF`), then sends/schedules the client
+> email (`/api/send-sendout`). So the note below that "Sully Recruit doesn't
+> render PDFs server-side" is true only of *this ChatGPT path* — the app now has
+> its own formatter/PDF/email flow. The two coexist; the ChatGPT custom-GPT
+> wiring in this doc still works. See SKILL-frontend.md "Send Out → Submission flow".
+
 ## What the GPT does
 
 The user says something like *"Format Jane Doe for the Goldman MD role"*.

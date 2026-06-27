@@ -115,6 +115,37 @@ When you click a row in the **Submission** stage (or any later stage), the sideb
 
 Click **Save submission details**. These values are snapshotted on the send-out, so changing the candidate's profile later won't rewrite history.
 
+### NEW: Format & submit with Joe (one guided flow)
+
+Instead of manually attaching a resume and emailing the client yourself, open a
+candidate's drawer and click **Ask Joe — format & submit**. This walks you
+through, in order:
+
+1. **Choose** — confirm the candidate + job.
+2. **Formatting** — Joe reformats the resume into the **Emerald house style** (a
+   branded PDF). Not happy with something? Type a note in **"Notes for Joe"** and
+   it re-formats — you can keep refining; Joe always rebuilds from the original
+   resume so edits never compound.
+3. **Preview** — review the branded PDF and download it.
+4. **Email** — a pre-drafted client email with the PDF attached. Edit the
+   recipients/subject/body, then **send now** or **schedule** it for later.
+
+When the email goes (or is scheduled), the candidate moves to **Submission** and
+the email is snapshotted on the send-out. Comp / right-to-work captured in the
+**Submitted to client** card flow into the draft.
+
+> There's also a ChatGPT-based version of this for power users — same idea,
+> driven from a custom GPT. Ask engineering if you want it set up.
+
+### NEW: Interviews (Planner)
+
+Once a candidate reaches the interview stage, track it under **Planner →
+Interviews**. Each **round is its own entry** with its own date, who's
+interviewing, prep notes, and a **debrief** (outcome + notes, and the recorded
+debrief call if you logged one). Use **New Interview** / **New round** to add
+more. Scheduling an interview drops a non-blocking marker on your calendar (and
+always Chris's).
+
 ### What you see on the Send Outs page
 
 - **KPI tiles** at the top: pitches, send-outs, submissions, interviews, offers, projected fee.

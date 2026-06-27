@@ -3,7 +3,7 @@
 ## Stack
 - React 18 + TypeScript + Vite
 - shadcn/ui components
-- Tailwind CSS (dark theme)
+- Tailwind CSS — **LIGHT theme** (white canvas / sage neutrals, since the 2026-06-26 refresh; a `.dark` block still exists but `:root` is light)
 - TanStack Query (react-query) for data fetching
 - React Router for navigation
 - sonner for toasts
@@ -120,6 +120,98 @@ site-wide.
 
 ---
 
+## New surfaces — week of 2026-06-27
+
+### Ask Joe everywhere (global launcher)
+`components/joe/AskJoeLauncher.tsx` (+ `AskJoePanel.tsx`) mounts in
+`layout/MainLayout.tsx` → a command-palette launcher on **every page**, opened
+with **⌘/Ctrl-J** (Esc closes). Streams from `ask-joe`. Replaced the old floating
+`AskJoeButton`. See SKILL-joe.md.
+
+### Dashboard — AI Command Center hero
+`components/dashboard/CommandCenter.tsx`, rendered at the top of
+`pages/Index.tsx` (replaced the welcome banner; legacy funnel/lists/calendar
+remain below as "Pipeline detail"). A KPI strip (Calls Today, Interviews 7d,
+Offers Out, Placements MTD, Open Searches, Avg Time-to-Fill) + AI "signal" cards
+(Ready to Move, Follow-ups Due, Below Market, Searches at Risk, Ask-Joe-says,
+Revenue). One round-trip via the `command_center_summary()` RPC →
+`hooks/useCommandCenter.ts`. Rows carry person avatars / company logos.
+
+### Jobs — two boards
+`pages/Jobs.tsx` `view: 'leads' | 'jobs' | 'list'` (default `'jobs'`).
+- **Leads board** (`status==='lead'`): **draggable** kanban over `jobs.lead_stage`
+  (`LEAD_STAGES` from `@/lib/jobStatus`: New → Contacts Added → Reached Out →
+  Market Over); drop persists `lead_stage` optimistically.
+- **Hot Jobs board** (non-lead, non-closed): **read-only** — each job sits in the
+  column of its **furthest-along candidate** (`useJobPipelineStages()` unions
+  `candidate_jobs` + `send_outs`); a "Sourcing" bucket leads `PROGRESSION` from
+  `@/lib/pipeline`. You move a job by moving its candidates.
+- Both render via generic `components/pipeline/JobStageBoard.tsx` (draggable only
+  when an `onMove` is supplied).
+
+### Interviews (Planner)
+`pages/Interviews.tsx` at `/interviews` under the Planner sub-nav
+(`Calendar | To-Do's | Interviews`); deep-link `?interview=<id>`. Groups
+Upcoming / To-be-scheduled / Completed. Detail slide-over
+`components/interviews/InterviewDetail.tsx` (schedule, type/round, interviewers
+people-picker, prep notes, **Debrief panel** with the recorded call);
+`NewInterviewDialog.tsx`. **Multiple rounds = one row per round**
+(`lib/createInterview.ts` auto-increments `interviews.round`); auto-created from
+send-outs via `lib/interviewWorkflow.ts`. Constraint values + calendar drop:
+SKILL-architecture.md. "New Interview" buttons on the page and on each send-out
+row (`CandidateRow.tsx`).
+
+### Send Out → Submission flow
+`pages/SendOut.tsx` (`/candidates/:id/sendout`), steps **choose → formatting →
+preview → email**. Entry: "Ask Joe — format & submit" in
+`components/candidate/CandidateDrawer.tsx`. In-app **server-side résumé formatter**
+`/api/format-resume-ai` (Emerald-house HTML, `gpt-5.4`) → PDF client-side
+(`html2canvas` + `jsPDF`, added to package.json) → Tiptap email composer →
+send-now or schedule (`/api/send-sendout` → `scheduled_messages` + Inngest
+`send-message-scheduled`). "Notes for Joe" modify loop accumulates feedback and
+re-formats from the source résumé each time. `OfferDialog.tsx` for offers. This
+is the in-app sibling of the ChatGPT path in `claude/GPT-SENDOUT-ACTION.md`.
+
+### Inbox / Communication Hub overhaul
+`pages/Inbox.tsx` (+ `components/inbox/*`):
+- **New "All" tab is the DEFAULT** (`?tab=all|focused|other`) — unions
+  focused (linked) + other (unlinked) + live unknown-sender Unipile threads.
+  Sidebar gains an "All" row. (The old focused/other-only world is stale.)
+- `inbox_threads` view now exposes `sender_name` + `avatar_url`; **`ThreadAvatar`**
+  (photo → initials → channel glyph). Display fallback
+  `candidate_name || contact_name || sender_name` so unlinked InMails show the
+  real sender.
+- **Inbox "Add"** (`AddPersonWizard.tsx`) does fuzzy match → **update-or-create**
+  ("Connect & Update" overwrites with newest, links the conversation): endpoints
+  `/api/search-person`, `/api/update-person`, shared `api/lib/fuzzy-match-person.ts`.
+- **Bulk Reconcile** (`ReconcileUnknownDialog.tsx`, Sparkles/Martini button on
+  Other/All) → `/api/inbox/reconcile-unknown` (scan/apply, **link-only**).
+- Calls panel gains a newest/oldest sort toggle; `invalidate.ts` `COMMS_KEYS`
+  now includes `inbox_live_threads` (refresh-on-link).
+
+### Picklist multi-selects (#370)
+`components/shared/PicklistMultiSelect.tsx` (+ `PicklistEditSection.tsx`), backed
+by `usePicklist(category)`; admin CRUD at **Settings → Option Lists**
+(`components/settings/OptionListsSection.tsx`). Drives Department + Products on
+candidate/contact/job; company Industry (+ Strategy, shown only for Hedge Funds).
+Schema/columns: SKILL-architecture.md. Because `contacts` is a view lacking the
+new array columns, ContactDetail reads/writes `departments`/`products` on the
+underlying `people` row.
+
+### Import from LinkedIn Recruiter
+`pages/LinkedInRecruiterImport.tsx` at `/admin/linkedin-recruiter-import` (card
+in Settings → Import): paste a Recruiter search/pipeline URL → seat picker →
+`/api/linkedin-recruiter-search` (v2, read-only) → preview table → fuzzy-dedup
+review (`components/import/ImportMatchReviewDialog.tsx` ← `/api/match-people`) →
+CSV export (`lib/csvExport.ts`) or import via `/api/add-person`.
+
+### Source pipeline — in-Sully actions (#383)
+`pages/SourceProject.tsx`: each (read-only LinkedIn pipeline) row gets a
+DropdownMenu — Enroll in sequence (`EnrollInSequenceDialog`), Create send-out,
+Open & message, Remove from pipeline.
+
+---
+
 ## ⚠️ Vite Env Vars — CRITICAL
 
 Only `VITE_` prefixed vars work. `REACT_APP_*` is ALWAYS undefined.
@@ -135,13 +227,37 @@ import.meta.env.REACT_APP_BACKEND_URL  // ❌ never use
 
 ---
 
-## Design System
+## Design System (Premium Fintech refresh — 2026-06-26)
 
-### Colors (Emerald Brand)
+The app flipped from dark to a **light, white-canvas / white-sidebar** look. All
+tokens are HSL triplets in **`frontend/src/index.css`** (`:root`). Neutrals were
+retinted from cool grey to a low-saturation **sage** family (hue ~146–150°) while
+holding lightness so AA contrast is unchanged; **cards/popovers stay pure white**
+to pop against the sage shell.
+
+### Colors (current `:root` tokens)
 ```css
---accent: #2A5C42       /* Emerald green — primary actions, headers */
---gold: #C9A84C         /* Gold — secondary actions, highlights */
+--background: 146 16% 97%    /* soft sage shell */
+--foreground: 150 12% 13%    /* near-black, faint sage tint */
+--card / --popover: 0 0% 100%/* PURE WHITE */
+--primary: 152 76% 18%       /* emerald #0B4F2F — primary actions, active pill */
+--accent:  46 68% 47%        /* gold #C9A227 — used sparingly */
+--secondary / --muted: ~146 14-16% 95%   /* sage fills */
+--border / --input: 146 13% 90%          /* sage border */
+--ring: 152 76% 18%          /* emerald focus */
+--radius: 0.875rem           /* 14px cards */
+--success 152 55% 30% · --warning 46 68% 47% · --info 199 89% 40%
+/* sidebar is near-white sage now: --sidebar-background 146 16% 98%, --sidebar-primary 152 76% 18% (emerald active pill) */
+/* hex spec tokens also exported: --emerald #0B4F2F, --gold #C9A227, --page-bg #F4F9F6, --card-border #E0E9E4 */
 ```
+Fonts: `--font-sans 'Inter'`, `--font-display 'Sora'`, `--font-mono 'JetBrains Mono'`.
+⚠️ The old dark-theme `--accent: #2A5C42` / `--gold: #C9A84C` are gone. `thead.table-header-green` is kept by name but is now a muted (not dark-green) bar.
+
+### Brand mark & avatars
+- **Brand/Joe icon = lucide `Martini`** (replaced `Sparkles` everywhere, #380). Sidebar "E" mark recolors the gold logo to emerald via a CSS mask (`Sidebar.tsx`).
+- **`components/shared/PersonAvatar.tsx`** — profile image (`profile_picture_url` → `avatar_url`) → initials chip (`bg-primary/10 text-primary`); `onError` flips to initials.
+- **`components/shared/CompanyLogo.tsx`** — `companies.logo_url` → **Clearbit** (`logo.clearbit.com/{domain}`) → initials.
+- **`lib/recruiterAvatars.ts`** — `recruiterAvatar(email)` maps Chris/Nancy emails to bundled photos (`assets/recruiters/`), else initials. Used in sidebar, dashboard + send-out user filters.
 
 ### Component Variants (Button)
 ```tsx
@@ -186,7 +302,12 @@ frontend/src/
     CandidateDetail.tsx     candidate profile + tabs (custom fields in Background tab)
     Contacts.tsx / ContactDetail.tsx   client list + profile
     Companies.tsx / CompanyDetail.tsx
-    Jobs.tsx / JobDetail.tsx           jobs list + pipeline
+    Jobs.tsx / JobDetail.tsx           Leads board + Hot Jobs board + list
+    Interviews.tsx          Planner → Interviews (list + detail slide-over)
+    SendOut.tsx             /candidates/:id/sendout — format & submit flow
+    Today.tsx               proactive Joe "Today" feed
+    SourceProject.tsx       LinkedIn Recruiter pipeline (read-only + in-Sully actions)
+    LinkedInRecruiterImport.tsx   /admin/linkedin-recruiter-import
     Sequences.tsx           sequence list
     SequenceBuilder.tsx     node-based sequence builder (/sequences/new, /:id/edit)
     SequenceScheduleView.tsx / SequenceAnalyticsPage.tsx

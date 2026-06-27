@@ -12,8 +12,8 @@
 >
 > **Weighting:** deliberately weighted toward a **proactive, agentic Joe**.
 > **Provider order:** every new AI surface leads with **OpenAI**
-> (`OpenAI → Claude → Gemini → OpenRouter`), reusing `RESUME_PARSE_ORDER`
-> (see [§6](#6-provider-strategy-openai-first)).
+> (`OpenAI → Claude → Gemini` — OpenRouter dropped 2026-06-26), reusing
+> `RESUME_PARSE_ORDER` (see [§6](#6-provider-strategy-openai-first)).
 
 ---
 
@@ -179,10 +179,13 @@ starts in Joe's queue, not in a blank candidate list.
 ## 6. Provider strategy — OpenAI-first
 
 Every new AI-native surface in this roadmap leads with **OpenAI**, with the rest
-of the cascade behind it as fallback: **`OpenAI → Claude → Gemini → OpenRouter`.**
+of the cascade behind it as fallback: **`OpenAI → Claude → Gemini`.**
 This is not a new mechanism — it's the same `order` override already used for
 resume parsing (`RESUME_PARSE_ORDER` in `parse-resume-ai.ts`,
-`resume-ingestion.ts`, etc.). Concretely:
+`resume-ingestion.ts`, etc.). **(Update 2026-06-26: OpenRouter was dropped from
+`RESUME_PARSE_ORDER` and `DEFAULT_ORDER` — dead/unfunded account — so the live
+constant is `OpenAI → Claude → Gemini`. Only `ask-joe`'s own cascade still keeps
+an OpenRouter tail.)** Concretely:
 
 - **New cron / Inngest surfaces** (`joe-daily-brief`, next-best-action, signal
   mining) pass an OpenAI-first `order` to `callAIWithFallback`

@@ -6,7 +6,10 @@ Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter pe
 
 > **2026-06-21 — Proactive & Agentic Joe.** Joe is now an operating layer, not just chat:
 > - **Proactive** (`JOE_PROACTIVE_ENABLED`, ON): `joe-daily-brief.ts` Inngest cron (`0 11 * * *`) writes a per-recruiter "Today" feed into `joe_briefings`; `generate-joe-says` also stamps `people.next_action`. Surfaced at `/today` (`Today.tsx`). Both pass `RESUME_PARSE_ORDER` (OpenAI-first).
-> - **Agentic** (`JOE_AGENTIC_ENABLED`, OFF): when on, `ask-joe` loads a propose-only write tier — `draft_message`, `enroll_in_sequence`, `move_pipeline_stage`, `create_task`, `add_note`. These NEVER write server-side; each validates guardrails (`do_not_contact` blocks outreach) and emits a `data: {"action":{…}}` SSE event rendered as an approve/edit/reject card (`JoeActionCard`). The client executes only on approval. Off → Joe is byte-for-byte the 9 read-only tools below.
+> - **Agentic** (`JOE_AGENTIC_ENABLED`, OFF): when on, `ask-joe` loads a propose-only write tier — `draft_message`, `enroll_in_sequence`, `move_pipeline_stage`, `create_task`, `add_note`. These NEVER write server-side; each validates guardrails (`do_not_contact` blocks outreach) and emits a `data: {"action":{…}}` SSE event rendered as an approve/edit/reject card (`JoeActionCard`). The client executes only on approval (`enroll_in_sequence` → `frontend/src/lib/enrollPeople.ts`). Off → Joe is byte-for-byte the 11 read-only tools below.
+>   - **`enroll_in_sequence` resolves people by name OR email** (#379): each identifier is a uuid, a `work_email`/`personal_email` match, or a `full_name` ilike (prefers an exact case-insensitive hit); dedupes, drops `deleted_at` + `do_not_contact`, resolves the sequence by name, emits ONE approval card.
+
+> **Ask Joe everywhere (2026-06-26):** `components/joe/AskJoeLauncher.tsx` (+ `AskJoePanel.tsx`) mounts in `MainLayout.tsx` → a command-palette launcher on **every page**, opened with **⌘/Ctrl-J** (Esc closes). Replaced the old floating `AskJoeButton`.
 
 ---
 
@@ -42,7 +45,7 @@ Joe is the AI backbone of Sully Recruit. He's a senior Wall Street headhunter pe
 ```
 The deployed function reads **only `messages`**. There is no `mode` or `context` field — Joe gets everything it needs through its tools. (Conversation history is passed as prior `messages`.)
 
-### Joe's Tools (all READ-ONLY; max 6 tool iterations/turn, 12s per tool)
+### Joe's Tools — 11 READ-ONLY (max 6 tool iterations/turn, 12s per tool)
 | Tool | What it does |
 |---|---|
 | `search_people` | Hybrid semantic + keyword search over candidates AND clients (resume embeddings + joe_says briefs + keyword ilike). Returns id, name, title, company, status, match_score, match_via, excerpt. Optional `role` (candidate\|client) / `status` filters. |
@@ -54,10 +57,12 @@ The deployed function reads **only `messages`**. There is no `mode` or `context`
 | `list_send_outs` | Pipeline rows; filter by person_id / job_id / stage. |
 | `list_recent_communications` | Most recent conversations + calls for a person across all channels. |
 | `search_companies` | Find companies by name. Returns id, name, domain, industry. |
+| `list_company_people` *(2026-06-24, #368)* | List everyone linked to a company — resolves the company by name, lists people via canonical `company_id` (+ company-name text fallback). |
+| `search_messages` *(2026-06-27, #376)* | Full-text-ish `ilike` over `messages.body` + `subject`; optional `channel` (email\|linkedin\|linkedin_recruiter\|sms) + `person_id` filters, `limit` 1–25. Returns sender, channel, direction, snippet, timestamp, `person_id` so Joe can chain to `get_person_detail`. |
 
 Joe chains tools when useful (e.g. `search_people` → `get_person_detail` → `list_recent_communications`, or `list_jobs` → `match_candidates_to_job`). When Joe references a person or job it includes the id in parentheses so the recruiter can jump to the page.
 
-> **Note:** There is no `draft_message` mode and there are no `get_candidate_context` / `get_contact_context` / `get_job_context` / `search_candidates` / `semantic_search_candidates` tools in the deployed function — those were earlier designs that never shipped. The nine tools above are the live set.
+> **Note:** There is no `draft_message` mode and there are no `get_candidate_context` / `get_contact_context` / `get_job_context` / `search_candidates` / `semantic_search_candidates` tools in the deployed function — those were earlier designs that never shipped. The 11 tools above are the live read set. (`list_company_people` and `search_messages` are NOT agentic-gated — they're always-on reads. The only agentic/`JOE_AGENTIC_ENABLED`-gated tools are the propose-only writers below.)
 
 ---
 

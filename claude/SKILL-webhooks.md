@@ -4,23 +4,37 @@
 
 | Channel | Provider | Webhook Receiver | Account Owner |
 |---|---|---|---|
-| LinkedIn | Unipile **v2** | `/api/webhooks/unipile` (Vercel) → `process-unipile-event` (Trigger.dev) | Chris (recruiter), Nancy (recruiter), Ashley (classic) |
-| Email | Microsoft Graph / Outlook + Unipile v2 (parallel) | `/api/webhooks/microsoft` + `process-unipile-event` email branch | Chris, Nancy, Ashley, House |
-| SMS | RingCentral | `webhook-ringcentral` Trigger.dev task | Chris, Nancy (NOT Ashley) |
+| LinkedIn | Unipile (reads v1, **sends v2**) | `/api/webhooks/unipile` (Vercel) → `process-unipile-event` (**Inngest**) | Chris (recruiter), Nancy (recruiter), Ashley (classic) |
+| Email | Microsoft Graph / Outlook + Unipile (parallel) | `/api/webhooks/microsoft` + `process-unipile-event` email branch | Chris, Nancy, Ashley, House |
+| SMS | RingCentral | `process-ringcentral-event` (**Inngest**) | Chris, Nancy (NOT Ashley) |
+
+> The webhook handlers run on **Inngest** now (`frontend/api/lib/inngest/functions/process-*-event.ts`), not Trigger.dev — the `src/trigger/` name elsewhere is a holdover. See CLAUDE.md.
 
 ---
 
-## Unipile v2 (LinkedIn + Outlook)
+## Unipile v1/v2 split (LinkedIn + Outlook)
 
-We migrated everything off v1. **Use `frontend/src/trigger/lib/unipile-v2.ts:unipileFetch(supabase, accountId, path, init)`** — it handles auth + the v2 path shape (`/api/v2/{account_id}/...`) and pulls config from `app_settings`.
+**Reads + email/calendar are still v1; LinkedIn _sends_ (classic DM / InMail / connection request) run on v2.** See CLAUDE.md for the full v1/v2 table. The live helpers are in **`frontend/src/server-lib/unipile-v2.ts`** (`unipileFetch()` = v1, `unipileFetchV2()` = v2; the `frontend/src/trigger/lib/` path is the dead Trigger.dev holdover). LinkedIn sends go through **`frontend/src/server-lib/send-channels.ts`** (`sendLinkedIn` → `sendLinkedInV2` when the account resolves to an `acc_xxx` id via `getUnipileAccountV2IdByV1Id()` and `isLinkedinV2SendEnabled()`, else the v1 fallback).
 
-### API path conventions (v2)
-- Profile: `linkedin/users/{slug-or-provider-id}`
-- Connection invite: `POST linkedin/users/invite`
-- Send (Classic OR InMail): `POST chats` — body is `{ attendees_ids: [providerId], text, linkedin?: { api: 'recruiter'|'classic', inmail?: true } }`. **Don't** use `message_type: "INMAIL"` (v1 shape).
-- Recruiter projects: `linkedin/recruiter/projects` (and `/talent-pool/applicants` is POST in v2)
+### LinkedIn send routes — v2 (live, updated 2026-06-24, `send-channels.ts`)
+The v2 send route templates live in `linkedinV2SendPaths` and dispatch in `sendLinkedInV2()`. **These replaced the old `POST chats` / `users/invite` shapes — do NOT use the old ones on v2 (they 404/501).**
+
+| Send type | v2 route (`POST /v2/{acc_xxx}/…`) | Body |
+|---|---|---|
+| **Connection request** | `users/me/relation-requests` | `{ user_id: providerId, message?: note }` — key is **`user_id`** (not `provider_id`), note key is **`message`** |
+| **Recruiter InMail** | `inboxes/RECRUITER_PRIMARY/chats/send` | `{ text, users_ids: [providerId], specifics: { linkedin: { recruiter: { subject, signature } } } }` — both `subject` + `signature` required (`signature` = sender `profiles.display_name` via `getLinkedInSenderName()`) |
+| **Classic DM** | `chats/send` | `{ text, users_ids: [providerId], specifics: { linkedin: { classic: {} } } }` |
+
+⚠️ Body key is **`specifics`** (NOT `options`), recipient key is **`users_ids`** (NOT `attendees_ids`). The top-level `chats/send` route **501s for recruiter** — InMail MUST use the inbox-scoped `inboxes/RECRUITER_PRIMARY/chats/send`. `users/invite` is v1-only (404s on v2). The `USE_LINKEDIN_INBOX_API` flag + `sendViaInboxEndpoint()` in send-channels are **dead/disabled** — leave OFF.
+
+### API path conventions (v1, still in use for reads)
+- Profile: `linkedin/users/{slug-or-provider-id}` (lookup adds `?with_sections=linkedin_experience` + a `variant=linkedin_recruiter` retry to resolve InMail senders — see lookup-linkedin below)
+- Recruiter projects: `linkedin/recruiter/projects` (read-only — no programmatic create/pipeline-save; see CLAUDE.md)
 - Chat list / messages: `chats`, `chats/{chat_id}/messages`
 - Account meta (for health checks): `accounts/{id}` — same in both versions
+
+### `lookup-linkedin` — resolve InMail senders (2026-06-27, #377)
+`frontend/api/lookup-linkedin.ts` prefills the inbox "Add person" form. InMail senders arrive as an `AEM…` provider URN that the classic profile read can't resolve, so the form came up empty. Fix: the v2 profile read now passes **`with_sections=linkedin_experience`** (fills current title/company that drive the people↔companies auto-link) and, after the classic id/account loop fails, retries every id/account with **`variant=linkedin_recruiter`** before the chat fallback — that's what resolves InMail senders and prefills name/title/company/photo.
 
 ### Inbound classification (`webhook-unipile.ts`)
 The chat object's `content_type === 'inmail'` OR `folder` array including `'INBOX_LINKEDIN_RECRUITER'` → bucket as `linkedin_recruiter`. Everything else → `linkedin`. **Don't** fall back to `integration_account.account_type` alone — a Recruiter seat handles BOTH InMails and Classic DMs, so account_type tagged every Chris message as Recruiter.
@@ -57,6 +71,25 @@ Unipile sends the secret in any of: `x-unipile-secret`, `x-webhook-secret`, `x-u
 
 ### Inbound invitations
 `sync-linkedin-invitations` (every 30 min) pulls `users/invitations/received`, persists into `linkedin_invitations` table, auto-creates a candidate when the inviter doesn't match an existing person (source=`linkedin_inbound_invite`).
+
+---
+
+## Email noise / marketing filter (`marketing-blocklist.ts`, updated 2026-06-27)
+
+`frontend/src/server-lib/marketing-blocklist.ts` is the single noise/marketing
+classifier — `isMarketingEmail(senderAddress)` plus `MARKETING_DOMAINS` and
+`MARKETING_SENDER_PATTERNS`. Consumed by the Inngest fns
+`purge-marketing-emails.ts` (daily sweep) and `backfill-emails.ts` (skip on
+ingest).
+
+- **NEW (#382): ALL `linkedin.com` / `*.linkedin.com` senders are now noise —
+  including `hit-reply@linkedin.com`** (previously kept). Real LinkedIn
+  conversations arrive through the LinkedIn message channel, not email relays,
+  so every LinkedIn email is treated as a notification/marketing relay.
+- `MARKETING_DOMAINS` expanded (efinancialcareers, ziprecruiter, topechelon,
+  ccsend, plus retail/travel/finance promo senders); `alerts@`, `notify@`,
+  `postmaster@` added to `MARKETING_SENDER_PATTERNS`. The #382 ship also one-off
+  archived ~4,000 existing LinkedIn/newsletter conversations.
 
 ---
 

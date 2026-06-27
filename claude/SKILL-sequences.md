@@ -75,6 +75,19 @@ recipient isn't connected yet. The Unipile webhook promotes it to `scheduled`
 on acceptance (`post_connect_delay_hours`, default 24h, + jitter). If you see
 empty/early `linkedin_message` sends, check the connection step.
 
+**Duplicate connection-invite skip (2026-06-27, #384).** Before sending a
+`linkedin_connection` step, `runSequenceAction` now calls
+`isLinkedInConnected()` (`send-channels.ts` — reads network distance live, v2
+when available else v1, **defaults to `false` on error** so a cheap idempotent
+invite still proceeds). If already 1st-degree it marks the step
+`skipped` (`already_connected`), calls `markConnectionAccepted()` and advances —
+no duplicate invite. The enrollment-time skip only saw a cached flag; this
+re-checks live since a recipient can connect between enrollment and send (and
+the connection webhook never fires for an invite that was never sent).
+`markConnectionAccepted()` + `schedulePendingConnectionLogs()` now live in the
+shared `frontend/src/server-lib/connection-accept.ts` so the `check-connections`
+cron and this runtime guard share one path.
+
 ### 2. Reply guard stops everything
 `hasRepliedSinceEnrollment()` scans `messages` for an `inbound` row (excluding
 `message_type='connection_accepted'`) since `enrolled_at`, matching on
@@ -106,8 +119,13 @@ All timing lives in `frontend/src/server-lib/send-time-calculator.ts`.
 - **Send window** is per-sequence (`send_window_start` / `send_window_end`,
   `"HH:MM"`, in the sequence timezone), default **09:00–18:00**. Delay hours
   tick *only inside* the window. `weekdays_only` rolls Sat/Sun to Monday open.
-- **`linkedin_connection` bypasses the window** — fires immediately, 24/7
-  (+0–3 min anti-burst offset).
+- **`linkedin_connection` bypasses the window** — fires 24/7 (+0–3 min
+  anti-burst offset) **but now still honors the per-channel daily + hourly caps**
+  (2026-06-24, #362). Previously it early-returned before the cap checks, so a
+  batch enrollment scheduled every invite for ~now and one sweep fired them all
+  at once, blowing past LinkedIn's daily-invite ceiling. `calculateSendTime`
+  now rolls a connection forward over `checkDailyCap`/`checkHourlyCap` (hot-spot
+  snapping still skipped for connections).
 - **Jitter:** per-action `jiggle_minutes` (±), re-clamped into the window;
   plus deterministic per-hour "hot-spot" snapping so independently-scheduled
   enrollments cluster like a human instead of bunching at HH:00.
@@ -169,11 +187,14 @@ On every inbound reply the webhook processors (`process-unipile-event`,
 - person `last_sequence_sentiment` / `last_sequence_sentiment_note`
 - extracted recruiting fields (comp, notice, locations, …) onto the person
 
-Sentiment vocab: `interested | positive | maybe | neutral | negative |
-not_interested | do_not_contact | ooo`. The calendar handler also stamps
-`booked_meeting` (stop_trigger `calendar_booked`). Keep
-`SequenceAnalyticsPage` `SENTIMENT_COLORS` and `CandidateDetail`
-`SENTIMENT_CONFIG` in sync with this list.
+Sentiment vocab (the `reply_sentiment_sentiment_check` CHECK now permits all 9,
+widened 2026-06-25): `interested | positive | maybe | neutral | negative |
+not_interested | do_not_contact | ooo | booked_meeting`. `intel-extraction.ts`
+clamps any off-vocab/hallucinated value to `neutral` via `safeSentiment`
+(`ALLOWED_SENTIMENTS`) before writing — and the `do_not_contact` branch keys off
+the clamped value. The calendar handler stamps `booked_meeting` (stop_trigger
+`calendar_booked`). Keep `SequenceAnalyticsPage` `SENTIMENT_COLORS` and
+`CandidateDetail` `SENTIMENT_CONFIG` in sync with this list.
 
 Then `stopEnrollment(..., 'reply_received', replyText)` terminates the
 enrollment and `triggerSentimentAnalysis` stamps `reply_received_at` +

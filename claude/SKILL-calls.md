@@ -19,6 +19,29 @@ RingCentral calls flow through this pipeline:
 
 ---
 
+## Debrief call → interview (2026-06-25, Phase 3)
+
+A recorded RingCentral call can attach to an interview as its debrief.
+
+- **Columns:** nullable FK `interview_id` on **both `call_logs` and
+  `ai_call_notes`** (`ON DELETE SET NULL`; migration
+  `20260625050000_call_logs_ai_call_notes_interview_id.sql`).
+- **Tagging:** `components/shared/CallButton.tsx` takes an optional `interviewId`;
+  `frontend/api/call/ringout.ts` stamps it on the ringout `call_logs` row.
+- **Correlation:** `process-ringcentral-event` (Inngest) best-effort carries the
+  interview tag from a recent ringout row onto the inbound transcribed call —
+  match on `owner_id` + last-10 digits of phone + 6-hour window, most recent
+  `interview_id`-tagged row. Normal (non-interview) calls keep `interview_id=null`.
+- **⚠️ The Deepgram runner SKIPS the candidate-field backfill when
+  `cl.interview_id` is set** (`call-deepgram-runner.ts` — `if (entityType ===
+  "candidate" && entityId && !cl.interview_id)`): a debrief call must NOT
+  overwrite the candidate's comp/skills/status/ownership. It still copies
+  `interview_id` into the `ai_call_notes` row.
+- `components/interviews/InterviewDetail.tsx` surfaces the call's summary /
+  action items / transcript in a Debrief panel.
+
+---
+
 ## Database Tables
 
 ### `call_logs`
@@ -88,10 +111,14 @@ updated_candidates_at, created_at
 
 ## Status Side Effect
 
-Every processed call sets `candidate.status = 'back_of_resume'`.
-Displayed as "Back of Resume" (not "Back_of_resume") everywhere:
-- CandidateDetail badge uses explicit label mapping
-- Candidates list uses `STATUS_LABELS` dict with `replace(/_/g, ' ')` fallback
+For a candidate call ≥60s, `intel-extraction` sets `status = 'engaged'`
+(the engagement promotion) **and** the boolean `back_of_resume = true` when comp
+exists + a resume is on file — these are two separate fields.
+**⚠️ `status='back_of_resume'` is NOT a valid value** (the status CHECK only
+allows `new | reached_out | engaged`); `back_of_resume` is a boolean column.
+A debrief call (`interview_id` set) does NOT touch candidate status/fields at all.
+`back_of_resume=true` is displayed as "Back of Resume" via the candidate-detail
+badge label map / the list's `STATUS_LABELS` dict.
 
 ---
 
