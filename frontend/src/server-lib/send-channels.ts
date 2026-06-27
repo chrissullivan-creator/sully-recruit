@@ -721,6 +721,81 @@ async function sendLinkedInV2(
   }
 }
 
+/**
+ * Live "are we already connected?" check used as a send-time guard before a
+ * sequence fires a LinkedIn connection request. Resolves the same account /
+ * provider id `sendLinkedIn` would use, then reads the member's network
+ * distance from Unipile (v2 when the flag + acc_xxx are present, else v1) and
+ * returns true for a 1st-degree connection.
+ *
+ * `to` may be a Unipile provider_id (the usual sequence-runner input) or a
+ * linkedin.com/in/<slug> URL.
+ *
+ * Defaults to `false` on ANY error (account lookup, rate-limit, profile fetch):
+ * a connection request is the cheap, idempotent action, so on uncertainty we'd
+ * rather let the send proceed (LinkedIn no-ops a request to an existing
+ * connection anyway) than wrongly skip a real invite.
+ */
+export async function isLinkedInConnected(
+  supabase: any,
+  to: string,
+  userId?: string,
+  accountId?: string,
+): Promise<boolean> {
+  try {
+    const { accountId: resolvedAccountId } = await getUnipileApiKey(supabase, userId, accountId);
+
+    let acctV2Id: string | null = null;
+    if (await isLinkedinV2SendEnabled(supabase)) {
+      acctV2Id = await getUnipileAccountV2IdByV1Id(supabase, resolvedAccountId);
+    }
+
+    // Resolve a linkedin URL → provider_id via v1 if a URL was passed.
+    let providerId = to;
+    const urlMatch = to.match(/linkedin\.com\/in\/([^/?#]+)/);
+    if (urlMatch) {
+      const userData: any = await unipileFetch(
+        supabase,
+        resolvedAccountId,
+        `linkedin/users/${encodeURIComponent(urlMatch[1])}`,
+        { method: "GET" },
+      );
+      providerId = userData.provider_id || userData.id || userData.public_id || urlMatch[1];
+    }
+
+    const profile: any = acctV2Id
+      ? await unipileFetchV2(
+          supabase,
+          acctV2Id,
+          `users/${encodeURIComponent(providerId)}`,
+          { method: "GET" },
+        )
+      : await unipileFetch(
+          supabase,
+          resolvedAccountId,
+          `linkedin/users/${encodeURIComponent(providerId)}`,
+          { method: "GET" },
+        );
+
+    // Mirror the connection-status read in check-connections.ts.
+    const networkDistance = profile.network_distance ?? profile.networkDistance;
+    return (
+      profile.is_connected === true ||
+      profile.connection_status === "CONNECTED" ||
+      profile.relationship === "CONNECTED" ||
+      profile.distance === 1 ||
+      networkDistance === 1 ||
+      networkDistance === "DISTANCE_1" ||
+      networkDistance === "FIRST_DEGREE"
+    );
+  } catch (err: any) {
+    logger.warn("isLinkedInConnected: check failed, assuming not connected", {
+      error: err?.message,
+    });
+    return false;
+  }
+}
+
 export async function sendLinkedIn(
   supabase: any,
   to: string,

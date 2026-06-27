@@ -15,7 +15,8 @@
  * `@trigger.dev/sdk/v3` and Inngest's per-run logger, so each engine can
  * pass its own without an adapter.
  */
-import { sendEmail, sendSms, sendLinkedIn, resolveRecipient } from "./send-channels.js";
+import { sendEmail, sendSms, sendLinkedIn, isLinkedInConnected, resolveRecipient } from "./send-channels.js";
+import { markConnectionAccepted } from "./connection-accept.js";
 import { resolveMergeTags, applyMergeTags, formatEmailBody, validateEmail } from "./merge-tags.js";
 import { calculateSendTime, incrementDailySend, localDateString } from "./send-time-calculator.js";
 import { canonicalChannel } from "./unipile-v2.js";
@@ -368,11 +369,29 @@ export async function runSequenceAction(
       case "sms":
         sendResult = await sendSms(supabase, to, messageBody, senderUserId);
         break;
-      case "linkedin_connection":
+      case "linkedin_connection": {
+        // Live guard: don't send a duplicate invite to someone we're already
+        // connected to. The enrollment-time skip only saw a cached flag; a
+        // recipient can accept (or already be a connection) between enrollment
+        // and this send. Re-check live, and if they're already a 1st-degree
+        // connection, skip the invite and treat it as accepted so any parked
+        // follow-up steps get released (the connection webhook won't fire for
+        // an invite we never sent).
+        if (await isLinkedInConnected(supabase, to, senderUserId, payload.accountId)) {
+          await markConnectionAccepted(supabase, enrollment, entityId, new Date());
+          await markStepSkipped(supabase, payload.stepLogId, "already_connected");
+          await checkSequenceComplete(supabase, enrollment, logger);
+          logger.info("Connection request skipped — already connected", {
+            enrollmentId: payload.enrollmentId,
+            entityId,
+          });
+          return { action: "skipped", reason: "already_connected" };
+        }
         // Connection requests don't carry attachments (no file field
         // on Unipile's invite endpoint), so attachmentUrl is omitted.
         sendResult = await sendLinkedIn(supabase, to, messageBody, senderUserId, payload.accountId, "linkedin_connection");
         break;
+      }
       case "linkedin_message": {
         const liAttachments: string[] | undefined =
           Array.isArray(action.attachment_urls) && action.attachment_urls.length

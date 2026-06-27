@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
+import {
+  ImportMatchReviewDialog,
+  type ReviewItem,
+  type IncomingPerson,
+  type PersonMatch,
+  type Decision,
+} from '@/components/import/ImportMatchReviewDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,9 +42,12 @@ interface PreviewRow {
   importable: boolean;
   type: PersonType;
   selected: boolean;
-  status?: 'importing' | 'imported' | 'merged' | 'error';
+  status?: 'importing' | 'imported' | 'merged' | 'skipped' | 'error';
   statusMsg?: string;
 }
+
+type ImportOutcome = 'imported' | 'merged' | 'skipped' | 'error';
+interface Counts { imported: number; merged: number; skipped: number; failed: number; }
 
 const STAGE_LABEL: Record<string, string> = {
   uncontacted: 'Uncontacted',
@@ -72,6 +82,14 @@ export default function LinkedInRecruiterImport() {
   const [importing, setImporting] = useState(false);
   const [rows, setRows] = useState<PreviewRow[]>([]);
   const [summary, setSummary] = useState<{ total: number; fetched: number; truncated: boolean } | null>(null);
+
+  // Fuzzy-dedup review state.
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const headersRef = useRef<Record<string, string>>({});
+  const pendingCleanCounts = useRef<Counts>({ imported: 0, merged: 0, skipped: 0, failed: 0 });
+  const importTargetCount = useRef(0);
 
   // LinkedIn seats that have a v2 (acc_xxx) id — the only ones we can call the
   // Recruiter search-from-URL endpoint on behalf of.
@@ -160,68 +178,174 @@ export default function LinkedInRecruiterImport() {
   const setSelectedType = (type: PersonType) =>
     setRows((prev) => prev.map((r) => (r.selected && r.importable ? { ...r, type } : r)));
 
+  const toIncoming = (r: PreviewRow): IncomingPerson => ({
+    key: r._k,
+    name: r.name,
+    title: r.current_title,
+    company: r.current_company,
+    location: r.location,
+    email: r.email,
+    phone: r.phone,
+    linkedin_url: r.linkedin_url,
+  });
+
+  // POST a single person to add-person. `decision` carries the user's choice
+  // from the review modal (merge into an existing person, keep both, or skip).
+  const postPerson = async (row: PreviewRow, decision?: Decision): Promise<ImportOutcome> => {
+    if (decision?.action === 'skip') {
+      patchRow(row._k, { status: 'skipped', statusMsg: 'Skipped (duplicate)' });
+      return 'skipped';
+    }
+    patchRow(row._k, { status: 'importing', statusMsg: undefined });
+    // On a merge, stamp the role that matches the existing person so add-person
+    // writes the right columns; otherwise use the row's chosen type.
+    const isMerge = decision?.action === 'merge' && !!decision.mergeTargetId;
+    const type = isMerge && decision?.mergeTargetType
+      ? (decision.mergeTargetType === 'candidate' ? 'candidate' : 'contact')
+      : row.type;
+    try {
+      const body: Record<string, any> = {
+        type,
+        provider_id: row.candidate_id || undefined,
+        data: {
+          first_name: row.first_name,
+          last_name: row.last_name,
+          title: row.current_title || undefined,
+          company: row.current_company || undefined,
+          location: row.location || undefined,
+          linkedin_url: row.linkedin_url || undefined,
+          email: row.email || undefined,
+          phone: row.phone || undefined,
+          headline: row.headline || undefined,
+          photo: row.avatar_url || undefined,
+          notes: `Imported from LinkedIn Recruiter${row.stage ? ` · stage: ${STAGE_LABEL[row.stage] || row.stage}` : ''}`,
+        },
+      };
+      if (isMerge) body.merge_into = decision!.mergeTargetId;
+      const resp = await fetch('/api/add-person', {
+        method: 'POST',
+        headers: headersRef.current,
+        body: JSON.stringify(body),
+      });
+      const json = await resp.json().catch(() => null);
+      if (!resp.ok) throw new Error(json?.error || `Failed (${resp.status})`);
+      if (json?.enriched) { patchRow(row._k, { status: 'merged', statusMsg: 'Merged & updated from LinkedIn' }); return 'merged'; }
+      if (json?.merged) { patchRow(row._k, { status: 'merged', statusMsg: 'Already existed — merged' }); return 'merged'; }
+      patchRow(row._k, { status: 'imported', statusMsg: 'Imported' }); return 'imported';
+    } catch (e: any) {
+      patchRow(row._k, { status: 'error', statusMsg: e?.message || 'Failed' });
+      return 'error';
+    }
+  };
+
+  // Run a batch with bounded concurrency so we don't open hundreds of sockets.
+  const runBatch = async (entries: { row: PreviewRow; decision?: Decision }[]): Promise<Counts> => {
+    const counts: Counts = { imported: 0, merged: 0, skipped: 0, failed: 0 };
+    let idx = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(4, entries.length) }, async () => {
+        while (idx < entries.length) {
+          const e = entries[idx++];
+          const r = await postPerson(e.row, e.decision);
+          if (r === 'imported') counts.imported++;
+          else if (r === 'merged') counts.merged++;
+          else if (r === 'skipped') counts.skipped++;
+          else counts.failed++;
+        }
+      }),
+    );
+    return counts;
+  };
+
+  const toastCounts = (c: Counts) => {
+    const parts: string[] = [];
+    if (c.imported) parts.push(`${c.imported} imported`);
+    if (c.merged) parts.push(`${c.merged} merged`);
+    if (c.skipped) parts.push(`${c.skipped} skipped`);
+    if (c.failed) parts.push(`${c.failed} failed`);
+    toast.success(parts.join(' · ') || 'No changes');
+  };
+
   const importSelected = async () => {
     if (importing) return;
     const targets = rows.filter((r) => r.selected && r.importable);
     if (targets.length === 0) { toast.error('Select at least one named person to import'); return; }
 
     setImporting(true);
-    targets.forEach((r) => patchRow(r._k, { status: 'importing', statusMsg: undefined }));
+    importTargetCount.current = targets.length;
+    headersRef.current = await authHeaders();
 
-    let imported = 0, merged = 0, failed = 0;
-    const headers = await authHeaders();
+    // ── Step 1: fuzzy-match against existing people so we don't create dupes ──
+    let matchMap: Record<string, PersonMatch[]> = {};
+    try {
+      const resp = await fetch('/api/match-people', {
+        method: 'POST',
+        headers: headersRef.current,
+        body: JSON.stringify({
+          people: targets.map((r) => ({
+            key: r._k,
+            name: r.name,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            email: r.email,
+            phone: r.phone,
+            linkedin_url: r.linkedin_url,
+            company: r.current_company,
+            title: r.current_title,
+            type: r.type === 'candidate' ? 'candidate' : 'client',
+          })),
+        }),
+      });
+      const json = await resp.json().catch(() => null);
+      if (resp.ok && json?.matches) matchMap = json.matches;
+    } catch {
+      // Match service hiccup — fall back to a plain import (add-person still
+      // does exact-key dedup server-side, so we never hard-dupe).
+    }
 
-    const importOne = async (row: PreviewRow) => {
-      try {
-        const resp = await fetch('/api/add-person', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            type: row.type,
-            provider_id: row.candidate_id || undefined,
-            data: {
-              first_name: row.first_name,
-              last_name: row.last_name,
-              title: row.current_title || undefined,
-              company: row.current_company || undefined,
-              location: row.location || undefined,
-              linkedin_url: row.linkedin_url || undefined,
-              email: row.email || undefined,
-              phone: row.phone || undefined,
-              headline: row.headline || undefined,
-              photo: row.avatar_url || undefined,
-              notes: `Imported from LinkedIn Recruiter${row.stage ? ` · stage: ${STAGE_LABEL[row.stage] || row.stage}` : ''}`,
-            },
-          }),
-        });
-        const json = await resp.json().catch(() => null);
-        if (!resp.ok) throw new Error(json?.error || `Failed (${resp.status})`);
-        if (json?.merged) { merged++; patchRow(row._k, { status: 'merged', statusMsg: 'Already existed — merged' }); }
-        else { imported++; patchRow(row._k, { status: 'imported', statusMsg: 'Imported' }); }
-      } catch (e: any) {
-        failed++;
-        patchRow(row._k, { status: 'error', statusMsg: e?.message || 'Failed' });
-      }
-    };
+    // ── Step 2: split into clean (no match → import now) and review (has a
+    //    plausible existing person → ask the user) ──
+    const clean: PreviewRow[] = [];
+    const reviewable: ReviewItem[] = [];
+    for (const r of targets) {
+      const ms = matchMap[r._k] || [];
+      if (ms.length) reviewable.push({ row: toIncoming(r), matches: ms });
+      else clean.push(r);
+    }
 
-    // Bounded concurrency so a big batch doesn't open hundreds of sockets.
-    let idx = 0;
-    await Promise.all(
-      Array.from({ length: Math.min(4, targets.length) }, async () => {
-        while (idx < targets.length) {
-          const cur = targets[idx++];
-          await importOne(cur);
-        }
-      }),
-    );
+    const cleanCounts = clean.length
+      ? await runBatch(clean.map((row) => ({ row })))
+      : { imported: 0, merged: 0, skipped: 0, failed: 0 };
 
-    setImporting(false);
-    const parts: string[] = [];
-    if (imported) parts.push(`${imported} imported`);
-    if (merged) parts.push(`${merged} merged`);
-    if (failed) parts.push(`${failed} failed`);
-    const typeWord = `${targets.filter((t) => t.type === 'candidate').length} candidate / ${targets.filter((t) => t.type === 'contact').length} contact`;
-    toast.success(`${parts.join(' · ') || 'No changes'} (${typeWord})`);
+    // ── Step 3: review the matches, or finish ──
+    if (reviewable.length) {
+      pendingCleanCounts.current = cleanCounts;
+      setReviewItems(reviewable);
+      setReviewOpen(true);
+      setImporting(false); // the modal drives the rest
+    } else {
+      setImporting(false);
+      toastCounts(cleanCounts);
+    }
+  };
+
+  const confirmReview = async (decisions: Record<string, Decision>) => {
+    setConfirming(true);
+    const byKey = new Map(rows.map((r) => [r._k, r]));
+    const entries = reviewItems
+      .map((it) => ({ row: byKey.get(it.row.key), decision: decisions[it.row.key] }))
+      .filter((e): e is { row: PreviewRow; decision: Decision } => !!e.row);
+    const reviewCounts = await runBatch(entries);
+    const c = pendingCleanCounts.current;
+    setConfirming(false);
+    setReviewOpen(false);
+    setReviewItems([]);
+    toastCounts({
+      imported: c.imported + reviewCounts.imported,
+      merged: c.merged + reviewCounts.merged,
+      skipped: c.skipped + reviewCounts.skipped,
+      failed: c.failed + reviewCounts.failed,
+    });
   };
 
   const csvHeaders = [
@@ -252,7 +376,8 @@ export default function LinkedInRecruiterImport() {
   const statusBadge = (r: PreviewRow) => {
     if (r.status === 'importing') return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
     if (r.status === 'imported') return <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><Check className="h-3 w-3" /> Imported</span>;
-    if (r.status === 'merged') return <span className="inline-flex items-center gap-1 text-xs text-amber-600"><Check className="h-3 w-3" /> Merged</span>;
+    if (r.status === 'merged') return <span className="inline-flex items-center gap-1 text-xs text-amber-600" title={r.statusMsg}><Check className="h-3 w-3" /> Merged</span>;
+    if (r.status === 'skipped') return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={r.statusMsg}><X className="h-3 w-3" /> Skipped</span>;
     if (r.status === 'error') return <span className="inline-flex items-center gap-1 text-xs text-destructive" title={r.statusMsg}><X className="h-3 w-3" /> Failed</span>;
     return null;
   };
@@ -437,6 +562,14 @@ export default function LinkedInRecruiterImport() {
           )}
         </div>
       </div>
+
+      <ImportMatchReviewDialog
+        open={reviewOpen}
+        onOpenChange={(o) => { if (!confirming) setReviewOpen(o); }}
+        items={reviewItems}
+        onConfirm={confirmReview}
+        confirming={confirming}
+      />
     </MainLayout>
   );
 }
