@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   PhoneIncoming, PhoneOutgoing, Clock, FileText, ListChecks,
-  DollarSign, ChevronDown, ChevronUp, Sparkles, Wand2, Loader2, PhoneCall,
+  DollarSign, ChevronDown, ChevronUp, Martini, Wand2, Loader2, PhoneCall,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -226,7 +226,7 @@ export function MeetingRecapsTab({ entityId, entityType, personName }: MeetingRe
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-accent" />
+          <Martini className="h-5 w-5 text-accent" />
           <h2 className="text-base font-semibold">Meeting Recaps</h2>
           <span className="text-xs text-muted-foreground">({recaps.length})</span>
         </div>

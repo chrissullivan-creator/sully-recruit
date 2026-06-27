@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Search, Send, Loader2, Sparkles, Globe, Users, FileText, MessageSquare, StickyNote } from 'lucide-react';
+import { Search, Send, Loader2, Martini, Globe, Users, FileText, MessageSquare, StickyNote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
@@ -182,7 +182,7 @@ export function UnifiedSearchDialog({ open, onOpenChange }: Props) {
               <div key={i} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                 {msg.role === 'assistant' && (
                   <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
-                    <Sparkles className="h-3.5 w-3.5 text-accent" />
+                    <Martini className="h-3.5 w-3.5 text-accent" />
                   </div>
                 )}
                 <div className={cn(
@@ -198,7 +198,7 @@ export function UnifiedSearchDialog({ open, onOpenChange }: Props) {
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex gap-3 justify-start">
                 <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <Martini className="h-3.5 w-3.5 text-accent" />
                 </div>
                 <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-3">
                   <div className="flex items-center gap-2 text-muted-foreground">

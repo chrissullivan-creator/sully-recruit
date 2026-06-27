@@ -9,7 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import {
-  Loader2, Users, Briefcase, Building2, Calendar, Eye, Sparkles,
+  Loader2, Users, Briefcase, Building2, Calendar, Eye, Martini,
   Download,
 } from 'lucide-react';
 
@@ -521,7 +521,7 @@ export default function Source() {
                 )}
                 {project.has_recommended_matches && (
                   <span className="inline-flex items-center gap-1 text-emerald-500">
-                    <Sparkles className="h-3 w-3" />
+                    <Martini className="h-3 w-3" />
                     Recommended matches active
                   </span>
                 )}

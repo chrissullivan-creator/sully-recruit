@@ -43,7 +43,7 @@ import {
   CalendarClock,
   Copy,
   Gauge,
-  Sparkles,
+  Martini,
   Upload,
   ListChecks,
 } from 'lucide-react';
@@ -678,7 +678,7 @@ const Settings = () => {
     { id: 'data_hygiene', label: 'Data Hygiene', icon: Copy },
     { id: 'general', label: 'General', icon: SettingsIcon },
     ...(isAdmin ? [
-      { id: 'custom_fields', label: 'Custom Fields', icon: Sparkles },
+      { id: 'custom_fields', label: 'Custom Fields', icon: Martini },
       { id: 'option_lists', label: 'Option Lists', icon: ListChecks },
       { id: 'admin', label: 'Admin Tools', icon: Wrench },
     ] : []),

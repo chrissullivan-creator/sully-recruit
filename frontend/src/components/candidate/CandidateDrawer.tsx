@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
   Mail, Phone, MessageSquare, Linkedin, ArrowLeft, ArrowRight, ExternalLink,
-  Clock, Briefcase, DollarSign, Trash2, Sparkles, Download, CalendarPlus,
+  Clock, Briefcase, DollarSign, Trash2, Martini, Download, CalendarPlus,
   Gift, XCircle, FileText, Repeat,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -628,7 +628,7 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                   className="w-full gap-1 border-gold/40 text-gold-deep hover:bg-gold-bg hover:border-gold"
                   onClick={handleAskJoe}
                 >
-                  <Sparkles className="h-3.5 w-3.5" /> Ask Joe — format résumé &amp; submit
+                  <Martini className="h-3.5 w-3.5" /> Ask Joe — format résumé &amp; submit
                 </Button>
               </div>
 

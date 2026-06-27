@@ -3,7 +3,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Martini, Send, Loader2, Sparkles, Trash2, UserCheck, Users } from 'lucide-react';
+import { Martini, Send, Loader2, Trash2, UserCheck, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -227,7 +227,7 @@ export default function AskJoe() {
                     onClick={() => ask(s)}
                     className="rounded-lg border border-card-border bg-white px-3 py-2 text-xs text-foreground hover:border-emerald/40 hover:bg-emerald-light/30 transition-colors"
                   >
-                    <Sparkles className="inline h-3 w-3 text-gold-deep mr-1.5" />
+                    <Martini className="inline h-3 w-3 text-gold-deep mr-1.5" />
                     {s}
                   </button>
                 ))}

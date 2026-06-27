@@ -35,7 +35,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, Sparkles, X, Target, User, Users, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw } from 'lucide-react';
+import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, ArrowDown, Upload, FileUp, Martini, X, Target, User, Users, Trash2, Loader2, AlertTriangle, SlidersHorizontal, HelpCircle, MoreHorizontal, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { DuplicateReviewDialog } from '@/components/candidates/DuplicateReviewDialog';
@@ -423,7 +423,7 @@ const Candidates = () => {
               </button>
             </div>
             <Button variant="ghost" size="sm" onClick={() => setAskJoeSearchOpen(true)}>
-              <Sparkles className="h-4 w-4 mr-1" />
+              <Martini className="h-4 w-4 mr-1" />
               Ask Joe
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>

@@ -12,7 +12,7 @@ import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Sparkles, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Martini, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -264,11 +264,11 @@ const Contacts = () => {
               </>
             )}
             <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(true)}>
-              <Sparkles className="h-4 w-4 mr-1" />
+              <Martini className="h-4 w-4 mr-1" />
               Ask Joe — Firm & Title Search
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setContactSearchOpen(true)}>
-              <Sparkles className="h-4 w-4 mr-1" />
+              <Martini className="h-4 w-4 mr-1" />
               Ask Joe — Contacts
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>

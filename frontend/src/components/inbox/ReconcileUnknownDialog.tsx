@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateCommsScope } from '@/lib/invalidate';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Loader2, CheckSquare, Square, Sparkles, UserCheck, Users } from 'lucide-react';
+import { Loader2, CheckSquare, Square, Martini, UserCheck, Users } from 'lucide-react';
 
 interface Proposal {
   conversation_id: string;
@@ -118,7 +118,7 @@ export function ReconcileUnknownDialog({
       <DialogContent className="max-w-xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-accent" />
+            <Martini className="h-5 w-5 text-accent" />
             Match unknown senders
           </DialogTitle>
           <DialogDescription>

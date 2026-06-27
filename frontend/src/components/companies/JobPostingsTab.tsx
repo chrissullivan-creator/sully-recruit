@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  RefreshCw, Plus, X, Trash2, ExternalLink, Briefcase, Loader2, Sparkles,
+  RefreshCw, Plus, X, Trash2, ExternalLink, Briefcase, Loader2, Martini,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 
@@ -252,7 +252,7 @@ export function JobPostingsTab({ companyId, companyName }: JobPostingsTabProps) 
               <>
                 <Button size="sm" variant="outline" disabled={bulkBusy}
                   onClick={() => convertToLeads(selectedIds)}>
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  <Martini className="h-3.5 w-3.5 mr-1.5" />
                   Add to leads
                 </Button>
                 <Button size="sm" variant="outline" disabled={bulkBusy}
@@ -387,7 +387,7 @@ function PostingDetailSheet({ posting, onClose, onDismiss, onConvert, busy }: {
                 <>
                   <Button size="sm" variant="gold" disabled={busy}
                     onClick={() => onConvert(posting.id)}>
-                    <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                    <Martini className="h-3.5 w-3.5 mr-1.5" />
                     Add to leads
                   </Button>
                   <Button size="sm" variant="outline" disabled={busy}

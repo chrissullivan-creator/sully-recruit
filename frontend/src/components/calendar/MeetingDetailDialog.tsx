@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Clock, MapPin, Video, ExternalLink, Users as UsersIcon,
-  Phone, FileText, ArrowUpRight, Sparkles,
+  Phone, FileText, ArrowUpRight, Martini,
 } from 'lucide-react';
 import { format, parseISO, differenceInMinutes } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -302,7 +302,7 @@ export function MeetingDetailDialog({
           {isPast && (
             <section className="space-y-2 mb-4">
               <h3 className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Sparkles className="h-3 w-3" /> Meeting recap
+                <Martini className="h-3 w-3" /> Meeting recap
                 <span className="text-[10px] text-muted-foreground/70">
                   AI summaries from calls within ±2h
                 </span>

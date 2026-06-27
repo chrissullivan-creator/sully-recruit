@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Sparkles } from "lucide-react";
+import { Martini } from "lucide-react";
 
 export interface SequenceSetupData {
   name: string;
@@ -285,7 +285,7 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
 
         {onAskJoe && (
           <Button variant="outline" className="w-full" onClick={onAskJoe}>
-            <Sparkles className="h-4 w-4 mr-2" />
+            <Martini className="h-4 w-4 mr-2" />
             Ask Joe to Write This Sequence
           </Button>
         )}

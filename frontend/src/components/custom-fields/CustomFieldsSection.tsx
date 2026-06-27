@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Martini } from 'lucide-react';
 
 type CustomFieldValues = Record<string, unknown>;
 
@@ -77,7 +77,7 @@ export function CustomFieldsSection({
     <div className="rounded-lg border border-border bg-card p-5 space-y-5">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <Sparkles className="h-3.5 w-3.5 text-accent" /> Custom Fields
+          <Martini className="h-3.5 w-3.5 text-accent" /> Custom Fields
         </h3>
         {dirty && (
           <Button variant="gold" size="sm" className="h-7 text-xs" onClick={save} disabled={saving}>

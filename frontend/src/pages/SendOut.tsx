@@ -24,7 +24,7 @@ import DOMPurify from 'dompurify';
 import type JsPDF from 'jspdf';
 import emeraldLogo from '@/assets/emerald-logo-resume.png';
 import {
-  ArrowLeft, ArrowRight, FileText, Sparkles, Loader2, Mail, Send, Download,
+  ArrowLeft, ArrowRight, FileText, Martini, Loader2, Mail, Send, Download,
   User, IdCard, UserCircle, Clock, ClipboardCheck,
 } from 'lucide-react';
 
@@ -548,7 +548,7 @@ export default function SendOut() {
                       setAppliedNotes(combined);
                       runFormat(nameMode, { feedback: combined, revision: true });
                     }}>
-                    {reformatting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+                    {reformatting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Martini className="h-3.5 w-3.5 mr-1" />}
                     {reformatting ? 'Re-formatting…' : 'Modify / re-run'}
                   </Button>
                   <div className="flex-1" />
@@ -635,7 +635,7 @@ export default function SendOut() {
                 <div className="flex items-center justify-between">
                   <Label>Email</Label>
                   <Button variant="ghost" size="sm" className="text-xs gap-1" disabled={generatingEmail} onClick={generateEmail}>
-                    {generatingEmail ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    {generatingEmail ? <Loader2 className="h-3 w-3 animate-spin" /> : <Martini className="h-3 w-3" />}
                     {generatingEmail ? 'Joe is writing…' : 'Re-draft with Joe'}
                   </Button>
                 </div>

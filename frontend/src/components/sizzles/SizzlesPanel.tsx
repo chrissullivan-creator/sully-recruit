@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
-import { Loader2, Sparkles, Trash2, Edit2, X, Check } from 'lucide-react';
+import { Loader2, Martini, Trash2, Edit2, X, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -168,7 +168,7 @@ function CreateSizzleForm({ scope, onCreated }: { scope: Props['scope']; onCreat
   if (!open) {
     return (
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Sparkles className="h-3.5 w-3.5 mr-1.5" /> New sizzle
+        <Martini className="h-3.5 w-3.5 mr-1.5" /> New sizzle
       </Button>
     );
   }
