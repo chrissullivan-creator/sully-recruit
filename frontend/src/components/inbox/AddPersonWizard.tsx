@@ -45,6 +45,10 @@ interface PersonMatch {
   current_company?: string;
   title?: string;
   company_name?: string;
+  // Fuzzy-match scoring from /api/search-person.
+  score?: number;
+  confidence?: 'high' | 'medium' | 'low';
+  matched_on?: string[];
 }
 
 interface FormData {
@@ -178,22 +182,15 @@ export function AddPersonWizard({
   const searchExisting = useCallback(async (type: PersonType) => {
     setStep('searching');
     try {
-      const token = await getToken();
-      const res = await fetch('/api/search-person', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          type,
-          name: prefill.name || '',
-          email: prefill.email || '',
-          phone: prefill.phone || '',
-          linkedin_url: prefill.linkedinUrl || '',
-        }),
+      const matches = await runFuzzyMatch(type, {
+        name: prefill.name || '',
+        email: prefill.email || '',
+        phone: prefill.phone || '',
+        linkedin_url: prefill.linkedinUrl || '',
       });
-      const data = await res.json();
 
-      if (data.matches?.length > 0) {
-        setMatches(data.matches);
+      if (matches.length > 0) {
+        setMatches(matches);
         setStep('matches');
       } else {
         await enrichFromSource(type);
@@ -203,6 +200,32 @@ export function AddPersonWizard({
       await enrichFromSource(type);
     }
   }, [prefill]);
+
+  // Run the fuzzy matcher (name + firm + title + email/linkedin/phone) and
+  // return the ranked matches. Shared by the fast first pass (bare prefill)
+  // and the post-enrichment pass (which adds the resolved company + title).
+  const runFuzzyMatch = useCallback(
+    async (
+      type: PersonType,
+      q: { name: string; email: string; phone: string; linkedin_url: string; company?: string; title?: string },
+    ): Promise<PersonMatch[]> => {
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/search-person', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ type, ...q }),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.matches ?? []) as PersonMatch[];
+      } catch (err) {
+        console.error('Fuzzy match failed:', err);
+        return [];
+      }
+    },
+    [],
+  );
 
   // ── Step 3b: Enrich from thread source ─────────────────────────────────────
 
@@ -266,22 +289,41 @@ export function AddPersonWizard({
       console.error('Enrichment failed:', err);
     }
 
-    // Decide: preview card (when enrichment landed something useful)
-    // or fall straight into the editable form (when it didn't).
-    // Read the latest form via the functional setter to dodge the
-    // async setState that the merges above used.
-    setForm(latest => {
-      const goodName =
-        (latest.first_name?.trim().length ?? 0) > 1 &&
-        (latest.last_name?.trim().length ?? 0) > 1;
-      const hasIdentitySignal =
-        !!latest.email || !!latest.title || !!latest.company ||
-        !!latest.headline || !!latest.photo ||
-        /linkedin\.com\/(?:in|pub)\//i.test(latest.linkedin_url ?? '');
-      setStep(goodName && hasIdentitySignal ? 'preview' : 'form');
-      return latest;
+    // Read the freshest enriched form (the merges above were async setstates).
+    const enriched = await new Promise<FormData>((resolve) => {
+      setForm((latest) => { resolve(latest); return latest; });
     });
-  }, [channel, rawBody, prefill]);
+
+    // Second matching pass — now that enrichment resolved a company + title,
+    // re-run the fuzzy matcher so we catch people the bare-name pass missed
+    // (same name at the same firm / similar title). If it finds anyone, show
+    // the matches so the user can update an existing record instead of
+    // creating a duplicate.
+    const enrichedMatches = await runFuzzyMatch(type, {
+      name: `${enriched.first_name} ${enriched.last_name}`.trim() || prefill.name || '',
+      email: enriched.email || '',
+      phone: enriched.phone || '',
+      linkedin_url: enriched.linkedin_url || '',
+      company: enriched.company || '',
+      title: enriched.title || '',
+    });
+    if (enrichedMatches.length > 0) {
+      setMatches(enrichedMatches);
+      setStep('matches');
+      return;
+    }
+
+    // No match — decide between the preview card (enrichment landed something
+    // useful) and the editable form (it didn't).
+    const goodName =
+      (enriched.first_name?.trim().length ?? 0) > 1 &&
+      (enriched.last_name?.trim().length ?? 0) > 1;
+    const hasIdentitySignal =
+      !!enriched.email || !!enriched.title || !!enriched.company ||
+      !!enriched.headline || !!enriched.photo ||
+      /linkedin\.com\/(?:in|pub)\//i.test(enriched.linkedin_url ?? '');
+    setStep(goodName && hasIdentitySignal ? 'preview' : 'form');
+  }, [channel, rawBody, prefill, runFuzzyMatch]);
 
   // LinkedIn resolution — delegates to /api/lookup-linkedin, which reads the
   // Unipile API key from app_settings and handles both slug-based and
@@ -354,25 +396,31 @@ export function AddPersonWizard({
 
   // ── Connect to existing match ──────────────────────────────────────────────
 
+  // Link the conversation to an existing person AND refresh their profile with
+  // the newest info we gathered (overwrite-with-newest: name, title, company,
+  // email, avatar, LinkedIn URL, phone). Server-side /api/update-person does
+  // the overwrite + conversation link + message backfill + provider_id cache.
   const handleConnect = async (match: PersonMatch) => {
     setLinking(true);
     try {
-      const linkCol = match.type === 'candidate' ? 'candidate_id' : 'contact_id';
-      const { error } = await supabase
-        .from('conversations')
-        .update({ [linkCol]: match.id })
-        .eq('id', threadId);
-      if (error) throw error;
-
-      // Backfill messages
-      await supabase
-        .from('messages')
-        .update({ [linkCol]: match.id })
-        .eq('conversation_id', threadId)
-        .is(linkCol, null);
-
-      const name = match.full_name || `${match.first_name} ${match.last_name}`;
-      toast.success(`Linked to ${name}`);
+      const token = await getToken();
+      const res = await fetch('/api/update-person', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          person_id: match.id,
+          type: match.type,
+          data: form,
+          conversation_id: threadId,
+          provider_id: senderProviderId || null,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      const name = match.full_name || `${match.first_name} ${match.last_name}`.trim();
+      toast.success(`Linked & updated ${name}`);
       invalidateQueries();
       onOpenChange(false);
       onPersonLinked?.();
@@ -617,8 +665,19 @@ export function AddPersonWizard({
           {/* ── STEP: Matches ────────────────────────────────────────── */}
           {step === 'matches' && (
             <div className="py-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                We found {matches.length === 1 ? 'a possible match' : 'possible matches'} on
+                name, firm &amp; title. Connecting updates that record with the latest info.
+              </p>
               {matches.map((m) => {
                 const d = getMatchDisplay(m);
+                const conf = m.confidence;
+                const confClass =
+                  conf === 'high'
+                    ? 'bg-success/15 text-success border-success/30'
+                    : conf === 'medium'
+                      ? 'bg-warning/15 text-warning border-warning/30'
+                      : 'bg-muted text-muted-foreground border-border';
                 return (
                   <div
                     key={`${m.type}:${m.id}`}
@@ -628,11 +687,16 @@ export function AddPersonWizard({
                       ? <UserCheck className="h-4 w-4 text-success shrink-0" />
                       : <Users className="h-4 w-4 text-info shrink-0" />}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="text-sm font-medium text-foreground truncate">{d.name}</p>
                         <Badge variant="outline" className="text-[9px] uppercase shrink-0 capitalize">
                           {m.type}
                         </Badge>
+                        {conf && (
+                          <Badge variant="outline" className={cn('text-[9px] uppercase shrink-0 capitalize', confClass)}>
+                            {conf} match
+                          </Badge>
+                        )}
                       </div>
                       {(d.title || d.company) && (
                         <p className="text-xs text-muted-foreground truncate">
@@ -641,6 +705,18 @@ export function AddPersonWizard({
                       )}
                       {m.email && (
                         <p className="text-[10px] text-muted-foreground truncate">{m.email}</p>
+                      )}
+                      {Array.isArray(m.matched_on) && m.matched_on.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {m.matched_on.map((sig) => (
+                            <span
+                              key={sig}
+                              className="text-[9px] rounded bg-accent/10 text-accent px-1.5 py-0.5 capitalize"
+                            >
+                              {sig}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                     <Button
@@ -651,7 +727,7 @@ export function AddPersonWizard({
                       onClick={() => handleConnect(m)}
                     >
                       {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <LinkIcon className="h-3 w-3" />}
-                      Connect
+                      Connect &amp; Update
                     </Button>
                   </div>
                 );

@@ -3,7 +3,7 @@
 // tool-use enabled; Gemini + OpenRouter answer text-only without tools —
 // they're only hit when the upstream providers fail.
 //
-// Tools: 9 read-only CRM tools always. When the JOE_AGENTIC_ENABLED app_setting
+// Tools: 10 read-only CRM tools always. When the JOE_AGENTIC_ENABLED app_setting
 // is on, an additional propose-only write tier (draft_message,
 // enroll_in_sequence, move_pipeline_stage, create_task, add_note) is loaded.
 // Those tools NEVER write — they emit an `action` SSE event that the client
@@ -55,7 +55,7 @@ const BASE_SYSTEM_PROMPT = `You are Joe — the AI backbone of Sully Recruit, bu
 
 Valid person statuses: new | reached_out | engaged. Never filter by back_of_resume or placed.
 
-You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications). For "who are the contacts/people at <company>" questions, use list_company_people (it resolves the company and lists everyone linked to it) rather than search_people.
+You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications). For "who are the contacts/people at <company>" questions, use list_company_people (it resolves the company and lists everyone linked to it) rather than search_people. When the question is about what was actually SAID in a message — find/search an email, LinkedIn DM, or Recruiter InMail by its content ("find the InMail mentioning X", "who messaged about the Citadel role") — use search_messages, then chain to get_person_detail on the returned person_id when you need more.
 
 When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people.`;
 
@@ -99,6 +99,25 @@ const TOOLS = [
         limit: { type: "number", description: "Max rows (1-20). Default 10." },
       },
       required: ["person_id"],
+    },
+  },
+  {
+    name: "search_messages",
+    description:
+      "Full-text search across ALL communications (email, LinkedIn DM, LinkedIn Recruiter InMail, SMS) by the actual message content — not just per person. Use this for questions like \"find the InMail where someone mentioned a $2M mandate\", \"who emailed about the Citadel role\", \"search messages for 'relocation'\", or \"what did Kwaku say about timing\". Returns the matching messages with the sender, channel, direction, a snippet around the match, the timestamp, and the linked person id (when known) so you can drill in with get_person_detail. Optionally filter by channel or restrict to one person.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Words/phrase to search for in the message body or subject." },
+        channel: {
+          type: "string",
+          enum: ["email", "linkedin", "linkedin_recruiter", "sms"],
+          description: "Restrict to one channel. Omit to search all.",
+        },
+        person_id: { type: "string", description: "Optional uuid — restrict to messages linked to this person." },
+        limit: { type: "number", description: "Max rows (1-25). Default 12." },
+      },
+      required: ["query"],
     },
   },
   {
@@ -303,6 +322,10 @@ function statusFromToolCall(name: string, input: any): string {
     }
     case "get_person_detail": return "Joe is pulling the brief…";
     case "list_recent_communications": return "Joe is checking recent messages…";
+    case "search_messages": {
+      const q = input?.query ? `"${String(input.query).slice(0, 40)}"` : "messages";
+      return `Joe is searching messages for ${q}…`;
+    }
     case "list_notes": return "Joe is reading recruiter notes…";
     case "list_send_outs": return "Joe is reviewing the pipeline…";
     case "list_jobs": return "Joe is searching jobs…";
@@ -475,6 +498,76 @@ async function toolListRecentCommunications(supabase: any, input: any): Promise<
     })
     .slice(0, limit);
   return JSON.stringify({ items: merged });
+}
+
+// Full-text-ish search across all message bodies/subjects so Joe can answer
+// content questions ("find the InMail about X"). Keyword search via ilike on
+// body + subject, optional channel / person filters. Each hit carries the
+// sender, channel, a snippet around the match, and the linked person id.
+async function toolSearchMessages(supabase: any, input: any): Promise<string> {
+  const query = String(input?.query ?? "").trim();
+  if (!query) return JSON.stringify({ error: "query required" });
+  const limit = Math.min(Math.max(Number(input?.limit) || 12, 1), 25);
+  const channel = String(input?.channel ?? "").trim();
+  const personId = String(input?.person_id ?? "").trim();
+
+  // Escape ilike wildcards in the user's text so % / _ are literal.
+  const safe = query.replace(/[%_]/g, (m) => `\\${m}`);
+
+  let q = supabase
+    .from("messages")
+    .select(
+      "id, conversation_id, channel, direction, subject, body, sender_name, sent_at, received_at, created_at, candidate_id, contact_id",
+    )
+    .or(`body.ilike.%${safe}%,subject.ilike.%${safe}%`)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (channel) q = q.eq("channel", channel);
+  if (personId) q = q.or(`candidate_id.eq.${personId},contact_id.eq.${personId}`);
+
+  const { data, error } = await q;
+  if (error) return JSON.stringify({ error: error.message });
+
+  // Resolve person names for the linked ids in one round-trip.
+  const ids = Array.from(
+    new Set(
+      ((data as any[]) ?? [])
+        .flatMap((m) => [m.candidate_id, m.contact_id])
+        .filter((x: any): x is string => !!x),
+    ),
+  );
+  const nameById = new Map<string, string>();
+  if (ids.length) {
+    const { data: people } = await supabase.from("people").select("id, full_name").in("id", ids);
+    for (const p of (people as any[]) ?? []) nameById.set(p.id, p.full_name);
+  }
+
+  const snippet = (body: string | null): string => {
+    const text = (body ?? "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx < 0) return text.slice(0, 240);
+    const start = Math.max(0, idx - 80);
+    return (start > 0 ? "…" : "") + text.slice(start, idx + query.length + 160) + "…";
+  };
+
+  const items = ((data as any[]) ?? []).map((m) => {
+    const pid = m.candidate_id ?? m.contact_id ?? null;
+    return {
+      message_id: m.id,
+      conversation_id: m.conversation_id,
+      channel: m.channel,
+      direction: m.direction,
+      subject: m.subject ?? null,
+      snippet: snippet(m.body),
+      sender_name: m.sender_name ?? null,
+      person_id: pid,
+      person_name: pid ? nameById.get(pid) ?? null : null,
+      sent_at: m.sent_at ?? m.received_at ?? m.created_at ?? null,
+    };
+  });
+
+  return JSON.stringify({ count: items.length, items });
 }
 
 async function toolListNotes(supabase: any, input: any): Promise<string> {
@@ -920,6 +1013,7 @@ async function runTool(
       case "search_people": return await toolSearchPeople(supabase, input);
       case "get_person_detail": return await toolGetPersonDetail(supabase, input);
       case "list_recent_communications": return await toolListRecentCommunications(supabase, input);
+      case "search_messages": return await toolSearchMessages(supabase, input);
       case "list_notes": return await toolListNotes(supabase, input);
       case "list_send_outs": return await toolListSendOuts(supabase, input);
       case "list_jobs": return await toolListJobs(supabase, input);
