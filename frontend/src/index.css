@@ -10,7 +10,7 @@
 
 @layer base {
   :root {
-    --background:         146 26% 95%; /* soft sage shell (stronger) */
+    --background:         146 16% 97%; /* soft sage shell (whiter) */
     --foreground:         150 12% 13%; /* near-black, faint sage */
 
     --card:               0 0% 100%;   /* cards stay pure white so they pop */
@@ -22,11 +22,11 @@
     --primary:            152 76% 18%; /* emerald #0B4F2F */
     --primary-foreground: 0 0% 100%;   /* white text on emerald */
 
-    --secondary:          146 22% 94%; /* sage subtle fill */
+    --secondary:          146 14% 95%; /* sage subtle fill */
     --secondary-foreground: 0 0% 13%;
 
-    --muted:              146 24% 93%; /* sage hover / fills */
-    --muted-foreground:   150 12% 37%; /* sage-grey secondary text */
+    --muted:              146 16% 95%; /* sage hover / fills */
+    --muted-foreground:   150 10% 38%; /* sage-grey secondary text */
 
     --accent:             46 68% 47%;  /* gold #C9A227 */
     --accent-foreground:  152 60% 12%; /* deep emerald text on gold */
@@ -34,19 +34,19 @@
     --destructive:        2 64% 58%;   /* soft red #D9534F */
     --destructive-foreground: 0 0% 100%;
 
-    --border:             146 18% 87%; /* sage border */
-    --input:              146 18% 87%;
+    --border:             146 13% 90%; /* sage border */
+    --input:              146 13% 90%;
     --ring:               152 76% 18%; /* emerald focus ring */
 
     --radius: 0.875rem;                /* 14px cards */
 
-    --sidebar-background:          146 24% 97%;/* near-white sage sidebar */
-    --sidebar-foreground:          150 12% 37%;/* sage-grey nav text */
+    --sidebar-background:          146 16% 98%;/* near-white sage sidebar */
+    --sidebar-foreground:          150 10% 38%;/* sage-grey nav text */
     --sidebar-primary:             152 76% 18%;/* emerald active pill */
     --sidebar-primary-foreground:  0 0% 100%;
-    --sidebar-accent:              146 24% 93%;/* sage hover */
+    --sidebar-accent:              146 16% 95%;/* sage hover */
     --sidebar-accent-foreground:   0 0% 13%;
-    --sidebar-border:              146 18% 87%;
+    --sidebar-border:              146 13% 90%;
     --sidebar-ring:                152 76% 18%;
 
     --success: 152 55% 30%;            /* emerald success */
@@ -97,8 +97,8 @@
     --gold-deep:     #A07E1A;
     --gold-light:    #F5EAC9;
     --gold-bg:       #FBF6E5;
-    --page-bg:       #EBF4EF;
-    --card-border:   #D5E2DA;
+    --page-bg:       #F4F9F6;
+    --card-border:   #E0E9E4;
 
     --font-display: 'Sora', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   }
