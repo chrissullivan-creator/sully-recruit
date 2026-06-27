@@ -19,11 +19,15 @@ import { BulkAddContactsDialog } from '@/components/source/BulkAddContactsDialog
 import { LocationCombobox, type LocationOption } from '@/components/source/LocationCombobox';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
+import {
   Loader2, ArrowLeft, Users, UserCheck, Contact,
   FileText, CheckSquare, Square, Briefcase,
   ChevronLeft, ChevronRight, Search as SearchIcon, MapPin,
   Bookmark, Download, CheckCircle2, ExternalLink, Import,
-  Linkedin, Trash2, Plus,
+  Linkedin, Trash2, Plus, MoreHorizontal, ListPlus, Send,
 } from 'lucide-react';
 
 const PAGE_SIZE = 25;
@@ -243,6 +247,10 @@ export default function SourceProject() {
 
   // ---- Selection (pipeline view) ----
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // In-Sully pipeline actions: enroll the pipeline person in a Sully sequence.
+  // (LinkedIn's own pipeline is read-only via the API, but these people are real
+  // CRM candidates, so we can act on them in Sully.)
+  const [enrollState, setEnrollState] = useState<{ ids: string[]; names: string[] } | null>(null);
   const [label, setLabel] = useState<ProjectLabel>('candidate');
   const [jobId, setJobId] = useState('');
 
@@ -1040,14 +1048,35 @@ export default function SourceProject() {
                               </Select>
                             </td>
                             <td className="px-2 py-2 text-center">
-                              <button
-                                onClick={() => withdrawSourcing(row)}
-                                disabled={movingId === row.id}
-                                className="text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-50"
-                                title="Remove from pipeline"
-                              >
-                                <Trash2 className="h-3.5 w-3.5 inline" />
-                              </button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                                    title="Actions"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4 inline" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem onClick={() => setEnrollState({ ids: [row.candidate_id], names: [name] })}>
+                                    <ListPlus className="h-3.5 w-3.5 mr-2" /> Enroll in sequence
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate(`/candidates/${row.candidate_id}/sendout`)}>
+                                    <Briefcase className="h-3.5 w-3.5 mr-2" /> Create send-out
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate(`/candidates/${row.candidate_id}`)}>
+                                    <Send className="h-3.5 w-3.5 mr-2" /> Open &amp; message
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => withdrawSourcing(row)}
+                                    disabled={movingId === row.id}
+                                    className="text-red-500 focus:text-red-500"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Remove from pipeline
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </td>
                           </tr>
                         );
@@ -1138,6 +1167,15 @@ export default function SourceProject() {
         onOpenChange={setContactDialogOpen}
         applicants={selectedApplicants}
         project={project}
+      />
+
+      {/* Enroll a pipeline person into a Sully sequence (in-Sully action on the
+          otherwise read-only LinkedIn pipeline). */}
+      <EnrollInSequenceDialog
+        open={!!enrollState}
+        onOpenChange={(o) => { if (!o) setEnrollState(null); }}
+        candidateIds={enrollState?.ids ?? []}
+        candidateNames={enrollState?.names ?? []}
       />
 
       {/* Link-job dialog — shown the first time you Save on a project that
