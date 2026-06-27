@@ -216,9 +216,14 @@ export default function Inbox() {
     is_read: true, // live results aren't tracked unread/read
     is_archived: false,
     candidate_id: null,
-    candidate_name: it.sender_name,
+    candidate_name: null,
     contact_id: null,
     contact_name: null,
+    // Unknown live senders aren't linked to a CRM person — surface the Unipile
+    // attendee name through sender_name so the row shows it (and stays styled
+    // as unlinked) rather than masquerading as a known candidate.
+    sender_name: it.sender_name,
+    avatar_url: null,
     send_out_id: null,
     account_id: it.account_id ?? null,
     external_conversation_id: it.external_conversation_id,

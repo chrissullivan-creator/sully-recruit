@@ -37,6 +37,11 @@ export interface InboxThread {
   candidate_name: string | null;
   contact_id: string | null;
   contact_name: string | null;
+  // Latest inbound message's sender name — the list/detail fall back to this
+  // when the thread isn't linked to a CRM person yet (e.g. unknown InMails).
+  sender_name?: string | null;
+  // Linked person's photo, surfaced by the inbox_threads view for avatars.
+  avatar_url?: string | null;
   send_out_id: string | null;
   account_id: string | null;
   external_conversation_id: string | null;
