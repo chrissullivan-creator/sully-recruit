@@ -63,6 +63,44 @@ export const MARKETING_DOMAINS = [
   "sign.plus",
   "jooble.org",
   "mms.uscc.net",
+
+  // LinkedIn bulk subdomains (the per-mailbox *@linkedin.com noise is handled
+  // by the dedicated rule in isMarketingEmail so real replies/people survive).
+  "em.linkedin.com",
+  "cs.linkedin.com",
+
+  // Newsletters / recruiting-industry / promo (from inbox sweep 2026-06)
+  "ccsend.com",
+  "shared1.ccsend.com",
+  "ziprecruiter.com",
+  "efinancialcareers.com",
+  "emails.efinancialcareers.com",
+  "topechelon.com",
+  "email-whitepages.com",
+  "learnbfsi.com",
+  "staffinghub.com",
+  "smartlead-team.com",
+  "emeraldeex.com",
+  "send.zapier.com",
+  "mail.clickup.com",
+  "mail.anthropic.com",
+  "e.crainwebinars.com",
+  "birds.cornell.edu",
+  // Retail / travel / finance promos & notifications
+  "emailinfo.buffalowildwings.com",
+  "email.petermillar.com",
+  "info6.citi.com",
+  "mail.quince.com",
+  "notice.loanstripe.com",
+  "email.flybreeze.com",
+  "email.enterprise.com",
+  "eg.expedia.com",
+  "mc.ihg.com",
+  "alerts.lendingtree.com",
+  "news.hims.com",
+  "email-marriott.com",
+  "nytdirect@nytimes.com",
+  "uber@uber.com",
 ];
 
 export const MARKETING_SENDER_PATTERNS = [
@@ -83,6 +121,12 @@ export const MARKETING_SENDER_PATTERNS = [
   "bounce@",
   "donotreply@",
   "do-not-reply@",
+  "alerts@",
+  "notify@",
+  "noreply-",
+  "press@",
+  "mailer-daemon@",
+  "postmaster@",
 ];
 
 export function isMarketingEmail(senderAddress: string | null): boolean {
@@ -102,6 +146,13 @@ export function isMarketingEmail(senderAddress: string | null): boolean {
 
   for (const pattern of MARKETING_SENDER_PATTERNS) {
     if (lower.startsWith(pattern)) return true;
+  }
+
+  // Every email from LinkedIn is noise (including hit-reply@linkedin.com) — the
+  // real conversations come through the LinkedIn message channel, not these
+  // email notifications/relays. Blocks linkedin.com + all subdomains.
+  if (domain && (domain === "linkedin.com" || domain.endsWith(".linkedin.com"))) {
+    return true;
   }
 
   return false;
