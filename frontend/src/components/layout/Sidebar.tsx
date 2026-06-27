@@ -140,10 +140,23 @@ export function Sidebar() {
       {/* ── Logo ── */}
       <div className="flex h-20 items-center justify-between px-5 border-b border-sidebar-border">
         <div className="flex items-center justify-center flex-1">
-          <img
-            src={logo}
-            alt="Emerald"
-            className="h-16 w-16 object-contain drop-shadow-[0_0_10px_hsl(46_68%_47%/0.35)]"
+          {/* Emerald E mark recolored to brand green via CSS mask (the source
+              PNG is gold; the mask uses its shape and fills with the emerald
+              token). */}
+          <div
+            role="img"
+            aria-label="Emerald Recruiting Group"
+            className="h-16 w-16 bg-primary"
+            style={{
+              WebkitMaskImage: `url(${logo})`,
+              maskImage: `url(${logo})`,
+              WebkitMaskSize: 'contain',
+              maskSize: 'contain',
+              WebkitMaskRepeat: 'no-repeat',
+              maskRepeat: 'no-repeat',
+              WebkitMaskPosition: 'center',
+              maskPosition: 'center',
+            }}
           />
         </div>
         <NotificationBell />
