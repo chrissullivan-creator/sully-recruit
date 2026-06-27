@@ -20,6 +20,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       candidate_company,
       candidate_notes,
       compensation,
+      base_comp,
+      bonus_comp,
+      total_comp,
+      right_to_work,
+      additional_notes,
       job_title,
       job_company,
       job_description,
@@ -41,25 +46,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const contactList = contact_names?.length ? contact_names.join(", ") : "the hiring team";
 
-    const userPrompt = `You are a senior Wall Street recruiter at The Emerald Recruiting Group. Write a professional sendout/submission email presenting a candidate to a client for a role.
+    // Prefer the explicit per-submission comp fields when present; fall back to
+    // the legacy single `compensation` string.
+    const compLines = [
+      base_comp ? `Base: ${base_comp}` : "",
+      bonus_comp ? `Bonus: ${bonus_comp}` : "",
+      total_comp ? `Total comp: ${total_comp}` : "",
+    ].filter(Boolean).join(" | ") || compensation || "";
+
+    const userPrompt = `You are a senior Wall Street recruiter at The Emerald Recruiting Group. Write a sharp, direct client submission email presenting a candidate for a role.
 
 Candidate: ${candidate_name}
 ${candidate_title ? `Current Title: ${candidate_title}` : ""}
 ${candidate_company ? `Current Company: ${candidate_company}` : ""}
-${candidate_notes ? `Notes: ${candidate_notes}` : ""}
-${compensation ? `Compensation: ${compensation}` : ""}
+${candidate_notes ? `Background notes: ${candidate_notes}` : ""}
+${compLines ? `Compensation: ${compLines}` : ""}
+${right_to_work ? `Right to work / work authorization: ${right_to_work}` : ""}
+${additional_notes ? `Additional notes from the recruiter: ${additional_notes}` : ""}
 
 ${job_title ? `Role: ${job_title}` : ""}
 ${job_company ? `Company: ${job_company}` : ""}
-${job_description ? `Description: ${job_description.slice(0, 1000)}` : ""}
+${job_description ? `Description: ${job_description.slice(0, 1200)}` : ""}
 
 Contact(s): ${contactList}
 Sender: ${sender_name || "The Emerald Recruiting Group"}
 
+Write the email so it is DIRECT and to the point: lead with why this specific candidate is right for THIS job, citing concrete, relevant experience. Naturally work in the compensation, right-to-work status, and any additional notes where they matter to the client. Keep it sharp — NOT salesy, NOT fluffy, no filler adjectives or hype. 2-3 short paragraphs max.
+
 Return ONLY valid JSON with two fields:
 {
   "greeting": "Hi [first name of first contact],",
-  "body": "the email body (no greeting, no sign-off). Be concise, professional, and highlight why this candidate is a strong fit. 2-3 short paragraphs max."
+  "body": "the email body (no greeting, no sign-off)."
 }`;
 
     const { text } = await callAIWithFallback({
@@ -67,7 +84,7 @@ Return ONLY valid JSON with two fields:
       openaiKey: openaiKey || undefined,
       geminiKey: geminiKey || undefined,
       openRouterKey: openRouterKey || undefined,
-      systemPrompt: "You write professional client-facing submission emails for a senior Wall Street recruiter.",
+      systemPrompt: "You write sharp, direct, no-fluff client-facing submission emails for a senior Wall Street recruiter.",
       userContent: userPrompt,
       model: "claude-sonnet-4-6",
       maxTokens: 1024,

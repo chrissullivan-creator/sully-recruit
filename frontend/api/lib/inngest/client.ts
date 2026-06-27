@@ -200,6 +200,19 @@ export type SendMessageRequested = {
   };
 };
 
+/**
+ * Deferred client submission email. Dispatched with a future `ts` by
+ * /api/send-sendout; the handler (send-message-scheduled) reads the
+ * `scheduled_messages` row and sends via Microsoft Graph at fire time.
+ */
+export type SendMessageScheduledRequested = {
+  name: "messages/send.scheduled.requested";
+  data: {
+    scheduledMessageId: string;
+    useSignature?: boolean;
+  };
+};
+
 /** Joe intel extraction on a manually-logged call's recruiter notes. */
 export type ExtractCallIntelRequested = {
   name: "messages/extract-call-intel.requested";
@@ -301,6 +314,7 @@ export type AllInngestEvents =
   | JoeSaysRequested
   | ResumeIngestionRequested
   | SendMessageRequested
+  | SendMessageScheduledRequested
   | ExtractCallIntelRequested
   | FetchEntityHistoryRequested
   | RecoverOrphanResumesRequested

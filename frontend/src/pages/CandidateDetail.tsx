@@ -40,6 +40,7 @@ import { CandidateSourceTab } from '@/components/source/SourceTabs';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
+import { InterviewDetail } from '@/components/interviews/InterviewDetail';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { CallButton } from '@/components/shared/CallButton';
@@ -258,6 +259,9 @@ const CandidateDetail = () => {
   const [selectedJobForSendOut, setSelectedJobForSendOut] = useState<string>('');
   const [savingSendOut, setSavingSendOut] = useState(false);
   const [sendOutNotesOpen, setSendOutNotesOpen] = useState(false);
+  // When a candidate is moved into the Interview stage we open the freshly
+  // (idempotently) created interview so the recruiter can set the date/time.
+  const [interviewDetailId, setInterviewDetailId] = useState<string | null>(null);
   // When set, the dialog is collecting a note for a stage move on
   // an existing send_out. Distinct from the "add to job" flow which
   // also uses sendOutNotesOpen but creates a fresh send_out.
@@ -500,6 +504,16 @@ const CandidateDetail = () => {
         stage: canonical,
         interviewAt: updatedSendOut.interview_at,
       });
+      // Open the just-created interview so the date/time can be edited —
+      // the same prepopulated-interview behaviour as the Send Outs drawer.
+      const { data: iv } = await supabase
+        .from('interviews')
+        .select('id')
+        .eq('send_out_id', updatedSendOut.id)
+        .order('round', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (iv) setInterviewDetailId((iv as any).id);
     }
 
     queryClient.invalidateQueries({ queryKey: ['candidate_send_outs', id] });
@@ -510,9 +524,21 @@ const CandidateDetail = () => {
 
   const handleUpdateStage = async (sendOutId: string, newStage: string) => {
     const canonical = stageToCanonical(newStage) ?? (newStage as CanonicalStage);
-    // Pitch / send out / submitted captures a stage-move note, with
-    // the prior pitch note pre-filled so it carries through.
-    if (canonical === 'pitch' || canonical === 'ready_to_send' || canonical === 'submitted') {
+
+    // Send Out → Submission launches the full Ask-Joe format + submit flow
+    // (format résumé → preview → draft email → send/schedule → advance stage).
+    // Mirrors the Send Outs drawer's "Ask Joe" entry point.
+    if (canonical === 'submitted') {
+      const so = sendOuts.find((s) => s.id === sendOutId);
+      const params = new URLSearchParams({ sendOutId });
+      if (so?.job_id) params.set('jobId', so.job_id);
+      navigate(`/candidates/${id}/sendout?${params.toString()}`);
+      return;
+    }
+
+    // Pitch / send out captures a stage-move note, with the prior pitch
+    // note pre-filled so it carries through.
+    if (canonical === 'pitch' || canonical === 'ready_to_send') {
       const prior = canonical === 'pitch' ? null : await fetchLatestStageMoveNote(sendOutId);
       setPendingStageMove({ sendOutId, target: canonical, initialNote: prior });
       setSendOutNotesOpen(true);
@@ -2393,6 +2419,13 @@ const CandidateDetail = () => {
             : 'Add to pipeline'
         }
         initialNote={pendingStageMove?.initialNote ?? null}
+      />
+
+      <InterviewDetail
+        interviewId={interviewDetailId}
+        open={!!interviewDetailId}
+        onOpenChange={(v) => { if (!v) setInterviewDetailId(null); }}
+        onNavigate={(iid) => setInterviewDetailId(iid)}
       />
 
       {candidate && (

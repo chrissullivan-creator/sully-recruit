@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -13,7 +14,8 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
   Mail, Phone, MessageSquare, Linkedin, ArrowLeft, ArrowRight, ExternalLink,
-  Clock, Briefcase, DollarSign, Trash2,
+  Clock, Briefcase, DollarSign, Trash2, Sparkles, Download, CalendarPlus,
+  Gift, XCircle, FileText, Repeat,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -21,10 +23,14 @@ import {
   stageToCanonical, daysSince, type CanonicalStage,
 } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
+import { createInterview } from '@/lib/createInterview';
 import { type SendOutRow, formatComp, formatCompRange, lastTouchAt } from '@/lib/queries/send-outs';
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
+import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
+import { OfferDialog } from '@/components/send-outs/OfferDialog';
+import { InterviewDetail } from '@/components/interviews/InterviewDetail';
 
 interface CandidateDrawerProps {
   row: SendOutRow | null;
@@ -58,16 +64,57 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
   const [baseMax, setBaseMax] = useState<string>('');
   const [bonusMin, setBonusMin] = useState<string>('');
   const [bonusMax, setBonusMax] = useState<string>('');
+  const [totalMin, setTotalMin] = useState<string>('');
+  const [totalMax, setTotalMax] = useState<string>('');
   const [rtw, setRtw] = useState<string>('');
+  const [additionalNotes, setAdditionalNotes] = useState<string>('');
   const [savingComp, setSavingComp] = useState(false);
+
+  // Stage-action dialogs (Submission / Interview).
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [resumeUrl, setResumeUrl] = useState<string>('');
+
+  // Formatted résumé for the Submission/Interview/Offer views (download link).
+  const { data: formattedResume } = useQuery({
+    queryKey: ['drawer_formatted_resume', c?.id],
+    enabled: !!c?.id && (stage === 'submitted' || stage === 'interview' || stage === 'offer'),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('formatted_resumes')
+        .select('id, file_name, file_path, created_at')
+        .eq('candidate_id', c!.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    const path = (formattedResume as any)?.file_path;
+    if (!path) { setResumeUrl(''); return; }
+    let active = true;
+    supabase.storage.from('resumes').createSignedUrl(path, 3600).then(({ data }) => {
+      if (active) setResumeUrl(data?.signedUrl ?? '');
+    });
+    return () => { active = false; };
+  }, [formattedResume]);
+
+  const submissionEmail = row?.submission_email ?? null;
 
   useEffect(() => {
     setBaseMin(row?.base_comp_min != null ? String(row.base_comp_min) : '');
     setBaseMax(row?.base_comp_max != null ? String(row.base_comp_max) : '');
     setBonusMin(row?.bonus_comp_min != null ? String(row.bonus_comp_min) : '');
     setBonusMax(row?.bonus_comp_max != null ? String(row.bonus_comp_max) : '');
+    setTotalMin(row?.total_comp_min != null ? String(row.total_comp_min) : '');
+    setTotalMax(row?.total_comp_max != null ? String(row.total_comp_max) : '');
     setRtw(row?.right_to_work ?? '');
-  }, [row?.id, row?.base_comp_min, row?.base_comp_max, row?.bonus_comp_min, row?.bonus_comp_max, row?.right_to_work]);
+    setAdditionalNotes(row?.additional_notes ?? '');
+  }, [row?.id, row?.base_comp_min, row?.base_comp_max, row?.bonus_comp_min, row?.bonus_comp_max, row?.total_comp_min, row?.total_comp_max, row?.right_to_work, row?.additional_notes]);
 
   const parseNum = (s: string): number | null => {
     const trimmed = s.trim();
@@ -89,7 +136,10 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
       String(row.base_comp_max ?? '') !== baseMax.trim() ||
       String(row.bonus_comp_min ?? '') !== bonusMin.trim() ||
       String(row.bonus_comp_max ?? '') !== bonusMax.trim() ||
-      (row.right_to_work ?? '') !== rtw.trim());
+      String(row.total_comp_min ?? '') !== totalMin.trim() ||
+      String(row.total_comp_max ?? '') !== totalMax.trim() ||
+      (row.right_to_work ?? '') !== rtw.trim() ||
+      (row.additional_notes ?? '') !== additionalNotes.trim());
 
   const saveComp = async () => {
     if (!row) return;
@@ -97,13 +147,18 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
     const baseMaxN = parseNum(baseMax);
     const bonusMinN = parseNum(bonusMin);
     const bonusMaxN = parseNum(bonusMax);
+    const totalMinN = parseNum(totalMin);
+    const totalMaxN = parseNum(totalMax);
 
     if (baseMin.trim() && baseMinN == null) { toast.error('Invalid base min (try 120k or 120000)'); return; }
     if (baseMax.trim() && baseMaxN == null) { toast.error('Invalid base max'); return; }
     if (bonusMin.trim() && bonusMinN == null) { toast.error('Invalid bonus min'); return; }
     if (bonusMax.trim() && bonusMaxN == null) { toast.error('Invalid bonus max'); return; }
+    if (totalMin.trim() && totalMinN == null) { toast.error('Invalid total min'); return; }
+    if (totalMax.trim() && totalMaxN == null) { toast.error('Invalid total max'); return; }
     if (baseMinN != null && baseMaxN != null && baseMinN > baseMaxN) { toast.error('Base min must be ≤ max'); return; }
     if (bonusMinN != null && bonusMaxN != null && bonusMinN > bonusMaxN) { toast.error('Bonus min must be ≤ max'); return; }
+    if (totalMinN != null && totalMaxN != null && totalMinN > totalMaxN) { toast.error('Total min must be ≤ max'); return; }
 
     setSavingComp(true);
     try {
@@ -114,7 +169,10 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
           base_comp_max: baseMaxN,
           bonus_comp_min: bonusMinN,
           bonus_comp_max: bonusMaxN,
+          total_comp_min: totalMinN,
+          total_comp_max: totalMaxN,
           right_to_work: rtw.trim() || null,
+          additional_notes: additionalNotes.trim() || null,
         })
         .eq('id', row.id);
       if (error) throw new Error(error.message);
@@ -126,6 +184,30 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
     } finally {
       setSavingComp(false);
     }
+  };
+
+  // Placeholder for the total-comp inputs = base + bonus sum, so an empty
+  // total reads as "we'll use base+bonus" rather than a bare hint.
+  const totalPlaceholder = (() => {
+    const bMin = parseNum(baseMin); const bMax = parseNum(baseMax);
+    const boMin = parseNum(bonusMin); const boMax = parseNum(bonusMax);
+    const sum = (a: number | null, b: number | null) =>
+      a == null && b == null ? null : (a ?? 0) + (b ?? 0);
+    const min = sum(bMin, boMin); const max = sum(bMax, boMax);
+    return {
+      min: min != null ? `Min (e.g. ${Math.round(min / 1000)}k)` : 'Min',
+      max: max != null ? `Max (e.g. ${Math.round(max / 1000)}k)` : 'Max',
+    };
+  })();
+
+  // Save any pending submission edits, then open the Ask-Joe format/submit flow
+  // for this send-out (carries job + send-out id so the flow preloads context).
+  const handleAskJoe = async () => {
+    if (!row || !c?.id) return;
+    if (dirty) await saveComp();
+    const params = new URLSearchParams({ sendOutId: row.id });
+    if (row.job_id) params.set('jobId', row.job_id);
+    navigate(`/candidates/${c.id}/sendout?${params.toString()}`);
   };
 
   const move = async (target: CanonicalStage, source: string) => {
@@ -143,6 +225,82 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
     toast.success(`Moved to ${canonicalConfig(target).label}`);
     invalidateSendOutScope(queryClient);
     invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));
+    onClose();
+  };
+
+  const afterStageChange = (msg: string) => {
+    toast.success(msg);
+    invalidateSendOutScope(queryClient);
+    invalidateKeys.forEach((k) => queryClient.invalidateQueries({ queryKey: k }));
+  };
+
+  // Reject from Submission / Interview — reasons captured in the dialog.
+  const handleReject = async (party: string, reason: string) => {
+    if (!row) return;
+    const res = await moveStage({
+      sendOutId: row.id,
+      candidateJobId: row.candidate_job_id ?? null,
+      fromStage: row.stage,
+      toStage: 'withdrawn',
+      triggerSource: 'drawer',
+      entityId: c?.id ?? null,
+      entityType: 'send_out',
+      withdrawnReason: reason || null,
+      rejectedByParty: party,
+    });
+    if (!res.ok) { toast.error(res.error ?? 'Reject failed'); return; }
+    afterStageChange('Marked rejected');
+    onClose();
+  };
+
+  // Move to Interview (from Submission) or add the next round (from Interview).
+  // Creates an interviews row (round auto-increments) and opens it so the
+  // recruiter can set the date/time; advances the funnel stage on first entry.
+  const goToInterview = async (advanceStage: boolean) => {
+    if (!row || !c?.id || !row.job_id) { toast.error('Need a candidate + job to schedule an interview'); return; }
+    setActionBusy(true);
+    try {
+      if (advanceStage) {
+        const res = await moveStage({
+          sendOutId: row.id,
+          candidateJobId: row.candidate_job_id ?? null,
+          fromStage: row.stage,
+          toStage: 'interview',
+          triggerSource: 'drawer',
+          entityId: c.id,
+          entityType: 'send_out',
+        });
+        if (!res.ok) { toast.error(res.error ?? 'Move failed'); return; }
+      }
+      const newId = await createInterview({ candidateId: c.id, jobId: row.job_id, sendOutId: row.id });
+      afterStageChange(advanceStage ? 'Moved to Interview' : 'Next round added');
+      setInterviewId(newId);
+    } catch (err: any) {
+      toast.error(err.message || 'Could not create interview');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  // Move to Offer (from Interview) — offer figures captured in the dialog.
+  const handleOffer = async (base: number | null, bonus: number | null, details: string) => {
+    if (!row) return;
+    const { error: updErr } = await supabase
+      .from('send_outs')
+      .update({ offer_base: base, offer_bonus: bonus, offer_details: details || null } as any)
+      .eq('id', row.id);
+    if (updErr) { toast.error(updErr.message); return; }
+    const res = await moveStage({
+      sendOutId: row.id,
+      candidateJobId: row.candidate_job_id ?? null,
+      fromStage: row.stage,
+      toStage: 'offer',
+      triggerSource: 'drawer',
+      entityId: c?.id ?? null,
+      entityType: 'send_out',
+    });
+    if (!res.ok) { toast.error(res.error ?? 'Move failed'); return; }
+    afterStageChange('Offer recorded');
     onClose();
   };
 
@@ -286,6 +444,87 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                 </div>
               </div>
 
+              {/* Submission / Interview / Offer: formatted résumé + the
+                  email that went out, plus the stage-specific next moves. */}
+              {(stage === 'submitted' || stage === 'interview' || stage === 'offer') && (
+                <div className="rounded-lg border border-card-border bg-white p-3 space-y-3">
+                  {/* Formatted résumé (download, not preview) */}
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Formatted résumé</p>
+                    {formattedResume ? (
+                      <a
+                        href={resumeUrl || undefined}
+                        target="_blank" rel="noreferrer"
+                        className={cn(
+                          'flex items-center gap-2 rounded-md border border-card-border p-2 text-sm',
+                          resumeUrl ? 'hover:border-emerald hover:bg-emerald-light' : 'opacity-60 pointer-events-none',
+                        )}
+                      >
+                        <FileText className="h-4 w-4 text-gold-deep shrink-0" />
+                        <span className="flex-1 min-w-0 truncate">{(formattedResume as any).file_name || 'Résumé'}</span>
+                        <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                      </a>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No formatted résumé on file.</p>
+                    )}
+                  </div>
+
+                  {/* Sent submission email */}
+                  {submissionEmail && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                        {submissionEmail.sent_at ? 'Submission email sent' : 'Submission email scheduled'}
+                      </p>
+                      <div className="rounded-md border border-card-border p-2 text-xs space-y-1">
+                        {submissionEmail.to?.length ? <p><span className="text-muted-foreground">To: </span>{submissionEmail.to.join(', ')}</p> : null}
+                        {submissionEmail.subject && <p className="font-medium">{submissionEmail.subject}</p>}
+                        <p className="text-muted-foreground">
+                          {submissionEmail.sent_at
+                            ? `Sent ${format(new Date(submissionEmail.sent_at), 'MMM d, yyyy h:mma')}`
+                            : submissionEmail.scheduled_at
+                              ? `Scheduled for ${format(new Date(submissionEmail.scheduled_at), 'MMM d, yyyy h:mma')}`
+                              : ''}
+                        </p>
+                        {submissionEmail.body_html && (
+                          <div
+                            className="mt-1 max-h-32 overflow-y-auto rounded bg-page-bg p-2 text-foreground [&_p]:mb-1"
+                            dangerouslySetInnerHTML={{ __html: submissionEmail.body_html }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stage-specific next moves */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      variant="outline" size="sm"
+                      className="gap-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                      onClick={() => setRejectOpen(true)}
+                    >
+                      <XCircle className="h-3.5 w-3.5" /> Reject
+                    </Button>
+
+                    {stage === 'submitted' && (
+                      <Button variant="gold" size="sm" className="gap-1" disabled={actionBusy} onClick={() => goToInterview(true)}>
+                        <CalendarPlus className="h-3.5 w-3.5" /> Move to Interview
+                      </Button>
+                    )}
+
+                    {stage === 'interview' && (
+                      <>
+                        <Button variant="outline" size="sm" className="gap-1 border-emerald/40 text-emerald hover:bg-emerald-light" disabled={actionBusy} onClick={() => goToInterview(false)}>
+                          <Repeat className="h-3.5 w-3.5" /> Next round
+                        </Button>
+                        <Button variant="gold" size="sm" className="gap-1" onClick={() => setOfferOpen(true)}>
+                          <Gift className="h-3.5 w-3.5" /> Move to Offer
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Editable per-submission comp + right-to-work. Snapshotted
                   on this send_out so the record of what was sent to the
                   client stays correct even if the candidate's profile
@@ -337,11 +576,41 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                 </div>
 
                 <div>
+                  <p className="text-[11px] text-muted-foreground mb-1">Total comp range</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text" inputMode="decimal"
+                      placeholder={totalPlaceholder.min}
+                      value={totalMin} onChange={(e) => setTotalMin(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                    <span className="text-muted-foreground text-xs">–</span>
+                    <Input
+                      type="text" inputMode="decimal"
+                      placeholder={totalPlaceholder.max}
+                      value={totalMax} onChange={(e) => setTotalMax(e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/70 mt-1">Leave blank to use base + bonus.</p>
+                </div>
+
+                <div>
                   <p className="text-[11px] text-muted-foreground mb-1">Right to work here</p>
                   <Input
                     type="text" placeholder="e.g. US Citizen, H1B, Sponsorship required"
                     value={rtw} onChange={(e) => setRtw(e.target.value)}
                     className="h-8 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1">Additional notes</p>
+                  <Textarea
+                    rows={3}
+                    placeholder="Anything the client should know — context, motivations, logistics, caveats…"
+                    value={additionalNotes} onChange={(e) => setAdditionalNotes(e.target.value)}
+                    className="text-sm resize-none"
                   />
                 </div>
 
@@ -352,6 +621,14 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                   onClick={saveComp}
                 >
                   {savingComp ? 'Saving…' : dirty ? 'Save submission details' : 'Saved'}
+                </Button>
+
+                <Button
+                  variant="outline" size="sm"
+                  className="w-full gap-1 border-gold/40 text-gold-deep hover:bg-gold-bg hover:border-gold"
+                  onClick={handleAskJoe}
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Ask Joe — format résumé &amp; submit
                 </Button>
               </div>
 
@@ -381,6 +658,29 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
           </>
         )}
       </SheetContent>
+
+      <WithdrawnReasonDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        candidateName={name}
+        jobTitle={j?.title ?? undefined}
+        onConfirm={handleReject}
+      />
+
+      <OfferDialog
+        open={offerOpen}
+        onOpenChange={setOfferOpen}
+        candidateName={name}
+        jobTitle={j?.title ?? undefined}
+        onConfirm={handleOffer}
+      />
+
+      <InterviewDetail
+        interviewId={interviewId}
+        open={!!interviewId}
+        onOpenChange={(v) => { if (!v) setInterviewId(null); }}
+        onNavigate={(iid) => setInterviewId(iid)}
+      />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>

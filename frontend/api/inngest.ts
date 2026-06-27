@@ -45,6 +45,7 @@ import { processMicrosoftEvent } from "./lib/inngest/functions/process-microsoft
 import { generateJoeSays } from "./lib/inngest/functions/generate-joe-says.js";
 import { resumeIngestion } from "./lib/inngest/functions/resume-ingestion.js";
 import { sendMessage } from "./lib/inngest/functions/send-message.js";
+import { sendMessageScheduled } from "./lib/inngest/functions/send-message-scheduled.js";
 import { extractManualCallIntel } from "./lib/inngest/functions/extract-manual-call-intel.js";
 import { fetchEntityHistory } from "./lib/inngest/functions/fetch-entity-history.js";
 import { recoverOrphanResumes } from "./lib/inngest/functions/recover-orphan-resumes.js";
@@ -129,6 +130,7 @@ export default serve({
     generateJoeSays,
     resumeIngestion,
     sendMessage,
+    sendMessageScheduled,
     extractManualCallIntel,
     fetchEntityHistory,
     recoverOrphanResumes,

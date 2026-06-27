@@ -21,7 +21,21 @@ export interface SendOutRow {
   base_comp_max: number | null;
   bonus_comp_min: number | null;
   bonus_comp_max: number | null;
+  total_comp_min: number | null;
+  total_comp_max: number | null;
   right_to_work: string | null;
+  additional_notes: string | null;
+  candidate_job_id: string | null;
+  submission_email: {
+    subject?: string;
+    body_html?: string;
+    to?: string[];
+    cc?: string[];
+    from?: string;
+    sent_at?: string;
+    scheduled_at?: string;
+    resume_file_name?: string;
+  } | null;
   candidate: {
     id: string;
     full_name: string | null;
@@ -53,7 +67,9 @@ export function useSendOuts() {
           id, candidate_id, job_id, recruiter_id, stage, outcome,
           sent_to_client_at, interview_at, offer_at, placed_at,
           created_at, updated_at, submittal_notes, resume_url,
-          base_comp_min, base_comp_max, bonus_comp_min, bonus_comp_max, right_to_work,
+          base_comp_min, base_comp_max, bonus_comp_min, bonus_comp_max,
+          total_comp_min, total_comp_max, right_to_work, additional_notes,
+          candidate_job_id, submission_email,
           candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, target_total_comp, target_base_comp, avatar_url, last_contacted_at, owner_user_id, type),
           job:jobs(id, title, company_name)
         `)

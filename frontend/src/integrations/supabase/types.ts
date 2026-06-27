@@ -4447,8 +4447,66 @@ export type Database = {
           },
         ]
       }
+      scheduled_messages: {
+        Row: {
+          attachment_paths: string[]
+          body_html: string
+          candidate_id: string | null
+          cc_emails: string[]
+          created_at: string
+          error: string | null
+          id: string
+          job_id: string | null
+          scheduled_at: string
+          send_out_id: string | null
+          sent_at: string | null
+          status: string
+          subject: string | null
+          to_emails: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attachment_paths?: string[]
+          body_html?: string
+          candidate_id?: string | null
+          cc_emails?: string[]
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id?: string | null
+          scheduled_at: string
+          send_out_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          to_emails?: string[]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attachment_paths?: string[]
+          body_html?: string
+          candidate_id?: string | null
+          cc_emails?: string[]
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id?: string | null
+          scheduled_at?: string
+          send_out_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          to_emails?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       send_outs: {
         Row: {
+          additional_notes: string | null
           base_comp_max: number | null
           base_comp_min: number | null
           bonus_comp_max: number | null
@@ -4460,11 +4518,16 @@ export type Database = {
           deleted_at: string | null
           deleted_by_user_id: string | null
           feedback: string | null
+          total_comp_max: number | null
+          total_comp_min: number | null
           id: string
           interview_at: string | null
           interview_round: number | null
           job_id: string
           offer_at: string | null
+          offer_base: number | null
+          offer_bonus: number | null
+          offer_details: string | null
           outcome: string | null
           placed_at: string | null
           recruiter_id: string | null
@@ -4475,11 +4538,13 @@ export type Database = {
           right_to_work: string | null
           sent_to_client_at: string | null
           stage: string
+          submission_email: Json | null
           submittal_notes: string | null
           updated_at: string
           withdrawn_reason: string | null
         }
         Insert: {
+          additional_notes?: string | null
           base_comp_max?: number | null
           base_comp_min?: number | null
           bonus_comp_max?: number | null
@@ -4491,11 +4556,16 @@ export type Database = {
           deleted_at?: string | null
           deleted_by_user_id?: string | null
           feedback?: string | null
+          total_comp_max?: number | null
+          total_comp_min?: number | null
           id?: string
           interview_at?: string | null
           interview_round?: number | null
           job_id: string
           offer_at?: string | null
+          offer_base?: number | null
+          offer_bonus?: number | null
+          offer_details?: string | null
           outcome?: string | null
           placed_at?: string | null
           recruiter_id?: string | null
@@ -4506,11 +4576,13 @@ export type Database = {
           right_to_work?: string | null
           sent_to_client_at?: string | null
           stage?: string
+          submission_email?: Json | null
           submittal_notes?: string | null
           updated_at?: string
           withdrawn_reason?: string | null
         }
         Update: {
+          additional_notes?: string | null
           base_comp_max?: number | null
           base_comp_min?: number | null
           bonus_comp_max?: number | null
@@ -4522,11 +4594,16 @@ export type Database = {
           deleted_at?: string | null
           deleted_by_user_id?: string | null
           feedback?: string | null
+          total_comp_max?: number | null
+          total_comp_min?: number | null
           id?: string
           interview_at?: string | null
           interview_round?: number | null
           job_id?: string
           offer_at?: string | null
+          offer_base?: number | null
+          offer_bonus?: number | null
+          offer_details?: string | null
           outcome?: string | null
           placed_at?: string | null
           recruiter_id?: string | null
@@ -4537,6 +4614,7 @@ export type Database = {
           right_to_work?: string | null
           sent_to_client_at?: string | null
           stage?: string
+          submission_email?: Json | null
           submittal_notes?: string | null
           updated_at?: string
           withdrawn_reason?: string | null
