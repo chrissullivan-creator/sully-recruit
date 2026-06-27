@@ -61,9 +61,9 @@ async function applyProxyConfig(logger: any): Promise<{
     .not("unipile_account_id", "is", null)
     .like("unipile_account_id", "acc_%");
 
-  let applied = 0,
-    skipped = 0,
-    errors = 0;
+  let applied = 0;
+  let errors = 0;
+  const skipped = 0;
   for (const acct of accounts ?? []) {
     try {
       await unipileFetch(supabase, acct.unipile_account_id!, `proxy`, {

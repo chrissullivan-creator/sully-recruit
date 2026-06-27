@@ -17,5 +17,3 @@ Deno.serve(async (req: Request) => {
     { headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' }}
   );
 });
-
-supabase/functions/provider-webhook/index.ts

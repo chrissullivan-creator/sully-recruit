@@ -116,7 +116,7 @@ export function EditMeetingDialog({ open, onOpenChange, task, companyId }: Props
       const results: Attendee[] = [];
 
       // Search contacts (prioritize same company)
-      let contactQuery = supabase
+      const contactQuery = supabase
         .from('contacts')
         .select('id, full_name, company_id')
         .ilike('full_name', `%${attendeeSearch}%`)

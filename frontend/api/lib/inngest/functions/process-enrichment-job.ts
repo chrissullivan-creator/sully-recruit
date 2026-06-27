@@ -94,7 +94,7 @@ export const processEnrichmentJob = inngest.createFunction(
       apollo_calls: 0, fullenrich_calls: 0, bettercontact_calls: 0,
       pdl_calls: 0, zerobounce_checks: 0,
     };
-    let linkedinSummary = job.linkedin_summary ?? {
+    const linkedinSummary = job.linkedin_summary ?? {
       urls_found: 0, profiles_synced: 0, work_history_rows: 0,
     };
     const accumulatedResults: any[] = Array.isArray(job.results) ? [...job.results] : [];

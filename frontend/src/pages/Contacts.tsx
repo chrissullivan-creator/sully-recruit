@@ -95,7 +95,7 @@ const Contacts = () => {
 
   const filteredContacts = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    let list = contacts.filter((contact) => {
+    const list = contacts.filter((contact) => {
       const companyDisplay = ((contact as any).company_name || (contact.companies as any)?.name || '');
       const secondary: string[] = Array.isArray((contact as any).secondary_emails) ? (contact as any).secondary_emails : [];
       const matchesSearch = !q ||

@@ -201,7 +201,7 @@ const Candidates = () => {
   }, [savedSearches]);
 
   const filteredCandidates = useMemo(() => {
-    let list = candidates.filter((c) => {
+    const list = candidates.filter((c) => {
       // Boolean search across key fields. Email lookups need to cover
       // every spot we store an address — primary_email (alias `email`),
       // work_email, personal_email, and the secondary_emails array —

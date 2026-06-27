@@ -111,7 +111,7 @@ export function AskJoeContactSearch({ open, onOpenChange, onEnrollContacts }: Pr
 
         let newlineIdx: number;
         while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-          let line = buffer.slice(0, newlineIdx).replace(/\r$/, '');
+          const line = buffer.slice(0, newlineIdx).replace(/\r$/, '');
           buffer = buffer.slice(newlineIdx + 1);
 
           if (!line.startsWith('data: ')) continue;
