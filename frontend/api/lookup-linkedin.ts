@@ -50,10 +50,22 @@ interface UnipileProfile {
   url?: string;
   public_identifier?: string;
   email?: string;
+  emails?: string[];
   provider_id?: string;
   id?: string;
-  // v2 nests location + the SELF marker under `specifics`.
-  specifics?: { location?: string; network_distance?: string } | null;
+  // v2 nests location, the SELF marker, AND the structured work history under
+  // `specifics`. experience[0] is the current/most-recent role — the reliable
+  // source of title + company (vs parsing the free-text headline).
+  specifics?: {
+    location?: string;
+    network_distance?: string;
+    experience?: Array<{
+      job_title?: string;
+      company?: { name?: string } | null;
+      started_on?: string;
+      ended_on?: string;
+    }>;
+  } | null;
 }
 
 /** A v2 chat message — we only read whether we sent it and its sender. */
@@ -167,18 +179,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const first = pickString(profile.first_name) || display.split(/\s+/)[0] || "";
     const last = pickString(profile.last_name) || display.split(/\s+/).slice(1).join(" ");
 
-    // The role line arrives as `description` ("Title at Company"); split it into
-    // structured title/company when possible (company drives the
-    // people↔companies auto-link). Fall back to the whole string as the title.
-    const description = pickString(profile.description, profile.headline, profile.title, profile.occupation);
+    // Title + company: prefer the STRUCTURED current experience (v2
+    // `specifics.experience[0]` = present/most-recent role) — it's the company
+    // that drives the people↔companies auto-link. Pick the first entry with no
+    // end date (current) else the first listed. Fall back to parsing the
+    // free-text headline ("Title at Company") only when no structured data.
     let title = "";
     let company = "";
-    const split = description.match(/^(.*?)\s+(?:at|@)\s+(.+)$/i);
-    if (split) {
-      title = split[1].trim();
-      company = split[2].trim();
-    } else if (description) {
-      title = description;
+    const experiences = Array.isArray(profile.specifics?.experience)
+      ? profile.specifics!.experience!
+      : [];
+    const currentExp =
+      experiences.find((e) => e && (e.job_title || e.company?.name) && !e.ended_on) ||
+      experiences.find((e) => e && (e.job_title || e.company?.name));
+    if (currentExp) {
+      title = pickString(currentExp.job_title);
+      company = pickString(currentExp.company?.name);
+    }
+    if (!title && !company) {
+      const description = pickString(profile.description, profile.headline, profile.title, profile.occupation);
+      const split = description.match(/^(.*?)\s+(?:at|@)\s+(.+)$/i);
+      if (split) {
+        title = split[1].trim();
+        company = split[2].trim();
+      } else if (description) {
+        title = description;
+      }
     }
 
     const phone = Array.isArray(profile.phone_numbers)
@@ -205,7 +231,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result: Record<string, string> = {};
     if (first) result.first_name = first;
     if (last) result.last_name = last;
-    const email = pickString(profile.email);
+    const email = Array.isArray(profile.emails)
+      ? pickString(profile.email, ...profile.emails)
+      : pickString(profile.email);
     if (email) result.email = email;
     if (phone) result.phone = phone;
     if (title) result.title = title;
