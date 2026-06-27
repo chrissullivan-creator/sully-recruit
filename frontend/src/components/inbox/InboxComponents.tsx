@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import DOMPurify from 'dompurify';
@@ -56,6 +57,54 @@ import {
   type PendingAttachment,
 } from '@/components/inbox/inbox-helpers';
 
+// ---------- Person avatar (with channel badge) ----------
+// Prefer a real photo, then initials of the resolved name, and only fall back
+// to the bare channel glyph when we have neither. A small channel badge is
+// overlaid whenever we're showing a person so the source stays legible.
+export function ThreadAvatar({
+  name,
+  photoUrl,
+  channel,
+  size = 'md',
+}: {
+  name?: string | null;
+  photoUrl?: string | null;
+  channel: string;
+  size?: 'sm' | 'md';
+}) {
+  const ChannelIcon = CHANNEL_ICONS[channel] || Mail;
+  const dim = size === 'sm' ? 'h-7 w-7' : 'h-9 w-9';
+  const initials = getInitials(name);
+  const hasPerson = !!photoUrl || !!initials;
+  return (
+    <div className="relative shrink-0">
+      <Avatar className={dim}>
+        {photoUrl ? <AvatarImage src={photoUrl} alt={name || ''} /> : null}
+        <AvatarFallback
+          className={cn(
+            'font-medium',
+            size === 'sm' ? 'text-[10px]' : 'text-[11px]',
+            initials ? 'bg-accent/15 text-accent' : (CHANNEL_COLORS[channel] || 'bg-muted text-muted-foreground'),
+          )}
+        >
+          {initials ? initials : <ChannelIcon className={size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4'} />}
+        </AvatarFallback>
+      </Avatar>
+      {hasPerson && (
+        <span
+          className={cn(
+            'absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full ring-2 ring-background',
+            CHANNEL_COLORS[channel] || 'bg-muted text-muted-foreground',
+          )}
+          aria-hidden
+        >
+          <ChannelIcon className="h-2.5 w-2.5" />
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ---------- Date group header ----------
 export function DateGroupHeader({ label }: { label: string }) {
   return (
@@ -96,7 +145,9 @@ export function ThreadItem({
   onUnsnooze: () => void | Promise<void>;
 }) {
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
-  const entityName = thread.candidate_name || thread.contact_name;
+  // Fall back to the message sender's name so unlinked threads (e.g. InMails
+  // from people not yet in the CRM) show who it's from instead of "Unknown".
+  const entityName = thread.candidate_name || thread.contact_name || thread.sender_name;
   const isLinked = !!(thread.candidate_id || thread.contact_id);
   // Prefer the latest INBOUND message for the preview — sent messages should
   // not "push" the conversation in the inbox. Fall back to last_message_* for
@@ -156,12 +207,13 @@ export function ThreadItem({
             <Square className="h-4 w-4 text-muted-foreground" />
           )}
         </button>
-        <div className={cn(
-          'mt-0.5 flex shrink-0 items-center justify-center rounded-full',
-          compact ? 'h-7 w-7' : 'h-8 w-8',
-          CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground',
-        )}>
-          <Icon className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+        <div className="mt-0.5">
+          <ThreadAvatar
+            name={entityName}
+            photoUrl={thread.avatar_url}
+            channel={thread.channel}
+            size={compact ? 'sm' : 'md'}
+          />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -1065,7 +1117,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
   }
 
   const Icon = CHANNEL_ICONS[thread.channel] || Mail;
-  const entityName = thread.candidate_name || thread.contact_name;
+  const entityName = thread.candidate_name || thread.contact_name || thread.sender_name;
   const isUnlinked = !(thread.candidate_id || thread.contact_id);
 
   // Sender info for create dialog prefill
@@ -1112,9 +1164,12 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
         <div className="sticky top-0 z-20 bg-background border-b border-border">
           {/* Identity bar */}
           <div className="px-6 py-3 flex items-center gap-3">
-            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', CHANNEL_COLORS[thread.channel] || 'bg-muted text-muted-foreground')}>
-              <Icon className="h-4 w-4" />
-            </div>
+            <ThreadAvatar
+              name={entityName || senderName}
+              photoUrl={thread.avatar_url}
+              channel={thread.channel}
+              size="md"
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 {isUnlinked ? (
@@ -1395,13 +1450,18 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
                       isOutbound ? 'justify-end' : 'justify-start',
                       sameSenderAsPrev ? 'mt-0.5' : 'mt-3'
                     )}>
-                      {/* Inbound avatar */}
+                      {/* Inbound avatar — real photo when we have one */}
                       {isInbound && (
                         <div className="w-7 shrink-0">
                           {!sameSenderAsPrev ? (
-                            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center">
-                              <span className="text-[10px] font-bold text-white">{inboundInitials}</span>
-                            </div>
+                            <Avatar className="h-7 w-7">
+                              {thread.avatar_url ? (
+                                <AvatarImage src={thread.avatar_url} alt={msg.sender_name || entityName || ''} />
+                              ) : null}
+                              <AvatarFallback className="bg-primary text-[10px] font-bold text-white">
+                                {inboundInitials}
+                              </AvatarFallback>
+                            </Avatar>
                           ) : <div className="h-7" />}
                         </div>
                       )}

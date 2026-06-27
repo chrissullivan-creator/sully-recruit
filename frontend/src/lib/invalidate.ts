@@ -38,6 +38,10 @@ const JOB_VIEW_KEYS = [
 const COMMS_KEYS = [
   'inbox_threads', 'inbox_thread', 'messages',
   'conversations', 'contact_conversations',
+  // Live unknown-sender fetch from Unipile (Other/All tabs) — refresh it too so
+  // linking/adding a person re-resolves those rows instead of leaving them
+  // stuck on "Unknown sender".
+  'inbox_live_threads',
 ];
 
 const NOTES_KEYS = ['notes', 'job_notes'];
