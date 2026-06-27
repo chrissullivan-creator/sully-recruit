@@ -22,7 +22,7 @@ import {
   Edit, Briefcase, MessageSquare, History, User,
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Calendar, Users, Send,
-  Sparkles, RefreshCw, Martini, Send as SendIcon,
+  Martini, RefreshCw, Send as SendIcon,
   PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play, MoreHorizontal,
 } from 'lucide-react';
 import {
@@ -883,7 +883,7 @@ const ContactDetail = () => {
                   <FileText className="h-3.5 w-3.5" /> Notes
                 </TabsTrigger>
                 <TabsTrigger value="sizzles" className="gap-1.5 snap-start">
-                  <Sparkles className="h-3.5 w-3.5" /> Sizzles
+                  <Martini className="h-3.5 w-3.5" /> Sizzles
                 </TabsTrigger>
               </TabsList>
             </div>

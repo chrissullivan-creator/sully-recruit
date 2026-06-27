@@ -8,7 +8,7 @@ import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs, useJobPipelineStages } from '@/hooks/useData';
 import { CompanyLink } from '@/components/shared/EntityLinks';
-import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Sparkles, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
+import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Martini, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VALUES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';

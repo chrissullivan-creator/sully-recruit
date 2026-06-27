@@ -15,7 +15,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft, Building, Globe, MapPin, Briefcase, FileText, Upload,
   Loader2, ExternalLink, Edit, Check, X, Linkedin, User, Users, Info, Plus,
-  FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Sparkles,
+  FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Martini,
   Rss,
 } from 'lucide-react';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
@@ -639,7 +639,7 @@ const CompanyDetail = () => {
                   )}
                 </TabsTrigger>
                 <TabsTrigger value="postings" className="gap-1.5"><Rss className="h-3.5 w-3.5" /> Job postings</TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
+                <TabsTrigger value="sizzles" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
               </TabsList>
             </div>
 

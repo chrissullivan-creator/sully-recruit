@@ -10,7 +10,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  Loader2, Briefcase, User, Sparkles, MessageSquare, PhoneCall, Mailbox, MoreHorizontal,
+  Loader2, Briefcase, User, Martini, MessageSquare, PhoneCall, Mailbox, MoreHorizontal,
   Send, FileText as FileTextIcon, XCircle,
 } from 'lucide-react';
 
@@ -106,7 +106,7 @@ export type SourcingStage = (typeof SOURCING_STAGES)[number];
 const STAGE_META: Record<SourcingStage, { label: string; cls: string; icon: any }> = {
   uncontacted:    { label: 'Uncontacted',   cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20',          icon: Mailbox },
   contacted:      { label: 'Contacted',     cls: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',   icon: MessageSquare },
-  replied:        { label: 'Replied',       cls: 'bg-green-500/10 text-green-400 border-green-500/20',      icon: Sparkles },
+  replied:        { label: 'Replied',       cls: 'bg-green-500/10 text-green-400 border-green-500/20',      icon: Martini },
   back_of_resume: { label: 'Back of resume',cls: 'bg-purple-500/10 text-purple-400 border-purple-500/20',   icon: PhoneCall },
 };
 

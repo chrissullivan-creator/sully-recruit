@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/shared/RichTextEditor";
 import { toast } from "sonner";
-import { Sparkles, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X } from "lucide-react";
+import { Martini, Plus, Trash2, Mail, MessageSquare, Phone, Linkedin, Loader2, Pencil, Paperclip, X } from "lucide-react";
 import type { ActionData } from "./ActionNode";
 import { supabase } from "@/integrations/supabase/client";
 import { applyMergeTags } from "@/lib/merge-tags";
@@ -221,7 +221,7 @@ export function SequenceStepCard({
                       {loadingIndex === i ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
-                        <Sparkles className="h-3 w-3" />
+                        <Martini className="h-3 w-3" />
                       )}
                     </Button>
                   )}
@@ -455,7 +455,7 @@ export function SequenceStepCard({
                     {loadingIndex === editingIndex ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
-                      <Sparkles className="h-4 w-4 mr-2" />
+                      <Martini className="h-4 w-4 mr-2" />
                     )}
                     Ask Joe
                   </Button>

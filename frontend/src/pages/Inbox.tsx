@@ -21,7 +21,7 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
-  Star, Clock as ClockIcon, Bell, Sun, CalendarClock, Sparkles,
+  Star, Clock as ClockIcon, Bell, Sun, CalendarClock, Martini,
 } from 'lucide-react';
 import { authHeaders } from '@/lib/api-auth';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -508,7 +508,7 @@ export default function Inbox() {
                     className="h-7 w-7 shrink-0 text-muted-foreground hover:text-accent"
                     aria-label="Match unknown senders to people"
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
+                    <Martini className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-xs">

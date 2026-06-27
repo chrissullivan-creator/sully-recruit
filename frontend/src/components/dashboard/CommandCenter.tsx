@@ -5,7 +5,7 @@ import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { cn } from '@/lib/utils';
 import {
   Phone, CalendarClock, Award, Trophy, Briefcase, Timer,
-  Flame, TrendingDown, BellRing, AlertTriangle, Sparkles, TrendingUp,
+  Flame, TrendingDown, BellRing, AlertTriangle, Martini, TrendingUp,
   ArrowUpRight, ChevronRight,
 } from 'lucide-react';
 
@@ -137,7 +137,7 @@ export function CommandCenter({ displayName }: { displayName: string }) {
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-accent" />
+            <Martini className="h-4 w-4 text-accent" />
             <span className="text-xs font-semibold uppercase tracking-widest text-accent">Command Center</span>
           </div>
           <h1 className="mt-1 text-2xl font-semibold text-foreground font-display">{getGreeting()}, {displayName}</h1>
@@ -202,7 +202,7 @@ export function CommandCenter({ displayName }: { displayName: string }) {
           <div className="rounded-2xl border border-accent/30 bg-gradient-to-b from-accent/[0.06] to-card p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent"><Sparkles className="h-4 w-4" /></span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent"><Martini className="h-4 w-4" /></span>
                 <h3 className="text-sm font-semibold text-foreground">Ask Joe says</h3>
               </div>
               <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">AI</span>

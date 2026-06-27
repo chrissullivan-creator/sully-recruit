@@ -13,7 +13,7 @@ import { authHeaders } from '@/lib/api-auth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Sparkles, Check, X, PhoneCall, Plus } from 'lucide-react';
+import { Loader2, User, Briefcase, Building, Calendar, Users, FileText, Martini, Check, X, PhoneCall, Plus } from 'lucide-react';
 import { CallButton } from '@/components/shared/CallButton';
 
 // Labels are what recruiters see; the stored `value` must satisfy the DB
@@ -378,7 +378,7 @@ export function InterviewDetail({ interviewId, open, onOpenChange, onNavigate }:
 
               {/* Debrief */}
               <section className="space-y-3 border-t border-border pt-5">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-accent" /> Debrief</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground flex items-center gap-2"><Martini className="h-3.5 w-3.5 text-accent" /> Debrief</h3>
                 {iv.ai_summary && (
                   <div className="rounded-lg border border-accent/20 bg-accent/5 p-3 text-sm text-foreground whitespace-pre-wrap">{iv.ai_summary}</div>
                 )}

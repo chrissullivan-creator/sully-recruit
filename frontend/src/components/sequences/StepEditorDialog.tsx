@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RichTextEditor } from "@/components/shared/RichTextEditor";
-import { Sparkles, Loader2, Mail, Linkedin, MessageSquare, Phone } from "lucide-react";
+import { Martini, Loader2, Mail, Linkedin, MessageSquare, Phone } from "lucide-react";
 
 const MERGE_TAGS = [
   "{{first_name}}", "{{last_name}}", "{{company}}", "{{title}}", "{{job_name}}", "{{sender_name}}",
@@ -111,7 +111,7 @@ export function StepEditorDialog({
                 {askJoeLoading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
                 ) : (
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  <Martini className="h-3.5 w-3.5 mr-1.5" />
                 )}
                 Ask Joe
               </Button>

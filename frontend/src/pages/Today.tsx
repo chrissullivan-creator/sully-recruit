@@ -10,7 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Clock, X, ChevronRight, Sparkles } from 'lucide-react';
+import { Check, Clock, X, ChevronRight, Martini } from 'lucide-react';
 
 /**
  * "Today / For You" — Phase 1 of the proactive-Joe roadmap. Renders the
@@ -119,7 +119,7 @@ export default function Today() {
         ) : briefings.length === 0 ? (
           <Card className="mt-4">
             <CardContent className="py-12 text-center">
-              <Sparkles className="h-8 w-8 mx-auto mb-3 text-emerald/60" />
+              <Martini className="h-8 w-8 mx-auto mb-3 text-emerald/60" />
               <p className="font-medium">No briefing items right now</p>
               <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
                 Joe builds a prioritized list each morning of the people who need your

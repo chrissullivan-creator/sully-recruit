@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { authHeaders } from '@/lib/api-auth';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Search, MapPin, Briefcase, Award, Building, ArrowRight, Sparkles, Send, FileText, MessageSquare } from 'lucide-react';
+import { Loader2, Search, MapPin, Briefcase, Award, Building, ArrowRight, Martini, Send, FileText, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -150,7 +150,7 @@ function AskJoeResumeChat() {
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
               <div className="h-16 w-16 rounded-full bg-accent/10 flex items-center justify-center">
-                <Sparkles className="h-8 w-8 text-accent" />
+                <Martini className="h-8 w-8 text-accent" />
               </div>
               <div className="text-center">
                 <p className="text-sm font-medium text-foreground mb-1">Ask Joe to search resumes</p>
@@ -175,7 +175,7 @@ function AskJoeResumeChat() {
             <div key={i} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
               {msg.role === 'assistant' && (
                 <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <Martini className="h-3.5 w-3.5 text-accent" />
                 </div>
               )}
               <div className={cn(
@@ -191,7 +191,7 @@ function AskJoeResumeChat() {
           {isLoading && messages[messages.length - 1]?.role === 'user' && (
             <div className="flex gap-3 justify-start">
               <div className="h-7 w-7 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-1">
-                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                <Martini className="h-3.5 w-3.5 text-accent" />
               </div>
               <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-3">
                 <div className="flex items-center gap-2 text-muted-foreground">
@@ -508,7 +508,7 @@ export const ResumeSearch = () => {
         <Tabs defaultValue="ask-joe" className="w-full">
           <TabsList className="mb-6 bg-secondary">
             <TabsTrigger value="ask-joe" className="gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" />
+              <Martini className="h-3.5 w-3.5" />
               Ask Joe
             </TabsTrigger>
             <TabsTrigger value="keyword" className="gap-1.5">

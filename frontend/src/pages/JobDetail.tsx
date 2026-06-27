@@ -29,7 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, FileText, ExternalLink, ClipboardList,
-  Search, Pencil, Link as LinkIcon, Info, Sparkles, Send, Trash2, Hash, UsersRound, Globe, Check,
+  Search, Pencil, Link as LinkIcon, Info, Martini, Send, Trash2, Hash, UsersRound, Globe, Check,
   Mailbox, Linkedin, Copy, Megaphone, MoreHorizontal, Flame,
 } from 'lucide-react';
 import { JobSourceTab } from '@/components/source/SourceTabs';
@@ -802,7 +802,7 @@ const JobDetail = () => {
             {/* Priority badge — gold treatment */}
             {(job as any).priority && (job as any).priority !== 'normal' && (
               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gold/15 text-gold-deep text-[10px] font-semibold uppercase tracking-wider border border-gold/30">
-                <Sparkles className="h-2.5 w-2.5 fill-current" /> {(job as any).priority}
+                <Martini className="h-2.5 w-2.5 fill-current" /> {(job as any).priority}
               </span>
             )}
           </div>
@@ -1076,12 +1076,12 @@ const JobDetail = () => {
               <TabsList className="bg-secondary">
                 <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
                 <TabsTrigger value="marketing" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Marketing</TabsTrigger>
-                <TabsTrigger value="matches" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
+                <TabsTrigger value="matches" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
                 <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
                 <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
                 <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1.5"><FileTextIcon className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
+                <TabsTrigger value="sizzles" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
               </TabsList>
             </div>
 
@@ -1174,7 +1174,7 @@ const JobDetail = () => {
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button variant="gold" size="sm" className="h-8 gap-1.5 shrink-0" disabled={askingJoe}>
-                        {askingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        {askingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Martini className="h-3.5 w-3.5" />}
                         Ask Joe
                       </Button>
                     </AlertDialogTrigger>
@@ -1886,7 +1886,7 @@ const JobDetail = () => {
             >
               {generatingPost
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <Sparkles className="h-3.5 w-3.5" />}
+                : <Martini className="h-3.5 w-3.5" />}
               Regenerate
             </Button>
             <Button
