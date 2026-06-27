@@ -65,9 +65,16 @@ export default function Inbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
 
-  // URL-synced state for sidebar nav: ?tab=focused|other &view=unread|archive|... &channel=email|...
+  // URL-synced state for sidebar nav: ?tab=all|focused|other &view=unread|archive|... &channel=email|...
+  // "All" is the default (no ?tab) so unlinked recruiter InMails — which land
+  // unfocused — aren't hidden behind the People-we-know view.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: 'focused' | 'other' = searchParams.get('tab') === 'other' ? 'other' : 'focused';
+  const tab: 'all' | 'focused' | 'other' =
+    searchParams.get('tab') === 'other'
+      ? 'other'
+      : searchParams.get('tab') === 'focused'
+        ? 'focused'
+        : 'all';
   const view: InboxView = ((): InboxView => {
     const v = searchParams.get('view');
     const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification', 'need_respond'];
@@ -89,7 +96,7 @@ export default function Inbox() {
   const callsActive = searchParams.get('section') === 'calls';
   const updateParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(searchParams);
-    if (!value || value === 'all' || (key === 'tab' && value === 'focused')) {
+    if (!value || value === 'all') {
       next.delete(key);
     } else {
       next.set(key, value);
@@ -109,14 +116,15 @@ export default function Inbox() {
     next.set('section', 'calls');
     setSearchParams(next, { replace: true });
   };
-  // People we know (focused) / Other (unlinked) now live in the rail. Selecting
-  // one always leaves the Calls section.
-  const selectTab = (t: 'focused' | 'other') => {
+  // All / People we know (focused) / Other (unlinked) now live in the rail.
+  // Selecting one always leaves the Calls section. "all" is the default, so it
+  // clears the param; focused/other set it explicitly.
+  const selectTab = (t: 'all' | 'focused' | 'other') => {
     const next = new URLSearchParams(searchParams);
     next.delete('section');
     next.delete('view'); // leaving the Need-to-respond view
-    if (t === 'other') next.set('tab', 'other');
-    else next.delete('tab');
+    if (t === 'all') next.delete('tab');
+    else next.set('tab', t);
     setSearchParams(next, { replace: true });
   };
   // "Need to respond" — known people whose latest message is inbound and still
@@ -161,13 +169,13 @@ export default function Inbox() {
   } = useInboxScope();
 
 
-  // Live fetch from Unipile for the "Other" tab — only fires when the
-  // user is actually viewing that tab. Returns threads from unknown
-  // senders that we don't persist under the Phase 5 storage rule.
+  // Live fetch from Unipile for the "Other" + "All" tabs — only fires when the
+  // user is viewing a tab that surfaces unknown senders. Returns threads from
+  // unknown senders that we don't persist under the Phase 5 storage rule.
   const liveChannel = channel === 'all' ? 'linkedin' : channel;
   const { data: liveData } = useQuery({
     queryKey: ['inbox_live_threads', liveChannel, scope, memberFilter],
-    enabled: tab === 'other' && !!userId,
+    enabled: (tab === 'other' || tab === 'all') && !!userId,
     staleTime: 60_000,
     queryFn: async () => {
       const { data: session } = await supabase.auth.getSession();
@@ -255,19 +263,25 @@ export default function Inbox() {
   // Focused = threads tagged to a person in the CRM. Other = unlinked.
   // Both tabs exclude snoozed + archived by default; the Snoozed and Archive
   // views below opt in explicitly.
+  const sortBySortAtDesc = (a: InboxThread, b: InboxThread) => {
+    const ta = a.sort_at ? new Date(a.sort_at).getTime() : 0;
+    const tb = b.sort_at ? new Date(b.sort_at).getTime() : 0;
+    return tb - ta;
+  };
+
   const focusedThreads = scoped.filter((t) => (t.candidate_id || t.contact_id) && visibleByDefault(t));
   const persistedOther = scoped.filter((t) => !t.candidate_id && !t.contact_id && visibleByDefault(t));
-  // Other tab unions persisted unlinked threads with live-fetched
+  // The Other + All tabs union persisted unlinked threads with live-fetched
   // unknown-sender threads from Unipile. Live results are deduped by
   // external_conversation_id on the API side.
-  const otherThreads: InboxThread[] = tab === 'other'
-    ? [...persistedOther, ...liveThreads].sort((a, b) => {
-        const ta = a.sort_at ? new Date(a.sort_at).getTime() : 0;
-        const tb = b.sort_at ? new Date(b.sort_at).getTime() : 0;
-        return tb - ta;
-      })
+  const showLive = tab === 'other' || tab === 'all';
+  const otherThreads: InboxThread[] = showLive
+    ? [...persistedOther, ...liveThreads].sort(sortBySortAtDesc)
     : persistedOther;
-  const tabPool = tab === 'focused' ? focusedThreads : otherThreads;
+  // "All" = everything: known people + unlinked + live unknown senders, so no
+  // recruiter InMail is ever hidden behind a tab.
+  const allTabThreads: InboxThread[] = [...focusedThreads, ...otherThreads].sort(sortBySortAtDesc);
+  const tabPool = tab === 'all' ? allTabThreads : tab === 'focused' ? focusedThreads : otherThreads;
 
   // "Need to respond": known-person threads where the latest message is inbound
   // (from them) and we haven't replied since.
@@ -343,9 +357,11 @@ export default function Inbox() {
   const listTitle =
     view === 'need_respond'
       ? 'Need to respond'
-      : tab === 'focused'
-        ? 'People we know'
-        : 'Other';
+      : tab === 'all'
+        ? 'All'
+        : tab === 'focused'
+          ? 'People we know'
+          : 'Other';
 
   // Mutation helpers — used by the per-row hover actions.
   const updateThread = async (threadId: string, patch: Record<string, unknown>) => {
@@ -402,7 +418,11 @@ export default function Inbox() {
           callsActive={callsActive}
           onSelectCalls={selectCalls}
           tab={tab}
-          tabCounts={{ focused: focusedThreads.length, other: persistedOther.length }}
+          tabCounts={{
+            all: focusedThreads.length + persistedOther.length,
+            focused: focusedThreads.length,
+            other: persistedOther.length,
+          }}
           onSelectTab={selectTab}
           needRespondCount={needRespondThreads.length}
           needRespondActive={view === 'need_respond'}
