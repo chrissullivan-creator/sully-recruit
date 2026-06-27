@@ -26,7 +26,9 @@ import { callAIWithFallback, RESUME_PARSE_ORDER } from "../../../../src/lib/ai-f
  * outage can't leave the feed empty.
  */
 
-const COLD_DAYS = 10;
+const COLD_DAYS = 10; // silent at least this long to count as "going cold"
+const COLD_MAX_DAYS = 60; // ...but not older than this — a 10-month-cold contact
+// isn't "going cold", it's gone. Keep the feed to people worth re-engaging now.
 const MAX_PER_OWNER = 25; // cap signals ranked + written per recruiter per day
 
 type Category = "hot_lead" | "going_cold" | "reply_waiting";
@@ -52,6 +54,7 @@ function entityTypeFor(personType: string | null): "candidate" | "client" {
 async function gatherSignals(supabase: any, logger: any): Promise<Signal[]> {
   const signals: Signal[] = [];
   const coldCutoff = new Date(Date.now() - COLD_DAYS * 86_400_000).toISOString();
+  const coldFloor = new Date(Date.now() - COLD_MAX_DAYS * 86_400_000).toISOString();
 
   // Warm repliers awaiting our move: they replied with positive/interested/maybe
   // sentiment and we haven't sent anything since their reply.
@@ -98,7 +101,8 @@ async function gatherSignals(supabase: any, logger: any): Promise<Signal[]> {
     .not("owner_user_id", "is", null)
     .eq("do_not_contact", false)
     .lt("last_responded_at", coldCutoff)
-    .order("last_responded_at", { ascending: true })
+    .gte("last_responded_at", coldFloor) // only the last ~2 months — skip dead-cold
+    .order("last_responded_at", { ascending: false }) // freshest-cold first
     .limit(400);
   if (coldErr) logger.warn("joe-daily-brief: cold query failed", { error: coldErr.message });
 

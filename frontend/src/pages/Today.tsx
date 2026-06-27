@@ -97,8 +97,19 @@ export default function Today() {
       'going_cold',
       'ops_warning',
     ];
+    // Dedupe to one card per person. Briefings accumulate across daily runs and
+    // a person can surface under more than one category, which showed the same
+    // contact several times (e.g. two "Rachel Phillips"). Keep the highest-
+    // scored card per entity — `briefings` is already ordered by score desc.
+    const seen = new Set<string>();
+    const deduped = briefings.filter((b) => {
+      const key = `${b.entity_type}:${b.entity_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     return order
-      .map((cat) => ({ cat, items: briefings.filter((b) => b.category === cat) }))
+      .map((cat) => ({ cat, items: deduped.filter((b) => b.category === cat) }))
       .filter((g) => g.items.length > 0);
   }, [briefings]);
 
