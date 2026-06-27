@@ -21,7 +21,7 @@ import {
   Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
-  Star, Clock as ClockIcon, Bell, Sun, CalendarClock,
+  Star, Clock as ClockIcon, Bell, Sun, CalendarClock, Sparkles,
 } from 'lucide-react';
 import { authHeaders } from '@/lib/api-auth';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -37,6 +37,7 @@ import { ComposeMessageDialog } from '@/components/inbox/ComposeMessageDialog';
 import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
+import { ReconcileUnknownDialog } from '@/components/inbox/ReconcileUnknownDialog';
 import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
@@ -64,6 +65,7 @@ export default function Inbox() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
 
   // URL-synced state for sidebar nav: ?tab=all|focused|other &view=unread|archive|... &channel=email|...
   // "All" is the default (no ?tab) so unlinked recruiter InMails — which land
@@ -406,6 +408,7 @@ export default function Inbox() {
       />
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
+      <ReconcileUnknownDialog open={reconcileOpen} onOpenChange={setReconcileOpen} />
 
       <div className="flex flex-col" style={{ height: 'calc(100vh - 7rem)' }}>
         <div className="flex flex-1 min-h-0">
@@ -495,6 +498,24 @@ export default function Inbox() {
                 {filtered.length} conversation{filtered.length === 1 ? '' : 's'}
               </div>
             </div>
+            {(tab === 'other' || tab === 'all') && !callsActive && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setReconcileOpen(true)}
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-accent"
+                    aria-label="Match unknown senders to people"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Match unknown senders to existing people
+                </TooltipContent>
+              </Tooltip>
+            )}
             <select
               value={sentimentFilter}
               onChange={(e) => updateParam('sentiment', e.target.value)}
