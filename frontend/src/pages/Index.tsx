@@ -7,6 +7,7 @@ import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { CommandCenter } from '@/components/dashboard/CommandCenter';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { recruiterAvatar } from '@/lib/recruiterAvatars';
 import { DateRangePicker, defaultDashboardRange, type DashboardRange } from '@/components/dashboard/DateRangePicker';
 import { JobPipeline } from '@/components/pipeline/JobPipeline';
 import { DashboardTasks } from '@/components/tasks/DashboardTasks';
@@ -287,9 +288,21 @@ const Dashboard = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Whole Team</SelectItem>
-                {user?.id && <SelectItem value="me">Me ({displayName})</SelectItem>}
+                {user?.id && (
+                  <SelectItem value="me">
+                    <span className="flex items-center gap-2">
+                      <PersonAvatar name={displayName} src={recruiterAvatar(user?.email)} size="xs" />
+                      Me ({displayName})
+                    </span>
+                  </SelectItem>
+                )}
                 {team.filter((t: any) => t.id !== user?.id).map((t: any) => (
-                  <SelectItem key={t.id} value={t.id}>{t.full_name || t.email}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    <span className="flex items-center gap-2">
+                      <PersonAvatar name={t.full_name || t.email} src={recruiterAvatar(t.email)} size="xs" />
+                      {t.full_name || t.email}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

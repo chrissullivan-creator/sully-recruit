@@ -6,6 +6,8 @@ import { NotificationBell } from './NotificationBell';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { recruiterAvatar } from '@/lib/recruiterAvatars';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, FolderSearch,
@@ -227,9 +229,11 @@ export function Sidebar() {
       {/* ── User section ── */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/10 border border-sidebar-primary/20 text-xs font-semibold text-sidebar-primary">
-            {initials}
-          </div>
+          <PersonAvatar
+            name={user?.user_metadata?.display_name || user?.email || 'User'}
+            src={recruiterAvatar(user?.email)}
+            size="md"
+          />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-sidebar-foreground truncate leading-none">
               {user?.user_metadata?.display_name || 'User'}

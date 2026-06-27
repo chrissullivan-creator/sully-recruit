@@ -3,6 +3,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { recruiterAvatar } from '@/lib/recruiterAvatars';
 
 export interface SendOutsFilters {
   q: string;
@@ -20,7 +22,7 @@ interface FilterBarProps {
   filters: SendOutsFilters;
   onChange: (next: SendOutsFilters) => void;
   jobs: { id: string; title: string | null; company_name: string | null }[];
-  recruiters: { id: string; full_name: string | null }[];
+  recruiters: { id: string; full_name: string | null; email?: string | null }[];
 }
 
 export function FilterBar({ filters, onChange, jobs, recruiters }: FilterBarProps) {
@@ -65,7 +67,12 @@ export function FilterBar({ filters, onChange, jobs, recruiters }: FilterBarProp
           <SelectContent>
             <SelectItem value="all">All recruiters</SelectItem>
             {recruiters.map((r) => (
-              <SelectItem key={r.id} value={r.id}>{r.full_name ?? '(unknown)'}</SelectItem>
+              <SelectItem key={r.id} value={r.id}>
+                <span className="flex items-center gap-2">
+                  <PersonAvatar name={r.full_name ?? '?'} src={recruiterAvatar(r.email)} size="xs" />
+                  {r.full_name ?? '(unknown)'}
+                </span>
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
