@@ -44,7 +44,7 @@ export const recoverOrphanResumes = inngest.createFunction(
     logger.info("Orphan recovery starting", { count: orphans.length, since, limit });
 
     let processed = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     const ingestionEvents: Array<{

@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `You are Joe, an AI assistant for Emerald Recruiting Group
 Generate a concise 2-3 sentence candidate profile that a recruiter can scan in 5 seconds. Focus on:
 - Current seniority + firm type (hedge fund ops / bank middle office / etc.)
 - Functional specialty and any notable product coverage
-- Comp range if known (format: \"$X base / $Y total\")
+- Comp range if known (format: "$X base / $Y total")
 - What they're looking for (if known)
 - One distinctive signal
 

@@ -120,7 +120,7 @@ function deriveNameFromFileName(fileName: string): { first_name: string | null; 
     .replace(/__+\d+_+$/, "")                      // trailing `__2_` etc
     .replace(/\(\d+\)$/, "")
     .replace(/\b(resume|cv|curriculum[_\s-]?vitae|new|updated|final|v?\d+(?:\.\d+)*|march|april|may|june|july|august|september|october|november|december|january|february|20\d{2})\b/gi, " ")
-    .replace(/[_\-]+/g, " ")
+    .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!stem) return { first_name: null, last_name: null };

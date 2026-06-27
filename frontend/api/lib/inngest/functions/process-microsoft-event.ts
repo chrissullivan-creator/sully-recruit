@@ -881,7 +881,7 @@ async function extractFailedRecipientFromOriginalSubject(
   bounceSubject: string,
 ): Promise<string | null> {
   const cleaned = bounceSubject
-    .replace(/^(undeliverable|undelivered|returned mail|mail delivery failure|delivery (status|has|failure)|delivery has failed)\s*[:\-]?\s*/i, "")
+    .replace(/^(undeliverable|undelivered|returned mail|mail delivery failure|delivery (status|has|failure)|delivery has failed)\s*[:-]?\s*/i, "")
     .trim();
   if (!cleaned) return null;
   const { data } = await supabase

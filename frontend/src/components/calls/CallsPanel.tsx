@@ -893,7 +893,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
                                 e.stopPropagation();
                                 setExpandedNotes(prev => {
                                   const next = new Set(prev);
-                                  isExpanded ? next.delete(call.id) : next.add(call.id);
+                                  if (isExpanded) next.delete(call.id); else next.add(call.id);
                                   return next;
                                 });
                               }}

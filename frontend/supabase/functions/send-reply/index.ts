@@ -224,7 +224,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const now = new Date().toISOString();
   let result: { ok: boolean; error?: string; graphMessageId?: string; chatId?: string; messageId?: string };
-  let sentChannel = String(channel);
+  const sentChannel = String(channel);
 
   // ── ROUTE BY CHANNEL ────────────────────────────────────────────────────
   if (channel === "email") {
