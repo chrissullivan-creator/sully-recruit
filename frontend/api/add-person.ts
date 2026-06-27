@@ -46,9 +46,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type: rawType, data, conversation_id, provider_id } = req.body || {};
+  const { type: rawType, data, conversation_id, provider_id, merge_into } = req.body || {};
   const providerId: string | null = typeof provider_id === "string" && provider_id.trim()
     ? provider_id.trim()
+    : null;
+  // Explicit, user-confirmed merge target (from the import review modal). When
+  // set, we enrich THIS person from the incoming LinkedIn profile instead of
+  // running auto-dedup: keep their email + phone, but overwrite the
+  // professional fields (LinkedIn URL, title, company, headline, photo) and
+  // queue a full Unipile re-resolve for experience / profile text.
+  const mergeInto: string | null = typeof merge_into === "string" && merge_into.trim()
+    ? merge_into.trim()
     : null;
   if (!rawType || !data?.first_name || !data?.last_name) {
     return res.status(400).json({ error: "Missing type, first_name, or last_name" });
@@ -87,22 +95,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // thread (which carries no email) always inserted a new row even when
     // their linkedin_url already existed on a record.
     let existing:
-      | { id: string; roles: string[] | null; linkedin_url: string | null; phone: string | null }
+      | { id: string; roles: string[] | null; type: string | null; linkedin_url: string | null; phone: string | null }
       | null = null;
 
-    const resolved = await resolvePerson(supabase, "linkedin", {
-      providerId,
-      linkedinUrl: data.linkedin_url?.trim() || null,
-      email: email || personalEmail || workEmail || null,
-      phone: data.phone?.trim() || null,
-    });
-    if (resolved?.personId) {
+    if (mergeInto) {
+      // User picked an explicit merge target in the review modal — load it
+      // directly and skip auto-dedup.
       const { data: row } = await supabase
         .from("people")
-        .select("id, roles, linkedin_url, phone")
-        .eq("id", resolved.personId)
+        .select("id, roles, type, linkedin_url, phone")
+        .eq("id", mergeInto)
         .maybeSingle();
-      if (row) existing = row as any;
+      if (!row) return res.status(404).json({ error: "merge_into person not found" });
+      existing = row as any;
+    } else {
+      const resolved = await resolvePerson(supabase, "linkedin", {
+        providerId,
+        linkedinUrl: data.linkedin_url?.trim() || null,
+        email: email || personalEmail || workEmail || null,
+        phone: data.phone?.trim() || null,
+      });
+      if (resolved?.personId) {
+        const { data: row } = await supabase
+          .from("people")
+          .select("id, roles, type, linkedin_url, phone")
+          .eq("id", resolved.personId)
+          .maybeSingle();
+        if (row) existing = row as any;
+      }
     }
 
     let personId: string;
@@ -116,17 +136,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mergedRoles = currentRoles.includes(role) ? currentRoles : [...currentRoles, role];
       personId = existing.id;
 
-      // Backfill identifiers we matched on but the survivor was missing,
-      // so the next inbound message hard-matches without another lookup.
-      // Conservative: only fills blanks, never overwrites.
       const patch: Record<string, any> = {
         roles: mergedRoles,
         updated_at: new Date().toISOString(),
       };
       const formLinkedin = data.linkedin_url?.trim();
       const formPhone = data.phone?.trim();
-      if (formLinkedin && !existing.linkedin_url) patch.linkedin_url = formLinkedin;
-      if (formPhone && !existing.phone) patch.phone = formPhone;
+
+      if (mergeInto) {
+        // Explicit enrich-merge from the import review modal. KEEP the
+        // survivor's email + phone (never touched here), but refresh the
+        // professional profile from the incoming LinkedIn data and queue a
+        // full re-resolve so experience / profile text / fresh photo land too.
+        if (formLinkedin) {
+          patch.linkedin_url = formLinkedin;
+          patch.unipile_resolve_status = "pending";
+        }
+        const headline = data.headline?.trim();
+        if (headline) patch.linkedin_headline = headline;
+        const photo = data.photo?.trim();
+        if (photo) {
+          patch.profile_picture_url = photo;
+          patch.avatar_url = photo;
+        }
+        const title = data.title?.trim();
+        const company = data.company?.trim();
+        const location = data.location?.trim();
+        // Field names differ by role: candidates use current_*, clients use the
+        // plain columns. Use the survivor's stored type.
+        if (existing.type === "candidate") {
+          if (title) patch.current_title = title;
+          if (company) patch.current_company = company;
+          if (location) patch.location_text = location;
+        } else {
+          if (title) patch.title = title;
+          if (company) patch.company_name = company;
+          if (location) patch.location_text = location;
+        }
+      } else {
+        // Auto-dedup merge — conservative: only fill blanks, never overwrite.
+        if (formLinkedin && !existing.linkedin_url) patch.linkedin_url = formLinkedin;
+        if (formPhone && !existing.phone) patch.phone = formPhone;
+      }
 
       const { error: upErr } = await supabase
         .from("people")
@@ -268,6 +319,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       type: role,
       roles: mergedRoles,
       merged: !!existing,
+      enriched: !!(existing && mergeInto),
     });
   } catch (err: any) {
     console.error("Insert failed:", err);

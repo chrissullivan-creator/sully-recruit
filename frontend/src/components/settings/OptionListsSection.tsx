@@ -3,15 +3,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Trash2, ListPlus } from 'lucide-react';
 
 const CATEGORIES = [
   { value: 'department', label: 'Department' },
   { value: 'products', label: 'Products' },
-  { value: 'industry', label: 'Industry' },
+  { value: 'industry', label: 'Industry / Firm Type' },
   { value: 'strategy', label: 'Strategy' },
 ];
 
@@ -28,6 +29,8 @@ export function OptionListsSection() {
   const queryClient = useQueryClient();
   const [newValue, setNewValue] = useState('');
   const [adding, setAdding] = useState(false);
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkAdding, setBulkAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: options = [], isLoading } = useQuery({
@@ -75,6 +78,47 @@ export function OptionListsSection() {
     }
   };
 
+  const addBulk = async () => {
+    // Accept newline- or comma-separated values pasted in bulk.
+    const raw = bulkValue
+      .split(/[\n,]/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (raw.length === 0) { toast.error('Paste one or more values'); return; }
+
+    const existingLower = new Set(options.map((o) => o.value.toLowerCase()));
+    const seen = new Set<string>();
+    const toInsert: string[] = [];
+    let dupes = 0;
+    for (const v of raw) {
+      const key = v.toLowerCase();
+      if (existingLower.has(key) || seen.has(key)) { dupes++; continue; }
+      seen.add(key);
+      toInsert.push(v);
+    }
+    if (toInsert.length === 0) { toast.error('All values already exist'); return; }
+
+    setBulkAdding(true);
+    try {
+      let nextOrder = options.reduce((max, o) => Math.max(max, o.sort_order ?? 0), 0) + 1;
+      const payload = toInsert.map((value) => ({
+        category,
+        value,
+        sort_order: nextOrder++,
+        is_active: true,
+      }));
+      const { error } = await (supabase.from('picklist_options' as any) as any).insert(payload);
+      if (error) throw error;
+      invalidate();
+      setBulkValue('');
+      toast.success(`Added ${toInsert.length}${dupes ? ` · ${dupes} skipped (already existed)` : ''}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add values');
+    } finally {
+      setBulkAdding(false);
+    }
+  };
+
   const removeValue = async (id: string) => {
     setDeletingId(id);
     try {
@@ -100,7 +144,7 @@ export function OptionListsSection() {
 
       <div className="mb-5 w-56">
         <Label className="text-xs">Category</Label>
-        <Select value={category} onValueChange={(v) => { setCategory(v); setNewValue(''); }}>
+        <Select value={category} onValueChange={(v) => { setCategory(v); setNewValue(''); setBulkValue(''); }}>
           <SelectTrigger className="mt-1.5 h-9 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
@@ -122,6 +166,24 @@ export function OptionListsSection() {
           {adding ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
           Add
         </Button>
+      </div>
+
+      <div className="mb-6 max-w-md space-y-1.5">
+        <Label className="text-xs">Bulk add</Label>
+        <Textarea
+          value={bulkValue}
+          onChange={(e) => setBulkValue(e.target.value)}
+          placeholder={'Paste many at once — one per line or comma-separated.\ne.g.\nHedge Fund\nInvestment Bank\nAsset Management'}
+          rows={4}
+          className="text-sm"
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">Duplicates are skipped automatically.</span>
+          <Button variant="outline" size="sm" onClick={addBulk} disabled={bulkAdding || !bulkValue.trim()}>
+            {bulkAdding ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <ListPlus className="h-4 w-4 mr-1" />}
+            Add all
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

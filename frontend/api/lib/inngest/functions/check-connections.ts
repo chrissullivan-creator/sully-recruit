@@ -5,68 +5,15 @@ import {
   unipileFetchV2,
   isLinkedinV2SendEnabled,
 } from "../../../../src/server-lib/unipile-v2.js";
-import { calculatePostConnectionSendTime } from "../../../../src/server-lib/send-time-calculator.js";
+import { schedulePendingConnectionLogs } from "../../../../src/server-lib/connection-accept.js";
 
 const BATCH_SIZE = 30;
 const DELAY_MS = 400;
 
-/**
- * Polling fallback for the Unipile connection-accepted webhook. Without
- * this, missed webhooks leave LinkedIn-connection step_logs parked at
- * `pending_connection` forever and the follow-up message never fires.
- *
- * Mirrors what `advanceOnConnectionAccepted` does in
- * `src/trigger/webhook-unipile.ts`:
- *   1. Flip `waiting_for_connection_acceptance=false` on the enrollment
- *   2. Promote any `pending_connection` step_logs to `scheduled` with a
- *      window-aware send time anchored on the acceptance timestamp
- *
- * Ported from `src/trigger/check-connections.ts`. Inngest is the only
- * scheduler now — Trigger.dev's copy is removed so they don't both
- * thrash Unipile.
- */
-async function schedulePendingConnectionLogs(
-  supabase: any,
-  enrollmentId: string,
-  acceptedAt: Date,
-): Promise<number> {
-  const { data: enrollment } = await supabase
-    .from("sequence_enrollments")
-    .select("*, sequences!inner(*)")
-    .eq("id", enrollmentId)
-    .maybeSingle();
-  if (!enrollment) return 0;
-
-  const sequence = enrollment.sequences;
-  const senderUserId = sequence.sender_user_id || sequence.created_by;
-
-  const { data: pendingLogs } = await supabase
-    .from("sequence_step_logs")
-    .select("id, sequence_actions!inner(base_delay_hours, delay_interval_minutes, jiggle_minutes)")
-    .eq("enrollment_id", enrollmentId)
-    .eq("status", "pending_connection");
-  if (!pendingLogs?.length) return 0;
-
-  for (const log of pendingLogs as any[]) {
-    const action = log.sequence_actions;
-    const scheduledAt = await calculatePostConnectionSendTime(
-      supabase,
-      acceptedAt,
-      Number(action.base_delay_hours) || 0,
-      action.delay_interval_minutes || 0,
-      action.jiggle_minutes || 0,
-      sequence.send_window_start || "09:00",
-      sequence.send_window_end || "18:00",
-      senderUserId,
-      sequence.timezone || undefined,
-    );
-    await supabase
-      .from("sequence_step_logs")
-      .update({ scheduled_at: scheduledAt.toISOString(), status: "scheduled" } as any)
-      .eq("id", log.id);
-  }
-  return pendingLogs.length;
-}
+// `schedulePendingConnectionLogs` now lives in
+// src/server-lib/connection-accept.ts so the send-time live guard (which skips
+// duplicate invites to people who are already connected) and this polling cron
+// share one promotion path. Imported above.
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
