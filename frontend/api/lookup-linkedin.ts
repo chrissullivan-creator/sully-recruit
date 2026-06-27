@@ -164,6 +164,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── Recruiter-variant pass ──
+    // LinkedIn Recruiter (InMail) senders arrive as an AEM… provider URN that
+    // the classic profile read can't resolve. Retry every id/account under the
+    // recruiter variant before falling back to the chat — this is what fills
+    // title/company/photo for InMail adds.
+    if (!profile) {
+      outer2: for (const id of ids) {
+        for (const acc of acctIds) {
+          const p = await v2GetUser(v2Base, apiKeyV2, acc, id, { variant: "linkedin_recruiter" });
+          if (hasUsefulProfile(p)) {
+            profile = p;
+            break outer2;
+          }
+        }
+      }
+    }
+
     // ── Chat fallback (v2) ──
     // When the identifier-based lookup turns up nothing (or there were no
     // identifiers at all), recover a profile from the chat's messages.
@@ -287,10 +304,18 @@ async function v2GetUser(
   apiKey: string,
   acc: string,
   id: string,
+  opts: { variant?: string } = {},
 ): Promise<UnipileProfile | null> {
   try {
+    const qs = new URLSearchParams();
+    // Pull the structured Experience section so we get the current title +
+    // company (drives the people↔companies auto-link). Without with_sections
+    // the profile comes back with no experience and title/company stay blank.
+    qs.set("with_sections", "linkedin_experience");
+    // Recruiter InMail senders only resolve under the recruiter variant.
+    if (opts.variant) qs.set("variant", opts.variant);
     const r = await fetch(
-      `${base}/${encodeURIComponent(acc)}/users/${encodeURIComponent(id)}`,
+      `${base}/${encodeURIComponent(acc)}/users/${encodeURIComponent(id)}?${qs.toString()}`,
       { headers: { "X-API-KEY": apiKey, Accept: "application/json" }, signal: AbortSignal.timeout(9000) },
     );
     if (!r.ok) return null;
