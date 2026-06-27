@@ -59,7 +59,7 @@ export default function SendOuts() {
   const { data: rows = [], isLoading } = useSendOuts();
   const { data: jobs = [] } = useJobs(true);
   const { data: profiles = [] } = useProfiles();
-  const recruiters = profiles.map((p: any) => ({ id: p.id, full_name: p.full_name }));
+  const recruiters = profiles.map((p: any) => ({ id: p.id, full_name: p.full_name, email: p.email }));
 
   const [filters, setFilters] = useState<SendOutsFilters>(() => readFiltersFromUrl(searchParams));
   const [openStages, setOpenStages] = useState<Set<CanonicalStage>>(new Set(CANONICAL_PIPELINE.slice(0, 5).map((s) => s.key)));

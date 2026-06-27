@@ -6,6 +6,8 @@ import { NotificationBell } from './NotificationBell';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import logo from '@/assets/emerald-e-logo.png';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { recruiterAvatar } from '@/lib/recruiterAvatars';
 import {
   LogOut, Users2, Megaphone, Inbox, Briefcase,
   Building2, Settings, LayoutDashboard, FolderSearch,
@@ -140,10 +142,23 @@ export function Sidebar() {
       {/* ── Logo ── */}
       <div className="flex h-20 items-center justify-between px-5 border-b border-sidebar-border">
         <div className="flex items-center justify-center flex-1">
-          <img
-            src={logo}
-            alt="Emerald"
-            className="h-16 w-16 object-contain drop-shadow-[0_0_10px_hsl(46_68%_47%/0.35)]"
+          {/* Emerald E mark recolored to brand green via CSS mask (the source
+              PNG is gold; the mask uses its shape and fills with the emerald
+              token). */}
+          <div
+            role="img"
+            aria-label="Emerald Recruiting Group"
+            className="h-16 w-16 bg-primary"
+            style={{
+              WebkitMaskImage: `url(${logo})`,
+              maskImage: `url(${logo})`,
+              WebkitMaskSize: 'contain',
+              maskSize: 'contain',
+              WebkitMaskRepeat: 'no-repeat',
+              maskRepeat: 'no-repeat',
+              WebkitMaskPosition: 'center',
+              maskPosition: 'center',
+            }}
           />
         </div>
         <NotificationBell />
@@ -214,9 +229,11 @@ export function Sidebar() {
       {/* ── User section ── */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/10 border border-sidebar-primary/20 text-xs font-semibold text-sidebar-primary">
-            {initials}
-          </div>
+          <PersonAvatar
+            name={user?.user_metadata?.display_name || user?.email || 'User'}
+            src={recruiterAvatar(user?.email)}
+            size="md"
+          />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-sidebar-foreground truncate leading-none">
               {user?.user_metadata?.display_name || 'User'}

@@ -3,10 +3,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, Save, Rocket } from "lucide-react";
+import { AlertTriangle, Save, Rocket, Mail, Linkedin, MessageSquare, Phone, UserPlus } from "lucide-react";
 import { tzLabel, type SequenceSetupData } from "./SequenceSetup";
 import type { SequenceBranch } from "./FlowBuilder";
-import { getBranchStats, getBranchLabel } from "./sequenceBranches";
+import { getBranchStats, flattenBranchSteps } from "./sequenceBranches";
+
+// Channel → icon + label for the step timeline.
+function channelIcon(ch: string) {
+  if (ch === "email") return <Mail className="h-3 w-3" />;
+  if (ch === "linkedin_connect") return <UserPlus className="h-3 w-3" />;
+  if (ch?.startsWith("linkedin")) return <Linkedin className="h-3 w-3" />;
+  if (ch === "sms") return <MessageSquare className="h-3 w-3" />;
+  if (ch === "phone" || ch === "call") return <Phone className="h-3 w-3" />;
+  return <Mail className="h-3 w-3" />;
+}
+function channelLabel(ch: string) {
+  if (ch === "linkedin_connect") return "LinkedIn connect";
+  if (ch?.startsWith("linkedin")) return "LinkedIn";
+  return ch;
+}
 import { useChannelLimits } from "@/hooks/useData";
 
 interface Props {
@@ -27,6 +42,9 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
   const stats = useMemo(() => {
     return getBranchStats(branches);
   }, [branches]);
+
+  // Linear list of steps (single-lane; legacy branch_b is folded into branch_a).
+  const steps = useMemo(() => flattenBranchSteps(branches), [branches]);
 
   const warnings = useMemo(() => {
     const warns: string[] = [];
@@ -86,14 +104,43 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
             <p className="font-medium">{stats.totalActions}</p>
           </div>
           <div>
-            <span className="text-muted-foreground">{getBranchLabel("branch_a")}:</span>
-            <p className="font-medium">{stats.actionsPerBranch.branch_a} actions</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">{getBranchLabel("branch_b")}:</span>
-            <p className="font-medium">{stats.actionsPerBranch.branch_b} actions</p>
+            <span className="text-muted-foreground">Steps:</span>
+            <p className="font-medium">{steps.length}</p>
           </div>
         </div>
+
+        {/* Step timeline — when each step sends + on which channel(s) */}
+        {steps.length > 0 && (
+          <div>
+            <p className="text-sm text-muted-foreground mb-2">Step timeline</p>
+            <ol className="space-y-2.5 border-l border-border pl-4">
+              {(() => {
+                let cumHours = 0;
+                return steps.map((step, i) => {
+                  cumHours += step.actions?.[0]?.baseDelayHours ?? 0;
+                  const day = Math.max(1, Math.round(cumHours / 24) + 1);
+                  return (
+                    <li key={step.id} className="relative">
+                      <span className="absolute -left-[1.32rem] top-1.5 h-2 w-2 rounded-full bg-primary ring-2 ring-card" />
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-xs font-semibold text-foreground">Step {i + 1}</span>
+                        <span className="text-xs text-muted-foreground">· Day {day}</span>
+                        {(step.actions || []).map((a, j) => (
+                          <span
+                            key={j}
+                            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] capitalize text-foreground"
+                          >
+                            {channelIcon(a.channel)} {channelLabel(a.channel)}
+                          </span>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                });
+              })()}
+            </ol>
+          </div>
+        )}
 
         {/* Channel breakdown */}
         <div>

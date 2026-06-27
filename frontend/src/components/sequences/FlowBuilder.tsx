@@ -167,7 +167,7 @@ function BranchColumn({
       <CardContent className="space-y-4">
         {branch.steps.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-            This lane is empty. Add a step to build the branch.
+            No steps yet. Add a step to get started.
           </div>
         ) : (
           branch.steps.map((step, index) => (
@@ -360,7 +360,7 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
               <div className="h-px w-20 bg-slate-300" />
             </div>
             <div className="text-center text-sm text-muted-foreground">
-              Every sequence starts here, then continues in exactly two fixed lanes.
+              Every sequence starts here, then runs your steps in order.
             </div>
           </div>
         </CardContent>

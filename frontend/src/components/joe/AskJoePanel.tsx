@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, ArrowUp, Sparkles, Loader2, ArrowUpRight } from 'lucide-react';
+import { X, ArrowUp, Martini, Loader2, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -138,7 +138,7 @@ export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => v
       <div className="relative z-10 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-fade-in">
         {/* Input row */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
-          <Sparkles className="h-5 w-5 shrink-0 text-accent" />
+          <Martini className="h-5 w-5 shrink-0 text-accent" />
           <input
             ref={inputRef}
             value={message}
