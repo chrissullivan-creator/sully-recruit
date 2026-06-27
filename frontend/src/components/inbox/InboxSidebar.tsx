@@ -1,6 +1,7 @@
 import {
   Inbox as InboxIcon,
   Mail,
+  Mails,
   Linkedin,
   MessageSquare,
   Target,
@@ -61,10 +62,10 @@ export interface InboxSidebarProps {
   callsActive?: boolean;
   onSelectCalls?: () => void;
 
-  // Views: People we know (focused) / Other (unlinked) / Need to respond.
-  tab: 'focused' | 'other';
-  tabCounts?: { focused?: number; other?: number };
-  onSelectTab: (tab: 'focused' | 'other') => void;
+  // Views: All / People we know (focused) / Other (unlinked) / Need to respond.
+  tab: 'all' | 'focused' | 'other';
+  tabCounts?: { all?: number; focused?: number; other?: number };
+  onSelectTab: (tab: 'all' | 'focused' | 'other') => void;
   needRespondCount?: number;
   needRespondActive?: boolean;
   onSelectNeedRespond: () => void;
@@ -165,8 +166,17 @@ export function InboxSidebar({
           )}
         </nav>
 
-        {/* Views — People we know / Other / Need to respond. No section label. */}
+        {/* Views — All / People we know / Other / Need to respond. No section
+            label. "All" surfaces both linked and unlinked threads (incl. live
+            unknown senders) so nothing is hidden behind a tab. */}
         <nav className="px-2 space-y-0.5 mt-4">
+          <NavRow
+            label="All"
+            Icon={Mails}
+            count={tabCounts.all}
+            active={!callsActive && !needRespondActive && tab === 'all'}
+            onClick={() => onSelectTab('all')}
+          />
           <NavRow
             label="People we know"
             Icon={Users}
