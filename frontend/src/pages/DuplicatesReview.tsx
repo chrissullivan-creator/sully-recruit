@@ -51,6 +51,7 @@ const MATCH_TYPE_COLORS: Record<string, string> = {
   email: "bg-blue-500/10 text-blue-500 border-blue-500/20",
   phone: "bg-amber-500/10 text-amber-500 border-amber-500/20",
   linkedin: "bg-sky-500/10 text-sky-500 border-sky-500/20",
+  name: "bg-violet-500/10 text-violet-500 border-violet-500/20",
 };
 
 // ─── Hook: fetch duplicate pairs + candidate details ────────────────────────
@@ -140,11 +141,12 @@ export default function DuplicatesReview() {
   // ── Count badges ──
 
   const counts = useMemo(() => {
-    const c = { all: pairs.length, email: 0, phone: 0, linkedin: 0 };
+    const c = { all: pairs.length, email: 0, phone: 0, linkedin: 0, name: 0 };
     for (const p of pairs) {
       if (p.match_type === "email") c.email++;
       else if (p.match_type === "phone") c.phone++;
       else if (p.match_type === "linkedin") c.linkedin++;
+      else if (p.match_type === "name") c.name++;
     }
     return c;
   }, [pairs]);
@@ -287,6 +289,9 @@ export default function DuplicatesReview() {
             </TabsTrigger>
             <TabsTrigger value="linkedin">
               LinkedIn <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5">{counts.linkedin}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="name">
+              Name <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5">{counts.name}</Badge>
             </TabsTrigger>
           </TabsList>
         </Tabs>
