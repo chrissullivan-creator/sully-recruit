@@ -30,6 +30,10 @@ import { backfillGraphEmailHistory } from "./lib/inngest/functions/backfill-grap
 import { reconcileUnipileAccounts } from "./lib/inngest/functions/reconcile-unipile-accounts.js";
 import { backfillLinkedinMessages } from "./lib/inngest/functions/backfill-linkedin-messages.js";
 import { backfillLinkedinMessagesV2 } from "./lib/inngest/functions/backfill-linkedin-messages-v2.js";
+import {
+  backfillLinkedinAttachmentsDaily,
+  backfillLinkedinAttachmentsOnce,
+} from "./lib/inngest/functions/backfill-linkedin-attachments.js";
 import { drainCallQueue } from "./lib/inngest/functions/drain-call-queue.js";
 import { pipelineHealthDigest } from "./lib/inngest/functions/pipeline-health-digest.js";
 import {
@@ -115,6 +119,8 @@ export default serve({
     reconcileUnipileAccounts,
     backfillLinkedinMessages,
     backfillLinkedinMessagesV2,
+    backfillLinkedinAttachmentsDaily,
+    backfillLinkedinAttachmentsOnce,
     linkedinSyncHealth,
     drainCallQueue,
     pipelineHealthDigest,
