@@ -14,7 +14,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { toast } from 'sonner';
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, RefreshCw,
-  MapPin, Video, Users as UsersIcon, ExternalLink, Clock, CalendarPlus, Loader2,
+  MapPin, Video, ExternalLink, CalendarPlus, Loader2,
 } from 'lucide-react';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { MeetingDetailDialog, type MeetingTask } from '@/components/calendar/MeetingDetailDialog';
@@ -167,11 +167,10 @@ export default function CalendarPage() {
             </Button>
           </div>
         }
-      />
-
-      <div className="border-b border-border bg-card/30 px-8 py-3">
+        icon={<CalendarIcon />}
+      >
         <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }, { label: 'Interviews', href: '/interviews' }]} />
-      </div>
+      </PageHeader>
 
       <ScheduleMeetingDialog open={scheduleOpen} onOpenChange={setScheduleOpen} />
       <MeetingDetailDialog
@@ -181,21 +180,21 @@ export default function CalendarPage() {
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-4">
         {/* Toolbar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-2xl border border-card-border bg-card shadow-sm px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="flex items-center border border-card-border rounded-lg overflow-hidden bg-white">
+            <div className="flex items-center border border-card-border rounded-full overflow-hidden bg-muted/40 p-0.5">
               <button
                 onClick={() => setViewMode('day')}
                 className={cn(
-                  'px-3 py-1.5 text-xs font-medium transition-colors',
-                  viewMode === 'day' ? 'bg-emerald-light text-emerald-dark' : 'text-muted-foreground hover:text-foreground',
+                  'px-3.5 py-1 text-xs font-medium rounded-full transition-colors',
+                  viewMode === 'day' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                 )}
               >Day</button>
               <button
                 onClick={() => setViewMode('week')}
                 className={cn(
-                  'px-3 py-1.5 text-xs font-medium transition-colors',
-                  viewMode === 'week' ? 'bg-emerald-light text-emerald-dark' : 'text-muted-foreground hover:text-foreground',
+                  'px-3.5 py-1 text-xs font-medium rounded-full transition-colors',
+                  viewMode === 'week' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                 )}
               >Week</button>
             </div>
@@ -206,7 +205,7 @@ export default function CalendarPage() {
             <Button variant="ghost" size="sm" onClick={goPrev}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-sm font-display font-semibold text-emerald-dark min-w-[14rem] text-center">{rangeLabel}</span>
+            <span className="text-sm font-display font-semibold text-foreground min-w-[14rem] text-center">{rangeLabel}</span>
             <Button variant="ghost" size="sm" onClick={goNext}>
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -217,14 +216,14 @@ export default function CalendarPage() {
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
             {Array.from({ length: 7 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-card-border bg-white min-h-[180px] animate-pulse">
-                <div className="px-3 py-2 border-b border-card-border bg-page-bg/40 flex justify-between">
-                  <div className="h-3 w-8 bg-emerald-light/60 rounded" />
-                  <div className="h-3 w-4 bg-emerald-light/60 rounded" />
+              <div key={i} className="rounded-2xl border border-card-border bg-card shadow-sm min-h-[180px] animate-pulse">
+                <div className="px-3 py-2 border-b border-card-border bg-muted/30 flex justify-between">
+                  <div className="h-3 w-8 bg-muted rounded" />
+                  <div className="h-3 w-4 bg-muted rounded" />
                 </div>
                 <div className="p-2 space-y-1.5">
-                  <div className="h-7 bg-emerald-light/30 rounded" />
-                  <div className="h-7 bg-emerald-light/30 rounded" />
+                  <div className="h-7 bg-muted/60 rounded-lg" />
+                  <div className="h-7 bg-muted/60 rounded-lg" />
                 </div>
               </div>
             ))}
@@ -256,16 +255,16 @@ function WeekGrid({
           <div
             key={key}
             className={cn(
-              'rounded-xl border bg-white overflow-hidden flex flex-col min-h-[180px]',
-              today ? 'border-emerald shadow-sm' : 'border-card-border',
+              'rounded-2xl border bg-card shadow-sm overflow-hidden flex flex-col min-h-[180px]',
+              today ? 'border-primary ring-1 ring-primary/20' : 'border-card-border',
             )}
           >
             <div className={cn(
               'px-3 py-2 border-b text-[11px] font-display font-semibold tracking-wider uppercase flex items-center justify-between',
-              today ? 'bg-emerald text-white border-emerald' : 'bg-page-bg/40 text-emerald-dark border-card-border',
+              today ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/30 text-muted-foreground border-card-border',
             )}>
               <span>{format(day, 'EEE')}</span>
-              <span className={cn('text-base font-bold tabular-nums', today ? 'text-white' : 'text-emerald-dark')}>
+              <span className={cn('text-base font-bold tabular-nums', today ? 'text-primary-foreground' : 'text-foreground')}>
                 {format(day, 'd')}
               </span>
             </div>
@@ -290,12 +289,12 @@ function DayList({
   onSelect: (t: CalendarTask) => void;
 }) {
   return (
-    <div className="rounded-xl border border-card-border bg-white">
+    <div className="rounded-2xl border border-card-border bg-card shadow-sm overflow-hidden">
       <div className={cn(
         'px-4 py-3 border-b border-card-border flex items-center justify-between',
-        isToday(day) && 'bg-emerald-light/30',
+        isToday(day) && 'bg-primary/5',
       )}>
-        <h3 className="text-sm font-display font-semibold text-emerald-dark">
+        <h3 className="text-sm font-display font-semibold text-foreground">
           {format(day, 'EEEE, MMMM d')}
         </h3>
         <span className="text-xs text-muted-foreground">
@@ -331,13 +330,13 @@ function EventCard({
         type="button"
         onClick={() => onSelect(task)}
         className={cn(
-          'w-full text-left rounded-md border px-2 py-1.5 text-[11px] leading-tight transition-colors',
+          'w-full text-left rounded-lg border px-2 py-1.5 text-[11px] leading-tight transition-colors',
           completed
             ? 'bg-muted/40 border-card-border text-muted-foreground line-through hover:bg-muted/60'
-            : 'bg-emerald-light/30 border-emerald/30 text-emerald-dark hover:bg-emerald-light/60',
+            : 'bg-primary/5 border-primary/20 text-foreground hover:bg-primary/10 hover:border-primary/40',
         )}
       >
-        <p className="font-semibold tabular-nums">{timeLabel}</p>
+        <p className="font-semibold tabular-nums text-primary">{timeLabel}</p>
         <p className="truncate">{task.title.replace(/^📅\s*/, '')}</p>
       </button>
     );
@@ -348,14 +347,14 @@ function EventCard({
       type="button"
       onClick={() => onSelect(task)}
       className={cn(
-        'w-full text-left rounded-lg border p-3 flex items-start gap-3 transition-colors',
+        'w-full text-left rounded-xl border p-3 flex items-start gap-3 transition-colors',
         completed
           ? 'bg-muted/40 border-card-border hover:bg-muted/60'
-          : 'bg-emerald-light/15 border-emerald/30 hover:bg-emerald-light/30',
+          : 'bg-primary/5 border-primary/20 hover:bg-primary/10 hover:border-primary/40',
       )}
     >
       <div className="shrink-0 w-20 text-right">
-        <p className="text-xs font-semibold tabular-nums text-emerald-dark">{start ? format(start, 'h:mm a') : 'All day'}</p>
+        <p className="text-xs font-semibold tabular-nums text-primary">{start ? format(start, 'h:mm a') : 'All day'}</p>
         {end && <p className="text-[10px] text-muted-foreground tabular-nums">{format(end, 'h:mm a')}</p>}
       </div>
       <div className="flex-1 min-w-0">
@@ -376,14 +375,14 @@ function EventCard({
             <a
               href={task.meeting_url} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1 text-emerald hover:text-emerald-dark"
+              className="inline-flex items-center gap-1 text-primary hover:text-primary/80"
             >
               <Video className="h-3 w-3" /> Join
               <ExternalLink className="h-2.5 w-2.5" />
             </a>
           )}
           {task.external_id && (
-            <Badge variant="outline" className="text-[9px] border-emerald/30 text-emerald-dark px-1.5 py-0">
+            <Badge variant="outline" className="text-[9px] border-primary/30 text-primary px-1.5 py-0">
               <CalendarIcon className="h-2.5 w-2.5 mr-0.5" /> Outlook
             </Badge>
           )}

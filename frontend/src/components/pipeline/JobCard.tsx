@@ -18,19 +18,19 @@ export function JobCard({ job, onClick }: JobCardProps) {
     <div
       onClick={onClick}
       className={cn(
-        'group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150',
-        'hover:border-accent/50 hover:shadow-md'
+        'group cursor-pointer rounded-2xl border border-card-border bg-card p-3 transition-all duration-200',
+        'hover:border-accent/50 hover:shadow-md hover:-translate-y-0.5'
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">
+        <h4 className="text-sm font-semibold text-foreground group-hover:text-accent transition-colors line-clamp-1">
           {job.title}
         </h4>
         <span className={cn('stage-badge shrink-0', priorityColors[job.priority])}>
           {job.priority}
         </span>
       </div>
-      
+
       <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
         <Briefcase className="h-3 w-3" />
         {job.company}
@@ -48,7 +48,7 @@ export function JobCard({ job, onClick }: JobCardProps) {
       </div>
       
       {job.salary && (
-        <p className="mt-2 text-xs font-medium text-accent flex items-center gap-1">
+        <p className="mt-2 text-xs font-semibold text-accent flex items-center gap-1">
           <DollarSign className="h-3 w-3" />
           {job.salary}
         </p>

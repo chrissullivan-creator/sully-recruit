@@ -577,7 +577,7 @@ export default function LinkedInRecruiterImport() {
                   </TableBody>
                 </Table>
               </div>
-            </div>
+            </SectionCard>
           )}
         </div>
       </div>

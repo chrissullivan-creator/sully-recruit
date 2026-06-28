@@ -772,7 +772,7 @@ const Settings = () => {
                         Bulk-import people, companies, or jobs from a CSV file.
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-6 flex items-center gap-4">
+                    <SectionCard bodyClassName="p-6 flex items-center gap-4">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                         <Upload className="h-5 w-5" />
                       </div>
@@ -783,8 +783,8 @@ const Settings = () => {
                       <Button asChild variant="gold" size="sm">
                         <Link to="/import">Open Importer</Link>
                       </Button>
-                    </div>
-                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-6 flex items-center gap-4">
+                    </SectionCard>
+                    <SectionCard bodyClassName="p-6 flex items-center gap-4">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                         <Upload className="h-5 w-5" />
                       </div>
@@ -795,7 +795,7 @@ const Settings = () => {
                       <Button asChild variant="gold" size="sm">
                         <Link to="/admin/linkedin-recruiter-import">Open</Link>
                       </Button>
-                    </div>
+                    </SectionCard>
                   </div>
                 )}
 

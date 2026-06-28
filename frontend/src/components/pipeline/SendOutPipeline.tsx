@@ -184,16 +184,16 @@ export const SendOutPipeline = ({
               <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-3">
                 {pipelineStages.map((stage) => (
                   <div key={stage} className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">
+                    <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                       {statusLabels[stage]}
-                      <span className="ml-1 text-foreground">({groupedBySendOuts[stage]?.length || 0})</span>
+                      <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold text-muted-foreground tabular-nums">{groupedBySendOuts[stage]?.length || 0}</span>
                     </div>
                     <div className="space-y-2">
                       {groupedBySendOuts[stage]?.map((record) => (
                         <div
                           key={record.id}
                           className={cn(
-                            'p-2 rounded-md border text-xs cursor-move group hover:shadow-md transition-shadow',
+                            'p-2.5 rounded-xl border text-xs cursor-move group hover:shadow-md hover:-translate-y-0.5 transition-all duration-200',
                             statusColors[stage]
                           )}
                         >
@@ -238,16 +238,16 @@ export const SendOutPipeline = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {exitLanes.map((stage) => (
                     <div key={stage} className="space-y-2">
-                      <div className="text-xs font-medium text-muted-foreground">
+                      <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                         {statusLabels[stage]}
-                        <span className="ml-1 text-foreground">({groupedBySendOuts[stage]?.length || 0})</span>
+                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold text-muted-foreground tabular-nums">{groupedBySendOuts[stage]?.length || 0}</span>
                       </div>
                       <div className="space-y-2">
                         {groupedBySendOuts[stage]?.map((record) => (
                           <div
                             key={record.id}
                             className={cn(
-                              'p-2 rounded-md border text-xs flex items-center justify-between group',
+                              'p-2.5 rounded-xl border text-xs flex items-center justify-between group',
                               statusColors[stage]
                             )}
                           >
