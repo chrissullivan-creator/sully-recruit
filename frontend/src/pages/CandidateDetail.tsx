@@ -31,6 +31,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
 import { SentimentChip, ChannelIcon, EditableField, EditableTextarea } from '@/components/candidate-detail/CandidateFields';
+import { CandidateHistoryTab } from '@/components/candidate-detail/CandidateHistoryTab';
+import { CandidateSequencesSection } from '@/components/candidate-detail/CandidateSequencesSection';
 import {
   Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
@@ -128,6 +130,24 @@ const CandidateDetail = () => {
       return data as any[];
     },
   });
+  // LinkedIn channels — gates the "LinkedIn message"/"InMail" reach-out items
+  // on a resolved Classic URN (candidate_channels.provider_id for channel
+  // 'linkedin'). Read-only; the actual send happens via sequences/inbox.
+  const { data: candidateChannels = [] } = useQuery({
+    queryKey: ['candidate_channels', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_channels')
+        .select('channel, provider_id, is_connected')
+        .eq('candidate_id', id!);
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+  const linkedinChannel = (candidateChannels as any[]).find(
+    (ch) => ch.channel === 'linkedin' && ch.provider_id,
+  );
   const [selectedCall, setSelectedCall] = useState<any>(null);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
@@ -151,7 +171,7 @@ const CandidateDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('joe');
+  const [activeTab, setActiveTab] = useState('overview');
   const [sidebarTab, setSidebarTab] = useState<'all' | 'notes' | 'tasks' | 'meetings'>('all');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -851,6 +871,26 @@ const CandidateDetail = () => {
     setSavingNote(false);
   };
 
+  // Place a RingCentral RingOut from the header "Reach out" menu — same
+  // endpoint the CallButton uses (rings the recruiter first, then bridges).
+  const reachOutCall = async () => {
+    const phone = candidate?.phone || (candidate as any)?.mobile_phone;
+    if (!phone) { toast.error('No phone number on file'); return; }
+    const toastId = toast.loading('Ringing your phone — pick up to connect…');
+    try {
+      const res = await fetch('/api/call/ringout', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ to: phone, candidate_id: id || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Call failed (${res.status})`);
+      toast.success('Ringing your phone — pick up to connect…', { id: toastId });
+    } catch (e: any) {
+      toast.error(e?.message || 'Call failed', { id: toastId });
+    }
+  };
+
   const handleJoeChatSend = async () => {
     if (!joeChatInput.trim() || joeChatLoading) return;
     const userMsg = { role: 'user' as const, content: joeChatInput };
@@ -955,26 +995,29 @@ const CandidateDetail = () => {
         avatar={<PersonAvatar name={fullName} src={c.avatar_url} size="lg" />}
         title={fullName}
         badges={
-          <>
-            <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
-            {(() => {
-              const roles: string[] = c.roles ?? ['candidate'];
-              return (
-                <div className="flex items-center gap-1">
-                  {roles.includes('candidate') && (
-                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-green-500/10 text-green-600 border border-green-500/20">
-                      Candidate
-                    </span>
-                  )}
-                  {roles.includes('client') && (
-                    <span className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium bg-accent/10 text-accent border border-accent/20">
-                      Client
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
-          </>
+          (() => {
+            // Uniform tag row — status, role(s), then function tags, all the
+            // same chip style (per the redesign brief). No per-tag colors.
+            const chip = 'inline-flex items-center rounded-full border border-card-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium text-foreground shrink-0';
+            const roles: string[] = c.roles ?? ['candidate'];
+            const statusLabel = candidate.status === 'back_of_resume'
+              ? 'Back of Resume'
+              : candidate.status === 'reached_out'
+                ? 'Reached Out'
+                : (candidate.status?.charAt(0).toUpperCase() ?? '') + (candidate.status?.slice(1) ?? '');
+            const functionTags: string[] = [
+              ...((c.departments as string[]) ?? []),
+              ...((c.products as string[]) ?? []),
+            ].filter(Boolean).slice(0, 6);
+            return (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {statusLabel && <span className={chip}>{statusLabel}</span>}
+                {roles.includes('candidate') && <span className={chip}>Candidate</span>}
+                {roles.includes('client') && <span className={chip}>Client</span>}
+                {functionTags.map((t, i) => <span key={i} className={chip}>{t}</span>)}
+              </div>
+            );
+          })()
         }
         subtitle={
           <span className="truncate">
@@ -985,39 +1028,60 @@ const CandidateDetail = () => {
           </span>
         }
         contactActions={
-          <>
-            {(() => {
-              // Prefer personal_email for candidate outreach (sequences send to
-              // personal_email; work_email is shown for context). Fall back to
-              // the legacy email column during the migration off it.
-              const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
-              return mailto ? (
-                <a href={`mailto:${mailto}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={mailto}>
-                  <Mail className="h-4 w-4" />
-                </a>
-              ) : null;
-            })()}
-            {candidate.phone && (
-              <CallButton
-                phone={candidate.phone}
-                candidateId={candidate.id}
-                iconOnly
-                title={`Call ${candidate.phone} (RingCentral RingOut)`}
-              />
-            )}
-            {candidate.linkedin_url && (
-              <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title="LinkedIn Profile">
-                <Linkedin className="h-4 w-4" />
-              </a>
-            )}
-          </>
+          (() => {
+            // Consolidated "Reach out" — Email / SMS / LinkedIn message / InMail
+            // / Log call. SMS gates on a mobile on file; LinkedIn items gate on
+            // a resolved Classic URN (candidate_channels). Reuses the existing
+            // mailto / sms / RingOut paths — no new send pipeline.
+            const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
+            const mobile = (candidate as any).mobile_phone || candidate.phone;
+            const linkedinUrl = candidate.linkedin_url as string | undefined;
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="gold" size="sm">
+                    <Send className="h-3.5 w-3.5 mr-1" /> Reach out
+                    <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem disabled={!mailto} onClick={() => { if (mailto) window.location.href = `mailto:${mailto}`; }}>
+                    <Mail className="h-3.5 w-3.5 mr-2" /> Email
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!mobile} onClick={() => { if (mobile) window.location.href = `sms:${mobile}`; }}>
+                    <MessageSquare className="h-3.5 w-3.5 mr-2" /> SMS
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!linkedinChannel || !linkedinUrl} onClick={() => { if (linkedinUrl) window.open(linkedinUrl, '_blank'); }}>
+                    <Linkedin className="h-3.5 w-3.5 mr-2" /> LinkedIn message
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!linkedinChannel || !linkedinUrl} onClick={() => { if (linkedinUrl) window.open(linkedinUrl, '_blank'); }}>
+                    <Send className="h-3.5 w-3.5 mr-2" /> LinkedIn InMail
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem disabled={!mobile} onClick={reachOutCall}>
+                    <Phone className="h-3.5 w-3.5 mr-2" /> Log call
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            );
+          })()
         }
         actions={
           <>
-          {/* Primary actions inline. Everything else lives behind the
-              "More" dropdown to keep the header from overflowing on
-              narrower screens. */}
-          <Button variant="gold" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
+          {/* Reach out (gold) is the single primary, in contactActions. Here:
+              Edit toggles the inline field unlock, Send Out + Enrich are
+              secondary, and everything else lives behind the "More" kebab. */}
+          {canEdit && (
+            <Button
+              variant={editingInfo ? 'gold-outline' : 'outline'}
+              size="sm"
+              onClick={() => setEditingInfo(!editingInfo)}
+              title={editingInfo ? 'Finish editing' : 'Edit fields inline'}
+            >
+              <Edit className="h-3.5 w-3.5 mr-1" />{editingInfo ? 'Done' : 'Edit'}
+            </Button>
+          )}
+          <Button variant="gold-outline" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
             <FileText className="h-3.5 w-3.5 mr-1" />Send Out
           </Button>
           {id && (
@@ -1058,7 +1122,7 @@ const CandidateDetail = () => {
                 )}
                 Fetch History
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setActiveTab('joe')}>
+              <DropdownMenuItem onClick={() => setActiveTab('overview')}>
                 <Martini className="h-3.5 w-3.5 mr-2" /> Ask Joe
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setMergeOpen(true)}>
@@ -1340,12 +1404,13 @@ const CandidateDetail = () => {
             <div className="px-8 border-b border-card-border bg-card/40 overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <TabsList className="h-auto bg-transparent p-0 inline-flex w-max gap-1 rounded-none">
                 {[
-                  { value: 'joe', label: 'Joe Says', icon: Martini },
-                  { value: 'background', label: 'Background', icon: Briefcase },
-                  { value: 'activity', label: 'Activity', icon: History },
+                  { value: 'overview', label: 'Overview', icon: User },
+                  { value: 'pipeline', label: 'Pipeline', icon: Send },
                   { value: 'documents', label: 'Documents', icon: FolderOpen },
-                  { value: 'send-outs', label: 'Pipeline', icon: Send },
+                  { value: 'history', label: 'History', icon: History },
+                  { value: 'communication', label: 'Communication', icon: MessageSquare },
                   { value: 'notes', label: 'Notes', icon: FileText },
+                  { value: 'todo', label: 'To-do', icon: Clock },
                 ].map((t) => {
                   const Icon = t.icon;
                   return (
@@ -1362,7 +1427,7 @@ const CandidateDetail = () => {
             </div>
 
             <ScrollArea className="flex-1">
-              <TabsContent value="joe" className="px-8 py-5 mt-0 space-y-6">
+              <TabsContent value="overview" className="px-8 py-5 mt-0 space-y-6">
                 <AISummaryCard
                   title="Joe Says"
                   actions={
@@ -1443,9 +1508,49 @@ const CandidateDetail = () => {
                     </div>
                   </div>
                 </SectionCard>
-              </TabsContent>
 
-              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
+                {/* Job matches (Overview) — top match for the assigned job */}
+                {candidateJobMatch && (
+                  <SectionCard title="Job match" icon={<Briefcase className="h-4 w-4" />}>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl font-bold tabular-nums text-foreground">
+                          {(candidateJobMatch as any).overall_score}%
+                        </span>
+                        {(candidateJobMatch as any).tier && (
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold capitalize text-muted-foreground">
+                            {(candidateJobMatch as any).tier}
+                          </span>
+                        )}
+                      </div>
+                      {(candidateJobMatch as any).reasoning && (
+                        <p className="text-sm text-foreground/90">{(candidateJobMatch as any).reasoning}</p>
+                      )}
+                      {Array.isArray((candidateJobMatch as any).strengths) && (candidateJobMatch as any).strengths.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Strengths</p>
+                          <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
+                            {(candidateJobMatch as any).strengths.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {Array.isArray((candidateJobMatch as any).concerns) && (candidateJobMatch as any).concerns.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Concerns</p>
+                          <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
+                            {(candidateJobMatch as any).concerns.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </SectionCard>
+                )}
+
+                {/* ── Background (folded into Overview) ─────────────────────
+                    Candidate summary, comp context, work history, education,
+                    picklists + custom fields. Kept here so the redesign's
+                    7-tab IA loses no editing surface. */}
+                <div className="border-t border-card-border pt-2" />
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
@@ -1625,7 +1730,7 @@ const CandidateDetail = () => {
                 )}
               </TabsContent>
 
-              <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-6">
+              <TabsContent value="communication" className="px-8 py-5 mt-0 space-y-6">
                 {/* Quick-action bar (was its own Communications tab — merged in) */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1801,6 +1906,11 @@ const CandidateDetail = () => {
                     </div>
                   )}
                 </SectionCard>
+
+                {/* Sequences — enrollment status + add/create entry points */}
+                {id && (
+                  <CandidateSequencesSection candidateId={id} onAddToSequence={() => setEnrollOpen(true)} />
+                )}
               </TabsContent>
 
               {/* ── Documents Tab (Resumes / Formatted / Other) ────────── */}
@@ -2091,7 +2201,7 @@ const CandidateDetail = () => {
               </TabsContent>
 
               {/* ── Pipeline Tab (Source pre-funnel + Send Outs) ──────────── */}
-              <TabsContent value="send-outs" className="px-8 py-5 mt-0 space-y-6">
+              <TabsContent value="pipeline" className="px-8 py-5 mt-0 space-y-6">
                 {/* Source funnel — was its own tab, merged in */}
                 {id && (
                   <div>
@@ -2331,6 +2441,70 @@ const CandidateDetail = () => {
                 <div className="border-t border-border pt-5">
                   <EntityNotesTab entityType="candidate" entityId={id!} placeholder="Add a note about this candidate — call summary, screening notes, anything the team should see…" />
                 </div>
+              </TabsContent>
+
+              {/* ── History Tab (profile / field change log) ─────────────── */}
+              <TabsContent value="history" className="px-8 py-5 mt-0 space-y-6">
+                {id && <CandidateHistoryTab candidateId={id} />}
+              </TabsContent>
+
+              {/* ── To-do Tab (tasks + meetings tagged to this person) ───── */}
+              <TabsContent value="todo" className="px-8 py-5 mt-0 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-accent" />
+                    <h2 className="text-base font-semibold">To-do</h2>
+                    <span className="text-xs text-muted-foreground">({regularTasks.length + meetings.length})</span>
+                  </div>
+                  <Button variant="gold" size="sm" onClick={() => setCreateTaskOpen(true)}>
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add task
+                  </Button>
+                </div>
+
+                {regularTasks.length === 0 && meetings.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                    <Clock className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium mb-1">Nothing on the to-do list</p>
+                    <p className="text-xs text-muted-foreground mb-4">Tasks and meetings tagged to this person show up here.</p>
+                    <Button variant="gold" size="sm" onClick={() => setCreateTaskOpen(true)}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add task
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {regularTasks.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tasks</p>
+                        {regularTasks.map((t: Task) => <TaskCard key={t.id} task={t} />)}
+                      </div>
+                    )}
+                    {meetings.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Meetings</p>
+                        {meetings.map((m: Task) => (
+                          <div
+                            key={m.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setEditingMeeting(m)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingMeeting(m); } }}
+                            className="cursor-pointer rounded-xl border border-card-border bg-card p-3 transition-colors hover:bg-muted/40"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
+                              {m.start_time && (
+                                <span className="text-xs text-muted-foreground shrink-0">
+                                  {format(new Date(m.start_time), 'MMM d, h:mm a')}
+                                </span>
+                              )}
+                            </div>
+                            {m.location && <p className="text-xs text-muted-foreground truncate">{m.location}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </TabsContent>
 
             </ScrollArea>
