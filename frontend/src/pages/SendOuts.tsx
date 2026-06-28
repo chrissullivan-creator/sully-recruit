@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { Plus, Download, ChevronDown, ChevronUp, LayoutGrid, BarChart3, List } from 'lucide-react';
+import { Plus, Download, LayoutGrid, BarChart3, List } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -17,9 +17,11 @@ import { useSendOuts, type SendOutRow, fetchLatestStageMoveNote } from '@/lib/qu
 import { CANONICAL_PIPELINE, stageToCanonical, nextStage, canonicalConfig, type CanonicalStage } from '@/lib/pipeline';
 import { moveStage } from '@/lib/mutations/move-stage';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
-import { KpiTiles } from '@/components/send-outs/KpiTiles';
 import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBar';
-import { StageTable } from '@/components/send-outs/StageTable';
+import { PipelineKpiStrip } from '@/components/send-outs/PipelineKpiStrip';
+import { PipelineBoard } from '@/components/send-outs/PipelineBoard';
+import { PipelineSidebars } from '@/components/send-outs/PipelineSidebars';
+import { computePipelineStats } from '@/lib/send-out-insights';
 import { SendOutsAnalytics } from '@/components/send-outs/SendOutsAnalytics';
 import { AllSendOutsTable } from '@/components/send-outs/AllSendOutsTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
@@ -78,7 +80,6 @@ export default function SendOuts() {
   };
 
   const [filters, setFilters] = useState<SendOutsFilters>(() => readFiltersFromUrl(searchParams));
-  const [openStages, setOpenStages] = useState<Set<CanonicalStage>>(new Set(CANONICAL_PIPELINE.slice(0, 5).map((s) => s.key)));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [drawerRow, setDrawerRow] = useState<SendOutRow | null>(null);
   const [addModal, setAddModal] = useState<{ open: boolean; stage: CanonicalStage; jobId: string | null }>({
@@ -102,12 +103,16 @@ export default function SendOuts() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  // Honour ?stage= param from dashboard cards: open + scroll that stage.
+  // Scroll a column into view (KPI tiles, needs-attention rows, ?stage deep-link).
+  const scrollToStage = (stage: CanonicalStage) =>
+    document.getElementById(`sendout-col-${stage}`)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+
+  // Honour ?stage= param from dashboard cards: scroll that stage into view.
   useEffect(() => {
     const stageParam = searchParams.get('stage');
     if (!stageParam) return;
     const canonical = stageToCanonical(stageParam);
-    if (canonical) setOpenStages((prev) => new Set([...prev, canonical]));
+    if (canonical) setTimeout(() => scrollToStage(canonical), 120);
   }, [searchParams]);
 
   // Persist filters to the URL (preserve any non-filter params like ?stage=).
@@ -160,20 +165,7 @@ export default function SendOuts() {
     }, 0);
   }, [rowsByStage]);
 
-  const toggleStageOpen = (key: CanonicalStage) =>
-    setOpenStages((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-
-  const expandAll   = () => setOpenStages(new Set(CANONICAL_PIPELINE.map((s) => s.key)));
-  const collapseAll = () => setOpenStages(new Set());
-
-  const handleTileClick = (target: 'all' | 'submitted' | 'interviewing' | 'offer') => {
-    if (target === 'all') return expandAll();
-    const targets: CanonicalStage[] =
-      target === 'submitted'    ? ['submitted'] :
-      target === 'interviewing' ? ['interview'] :
-      target === 'offer'        ? ['offer'] : [];
-    setOpenStages(new Set(targets));
-  };
+  const stats = useMemo(() => computePipelineStats(filteredRows), [filteredRows]);
 
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -276,8 +268,6 @@ export default function SendOuts() {
     const row = filteredRows.find((r) => r.id === e.active.id);
     if (!row) return;
     if (stageToCanonical(row.stage) === target) return;
-    // Auto-expand the destination so the user sees the drop.
-    setOpenStages((prev) => new Set([...prev, target!]));
     await commitMove(row, target, 'drag');
   };
 
@@ -295,8 +285,6 @@ export default function SendOuts() {
     URL.revokeObjectURL(url);
   };
 
-  const allOpen = openStages.size === CANONICAL_PIPELINE.length;
-
   return (
     <MainLayout>
       <PageHeader
@@ -304,12 +292,6 @@ export default function SendOuts() {
         description="Every active send-out across the team — drag to advance, click to open."
         actions={
           <div className="flex items-center gap-2">
-            {tab === 'pipeline' && (
-              <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
-                {allOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                {allOpen ? 'Collapse all' : 'Expand all'}
-              </Button>
-            )}
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1">
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
@@ -348,7 +330,7 @@ export default function SendOuts() {
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-6">
         {tab === 'pipeline' && (
-          <KpiTiles rows={filteredRows} onTileClick={handleTileClick} offerFee={offerFee} />
+          <PipelineKpiStrip stats={stats} onStageClick={scrollToStage} />
         )}
 
         <FilterBar
@@ -373,24 +355,16 @@ export default function SendOuts() {
             onDragEnd={handleDragEnd}
             onDragCancel={() => { setActiveDrag(null); setOverStage(null); }}
           >
-            <div className="space-y-3">
-              {CANONICAL_PIPELINE.map((cfg) => (
-                <StageTable
-                  key={cfg.key}
-                  config={cfg}
-                  rows={rowsByStage.get(cfg.key) ?? []}
-                  isOpen={openStages.has(cfg.key) || overStage === cfg.key}
-                  isOver={overStage === cfg.key}
-                  onToggle={() => toggleStageOpen(cfg.key)}
-                  selectedIds={selectedIds}
-                  onToggleSelect={toggleSelect}
-                  onAdvance={handleAdvance}
-                  onOpen={handleOpenRow}
-                  onAdd={() => setAddModal({ open: true, stage: cfg.key, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
-                  onDelete={(row) => setDeleteRow(row)}
-                />
-              ))}
-            </div>
+            <PipelineBoard
+              rowsByStage={rowsByStage}
+              overStage={overStage}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
+              onOpen={handleOpenRow}
+              onAdvance={handleAdvance}
+              onDelete={(row) => setDeleteRow(row)}
+              onAdd={(stage) => setAddModal({ open: true, stage, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
+            />
 
             <DragOverlay>
               {activeDrag && (
@@ -407,6 +381,10 @@ export default function SendOuts() {
             <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
             <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>
           </div>
+        )}
+
+        {!isLoading && tab === 'pipeline' && filteredRows.length > 0 && (
+          <PipelineSidebars stats={stats} rows={filteredRows} onStageClick={scrollToStage} />
         )}
       </div>
 
