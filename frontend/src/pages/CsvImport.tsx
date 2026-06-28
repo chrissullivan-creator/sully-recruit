@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -12,7 +13,7 @@ import { invalidatePersonScope, invalidateJobScope } from '@/lib/invalidate';
 import { authHeaders } from '@/lib/api-auth';
 import { toast } from 'sonner';
 import {
-  Upload, FileText, CheckCircle2, XCircle, Loader2, ArrowRight,
+  Upload, CloudUpload, FileText, FileSpreadsheet, CheckCircle2, XCircle, Loader2, ArrowRight,
   Users2, Briefcase, Wand2, Building2, RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -267,6 +268,8 @@ export default function CsvImport() {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="Data"
+        icon={<FileSpreadsheet />}
         title="CSV Import"
         description="Bulk-import candidates, clients, or jobs from a spreadsheet. Columns auto-map; correct any mismatches, preview, then import — with an optional enrichment pass after."
         actions={
@@ -277,11 +280,15 @@ export default function CsvImport() {
       />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-5 max-w-5xl">
+        {/* ── Stepper ───────────────────────────────────────────── */}
+        <Stepper step={step} hasFile={headers.length > 0} />
+
         {/* ── Step 1: entity + file ─────────────────────────────── */}
-        <div className="rounded-lg border border-card-border bg-white p-4 space-y-3">
-          <p className="text-xs font-display font-semibold uppercase tracking-wider text-muted-foreground">
-            1 · What are you importing?
-          </p>
+        <SectionCard
+          title="What are you importing?"
+          icon={<FileSpreadsheet className="h-4 w-4" />}
+          bodyClassName="p-5 space-y-4"
+        >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {(Object.keys(ENTITY_META) as Entity[]).map((e) => {
               const meta = ENTITY_META[e];
@@ -306,15 +313,15 @@ export default function CsvImport() {
                     }
                   }}
                   className={cn(
-                    'text-left rounded-lg border-2 p-3 transition-colors disabled:opacity-50',
+                    'text-left rounded-2xl border-2 p-4 transition-colors disabled:opacity-50',
                     active
-                      ? 'border-emerald bg-emerald-light/30'
-                      : 'border-card-border hover:border-emerald/50 bg-white',
+                      ? 'border-primary bg-primary/5'
+                      : 'border-card-border hover:border-primary/50 bg-card',
                   )}
                 >
                   <div className="flex items-center gap-2 mb-1">
-                    <Icon className={cn('h-4 w-4', active ? 'text-emerald-dark' : 'text-muted-foreground')} />
-                    <span className={cn('text-sm font-display font-semibold', active ? 'text-emerald-dark' : 'text-foreground')}>
+                    <Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-muted-foreground')} />
+                    <span className={cn('text-sm font-display font-semibold', active ? 'text-primary' : 'text-foreground')}>
                       {meta.label}
                     </span>
                   </div>
@@ -330,10 +337,10 @@ export default function CsvImport() {
             onDragLeave={() => setDragOver(false)}
             onClick={() => fileInputRef.current?.click()}
             className={cn(
-              'rounded-xl border-2 border-dashed bg-white py-8 px-6 text-center cursor-pointer transition-colors',
+              'rounded-2xl border-2 border-dashed bg-card py-10 px-6 text-center cursor-pointer transition-colors',
               dragOver
-                ? 'border-emerald bg-emerald-light/30 text-emerald-dark'
-                : 'border-card-border hover:border-emerald/50',
+                ? 'border-primary bg-primary/5 text-primary'
+                : 'border-card-border hover:border-primary/50',
             )}
           >
             <input
@@ -343,32 +350,37 @@ export default function CsvImport() {
               onChange={onPick}
               className="hidden"
             />
-            <Upload className="h-7 w-7 mx-auto text-emerald mb-2" />
-            <p className="text-sm font-display font-semibold text-emerald-dark">
+            <span className="flex h-12 w-12 mx-auto mb-3 items-center justify-center rounded-2xl bg-primary/10">
+              {fileName
+                ? <FileSpreadsheet className="h-6 w-6 text-primary" />
+                : <CloudUpload className="h-6 w-6 text-primary" />}
+            </span>
+            <p className="text-sm font-display font-semibold text-foreground">
               {fileName ? `Selected: ${fileName}` : 'Drop a .csv here, or click to choose'}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               CSV · up to 15 MB · {MAX_ROWS} rows per import · quoted fields & commas supported
             </p>
           </div>
-        </div>
+        </SectionCard>
 
         {/* ── Step 2: column mapping + preview ───────────────────── */}
         {headers.length > 0 && step !== 'importing' && (
-          <div className="rounded-lg border border-card-border bg-white p-4 space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-xs font-display font-semibold uppercase tracking-wider text-muted-foreground">
-                2 · Map columns
-                <span className="ml-2 normal-case font-normal text-muted-foreground">
-                  <EntityIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" />
+          <SectionCard
+            title="Map columns"
+            icon={<EntityIcon className="h-4 w-4" />}
+            actions={
+              <>
+                <span className="text-xs text-muted-foreground hidden sm:inline">
                   {rows.length} row{rows.length === 1 ? '' : 's'} detected
                 </span>
-              </p>
-              <Button variant="ghost" size="sm" onClick={resetFile} className="gap-1.5">
-                <RotateCcw className="h-3.5 w-3.5" /> Start over
-              </Button>
-            </div>
-
+                <Button variant="ghost" size="sm" onClick={resetFile} className="gap-1.5">
+                  <RotateCcw className="h-3.5 w-3.5" /> Start over
+                </Button>
+              </>
+            }
+            bodyClassName="p-5 space-y-4"
+          >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
               {fieldDefs.map((f) => (
                 <div key={f.key} className="flex items-center justify-between gap-3">
@@ -408,10 +420,10 @@ export default function CsvImport() {
 
             {/* Preview */}
             {mappedFields.length > 0 && (
-              <div className="rounded-lg border border-card-border overflow-x-auto">
+              <div className="rounded-2xl border border-card-border overflow-x-auto">
                 <table className="w-full">
-                  <thead className="border-b border-card-border bg-page-bg/40">
-                    <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="table-header-green">
+                    <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider">
                       {mappedFields.map((f) => (
                         <th key={f.key} className="px-3 py-2 whitespace-nowrap">{f.label}</th>
                       ))}
@@ -419,7 +431,7 @@ export default function CsvImport() {
                   </thead>
                   <tbody className="divide-y divide-card-border">
                     {previewRows.map((row, i) => (
-                      <tr key={i} className="text-xs">
+                      <tr key={i} className="text-xs text-foreground">
                         {mappedFields.map((f) => (
                           <td key={f.key} className="px-3 py-2 max-w-[200px] truncate" title={(row as any)[f.key]}>
                             {(row as any)[f.key] || <span className="text-muted-foreground/50">—</span>}
@@ -449,18 +461,18 @@ export default function CsvImport() {
                 Import {rows.length} {ENTITY_META[entity].label.toLowerCase()}
               </Button>
             </div>
-          </div>
+          </SectionCard>
         )}
 
         {/* ── Step: importing progress ──────────────────────────── */}
         {step === 'importing' && (
-          <div className="rounded-lg border border-card-border bg-white p-4 space-y-3">
+          <SectionCard bodyClassName="p-5 space-y-3">
             <div className="flex items-center gap-2 text-sm text-amber-700">
               <Loader2 className="h-4 w-4 animate-spin" />
               Importing {rows.length} {ENTITY_META[entity].label.toLowerCase()}…
             </div>
             <Progress value={progressPct} />
-          </div>
+          </SectionCard>
         )}
 
         {/* ── Step 3: result summary ────────────────────────────── */}
@@ -537,14 +549,13 @@ function ResultSummary({
   };
 
   return (
-    <div className="rounded-lg border border-card-border bg-white p-4 space-y-4">
-      <div className="flex items-center gap-2">
-        <CheckCircle2 className="h-5 w-5 text-emerald" />
-        <p className="text-sm font-display font-semibold text-emerald-dark">Import complete</p>
-      </div>
-
+    <SectionCard
+      title="Import complete"
+      icon={<CheckCircle2 className="h-4 w-4 text-primary" />}
+      bodyClassName="p-5 space-y-4"
+    >
       <div className="flex items-center gap-4 text-sm flex-wrap">
-        <span className="text-emerald">Created: <strong className="tabular-nums">{created}</strong></span>
+        <span className="text-primary">Created: <strong className="tabular-nums">{created}</strong></span>
         <span className="text-amber-700">{secondLabel}: <strong className="tabular-nums">{second}</strong></span>
         {failed.length > 0 && (
           <span className="text-red-600">Failed: <strong className="tabular-nums">{failed.length}</strong></span>
@@ -553,9 +564,9 @@ function ResultSummary({
 
       {/* People-only: run enrichment on everything we touched. */}
       {isPeople && peopleIds.length > 0 && (
-        <div className="rounded-lg border border-card-border bg-page-bg/40 p-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="rounded-2xl border border-card-border bg-page-bg/40 p-4 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-xs text-muted-foreground">
-            <p className="font-medium text-emerald-dark mb-0.5">Run enrichment (Apollo → FullEnrich)</p>
+            <p className="font-medium text-primary mb-0.5">Run enrichment (Apollo → FullEnrich)</p>
             Find work emails for the {peopleIds.length} {entityLabel.toLowerCase()} you just imported.
           </div>
           <Button
@@ -576,7 +587,7 @@ function ResultSummary({
 
       {/* Failures list (+ download). */}
       {failed.length > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50/50 overflow-hidden">
+        <div className="rounded-2xl border border-red-200 bg-red-50/50 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-red-200 bg-red-50">
             <span className="text-xs font-medium text-red-700 flex items-center gap-1.5">
               <XCircle className="h-3.5 w-3.5" /> {failed.length} row{failed.length === 1 ? '' : 's'} failed
@@ -608,6 +619,61 @@ function ResultSummary({
           View {isPeople ? 'people' : 'jobs'} <ArrowRight className="h-3.5 w-3.5" />
         </Button>
       </div>
+    </SectionCard>
+  );
+}
+
+/** Modern numbered stepper for the import flow. */
+function Stepper({ step, hasFile }: { step: Step; hasFile: boolean }) {
+  const steps: { key: Step; label: string }[] = [
+    { key: 'choose', label: 'Choose & upload' },
+    { key: 'map', label: 'Map & preview' },
+    { key: 'done', label: 'Import' },
+  ];
+  // Determine the active index from the current step.
+  const activeIndex =
+    step === 'done' ? 2
+      : step === 'importing' || step === 'map' || hasFile ? 1
+        : 0;
+
+  return (
+    <div className="flex items-center gap-2 sm:gap-3">
+      {steps.map((s, i) => {
+        const complete = i < activeIndex;
+        const active = i === activeIndex;
+        return (
+          <div key={s.key} className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-display font-semibold transition-colors',
+                  complete && 'bg-primary text-primary-foreground',
+                  active && 'bg-primary/10 text-primary ring-2 ring-primary/30',
+                  !complete && !active && 'bg-muted text-muted-foreground',
+                )}
+              >
+                {complete ? <CheckCircle2 className="h-4 w-4" /> : i + 1}
+              </span>
+              <span
+                className={cn(
+                  'text-xs font-display font-semibold hidden sm:inline',
+                  active || complete ? 'text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {s.label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <span
+                className={cn(
+                  'h-px w-6 sm:w-10 rounded-full',
+                  i < activeIndex ? 'bg-primary/40' : 'bg-card-border',
+                )}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

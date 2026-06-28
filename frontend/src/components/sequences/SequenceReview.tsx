@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, Save, Rocket, Mail, Linkedin, MessageSquare, Phone, UserPlus } from "lucide-react";
+import { AlertTriangle, Save, Rocket, Mail, Linkedin, MessageSquare, Phone, UserPlus, ClipboardCheck } from "lucide-react";
 import { tzLabel, type SequenceSetupData } from "./SequenceSetup";
 import type { SequenceBranch } from "./FlowBuilder";
 import { getBranchStats, flattenBranchSteps } from "./sequenceBranches";
@@ -80,39 +80,28 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
   }, [stats, enrollmentCount, channelLimits]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Review & Activate</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SectionCard title="Review & Activate" icon={<ClipboardCheck className="h-4 w-4" />}>
+      <div className="space-y-4">
         {/* Summary */}
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-muted-foreground">Name:</span>
-            <p className="font-medium">{setup.name || "Untitled"}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Audience:</span>
-            <p className="font-medium capitalize">{setup.audienceType}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Send Window:</span>
-            <p className="font-medium">{setup.sendWindowStart} - {setup.sendWindowEnd} {tzLabel(setup.timezone || "America/New_York")}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Total Actions:</span>
-            <p className="font-medium">{stats.totalActions}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Steps:</span>
-            <p className="font-medium">{steps.length}</p>
-          </div>
+        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-card-border bg-page-bg/50 p-4">
+          {[
+            { label: "Name", value: setup.name || "Untitled" },
+            { label: "Audience", value: setup.audienceType, capitalize: true },
+            { label: "Send Window", value: `${setup.sendWindowStart} – ${setup.sendWindowEnd} ${tzLabel(setup.timezone || "America/New_York")}` },
+            { label: "Total Actions", value: stats.totalActions },
+            { label: "Steps", value: steps.length },
+          ].map((row) => (
+            <div key={row.label}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{row.label}</p>
+              <p className={`font-medium text-foreground ${row.capitalize ? "capitalize" : ""}`}>{row.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Step timeline — when each step sends + on which channel(s) */}
         {steps.length > 0 && (
           <div>
-            <p className="text-sm text-muted-foreground mb-2">Step timeline</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Step timeline</p>
             <ol className="space-y-2.5 border-l border-border pl-4">
               {(() => {
                 let cumHours = 0;
@@ -144,7 +133,7 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
 
         {/* Channel breakdown */}
         <div>
-          <p className="text-sm text-muted-foreground mb-2">Estimated daily sends per channel:</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Estimated daily sends per channel</p>
           <div className="flex flex-wrap gap-2">
             {Object.entries(stats.channelCounts).map(([channel, count]) => (
               <Badge key={channel} variant="secondary">
@@ -187,7 +176,7 @@ export function SequenceReview({ setup, branches, enrollmentCount = 0, onSaveDra
             Activate
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </SectionCard>
   );
 }

@@ -226,9 +226,11 @@ const Contacts = () => {
 
   return (
     <MainLayout>
-      <PageHeader 
-        title="Contacts" 
+      <PageHeader
+        title="Contacts"
         description="Your network of hiring managers, HR leaders, and decision makers."
+        eyebrow="Network"
+        icon={<Users />}
         actions={
           <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
@@ -283,30 +285,50 @@ const Contacts = () => {
         }
       />
       
-      <div className="p-8">
-        <div className="flex flex-wrap items-center gap-4 mb-6">
-          <div className="relative flex-1 max-w-md">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <div className="relative flex-1 min-w-[16rem] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search contacts…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-10 pl-10 pr-4 rounded-xl border border-card-border bg-card text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Status:</span>
-            <Button variant={filter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('all')}>All</Button>
-            <Button variant={filter === 'active' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('active')}>Active</Button>
-            <Button variant={filter === 'inactive' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('inactive')}>Inactive</Button>
+
+          <div className="inline-flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
+            {([['all', 'All'], ['active', 'Active'], ['inactive', 'Inactive']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setFilter(value)}
+                className={cn(
+                  'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                  filter === value
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+                )}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Role:</span>
-            <Button variant={roleFilter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('all')}>All</Button>
-            <Button variant={roleFilter === 'client_only' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('client_only')}>Client only</Button>
-            <Button variant={roleFilter === 'also_candidate' ? 'secondary' : 'ghost'} size="sm" onClick={() => setRoleFilter('also_candidate')}>Also a Candidate</Button>
+          <div className="inline-flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
+            {([['all', 'All'], ['client_only', 'Client only'], ['also_candidate', 'Also a Candidate']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setRoleFilter(value)}
+                className={cn(
+                  'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                  roleFilter === value
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+                )}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {paginatedContacts.length > 0 && !paginatedContacts.every((c) => selectedIds.includes(c.id)) && (
@@ -345,7 +367,7 @@ const Contacts = () => {
             </Button>
           </div>
         ) : (
-          <HorizontalTableScroll stickyHeader minWidth={1300}>
+          <HorizontalTableScroll stickyHeader minWidth={1300} className="rounded-2xl border-card-border shadow-sm">
             <table className="w-full">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
@@ -355,34 +377,34 @@ const Contacts = () => {
                       onCheckedChange={toggleAll}
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
             <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
             <span className="flex items-center gap-1">Title <SortIcon field="title" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
             <span className="flex items-center gap-1">Company <SortIcon field="company" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact Info</th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastReached')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Contact Info</th>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastReached')}>
             <span className="flex items-center gap-1">Last Reached Out <SortIcon field="lastReached" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
             <span className="flex items-center gap-1">Last Response <SortIcon field="lastResponded" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
             <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
           </th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sentiment</th>
-          <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Channel</th>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Sentiment</th>
+          <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
             <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
           </th>
           <th className="w-10 px-4 py-3"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-card-border">
                 {paginatedContacts.map((contact) => (
                   <tr key={contact.id} className="group hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -482,14 +504,14 @@ const Contacts = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn(
-                        'stage-badge border',
+                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide capitalize',
                         contact.status === 'engaged' || contact.status === 'active'
                           ? 'bg-success/10 text-success border-success/20'
                           : contact.status === 'reached_out'
                           ? 'bg-warning/15 text-warning border-warning/20'
                           : contact.status === 'new'
-                          ? 'bg-blue-500/15 text-blue-400 border-blue-500/20'
-                          : 'bg-muted text-muted-foreground border-border'
+                          ? 'bg-primary/10 text-primary border-primary/20'
+                          : 'bg-muted text-muted-foreground border-card-border'
                       )}>
                         {contact.status}
                       </span>

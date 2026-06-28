@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,7 +17,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Wand2 } from "lucide-react";
+import { RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Wand2, GitMerge } from "lucide-react";
 import { Link } from "react-router-dom";
 
 type Severity = "critical" | "high" | "medium" | "low";
@@ -160,8 +161,10 @@ export default function CollisionReview() {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="Data Hygiene"
         title="Candidate record collisions"
         description="Finds candidate rows where two or more real people may have been merged. Different problem than the Duplicates page (which finds two rows that should be one)."
+        icon={<GitMerge />}
         actions={
           <div className="flex items-center gap-2">
             {result && autoFixableVisible.length > 0 && (
@@ -188,12 +191,15 @@ export default function CollisionReview() {
         }
       />
 
+      <div className="space-y-6 p-8">
       {!result && (
-        <div className="rounded-md border bg-muted/30 p-8 text-center text-muted-foreground">
-          <AlertTriangle className="mx-auto mb-3 h-8 w-8 opacity-60" />
-          <p>Click <strong>Scan now</strong> to find suspected collision records.</p>
-          <p className="mt-2 text-xs">Scan reads every parsed resume and compares against each candidate's profile. Usually takes a few seconds.</p>
-        </div>
+        <SectionCard>
+          <div className="py-10 text-center text-muted-foreground">
+            <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-accent opacity-80" />
+            <p>Click <strong className="text-foreground">Scan now</strong> to find suspected collision records.</p>
+            <p className="mt-2 text-xs">Scan reads every parsed resume and compares against each candidate's profile. Usually takes a few seconds.</p>
+          </div>
+        </SectionCard>
       )}
 
       {/* Per-row confirmation */}
@@ -267,7 +273,7 @@ export default function CollisionReview() {
       {result && (
         <>
           {/* Severity tiles */}
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {(["critical","high","medium","low"] as Severity[]).map((sev) => {
               const n = result.severity_breakdown[sev];
               const active = severityFilter === sev;
@@ -276,32 +282,38 @@ export default function CollisionReview() {
                   key={sev}
                   type="button"
                   onClick={() => setSeverityFilter(active ? "all" : sev)}
-                  className={`rounded-md border p-3 text-left transition ${active ? "ring-2 ring-primary" : "hover:bg-muted/50"} ${SEVERITY_STYLES[sev]}`}
+                  className={`rounded-2xl border p-4 text-left shadow-sm transition ${active ? "ring-2 ring-primary" : "hover:brightness-[0.98]"} ${SEVERITY_STYLES[sev]}`}
                 >
-                  <div className="text-2xl font-semibold">{n}</div>
+                  <div className="text-2xl font-semibold tabular-nums">{n}</div>
                   <div className="text-xs uppercase tracking-wide">{sev}</div>
                 </button>
               );
             })}
           </div>
 
-          {/* Scan summary */}
-          <div className="mb-3 text-xs text-muted-foreground">
-            Scanned {result.total_resume_rows_scanned.toLocaleString()} resume rows ·
-            {" "}{result.total_candidates_with_resumes.toLocaleString()} candidates with resumes ·
-            {" "}{result.total_suspects.toLocaleString()} suspects ·
-            {" "}{new Date(result.scanned_at).toLocaleString()}
-            {severityFilter !== "all" && (
-              <Button size="sm" variant="link" className="ml-2 h-auto p-0 text-xs" onClick={() => setSeverityFilter("all")}>
-                Clear filter
-              </Button>
-            )}
-          </div>
-
           {/* Results table */}
-          <div className="rounded-md border">
+          <SectionCard
+            title={`Suspected collisions${severityFilter !== "all" ? ` · ${severityFilter}` : ""}`}
+            icon={<GitMerge className="h-4 w-4" />}
+            actions={
+              severityFilter !== "all" && (
+                <Button size="sm" variant="outline" onClick={() => setSeverityFilter("all")}>
+                  Clear filter
+                </Button>
+              )
+            }
+            flush
+          >
+            {/* Scan summary */}
+            <div className="border-b border-card-border px-5 py-2.5 text-xs text-muted-foreground">
+              Scanned {result.total_resume_rows_scanned.toLocaleString()} resume rows ·
+              {" "}{result.total_candidates_with_resumes.toLocaleString()} candidates with resumes ·
+              {" "}{result.total_suspects.toLocaleString()} suspects ·
+              {" "}{new Date(result.scanned_at).toLocaleString()}
+            </div>
+
             <Table>
-              <TableHeader>
+              <TableHeader className="table-header-green">
                 <TableRow>
                   <TableHead className="w-[90px]">Severity</TableHead>
                   <TableHead>Candidate (Sully record)</TableHead>
@@ -328,9 +340,10 @@ export default function CollisionReview() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </SectionCard>
         </>
       )}
+      </div>
     </MainLayout>
   );
 }
@@ -413,12 +426,13 @@ function SuspectRow({
       {open && (
         <TableRow className="bg-muted/30">
           <TableCell colSpan={5}>
-            <div className="px-2 py-2">
-              <div className="mb-2 text-xs font-medium text-muted-foreground">
+            <div className="p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Resume identities ({suspect.resume_identities.length})
               </div>
+              <div className="overflow-hidden rounded-2xl border border-card-border bg-card shadow-sm">
               <Table>
-                <TableHeader>
+                <TableHeader className="table-header-green">
                   <TableRow>
                     <TableHead>File</TableHead>
                     <TableHead>Parsed name</TableHead>
@@ -445,6 +459,7 @@ function SuspectRow({
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
           </TableCell>
         </TableRow>

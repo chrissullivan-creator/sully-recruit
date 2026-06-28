@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,7 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  RefreshCw, Loader2, ExternalLink, ChevronLeft, ChevronRight, Copy,
+  RefreshCw, Loader2, ExternalLink, ChevronLeft, ChevronRight, Copy, CopyCheck,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -260,6 +261,7 @@ export default function DuplicatesReview() {
   return (
     <MainLayout>
       <PageHeader
+        icon={<CopyCheck />}
         title="Duplicate Candidates"
         description={`${pairs.length} pending duplicate${pairs.length !== 1 ? "s" : ""} to review`}
         actions={
@@ -298,21 +300,25 @@ export default function DuplicatesReview() {
 
         {/* Content */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
+          <SectionCard>
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          </SectionCard>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <Copy className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground text-sm">
-              No pending duplicates. Run a scan to detect new ones.
-            </p>
-          </div>
+          <SectionCard className="border-dashed">
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Copy className="h-10 w-10 text-muted-foreground/40 mb-3" />
+              <p className="text-muted-foreground text-sm">
+                No pending duplicates. Run a scan to detect new ones.
+              </p>
+            </div>
+          </SectionCard>
         ) : (
           <>
-            <div className="rounded-lg border bg-card">
+            <SectionCard flush>
               <Table>
-                <TableHeader>
+                <TableHeader className="table-header-green">
                   <TableRow>
                     <TableHead className="w-[100px]">Match</TableHead>
                     <TableHead className="w-[80px]">Confidence</TableHead>
@@ -400,7 +406,7 @@ export default function DuplicatesReview() {
                   })}
                 </TableBody>
               </Table>
-            </div>
+            </SectionCard>
 
             {/* Pagination */}
             {totalPages > 1 && (

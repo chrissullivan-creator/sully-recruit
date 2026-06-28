@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,9 +10,12 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, BarChart3, Calendar, Pause, Play, Loader2, Archive, Trash2 } from "lucide-react";
+import { Plus, BarChart3, Calendar, Pause, Play, Loader2, Archive, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api-auth";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionCard } from "@/components/shared/SectionCard";
+import { StatStrip } from "@/components/shared/StatStrip";
 import { EnrolledPeopleDialog } from "./EnrolledPeopleDialog";
 
 interface SequenceRow {
@@ -203,32 +205,56 @@ export function SequenceList() {
     }
   }
 
+  const totalEnrolled = sequences.reduce((sum, s) => sum + (s._enrollmentCount ?? 0), 0);
+  const totalActive = sequences.reduce((sum, s) => sum + (s._activeCount ?? 0), 0);
+  const liveCount = sequences.filter((s) => s.status === "active").length;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Sequences</CardTitle>
-        <Link to="/sequences/new">
-          <Button>
-            <Plus className="h-4 w-4 mr-2" /> New Sequence
-          </Button>
-        </Link>
-      </CardHeader>
-      <CardContent>
+    <>
+      <PageHeader
+        eyebrow="Outreach"
+        title="Sequences"
+        description="Automated multi-channel cadences across email, LinkedIn, and SMS."
+        icon={<Workflow />}
+        actions={
+          <Link to="/sequences/new">
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" /> New Sequence
+            </Button>
+          </Link>
+        }
+      />
+
+      <div className="px-8 py-6 space-y-6">
+        {!loading && sequences.length > 0 && (
+          <StatStrip
+            items={[
+              { label: "Sequences", value: sequences.length },
+              { label: "Active", value: liveCount, accent: liveCount > 0 },
+              { label: "Enrolled", value: totalEnrolled },
+              { label: "Live Enrollments", value: totalActive },
+            ]}
+          />
+        )}
+
+        <SectionCard title="All sequences" icon={<Workflow className="h-4 w-4" />} flush>
         {loading ? (
-          <p className="text-muted-foreground text-sm">Loading...</p>
+          <p className="text-muted-foreground text-sm p-5">Loading...</p>
         ) : sequences.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <p>No sequences yet.</p>
+          <div className="text-center py-16 text-muted-foreground">
+            <Workflow className="mx-auto h-10 w-10 text-muted-foreground/40" />
+            <p className="mt-3 font-medium text-foreground">No sequences yet</p>
+            <p className="text-sm">Build your first multi-channel outreach cadence.</p>
             <Link to="/sequences/new">
-              <Button variant="outline" className="mt-4">
-                <Plus className="h-4 w-4 mr-2" /> Create Your First Sequence
+              <Button variant="outline" className="mt-4 gap-2">
+                <Plus className="h-4 w-4" /> Create Your First Sequence
               </Button>
             </Link>
           </div>
         ) : (
           <>
             {selectedIds.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mb-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 px-5 py-2.5 border-b border-card-border rounded-none bg-accent/5">
                 <span className="text-sm font-medium">{selectedIds.length} selected</span>
                 <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy} onClick={() => bulkSetStatus("active")}>
                   <Play className="h-3.5 w-3.5" /> Activate
@@ -264,23 +290,23 @@ export function SequenceList() {
             )}
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10 pl-5">
                   <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} aria-label="Select all" />
                 </TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Audience</TableHead>
-                <TableHead>Job</TableHead>
-                <TableHead>Enrolled</TableHead>
-                <TableHead>Active</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Name</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Audience</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Job</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Enrolled</TableHead>
+                <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Active</TableHead>
+                <TableHead className="pr-5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sequences.map((seq) => (
                 <TableRow key={seq.id} className={selectedIds.includes(seq.id) ? "bg-accent/5" : undefined}>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>
                     <Checkbox
                       checked={selectedIds.includes(seq.id)}
                       onCheckedChange={() => toggleSelect(seq.id)}
@@ -288,7 +314,7 @@ export function SequenceList() {
                     />
                   </TableCell>
                   <TableCell className="font-medium">
-                    <Link to={`/sequences/${seq.id}/edit`} className="hover:underline">
+                    <Link to={`/sequences/${seq.id}/edit`} className="text-foreground hover:text-primary hover:underline">
                       {seq.name}
                     </Link>
                   </TableCell>
@@ -331,7 +357,7 @@ export function SequenceList() {
                       {seq._activeCount}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="pr-5">
                     <div className="flex gap-1">
                       {seq.status === "active" && (
                         <Button
@@ -373,7 +399,8 @@ export function SequenceList() {
           </Table>
           </>
         )}
-      </CardContent>
+        </SectionCard>
+      </div>
       <EnrolledPeopleDialog
         sequenceId={drillSequence?.id ?? null}
         sequenceName={drillSequence?.name ?? ""}
@@ -381,6 +408,6 @@ export function SequenceList() {
         open={!!drillSequence}
         onOpenChange={(o) => { if (!o) setDrillSequence(null); }}
       />
-    </Card>
+    </>
   );
 }

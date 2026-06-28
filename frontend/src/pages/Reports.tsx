@@ -6,9 +6,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { useProfiles } from '@/hooks/useProfiles';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, TrendingUp, Users, Building2, Calendar as CalendarIcon, Trophy } from 'lucide-react';
+import { Loader2, BarChart3, Users, Building2, Calendar as CalendarIcon, Trophy } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 
 type RangeKey = 'this_month' | 'last_month' | 'last_3' | 'ytd';
@@ -108,6 +109,7 @@ export default function Reports() {
       <PageHeader
         title="Reports"
         description="Performance breakdown by recruiter, client, and month."
+        icon={<BarChart3 />}
         actions={
           <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
             <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
@@ -118,7 +120,7 @@ export default function Reports() {
         }
       />
 
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-6">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-8 space-y-6">
         {/* KPI strip */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <KpiCard label="Total Send-outs" value={totals.total.toString()} />
@@ -131,9 +133,11 @@ export default function Reports() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
-          </div>
+          <SectionCard>
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
+            </div>
+          </SectionCard>
         ) : (
           <Tabs defaultValue="recruiter" className="w-full">
             <TabsList>
@@ -161,13 +165,13 @@ export default function Reports() {
 function KpiCard({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div className={cn(
-      'rounded-xl border p-3 bg-white',
-      highlight ? 'border-gold/40 bg-gold-bg/40' : 'border-card-border',
+      'rounded-2xl border bg-card p-4 shadow-sm',
+      highlight ? 'border-accent/40 bg-gold-bg/40' : 'border-card-border',
     )}>
       <p className="text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className={cn(
         'mt-1 text-xl font-display font-bold tabular-nums',
-        highlight ? 'text-gold-deep' : 'text-emerald-dark',
+        highlight ? 'text-accent' : 'text-primary',
       )}>{value}</p>
     </div>
   );
@@ -212,46 +216,50 @@ function aggregate(rows: SendOutMetric[], keyOf: (r: SendOutMetric) => { key: st
 function AggTable({ rows, headerLabel, emptyText }: { rows: AggRow[]; headerLabel: string; emptyText: string }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
-        <p className="text-sm text-muted-foreground">{emptyText}</p>
-      </div>
+      <SectionCard>
+        <div className="py-16 text-center">
+          <p className="text-sm text-muted-foreground">{emptyText}</p>
+        </div>
+      </SectionCard>
     );
   }
   const top = rows[0];
   return (
-    <HorizontalTableScroll className="rounded-xl border border-card-border bg-white overflow-hidden" minWidth={900}>
-      <table className="w-full">
-        <thead>
-          <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground border-b border-card-border bg-page-bg/40">
-            <th className="px-4 py-2.5">{headerLabel}</th>
-            <th className="px-3 py-2.5 text-right">Total</th>
-            <th className="px-3 py-2.5 text-right">Submissions</th>
-            <th className="px-3 py-2.5 text-right">Interviews</th>
-            <th className="px-3 py-2.5 text-right">Offers</th>
-            <th className="px-3 py-2.5 text-right">Placed</th>
-            <th className="px-3 py-2.5 text-right">Fee</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.key} className="border-b border-card-border last:border-b-0 hover:bg-emerald-light/15">
-              <td className="px-4 py-2.5 text-sm font-medium text-emerald-dark flex items-center gap-2">
-                {r.key === top.key && top.fee > 0 && <Trophy className="h-3.5 w-3.5 text-gold-deep" />}
-                {r.label}
-              </td>
-              <td className="px-3 py-2.5 text-sm text-muted-foreground tabular-nums text-right">{r.total}</td>
-              <td className="px-3 py-2.5 text-sm text-muted-foreground tabular-nums text-right">{r.sentOut}</td>
-              <td className="px-3 py-2.5 text-sm text-muted-foreground tabular-nums text-right">{r.interviews}</td>
-              <td className="px-3 py-2.5 text-sm text-muted-foreground tabular-nums text-right">{r.offers}</td>
-              <td className="px-3 py-2.5 text-sm font-semibold text-emerald-dark tabular-nums text-right">{r.placements}</td>
-              <td className="px-3 py-2.5 text-sm font-semibold text-gold-deep tabular-nums text-right">
-                {r.fee > 0 ? fmtMoney(r.fee) : '—'}
-              </td>
+    <SectionCard flush>
+      <HorizontalTableScroll minWidth={900}>
+        <table className="w-full">
+          <thead className="table-header-green">
+            <tr className="text-left">
+              <th className="px-4 py-3">{headerLabel}</th>
+              <th className="px-3 py-3 text-right">Total</th>
+              <th className="px-3 py-3 text-right">Submissions</th>
+              <th className="px-3 py-3 text-right">Interviews</th>
+              <th className="px-3 py-3 text-right">Offers</th>
+              <th className="px-3 py-3 text-right">Placed</th>
+              <th className="px-3 py-3 text-right">Fee</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </HorizontalTableScroll>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-b border-card-border last:border-b-0 hover:bg-emerald-light/15">
+                <td className="px-4 py-3 text-sm font-medium text-primary flex items-center gap-2">
+                  {r.key === top.key && top.fee > 0 && <Trophy className="h-3.5 w-3.5 text-accent" />}
+                  {r.label}
+                </td>
+                <td className="px-3 py-3 text-sm text-muted-foreground tabular-nums text-right">{r.total}</td>
+                <td className="px-3 py-3 text-sm text-muted-foreground tabular-nums text-right">{r.sentOut}</td>
+                <td className="px-3 py-3 text-sm text-muted-foreground tabular-nums text-right">{r.interviews}</td>
+                <td className="px-3 py-3 text-sm text-muted-foreground tabular-nums text-right">{r.offers}</td>
+                <td className="px-3 py-3 text-sm font-semibold text-primary tabular-nums text-right">{r.placements}</td>
+                <td className="px-3 py-3 text-sm font-semibold text-accent tabular-nums text-right">
+                  {r.fee > 0 ? fmtMoney(r.fee) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </HorizontalTableScroll>
+    </SectionCard>
   );
 }
 

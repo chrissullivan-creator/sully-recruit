@@ -71,12 +71,21 @@ export default function Inbox() {
   // "All" is the default (no ?tab) so unlinked recruiter InMails — which land
   // unfocused — aren't hidden behind the People-we-know view.
   const [searchParams, setSearchParams] = useSearchParams();
+  // Tab is driven by either ?tab= (focused/other/all) or the simpler public
+  // ?filter= alias (known → focused, unknown → other). When both are present,
+  // ?filter wins so deep links like /inbox?filter=known land on the right view.
+  // known = threads linked to a CRM person; unknown = unlinked / unknown sender.
+  const filterParam = searchParams.get('filter');
   const tab: 'all' | 'focused' | 'other' =
-    searchParams.get('tab') === 'other'
-      ? 'other'
-      : searchParams.get('tab') === 'focused'
-        ? 'focused'
-        : 'all';
+    filterParam === 'known'
+      ? 'focused'
+      : filterParam === 'unknown'
+        ? 'other'
+        : searchParams.get('tab') === 'other'
+          ? 'other'
+          : searchParams.get('tab') === 'focused'
+            ? 'focused'
+            : 'all';
   const view: InboxView = ((): InboxView => {
     const v = searchParams.get('view');
     const valid: InboxView[] = ['all', 'unread', 'starred', 'snoozed', 'awaiting_reply', 'sent', 'drafts', 'archive', 'needs_classification', 'need_respond'];
@@ -125,6 +134,7 @@ export default function Inbox() {
     const next = new URLSearchParams(searchParams);
     next.delete('section');
     next.delete('view'); // leaving the Need-to-respond view
+    next.delete('filter'); // canonicalize onto ?tab so the two never conflict
     if (t === 'all') next.delete('tab');
     else next.set('tab', t);
     setSearchParams(next, { replace: true });
@@ -446,16 +456,16 @@ export default function Inbox() {
         ) : (
         <>
         {/* Thread list */}
-        <div className="w-80 border-r border-border flex flex-col bg-background">
+        <div className="w-80 border-r border-card-border flex flex-col bg-card">
           {/* Search + Density toggle + Compose */}
-          <div className="p-3 border-b border-border/60 flex gap-2">
+          <div className="p-3 border-b border-card-border flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search messages, names..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs"
+                className="pl-8 h-9 text-xs rounded-xl"
               />
             </div>
             <Tooltip>
@@ -464,7 +474,7 @@ export default function Inbox() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setDensity(density === 'comfortable' ? 'compact' : 'comfortable')}
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  className="h-9 w-9 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
                   aria-label="Toggle list density"
                 >
                   {density === 'comfortable' ? (
@@ -482,18 +492,61 @@ export default function Inbox() {
               variant="gold"
               size="icon"
               onClick={() => setComposeOpen(true)}
-              className="h-8 w-8 shrink-0"
+              className="h-9 w-9 shrink-0 rounded-xl"
               title="Compose new message"
             >
               <PenSquare className="h-3.5 w-3.5" />
             </Button>
           </div>
 
+          {/* All / Known / Unknown segment control — mirrors the rail's tab
+              state and keeps the ?filter= URL param in sync (known → focused,
+              unknown → other). Hidden while a special view (Need-to-respond,
+              Snoozed, Archive, …) is active so it can't show a misleading
+              selection. */}
+          {view !== 'need_respond' && view !== 'snoozed' && view !== 'archive' &&
+            view !== 'starred' && view !== 'sent' && view !== 'needs_classification' && (
+            <div className="px-3 pt-2.5">
+              <div className="flex items-center gap-1 rounded-xl bg-muted/50 p-1">
+                {([
+                  { key: 'all', label: 'All', count: focusedThreads.length + persistedOther.length },
+                  { key: 'focused', label: 'Known', count: focusedThreads.length },
+                  { key: 'other', label: 'Unknown', count: persistedOther.length },
+                ] as const).map((seg) => {
+                  const active = tab === seg.key;
+                  return (
+                    <button
+                      key={seg.key}
+                      type="button"
+                      onClick={() => selectTab(seg.key)}
+                      className={cn(
+                        'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors',
+                        active
+                          ? 'bg-card text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <span>{seg.label}</span>
+                      {seg.count > 0 && (
+                        <span className={cn(
+                          'text-[10px] tabular-nums rounded-full px-1.5 py-0.5',
+                          active ? 'bg-accent/15 text-accent font-semibold' : 'bg-muted text-muted-foreground',
+                        )}>
+                          {seg.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* List header — active view, count, and quick filters (Awaiting +
               Sentiment). The People-we-know / Other split now lives in the rail. */}
-          <div className="px-3 pt-2.5 pb-2 flex items-center gap-2 border-b border-border/40">
+          <div className="px-3 pt-2.5 pb-2 flex items-center gap-2 border-b border-card-border">
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-foreground truncate">{listTitle}</div>
+              <div className="text-sm font-semibold text-foreground truncate font-display">{listTitle}</div>
               <div className="text-[11px] text-muted-foreground">
                 {filtered.length} conversation{filtered.length === 1 ? '' : 's'}
               </div>
@@ -505,7 +558,7 @@ export default function Inbox() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setReconcileOpen(true)}
-                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-accent"
+                    className="h-7 w-7 shrink-0 rounded-lg text-muted-foreground hover:text-accent"
                     aria-label="Match unknown senders to people"
                   >
                     <Martini className="h-3.5 w-3.5" />
@@ -519,7 +572,7 @@ export default function Inbox() {
             <select
               value={sentimentFilter}
               onChange={(e) => updateParam('sentiment', e.target.value)}
-              className="h-7 text-[11px] rounded-md border border-border bg-background px-1.5 text-muted-foreground hover:text-foreground hover:border-accent/50 transition-colors cursor-pointer"
+              className="h-7 text-[11px] rounded-lg border border-card-border bg-card px-2 text-muted-foreground hover:text-foreground hover:border-accent/50 transition-colors cursor-pointer"
               aria-label="Filter by sentiment"
             >
               <option value="all">All sentiment</option>

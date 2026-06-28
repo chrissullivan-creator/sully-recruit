@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { format, formatDistanceToNow } from 'date-fns';
 import { History, Search, ExternalLink, Plus, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SectionCard } from '@/components/shared/SectionCard';
 
 interface AuditRow {
   id: number;
@@ -119,35 +120,38 @@ export default function AuditLog() {
       <PageHeader
         title="Audit trail"
         description="Every change to the firm's records — who, when, what changed."
+        icon={<History />}
       />
 
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[220px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter by actor, field, or entity name…"
-              className="pl-9"
-            />
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-8 space-y-6">
+        <SectionCard>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[220px] max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Filter by actor, field, or entity name…"
+                className="pl-9"
+              />
+            </div>
+            <Select value={tableFilter} onValueChange={setTableFilter}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>{TABLES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={actionFilter} onValueChange={(v) => setActionFilter(v as any)}>
+              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All actions</SelectItem>
+                <SelectItem value="insert">Insert</SelectItem>
+                <SelectItem value="update">Update</SelectItem>
+                <SelectItem value="delete">Delete</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <Select value={tableFilter} onValueChange={setTableFilter}>
-            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>{TABLES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={actionFilter} onValueChange={(v) => setActionFilter(v as any)}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All actions</SelectItem>
-              <SelectItem value="insert">Insert</SelectItem>
-              <SelectItem value="update">Update</SelectItem>
-              <SelectItem value="delete">Delete</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        </SectionCard>
 
-        <div className="rounded-xl border border-card-border bg-white overflow-hidden">
+        <SectionCard flush>
           {isLoading ? (
             <div className="p-8 text-sm text-muted-foreground text-center">Loading…</div>
           ) : filtered.length === 0 ? (
@@ -159,15 +163,15 @@ export default function AuditLog() {
               {filtered.map((r) => {
                 const Icon = r.action === 'insert' ? Plus : r.action === 'update' ? Pencil : Trash2;
                 const tone =
-                  r.action === 'insert' ? 'text-emerald' :
-                  r.action === 'update' ? 'text-gold-deep' : 'text-red-600';
+                  r.action === 'insert' ? 'text-primary' :
+                  r.action === 'update' ? 'text-accent' : 'text-red-600';
                 const route = actionRoute(r);
                 return (
                   <div key={r.id} className="px-5 py-3.5 flex items-start gap-4 hover:bg-page-bg/40 transition-colors">
                     <Icon className={cn('h-4 w-4 mt-1 shrink-0', tone)} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm">
-                        <span className="font-medium text-emerald-dark">{r.actor_email || 'system'}</span>
+                        <span className="font-medium text-primary">{r.actor_email || 'system'}</span>
                         {' '}{r.action === 'insert' ? 'created' : r.action === 'update' ? 'updated' : 'deleted'}{' '}
                         <span className="text-foreground">{describe(r)}</span>
                       </p>
@@ -175,7 +179,7 @@ export default function AuditLog() {
                         <ul className="mt-1 space-y-0.5">
                           {Object.entries(r.changed).slice(0, 6).map(([k, [b, a]]) => (
                             <li key={k} className="text-[11px] text-muted-foreground tabular-nums">
-                              <span className="font-mono text-emerald-dark">{k}</span>
+                              <span className="font-mono text-primary">{k}</span>
                               {' '}<span className="line-through opacity-60">{formatValue(b)}</span>
                               {' → '}
                               <span className="text-foreground">{formatValue(a)}</span>
@@ -205,7 +209,7 @@ export default function AuditLog() {
               })}
             </div>
           )}
-        </div>
+        </SectionCard>
       </div>
     </MainLayout>
   );

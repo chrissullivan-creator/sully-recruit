@@ -241,7 +241,7 @@ function LogCallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           {/* Match result */}
           {matchResult && (
             <div className={cn(
-              'flex items-center gap-3 rounded-lg border p-3',
+              'flex items-center gap-3 rounded-xl border p-3',
               matchResult.matched
                 ? 'border-success/30 bg-success/5'
                 : 'border-warning/30 bg-warning/5'
@@ -657,6 +657,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
       {!embedded && (
         <PageHeader
           title="Calls"
+          icon={<Phone />}
           description="Call history with notes auto-tagged to candidates and contacts."
           actions={
             <Button variant="gold" onClick={() => setLogOpen(true)}>
@@ -677,7 +678,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
         {embedded && (
           <div className="flex items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Calls</h2>
+              <h2 className="font-display text-lg font-semibold text-foreground">Calls</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Call history with notes auto-tagged to candidates and contacts.
               </p>
@@ -698,12 +699,12 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
               placeholder="Search by name, phone, or notes..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-10 pl-10 pr-4 rounded-xl border border-card-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-sm"
             />
           </div>
           <button
             onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
-            className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-input bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-card-border bg-card text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 shadow-sm"
             title="Toggle date sort"
           >
             {sortOrder === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
@@ -790,7 +791,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
               return (
               <div
                 key={call.id}
-                className="rounded-lg border border-border bg-card p-5 hover:border-accent/40 transition-all cursor-pointer"
+                className="rounded-2xl border border-card-border bg-card shadow-sm p-5 hover:border-accent/40 hover:shadow-md transition-all cursor-pointer"
                 onClick={() => setDetailCall({ call, aiNotes: ai })}
               >
                 <div className="flex items-start gap-4">
@@ -871,7 +872,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
                     {(summary || call.notes) && (() => {
                       if (summary) {
                         return (
-                          <div className="mt-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
+                          <div className="mt-2 p-3 rounded-xl bg-accent/5 border border-accent/20">
                             <div className="flex items-center gap-2 mb-1">
                               <FileText className="h-3.5 w-3.5 text-accent" />
                               <span className="text-xs font-medium text-accent">Summary</span>
@@ -883,7 +884,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
                       const isExpanded = expandedNotes.has(call.id);
                       const needsTruncation = (call.notes?.length ?? 0) > 300;
                       return (
-                        <div className="mt-3 p-3 rounded-lg bg-muted/50">
+                        <div className="mt-3 p-3 rounded-xl bg-muted/50">
                           <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                             {isExpanded || !needsTruncation ? call.notes : `${call.notes!.slice(0, 300)}...`}
                           </p>
@@ -908,7 +909,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
 
                     {/* Action Items from AI */}
                     {ai?.ai_action_items && (
-                      <div className="mt-2 p-3 rounded-lg bg-muted/50">
+                      <div className="mt-2 p-3 rounded-xl bg-muted/50">
                         <div className="flex items-center gap-2 mb-1">
                           <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
                           <span className="text-xs font-medium text-muted-foreground">Action Items</span>
@@ -919,7 +920,7 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
 
                     {/* Audio Recording */}
                     {audioUrl && (
-                      <div className="mt-2 p-3 rounded-lg bg-muted/30 border border-border">
+                      <div className="mt-2 p-3 rounded-xl bg-muted/30 border border-card-border">
                         <div className="flex items-center gap-2 mb-2">
                           <Phone className="h-3.5 w-3.5 text-muted-foreground" />
                           <span className="text-xs font-medium text-muted-foreground">Recording</span>

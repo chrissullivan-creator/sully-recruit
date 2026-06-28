@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { MessageTemplateManager } from '@/components/templates/MessageTemplateManager';
 import { CustomFieldsManager } from '@/components/custom-fields/CustomFieldsManager';
 import { ChannelLimitsSettings } from '@/components/sequences/ChannelLimitsSettings';
@@ -70,7 +71,41 @@ import { OptionListsSection } from '@/components/settings/OptionListsSection';
 const Settings = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState('integrations');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Map sidebar deep-link `?tab=` slugs (hyphenated, used by the Admin
+  // sub-nav) onto this page's internal tab ids (underscored).
+  const TAB_PARAM_TO_ID: Record<string, string> = {
+    'custom-fields': 'custom_fields',
+    'hygiene': 'data_hygiene',
+  };
+  const TAB_ID_TO_PARAM: Record<string, string> = {
+    custom_fields: 'custom-fields',
+    data_hygiene: 'hygiene',
+  };
+  const initialTab = TAB_PARAM_TO_ID[searchParams.get('tab') ?? ''] ?? 'integrations';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Keep the active tab in sync if the `?tab=` param changes (e.g. the
+  // sidebar links to a different Admin sub-item while already on this page).
+  useEffect(() => {
+    const mapped = TAB_PARAM_TO_ID[searchParams.get('tab') ?? ''];
+    if (mapped && mapped !== activeTab) setActiveTab(mapped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Reflect known deep-linkable tabs back into the URL; clear the param
+  // for the rest so a refresh lands on the same section.
+  const selectTab = (id: string) => {
+    setActiveTab(id);
+    const param = TAB_ID_TO_PARAM[id];
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (param) next.set('tab', param);
+      else next.delete('tab');
+      return next;
+    }, { replace: true });
+  };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -690,27 +725,29 @@ const Settings = () => {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="Settings"
         title="Admin"
         description="Configure integrations, import data, and manage your account."
+        icon={<SettingsIcon />}
       />
 
       <div className="p-8">
         <div className="flex gap-8">
           {/* Sidebar */}
-          <div className="w-48 shrink-0">
-            <nav className="space-y-1">
+          <div className="w-52 shrink-0">
+            <nav className="sticky top-8 space-y-1 rounded-2xl border border-card-border bg-card p-2 shadow-sm">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
                     activeTab === tab.id
-                      ? 'bg-secondary text-foreground'
+                      ? 'bg-primary/10 text-primary'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
-                  <tab.icon className="h-4 w-4" />
+                  <tab.icon className={cn('h-4 w-4 shrink-0', activeTab === tab.id ? 'text-primary' : 'text-muted-foreground')} />
                   {tab.label}
                 </button>
               ))}
@@ -735,8 +772,8 @@ const Settings = () => {
                         Bulk-import people, companies, or jobs from a CSV file.
                       </p>
                     </div>
-                    <div className="rounded-lg border border-border bg-card p-6 flex items-center gap-4">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-6 flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                         <Upload className="h-5 w-5" />
                       </div>
                       <div className="flex-1">
@@ -747,8 +784,8 @@ const Settings = () => {
                         <Link to="/import">Open Importer</Link>
                       </Button>
                     </div>
-                    <div className="rounded-lg border border-border bg-card p-6 flex items-center gap-4">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-6 flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                         <Upload className="h-5 w-5" />
                       </div>
                       <div className="flex-1">
@@ -786,10 +823,10 @@ const Settings = () => {
                     </div>
 
                     {/* Email SMTP */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          'flex h-10 w-10 items-center justify-center rounded-xl',
                           emailActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <Mail className="h-5 w-5" />
@@ -863,10 +900,10 @@ const Settings = () => {
                     </div>
 
                     {/* Unipile (LinkedIn) */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          'flex h-10 w-10 items-center justify-center rounded-xl',
                           unipileActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <Linkedin className="h-5 w-5" />
@@ -938,10 +975,10 @@ const Settings = () => {
                     </div>
 
                     {/* RingCentral */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          'flex h-10 w-10 items-center justify-center rounded-xl',
                           ringcentralActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <PhoneCall className="h-5 w-5" />
@@ -1141,10 +1178,10 @@ const Settings = () => {
                     </div>
 
                     {/* Clay Enrichment */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          'flex h-10 w-10 items-center justify-center rounded-xl',
                           clayActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <Wrench className="h-5 w-5" />
@@ -1263,10 +1300,10 @@ const Settings = () => {
                     </div>
 
                     {/* Microsoft / Outlook OAuth */}
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-4">
                       <div className="flex items-center gap-3">
                         <div className={cn(
-                          'flex h-10 w-10 items-center justify-center rounded-lg',
+                          'flex h-10 w-10 items-center justify-center rounded-xl',
                           msStatus.connected ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
                         )}>
                           <Mail className="h-5 w-5" />
@@ -1322,7 +1359,7 @@ const Settings = () => {
                       )}
                     </div>
 
-                    <div className="rounded-lg border border-border bg-card p-5 space-y-5">
+                    <div className="rounded-2xl border border-card-border bg-card shadow-sm p-5 space-y-5">
                       <div>
                         <h3 className="text-base font-semibold text-foreground">LinkedIn (Recruiter)</h3>
                         <p className="text-xs text-muted-foreground mt-1">
@@ -1566,7 +1603,7 @@ const Settings = () => {
                         { id: 'cleanup-stale-enrollments', label: 'Cleanup Enrollments', desc: 'Remove stale/abandoned sequence enrollments', endpoint: null },
                         { id: 'sync-conversations', label: 'Sync Conversations', desc: 'Sync conversations from Unipile', endpoint: null },
                       ].map((task) => (
-                        <div key={task.id} className="rounded-lg border border-border bg-card p-4 flex items-center justify-between">
+                        <div key={task.id} className="rounded-2xl border border-card-border bg-card shadow-sm p-4 flex items-center justify-between">
                           <div>
                             <h3 className="text-sm font-medium text-foreground">{task.label}</h3>
                             <p className="text-xs text-muted-foreground">{task.desc}</p>
@@ -1611,7 +1648,7 @@ const Settings = () => {
                           messages/fetch-entity-history.requested for
                           every person with last_history_synced_at IS NULL,
                           ordered newest-first, capped at 500. */}
-                      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                      <div className="rounded-2xl border border-card-border bg-card shadow-sm p-4 space-y-3">
                         <div>
                           <h3 className="text-sm font-medium text-foreground">Backfill messages for recently added people</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -1666,7 +1703,7 @@ const Settings = () => {
                           3-day v2 sweep. Recovers Recruiter InMail / classic DMs
                           missed while a seat's Unipile session was stalled. Run
                           AFTER reconnecting the seat in Integrations. */}
-                      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                      <div className="rounded-2xl border border-card-border bg-card shadow-sm p-4 space-y-3">
                         <div>
                           <h3 className="text-sm font-medium text-foreground">Deep LinkedIn backfill (recover InMail / gaps)</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">

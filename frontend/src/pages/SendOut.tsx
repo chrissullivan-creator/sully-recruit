@@ -433,22 +433,48 @@ export default function SendOut() {
   const c = candidate as any;
   const fullName = c?.full_name || `${c?.first_name || ''} ${c?.last_name || ''}`.trim() || 'Candidate';
   const stepIndex = ['choose', 'preview', 'email'].indexOf(step === 'formatting' ? 'choose' : step);
+  const STEP_LABELS = ['Résumé', 'Review', 'Submit'];
 
   return (
     <MainLayout>
-      <div className="px-8 py-4 border-b border-border flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-lg font-semibold text-foreground">Send Out — {fullName}</h1>
-          <p className="text-sm text-muted-foreground">Format the résumé, draft the email, submit to the client</p>
+      <div className="px-8 py-5 border-b border-card-border bg-card/50">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="shrink-0">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Send className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Send Out</p>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground truncate">{fullName}</h1>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className={cn('h-2 w-8 rounded-full transition-colors',
-              i === stepIndex ? 'bg-gold' : i < stepIndex ? 'bg-gold/40' : 'bg-muted')} />
-          ))}
+
+        {/* Stepper */}
+        <div className="mt-4 flex items-center gap-2">
+          {STEP_LABELS.map((label, i) => {
+            const state = i === stepIndex ? 'current' : i < stepIndex ? 'done' : 'upcoming';
+            return (
+              <div key={label} className="flex flex-1 items-center gap-2 last:flex-none">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors',
+                    state === 'current' && 'bg-primary text-primary-foreground',
+                    state === 'done' && 'bg-primary/15 text-primary',
+                    state === 'upcoming' && 'bg-muted text-muted-foreground',
+                  )}>{i + 1}</span>
+                  <span className={cn(
+                    'text-xs font-semibold uppercase tracking-wide',
+                    state === 'upcoming' ? 'text-muted-foreground' : 'text-foreground',
+                  )}>{label}</span>
+                </div>
+                {i < STEP_LABELS.length - 1 && (
+                  <div className={cn('h-px flex-1 transition-colors', i < stepIndex ? 'bg-primary/40' : 'bg-card-border')} />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -457,8 +483,8 @@ export default function SendOut() {
 
           {/* ── Step: Choose (résumé source + name treatment) ───────────── */}
           {step === 'choose' && (
-            <div className="space-y-6">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><FileText className="h-5 w-5 text-gold-deep" /> Format the résumé</h2>
+            <div className="space-y-6 rounded-2xl border border-card-border bg-card p-6 shadow-sm">
+              <h2 className="font-display text-lg font-semibold flex items-center gap-2"><FileText className="h-5 w-5 text-gold-deep" /> Format the résumé</h2>
 
               <div className="space-y-2">
                 <Label>Tag to job</Label>
@@ -501,7 +527,7 @@ export default function SendOut() {
                   {NAME_OPTIONS.map((opt) => (
                     <button key={opt.value}
                       onClick={() => { setNameMode(opt.value); setAppliedNotes(''); setFeedback(''); runFormat(opt.value); }}
-                      className="rounded-lg border-2 border-card-border p-4 text-left transition-all hover:border-gold hover:bg-gold-bg/40">
+                      className="rounded-2xl border border-card-border bg-card p-4 text-left shadow-sm transition-all hover:border-gold hover:bg-gold-bg/40 hover:shadow">
                       <opt.icon className="h-5 w-5 text-gold-deep mb-2" />
                       <p className="text-sm font-semibold">{opt.label}</p>
                       <p className="text-xs text-muted-foreground mt-1">{opt.desc}</p>
@@ -515,7 +541,7 @@ export default function SendOut() {
 
           {/* ── Step: Formatting spinner ────────────────────────────────── */}
           {step === 'formatting' && (
-            <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-card-border bg-card py-20 shadow-sm">
               <Loader2 className="h-10 w-10 animate-spin text-gold-deep" />
               <p className="text-sm text-muted-foreground">Joe is formatting the résumé in the Emerald house style…</p>
             </div>
@@ -525,19 +551,19 @@ export default function SendOut() {
           {step === 'preview' && (
             <div className="space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2"><FileText className="h-5 w-5 text-gold-deep" /> Review the formatted résumé</h2>
+                <h2 className="font-display text-lg font-semibold flex items-center gap-2"><FileText className="h-5 w-5 text-gold-deep" /> Review the formatted résumé</h2>
                 <Button variant="ghost" size="sm" onClick={() => setStep('choose')}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Change options
                 </Button>
               </div>
 
-              <div className="rounded-lg border border-card-border bg-white overflow-hidden">
+              <div className="rounded-2xl border border-card-border bg-white overflow-hidden shadow-sm">
                 <div className="max-h-[60vh] overflow-y-auto p-2">
                   <div className="mx-auto bg-white" style={{ width: 816 }} dangerouslySetInnerHTML={{ __html: renderedHtml }} />
                 </div>
               </div>
 
-              <div className="rounded-lg border border-card-border bg-page-bg p-3 space-y-2">
+              <div className="rounded-2xl border border-card-border bg-card p-4 space-y-2 shadow-sm">
                 <Label className="text-xs">Notes for Joe (optional)</Label>
                 <Textarea rows={2} value={feedback} onChange={(e) => setFeedback(e.target.value)}
                   placeholder="e.g. Shorten the 2018 role, fix the second bullet, use 'VP' not 'Vice President'…" />
@@ -565,14 +591,14 @@ export default function SendOut() {
           {step === 'email' && (
             <div className="space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2"><Mail className="h-5 w-5 text-gold-deep" /> Submit to client</h2>
+                <h2 className="font-display text-lg font-semibold flex items-center gap-2"><Mail className="h-5 w-5 text-gold-deep" /> Submit to client</h2>
                 <Button variant="ghost" size="sm" onClick={() => setStep('preview')}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Back to résumé
                 </Button>
               </div>
 
               {/* From + send mode + schedule */}
-              <div className="rounded-lg border border-card-border bg-white p-3 space-y-3">
+              <div className="rounded-2xl border border-card-border bg-card p-4 space-y-3 shadow-sm">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="text-sm">
                     <span className="text-muted-foreground">From: </span>
@@ -600,7 +626,7 @@ export default function SendOut() {
               {/* Recipients */}
               <div className="space-y-2">
                 <Label>Recipients</Label>
-                <div className="rounded-lg border border-card-border bg-white p-3 space-y-1.5">
+                <div className="rounded-2xl border border-card-border bg-card p-4 space-y-1.5 shadow-sm">
                   {recipients.length === 0 && <p className="text-xs text-muted-foreground">No job contacts found — add a recipient below.</p>}
                   {recipients.map((r, i) => (
                     <label key={r.email + i} className="flex items-center gap-2 text-sm">
@@ -640,7 +666,7 @@ export default function SendOut() {
                   </Button>
                 </div>
                 {generatingEmail ? (
-                  <div className="rounded-lg border border-gold/30 bg-gold-bg/40 p-6 flex items-center gap-3">
+                  <div className="rounded-2xl border border-gold/30 bg-gold-bg/40 p-6 flex items-center gap-3">
                     <Loader2 className="h-5 w-5 animate-spin text-gold-deep" />
                     <span className="text-sm text-muted-foreground">Drafting a sharp, direct submission email…</span>
                   </div>
@@ -651,7 +677,7 @@ export default function SendOut() {
               </div>
 
               {/* Attachment */}
-              <div className="rounded-lg border border-card-border bg-white p-3 flex items-center gap-3">
+              <div className="rounded-2xl border border-card-border bg-card p-4 flex items-center gap-3 shadow-sm">
                 <FileText className="h-5 w-5 text-gold-deep shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{pdfFileName || `${safeName(displayName)}_Emerald.pdf`}</p>
