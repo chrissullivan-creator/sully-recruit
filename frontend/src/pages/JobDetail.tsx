@@ -3,6 +3,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { CompanyLink } from '@/components/shared/EntityLinks';
+import { DetailHeader } from '@/components/shared/DetailHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,7 +29,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  ArrowLeft, Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
+  Briefcase, MapPin, DollarSign, UserPlus, ListTodo, Loader2,
   Users, X, Star, FileText, ExternalLink, ClipboardList,
   Search, Pencil, Link as LinkIcon, Info, Martini, Send, Trash2, Hash, UsersRound, Globe, Check,
   Mailbox, Linkedin, Copy, Megaphone, MoreHorizontal, Flame,
@@ -777,21 +779,22 @@ const JobDetail = () => {
 
   return (
     <MainLayout>
-      {/* ── Top Header Bar ─────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-6 lg:px-8 py-4 border-b border-card-border bg-white">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/jobs')}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        {companyLogoUrl ? (
-          <img src={companyLogoUrl} alt="" className="h-10 w-10 rounded-lg object-contain shrink-0 bg-gold-bg border border-gold/30 p-1" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-bg border border-gold/30 shrink-0">
-            <Briefcase className="h-5 w-5 text-gold-deep" />
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-lg font-display font-semibold text-emerald-dark truncate">{job.title}</h1>
+      {/* ── Top Header Bar (shared DetailHeader) ───────────── */}
+      <DetailHeader
+        onBack={() => navigate('/jobs')}
+        backLabel="Jobs"
+        avatar={
+          companyLogoUrl ? (
+            <img src={companyLogoUrl} alt="" className="h-12 w-12 rounded-xl object-contain bg-gold-bg border border-gold/30 p-1" />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gold-bg border border-gold/30">
+              <Briefcase className="h-6 w-6 text-gold-deep" />
+            </div>
+          )
+        }
+        title={job.title}
+        badges={
+          <>
             {/* Status pill */}
             <span className={cn(
               'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border',
@@ -805,8 +808,10 @@ const JobDetail = () => {
                 <Martini className="h-2.5 w-2.5 fill-current" /> {(job as any).priority}
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
+          </>
+        }
+        subtitle={
+          <>
             {companyName && (
               <CompanyLink companyId={(job as any).company_id} name={companyName} className="truncate" />
             )}
@@ -815,50 +820,54 @@ const JobDetail = () => {
                 ${Math.round(((job as any).comp_min ?? 0) / 1000)}k–${Math.round(((job as any).comp_max ?? 0) / 1000)}k
               </span>
             )}
-            {(job as any).location && <span>{(job as any).location}</span>}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Primary action stays visible; secondary actions fold into the ⋯ menu. */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleGenerateLinkedInPost}
-            className="border-card-border gap-1.5"
-            title="Generate a candidate-facing LinkedIn job post"
-          >
-            <Linkedin className="h-3.5 w-3.5" /> LinkedIn post
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" title="More actions">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.href);
-                  toast.success('Link copied');
-                }}
-              >
-                <ExternalLink className="h-3.5 w-3.5 mr-2" /> Share link
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTaskPanel(true)}>
-                <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={deletingJob}
-                onClick={() => setDeleteConfirmOpen(true)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete job
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+            {(job as any).location && (
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {(job as any).location}</span>
+            )}
+          </>
+        }
+        actions={
+          <>
+            {/* Primary action stays visible; secondary actions fold into the ⋯ menu. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateLinkedInPost}
+              className="border-card-border gap-1.5"
+              title="Generate a candidate-facing LinkedIn job post"
+            >
+              <Linkedin className="h-3.5 w-3.5" /> LinkedIn post
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" title="More actions">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem
+                  onClick={() => {
+                    navigator.clipboard.writeText(window.location.href);
+                    toast.success('Link copied');
+                  }}
+                >
+                  <ExternalLink className="h-3.5 w-3.5 mr-2" /> Share link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTaskPanel(true)}>
+                  <ListTodo className="h-3.5 w-3.5 mr-2" /> Tasks
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={deletingJob}
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete job
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
 
       {/* Delete confirmation — controlled, opened from the ⋯ menu. */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -897,59 +906,64 @@ const JobDetail = () => {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left Sidebar ─────────────────────────────────── */}
-        <aside className="w-72 shrink-0 border-r border-border overflow-y-auto">
-          <div className="p-5 space-y-5">
+        <aside className="w-72 shrink-0 border-r border-card-border bg-page-bg/40 overflow-y-auto">
+          <div className="p-4 space-y-4">
 
-            {/* Status badge + Job Code */}
-            <div className="flex flex-col items-center text-center gap-1.5">
-              <Badge
-                variant="secondary"
-                className={cn('text-xs cursor-pointer', jobStatusMeta(job.status)?.pillClass)}
-                onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}
-              >
-                {jobStatusLabel(job.status)}
-              </Badge>
-              {(job as any).job_code && (
-                <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded">
-                  {(job as any).job_code}
-                </span>
-              )}
-            </div>
-
-            {/* Lead sub-stage + Convert to Hot — only while the job is a lead.
-                lead_stage auto-advances (contacts added → reached out → market
-                over) via DB triggers; the badge is also click-to-set. */}
-            {job.status === 'lead' && (
-              <div className="flex flex-col items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => openFieldEdit('lead_stage', 'Lead Stage', 'select', (job as any).lead_stage || 'new', LEAD_STAGE_OPTIONS)}
-                  className="flex items-center gap-1.5"
-                  title="Lead sub-stage — auto-advances as contacts are added, you reach out, and a candidate is submitted. Click to set it manually."
-                >
-                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Lead Stage</span>
+            {/* Status + Job Code + lead-stage panel */}
+            <SectionCard>
+              <div className="space-y-4">
+                {/* Status badge + Job Code */}
+                <div className="flex flex-col items-center text-center gap-1.5">
                   <Badge
                     variant="secondary"
-                    className={cn('text-xs cursor-pointer', leadStageMeta((job as any).lead_stage || 'new')?.pillClass)}
+                    className={cn('text-xs cursor-pointer', jobStatusMeta(job.status)?.pillClass)}
+                    onClick={() => openFieldEdit('status', 'Status', 'select', job.status || 'lead', STATUS_OPTIONS)}
                   >
-                    {leadStageLabel((job as any).lead_stage)}
+                    {jobStatusLabel(job.status)}
                   </Badge>
-                </button>
-                <Button
-                  size="sm"
-                  variant="gold"
-                  className="h-7 gap-1.5 text-xs"
-                  onClick={() => saveField('status', 'hot')}
-                  title="Promote this lead to a Hot (active) job"
-                >
-                  <Flame className="h-3.5 w-3.5" /> Convert to Hot
-                </Button>
+                  {(job as any).job_code && (
+                    <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded">
+                      {(job as any).job_code}
+                    </span>
+                  )}
+                </div>
+
+                {/* Lead sub-stage + Convert to Hot — only while the job is a lead.
+                    lead_stage auto-advances (contacts added → reached out → market
+                    over) via DB triggers; the badge is also click-to-set. */}
+                {job.status === 'lead' && (
+                  <div className="flex flex-col items-center gap-2 border-t border-card-border pt-4">
+                    <button
+                      type="button"
+                      onClick={() => openFieldEdit('lead_stage', 'Lead Stage', 'select', (job as any).lead_stage || 'new', LEAD_STAGE_OPTIONS)}
+                      className="flex items-center gap-1.5"
+                      title="Lead sub-stage — auto-advances as contacts are added, you reach out, and a candidate is submitted. Click to set it manually."
+                    >
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Lead Stage</span>
+                      <Badge
+                        variant="secondary"
+                        className={cn('text-xs cursor-pointer', leadStageMeta((job as any).lead_stage || 'new')?.pillClass)}
+                      >
+                        {leadStageLabel((job as any).lead_stage)}
+                      </Badge>
+                    </button>
+                    <Button
+                      size="sm"
+                      variant="gold"
+                      className="h-7 gap-1.5 text-xs"
+                      onClick={() => saveField('status', 'hot')}
+                      title="Promote this lead to a Hot (active) job"
+                    >
+                      <Flame className="h-3.5 w-3.5" /> Convert to Hot
+                    </Button>
+                  </div>
+                )}
               </div>
-            )}
+            </SectionCard>
 
             {/* Key fields */}
+            <SectionCard title="Job Information" icon={<Briefcase className="h-4 w-4" />}>
             <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Job Info</h3>
 
               <EditableField onClick={() => openFieldEdit('title', 'Title', 'text', job.title || '', undefined, 'e.g. Senior Software Engineer')}>
                 <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Title</Label>
@@ -1032,15 +1046,16 @@ const JobDetail = () => {
                 />
               </div>
             </div>
+            </SectionCard>
 
             {/* Quick contacts preview */}
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                <Users className="h-3 w-3" /> Contacts
-                {(jobContacts as any[]).length > 0 && (
-                  <span className="text-muted-foreground ml-1">({(jobContacts as any[]).length})</span>
-                )}
-              </h3>
+            <SectionCard
+              title="Contacts"
+              icon={<Users className="h-4 w-4" />}
+              actions={(jobContacts as any[]).length > 0
+                ? <span className="text-xs font-semibold tabular-nums text-muted-foreground">{(jobContacts as any[]).length}</span>
+                : undefined}
+            >
               {(jobContacts as any[]).length === 0 ? (
                 <p className="text-xs text-muted-foreground">No contacts assigned.</p>
               ) : (
@@ -1057,46 +1072,49 @@ const JobDetail = () => {
                   )}
                 </div>
               )}
-            </div>
+            </SectionCard>
 
             {/* Send Outs summary */}
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                <Send className="h-3 w-3" /> Send Outs
-              </h3>
+            <SectionCard title="Send Outs" icon={<Send className="h-4 w-4" />}>
               <p className="text-sm font-medium text-foreground">{(sendOuts as any[]).length} candidates</p>
-            </div>
+            </SectionCard>
           </div>
         </aside>
 
         {/* ── Tabs Area ────────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Tabs value={activeJobTab} onValueChange={setActiveJobTab} className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-4 border-b border-border">
-              <TabsList className="bg-secondary">
-                <TabsTrigger value="details" className="gap-1.5"><Info className="h-3.5 w-3.5" /> Details</TabsTrigger>
-                <TabsTrigger value="marketing" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Marketing</TabsTrigger>
-                <TabsTrigger value="matches" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> AI Matches</TabsTrigger>
-                <TabsTrigger value="contacts" className="gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Contacts</TabsTrigger>
-                <TabsTrigger value="source" className="gap-1.5"><Mailbox className="h-3.5 w-3.5" /> Source</TabsTrigger>
-                <TabsTrigger value="send-outs" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Send Outs</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5"><FileTextIcon className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
+            <div className="px-6 lg:px-8 pt-3 border-b border-card-border bg-card/40">
+              <TabsList className="h-auto w-full justify-start gap-1 rounded-none border-0 bg-transparent p-0 overflow-x-auto">
+                {[
+                  { value: 'details', icon: Info, label: 'Details' },
+                  { value: 'marketing', icon: Megaphone, label: 'Marketing' },
+                  { value: 'matches', icon: Martini, label: 'AI Matches' },
+                  { value: 'contacts', icon: UserPlus, label: 'Contacts' },
+                  { value: 'source', icon: Mailbox, label: 'Source' },
+                  { value: 'send-outs', icon: Send, label: 'Send Outs' },
+                  { value: 'notes', icon: FileTextIcon, label: 'Notes' },
+                  { value: 'sizzles', icon: Martini, label: 'Sizzles' },
+                ].map(({ value, icon: TabIcon, label }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-2.5 pt-1.5 text-sm font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none hover:text-foreground"
+                  >
+                    <TabIcon className="h-3.5 w-3.5" /> {label}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1" horizontal>
 
               {/* ── Details Tab ────────────────────────────── */}
-              <TabsContent value="details" className="px-8 py-5 mt-0 space-y-6">
+              <TabsContent value="details" className="px-6 lg:px-8 py-5 mt-0 space-y-4">
 
                 {/* Description */}
-                <div>
+                <SectionCard title="Description" icon={<Briefcase className="h-4 w-4" />}>
                   <EditableField onClick={() => openFieldEdit('description', 'Description', 'richtext', job.description || '', undefined, 'Job description, requirements, qualifications...')}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Briefcase className="h-4 w-4 text-accent" />
-                      <h2 className="text-base font-semibold text-foreground">Description</h2>
-                    </div>
                     {job.description ? (
                       <div
                         className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
@@ -1106,20 +1124,16 @@ const JobDetail = () => {
                       <p className="text-sm italic text-muted-foreground">No description yet. Click to add.</p>
                     )}
                   </EditableField>
-                </div>
+                </SectionCard>
 
                 {/* Submittal Instructions */}
-                <div className="border-t border-border pt-5">
+                <SectionCard title="Submittal Instructions" icon={<ClipboardList className="h-4 w-4" />}>
                   <EditableField onClick={() => openFieldEdit(
                     'submittal_instructions', 'Submittal Instructions', 'richtext',
                     (job as any).submittal_instructions || '',
                     undefined,
                     'e.g. Send blind resume only. Include comp expectations and reason for looking...',
                   )}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <ClipboardList className="h-4 w-4 text-accent" />
-                      <h2 className="text-base font-semibold text-foreground">Submittal Instructions</h2>
-                    </div>
                     {(job as any).submittal_instructions ? (
                       <div
                         className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
@@ -1129,24 +1143,24 @@ const JobDetail = () => {
                       <p className="text-sm italic text-muted-foreground">No instructions yet. Click to add.</p>
                     )}
                   </EditableField>
-                </div>
 
-                {/* Submittal callout */}
-                {(job as any).submittal_instructions && (
-                  <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
-                    <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
-                      <ClipboardList className="h-3.5 w-3.5" /> Quick Reference — Submittal Instructions
-                    </p>
-                    <div
-                      className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
-                    />
-                  </div>
-                )}
+                  {/* Submittal callout */}
+                  {(job as any).submittal_instructions && (
+                    <div className="mt-4 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 space-y-1">
+                      <p className="text-xs font-semibold text-accent uppercase tracking-wide flex items-center gap-1.5">
+                        <ClipboardList className="h-3.5 w-3.5" /> Quick Reference — Submittal Instructions
+                      </p>
+                      <div
+                        className="text-sm text-foreground prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((job as any).submittal_instructions) }}
+                      />
+                    </div>
+                  )}
+                </SectionCard>
 
                 {/* Department / Products */}
                 {id && (
-                  <div className="border-t border-border pt-5">
+                  <SectionCard title="Classification" icon={<Hash className="h-4 w-4" />}>
                     <PicklistEditSection
                       table="jobs"
                       recordId={id}
@@ -1157,7 +1171,7 @@ const JobDetail = () => {
                       ]}
                       invalidateKeys={[['job', id], ['jobs']]}
                     />
-                  </div>
+                  </SectionCard>
                 )}
               </TabsContent>
 
@@ -1165,8 +1179,8 @@ const JobDetail = () => {
               {/* Public, website-facing copy for this role. Kept separate from
                   the internal Details fields so recruiters can polish marketing
                   language without touching the operational record. */}
-              <TabsContent value="marketing" className="px-8 py-5 mt-0 space-y-6">
-                <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 flex items-center justify-between gap-3">
+              <TabsContent value="marketing" className="px-6 lg:px-8 py-5 mt-0 space-y-4">
+                <div className="rounded-2xl border border-accent/20 bg-accent/5 px-4 py-3 flex items-center justify-between gap-3">
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <Megaphone className="h-3.5 w-3.5 text-accent" />
                     These fields power the public website listing — separate from the internal Details tab.
@@ -1193,37 +1207,38 @@ const JobDetail = () => {
                   </AlertDialog>
                 </div>
 
-                {/* Marketing Title */}
-                <EditableField onClick={() => openFieldEdit('marketing_title', 'Marketing Title', 'text', (job as any).marketing_title || '', undefined, 'e.g. Senior Quantitative Researcher — Systematic Macro')}>
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Briefcase className="h-3 w-3" /> Marketing Title</Label>
-                  <p className="text-sm font-medium text-foreground mt-0.5">{(job as any).marketing_title || <span className="italic text-muted-foreground">Not set</span>}</p>
-                </EditableField>
+                {/* Marketing fields */}
+                <SectionCard title="Marketing Fields" icon={<Megaphone className="h-4 w-4" />}>
+                  <div className="space-y-3">
+                    {/* Marketing Title */}
+                    <EditableField onClick={() => openFieldEdit('marketing_title', 'Marketing Title', 'text', (job as any).marketing_title || '', undefined, 'e.g. Senior Quantitative Researcher — Systematic Macro')}>
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Briefcase className="h-3 w-3" /> Marketing Title</Label>
+                      <p className="text-sm font-medium text-foreground mt-0.5">{(job as any).marketing_title || <span className="italic text-muted-foreground">Not set</span>}</p>
+                    </EditableField>
 
-                {/* Type of Firm */}
-                <EditableField onClick={() => openFieldEdit('marketing_type_of_firm', 'Marketing Type of Firm', 'text', (job as any).marketing_type_of_firm || '', undefined, 'e.g. Multi-strategy hedge fund')}>
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Type of Firm</Label>
-                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_type_of_firm || <span className="italic text-muted-foreground">Not set</span>}</p>
-                </EditableField>
+                    {/* Type of Firm */}
+                    <EditableField onClick={() => openFieldEdit('marketing_type_of_firm', 'Marketing Type of Firm', 'text', (job as any).marketing_type_of_firm || '', undefined, 'e.g. Multi-strategy hedge fund')}>
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Globe className="h-3 w-3" /> Type of Firm</Label>
+                      <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_type_of_firm || <span className="italic text-muted-foreground">Not set</span>}</p>
+                    </EditableField>
 
-                {/* Marketing Location */}
-                <EditableField onClick={() => openFieldEdit('marketing_job_location', 'Marketing Location', 'text', (job as any).marketing_job_location || '', undefined, 'e.g. New York, NY (Hybrid)')}>
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><MapPin className="h-3 w-3" /> Location</Label>
-                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_location || <span className="italic text-muted-foreground">Not set</span>}</p>
-                </EditableField>
+                    {/* Marketing Location */}
+                    <EditableField onClick={() => openFieldEdit('marketing_job_location', 'Marketing Location', 'text', (job as any).marketing_job_location || '', undefined, 'e.g. New York, NY (Hybrid)')}>
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><MapPin className="h-3 w-3" /> Location</Label>
+                      <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_location || <span className="italic text-muted-foreground">Not set</span>}</p>
+                    </EditableField>
 
-                {/* Marketing Compensation */}
-                <EditableField onClick={() => openFieldEdit('marketing_job_compensation', 'Marketing Compensation', 'text', (job as any).marketing_job_compensation || '', undefined, 'e.g. Competitive base + bonus')}>
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><DollarSign className="h-3 w-3" /> Compensation</Label>
-                  <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
-                </EditableField>
+                    {/* Marketing Compensation */}
+                    <EditableField onClick={() => openFieldEdit('marketing_job_compensation', 'Marketing Compensation', 'text', (job as any).marketing_job_compensation || '', undefined, 'e.g. Competitive base + bonus')}>
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1"><DollarSign className="h-3 w-3" /> Compensation</Label>
+                      <p className="text-sm text-foreground mt-0.5">{(job as any).marketing_job_compensation || <span className="italic text-muted-foreground">Not set</span>}</p>
+                    </EditableField>
+                  </div>
+                </SectionCard>
 
                 {/* Marketing Description */}
-                <div className="border-t border-border pt-5">
+                <SectionCard title="Marketing Job Description" icon={<Megaphone className="h-4 w-4" />}>
                   <EditableField onClick={() => openFieldEdit('marketing_job_description', 'Marketing Job Description', 'richtext', (job as any).marketing_job_description || '', undefined, 'Public-facing role summary, highlights, what makes this opportunity compelling...')}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Megaphone className="h-4 w-4 text-accent" />
-                      <h2 className="text-base font-semibold text-foreground">Marketing Job Description</h2>
-                    </div>
                     {(job as any).marketing_job_description ? (
                       <div
                         className="text-sm text-foreground prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
@@ -1233,33 +1248,38 @@ const JobDetail = () => {
                       <p className="text-sm italic text-muted-foreground">No marketing description yet. Click to add.</p>
                     )}
                   </EditableField>
-                </div>
+                </SectionCard>
               </TabsContent>
 
               {/* ── Pipeline Tab (kanban with DnD; DndContext is at page-level) ─ */}
               {/* ── AI Matches Tab ─────────────────────────── */}
-              <TabsContent value="matches" className="px-8 py-5 mt-0">
+              <TabsContent value="matches" className="px-6 lg:px-8 py-5 mt-0">
                 <JobMatchesList jobId={job.id} />
               </TabsContent>
 
               {/* ── Contacts Tab ───────────────────────────── */}
-              <TabsContent value="contacts" className="px-8 py-5 mt-0 space-y-5">
-                <div className="flex items-center gap-2 mb-2">
-                  <UserPlus className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold text-foreground">Job Contacts</h2>
-                  {(jobContacts as any[]).length > 0 && (
-                    <Badge variant="secondary" className="ml-1">{(jobContacts as any[]).length}</Badge>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="gold-outline"
-                    className="ml-auto gap-1.5"
-                    onClick={() => setBdSeqOpen(true)}
-                    title="Create a business-development email sequence to these contacts, drafted by Joe"
-                  >
-                    <Megaphone className="h-3.5 w-3.5" /> BD Sequence
-                  </Button>
-                </div>
+              <TabsContent value="contacts" className="px-6 lg:px-8 py-5 mt-0">
+                <SectionCard
+                  title="Job Contacts"
+                  icon={<UserPlus className="h-4 w-4" />}
+                  actions={
+                    <>
+                      {(jobContacts as any[]).length > 0 && (
+                        <Badge variant="secondary">{(jobContacts as any[]).length}</Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="gold-outline"
+                        className="gap-1.5"
+                        onClick={() => setBdSeqOpen(true)}
+                        title="Create a business-development email sequence to these contacts, drafted by Joe"
+                      >
+                        <Megaphone className="h-3.5 w-3.5" /> BD Sequence
+                      </Button>
+                    </>
+                  }
+                >
+                <div className="space-y-5">
 
                 {/* Existing contacts */}
                 {(jobContacts as any[]).length === 0 ? (
@@ -1269,7 +1289,7 @@ const JobDetail = () => {
                     {(jobContacts as any[]).map(jc => {
                       const c = jc.contact ?? jc.contacts;
                       return (
-                        <div key={jc.id} className="flex items-start gap-3 rounded-lg border border-border p-3 bg-card/40">
+                        <div key={jc.id} className="flex items-start gap-3 rounded-xl border border-card-border p-3 bg-muted/20">
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="flex items-center gap-2 flex-wrap">
                               <button
@@ -1444,6 +1464,8 @@ const JobDetail = () => {
 
                 {/* Company candidates intentionally not shown here — the
                     Contacts tab lists only the contacts assigned to this job. */}
+                </div>
+                </SectionCard>
               </TabsContent>
 
               {/* ── Source Tab (pre-pitch funnel) ─────────── */}
@@ -1527,7 +1549,7 @@ const JobDetail = () => {
                       </div>
 
                       {allSendOuts.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                        <div className="rounded-2xl border border-dashed border-card-border p-10 text-center">
                           <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                           <p className="text-sm font-medium mb-1">No send outs yet</p>
                           <p className="text-xs text-muted-foreground mb-3">Send outs will appear here once candidates are submitted.</p>
@@ -1542,11 +1564,11 @@ const JobDetail = () => {
                           </Button>
                         </div>
                       ) : filtered.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                        <div className="rounded-2xl border border-dashed border-card-border p-8 text-center text-sm text-muted-foreground">
                           No send outs in this stage.
                         </div>
                       ) : (
-                        <div className="min-w-[1100px] rounded-lg border border-border overflow-hidden">
+                        <div className="min-w-[1100px] rounded-2xl border border-card-border shadow-sm overflow-hidden">
                           <table className="w-full">
                             <thead className="table-header-green">
                               <tr>
