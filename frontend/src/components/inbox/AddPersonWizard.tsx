@@ -87,6 +87,9 @@ export interface AddPersonWizardProps {
   externalConversationId?: string | null;
   integrationAccountId?: string | null;
   senderProviderId?: string | null;
+  /** Sender display name — used as the People-Search fallback when the provider
+   *  URN / chat won't resolve (e.g. Recruiter InMail). */
+  senderName?: string | null;
   /** Pre-pick candidate/client and skip the pick_type step (one-click add). */
   initialType?: PersonType;
   onPersonLinked?: () => void;
@@ -104,10 +107,15 @@ export function AddPersonWizard({
   externalConversationId,
   integrationAccountId,
   senderProviderId,
+  senderName,
   initialType,
   onPersonLinked,
 }: AddPersonWizardProps) {
   const queryClient = useQueryClient();
+  // Canonical provider id discovered during enrichment (e.g. via People Search
+  // for an InMail sender). Cached on the person at save so future inbound
+  // messages auto-match. Falls back to the thread's senderProviderId.
+  const resolvedProviderIdRef = useRef<string | null>(null);
   const [step, setStep] = useState<Step>('pick_type');
   const [personType, setPersonType] = useState<PersonType | null>(null);
   const [matches, setMatches] = useState<PersonMatch[]>([]);
@@ -160,6 +168,7 @@ export function AddPersonWizard({
     setPersonType(initialType ?? null);
     setMatches([]);
     enrichedRef.current = false;
+    resolvedProviderIdRef.current = null;
     // LinkedIn inbound senders carry a Unipile URN/provider_id (e.g. ACoAAA...,
     // urn:li:fsd_profile:...) in sender_address, NOT a real linkedin.com URL.
     // Only seed the linkedin_url field if it actually looks like one — otherwise
@@ -350,9 +359,14 @@ export function AddPersonWizard({
     if (!opts.urlOverride && senderProviderId) body.unipile_id = senderProviderId;
     if (externalConversationId) body.chat_id = externalConversationId;
     if (integrationAccountId) body.integration_account_id = integrationAccountId;
+    // Name fallback: when the URN/chat won't resolve (Recruiter InMail), the
+    // server searches LinkedIn by name. Send the sender's name (or the bare
+    // prefill name) so that path can run.
+    const searchName = (senderName || prefill.name || '').trim();
+    if (!opts.urlOverride && searchName) body.name = searchName;
 
     // Nothing to resolve with — bail.
-    if (!body.linkedin_url && !body.chat_id && !body.unipile_id) return;
+    if (!body.linkedin_url && !body.chat_id && !body.unipile_id && !body.name) return;
 
     const res = await fetch('/api/lookup-linkedin', {
       method: 'POST',
@@ -362,6 +376,9 @@ export function AddPersonWizard({
     if (!res.ok) return;
     const profile = await res.json();
     if (!profile || Object.keys(profile).length === 0) return;
+    // Remember a canonical provider id the server discovered (People Search) so
+    // we can cache it on the person at save time.
+    if (profile.provider_id) resolvedProviderIdRef.current = profile.provider_id;
 
     if (opts.fillBlanks) {
       setForm(prev => ({
@@ -412,7 +429,7 @@ export function AddPersonWizard({
           type: match.type,
           data: form,
           conversation_id: threadId,
-          provider_id: senderProviderId || null,
+          provider_id: senderProviderId || resolvedProviderIdRef.current || null,
         }),
       });
       if (!res.ok) {
@@ -468,8 +485,9 @@ export function AddPersonWizard({
           data: resolvedForm,
           conversation_id: threadId,
           // Cache the LinkedIn provider id on the new person so future inbound
-          // messages from this sender auto-match (and re-run sentiment).
-          provider_id: senderProviderId || null,
+          // messages from this sender auto-match (and re-run sentiment). Prefer
+          // the thread's URN; fall back to one discovered via People Search.
+          provider_id: senderProviderId || resolvedProviderIdRef.current || null,
         }),
       });
 

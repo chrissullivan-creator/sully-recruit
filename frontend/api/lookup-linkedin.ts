@@ -94,8 +94,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { linkedin_url, unipile_id, chat_id, integration_account_id, account_id } = req.body || {};
-  if (!linkedin_url && !unipile_id && !chat_id) return res.status(200).json({});
+  const { linkedin_url, unipile_id, chat_id, integration_account_id, account_id, name } = req.body || {};
+  // `name` enables the People-Search fallback for InMail/unknown senders whose
+  // provider URN + chat won't resolve — so we still need at least one of these.
+  if (!linkedin_url && !unipile_id && !chat_id && !name) return res.status(200).json({});
 
   try {
     const [{ data: baseRow }, { data: keyRow }] = await Promise.all([
@@ -150,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     pushId(unipile_id);
     pushId(linkedin_url);
-    if (ids.length === 0 && !chat_id) return res.status(200).json({});
+    if (ids.length === 0 && !chat_id && !name) return res.status(200).json({});
 
     // ── Try each identifier against each account until one resolves usefully ──
     let profile: UnipileProfile | null = null;
@@ -186,6 +188,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // identifiers at all), recover a profile from the chat's messages.
     if (!profile && chat_id) {
       profile = await resolveFromChat(v2Base, apiKeyV2, acctIds, String(chat_id));
+    }
+
+    // ── Name-search fallback (v2 People Search) ──
+    // Last resort for InMail / unknown senders whose provider URN + chat won't
+    // resolve (common for Recruiter InMail): search LinkedIn by the sender's
+    // name and take the top hit. Gives us a real public profile — URL, provider
+    // id, headline/photo/location — to prefill AND a canonical provider id to
+    // cache so future inbound messages auto-match. The user reviews the result
+    // before saving, so an imperfect top hit is editable, not silently wrong.
+    // Requires a full name (≥2 tokens) to keep the search from being noise.
+    if (!profile && typeof name === "string" && name.trim().split(/\s+/).length >= 2) {
+      profile = await resolveByNameSearch(v2Base, apiKeyV2, acctIds, name.trim());
     }
 
     if (!profile) return res.status(200).json({});
@@ -258,6 +272,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (location) result.location = location;
     if (photo) result.photo = photo;
     if (resolvedUrl) result.linkedin_url = resolvedUrl;
+    // Surface the canonical LinkedIn provider id + slug so the caller can cache
+    // them on the person — this is how People-Search-resolved InMail senders get
+    // a "unipile id" backfilled (the original AEM… recruiter URN doesn't match
+    // future classic inbound).
+    const resolvedProviderId = pickString(profile.provider_id, profile.id);
+    if (resolvedProviderId) result.provider_id = resolvedProviderId;
+    if (profile.public_identifier) result.public_identifier = profile.public_identifier;
 
     return res.status(200).json(result);
   } catch (err) {
@@ -323,6 +344,93 @@ async function v2GetUser(
   } catch {
     return null;
   }
+}
+
+/** A single LinkedIn People-Search result (v2). We only read the identity bits
+ *  we can prefill from. `id` is the messaging-capable provider id. */
+interface PeopleSearchHit {
+  id?: string;
+  member_id?: string;
+  display_name?: string;
+  public_identifier?: string;
+  profile_url?: string;
+  public_picture_url?: string;
+  public_picture_url_large?: string;
+  headline?: string;
+  location?: string;
+  industry?: string;
+  network_distance?: string;
+}
+
+/** Resolve a profile by NAME via the v2 People Search endpoint
+ *  (POST /v2/{acc}/linkedin/search/people). Returns the top hit, enriched via a
+ *  direct profile read when it exposes a public identifier (so title/company
+ *  land too). Used as the final InMail/unknown-sender fallback. */
+async function resolveByNameSearch(
+  base: string,
+  apiKey: string,
+  acctIds: string[],
+  name: string,
+): Promise<UnipileProfile | null> {
+  const parts = name.split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.slice(1).join(" ") || "";
+  for (const acc of acctIds) {
+    try {
+      const r = await fetch(
+        `${base}/${encodeURIComponent(acc)}/linkedin/search/people?limit=5`,
+        {
+          method: "POST",
+          headers: { "X-API-KEY": apiKey, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            keywords: name,
+            advanced_keywords: { first_name: first, last_name: last },
+          }),
+          signal: AbortSignal.timeout(9000),
+        },
+      );
+      if (!r.ok) continue;
+      const j = (await r.json().catch(() => null)) as { data?: PeopleSearchHit[] } | null;
+      const results = Array.isArray(j?.data) ? j!.data! : [];
+      if (results.length === 0) continue;
+      const hit = results[0];
+
+      // Map the search hit to our loose profile shape (display_name, headline,
+      // location, photo, URL, provider id) so it prefills even without a second
+      // call…
+      const hitProfile: UnipileProfile = {
+        display_name: hit.display_name,
+        headline: hit.headline,
+        location: hit.location,
+        public_identifier: hit.public_identifier,
+        profile_url: hit.profile_url,
+        public_picture_url: hit.public_picture_url_large || hit.public_picture_url,
+        provider_id: hit.id,
+        id: hit.id,
+      };
+
+      // …then enrich via the public identifier to pull structured experience
+      // (current title + company), merging the provider id/url back in.
+      const slug = pickString(hit.public_identifier);
+      if (slug) {
+        const enriched = await v2GetUser(base, apiKey, acc, slug);
+        if (enriched && hasUsefulProfile(enriched)) {
+          return {
+            ...hitProfile,
+            ...enriched,
+            provider_id: hitProfile.provider_id || enriched.provider_id,
+            profile_url: enriched.profile_url || hitProfile.profile_url,
+            public_identifier: enriched.public_identifier || hitProfile.public_identifier,
+            public_picture_url: enriched.public_picture_url || hitProfile.public_picture_url,
+          };
+        }
+      }
+      return hasUsefulProfile(hitProfile) ? hitProfile : null;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /** Recover a profile from a chat's messages (v2). v2 has no chat-attendees
