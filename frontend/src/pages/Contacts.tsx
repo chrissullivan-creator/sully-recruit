@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
@@ -226,11 +226,10 @@ const Contacts = () => {
 
   return (
     <MainLayout>
+      <div className="px-6 pt-6 lg:px-8">
       <PageHeader
         title="Contacts"
-        description="Your network of hiring managers, HR leaders, and decision makers."
-        eyebrow="Network"
-        icon={<Users />}
+        count={filteredContacts.length}
         actions={
           <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
@@ -284,7 +283,8 @@ const Contacts = () => {
           </div>
         }
       />
-      
+      </div>
+
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <div className="relative flex-1 min-w-[16rem] max-w-md">

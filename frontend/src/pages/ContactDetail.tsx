@@ -21,7 +21,7 @@ import {
   Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User,
   FileText, Loader2, Check, X, ExternalLink,
-  Clock, Search, Users, Send,
+  Clock, Search, Users, Send, ChevronDown,
   Martini, RefreshCw, Send as SendIcon,
   PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play, MoreHorizontal,
 } from 'lucide-react';
@@ -586,17 +586,23 @@ const ContactDetail = () => {
         avatar={<PersonAvatar name={fullName} src={c.avatar_url} size="lg" />}
         title={fullName}
         badges={
-          <>
-            <Badge variant="secondary" className={cn('text-xs border shrink-0', statusCfg.className)}>
-              {statusCfg.label}
-            </Badge>
-            {Array.isArray(c.roles) && c.roles.includes('client') && (
-              <Badge variant="secondary" className="text-xs bg-accent/15 text-accent border-accent/30 shrink-0">Client</Badge>
-            )}
-            {Array.isArray(c.roles) && c.roles.includes('candidate') && (
-              <Badge variant="secondary" className="text-xs bg-green-500/10 text-green-600 border-green-500/20 shrink-0">Candidate</Badge>
-            )}
-          </>
+          (() => {
+            // Uniform tag row — status + role(s) + function tags, one chip style.
+            const chip = 'inline-flex items-center rounded-full border border-card-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium text-foreground shrink-0';
+            const roles: string[] = Array.isArray(c.roles) ? c.roles : [];
+            const functionTags: string[] = [
+              ...((c.departments as string[]) ?? []),
+              ...((c.products as string[]) ?? []),
+            ].filter(Boolean).slice(0, 6);
+            return (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={chip}>{statusCfg.label}</span>
+                {roles.includes('client') && <span className={chip}>Client</span>}
+                {roles.includes('candidate') && <span className={chip}>Candidate</span>}
+                {functionTags.map((t, i) => <span key={i} className={chip}>{t}</span>)}
+              </div>
+            );
+          })()
         }
         subtitle={
           <span className="truncate">
@@ -607,29 +613,37 @@ const ContactDetail = () => {
           </span>
         }
         contactActions={
-          <>
-            {(() => {
-              // Prefer work_email for client outreach (sequences send to
-              // work_email; personal_email is shown for context). Fall back to
-              // the legacy email column during the migration off it.
-              const mailto = (contact as any).work_email || (contact as any).personal_email || contact.email;
-              return mailto ? (
-                <a href={`mailto:${mailto}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={mailto}>
-                  <Mail className="h-4 w-4" />
-                </a>
-              ) : null;
-            })()}
-            {contact.phone && (
-              <a href={`tel:${contact.phone}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={contact.phone}>
-                <Phone className="h-4 w-4" />
-              </a>
-            )}
-            {contact.linkedin_url && (
-              <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title="LinkedIn Profile">
-                <Linkedin className="h-4 w-4" />
-              </a>
-            )}
-          </>
+          (() => {
+            // Consolidated "Reach out" — Email / SMS / LinkedIn / Call.
+            // Reuses the existing mailto / sms / tel paths; gates per channel.
+            const mailto = (contact as any).work_email || (contact as any).personal_email || contact.email;
+            const phone = (contact as any).mobile_phone || contact.phone;
+            const linkedinUrl = contact.linkedin_url as string | undefined;
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="gold" size="sm">
+                    <Send className="h-3.5 w-3.5 mr-1" /> Reach out
+                    <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem disabled={!mailto} onClick={() => { if (mailto) window.location.href = `mailto:${mailto}`; }}>
+                    <Mail className="h-3.5 w-3.5 mr-2" /> Email
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!phone} onClick={() => { if (phone) window.location.href = `sms:${phone}`; }}>
+                    <MessageSquare className="h-3.5 w-3.5 mr-2" /> SMS
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!linkedinUrl} onClick={() => { if (linkedinUrl) window.open(linkedinUrl, '_blank'); }}>
+                    <Linkedin className="h-3.5 w-3.5 mr-2" /> LinkedIn
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!phone} onClick={() => { if (phone) window.location.href = `tel:${phone}`; }}>
+                    <Phone className="h-3.5 w-3.5 mr-2" /> Call
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            );
+          })()
         }
         actions={
           <>

@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { JobStageBoard, type BoardColumn } from '@/components/pipeline/JobStageBoard';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
@@ -12,7 +13,7 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VALUES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
+import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VALUES } from '@/lib/jobStatus';
 import { PROGRESSION, canonicalConfig } from '@/lib/pipeline';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
@@ -205,13 +206,12 @@ const Jobs = () => {
 
   return (
     <MainLayout>
-      <PageHeader
-        eyebrow="Pipeline"
-        title="Jobs"
-        description="Track your active job requisitions through the pipeline."
-        icon={<Briefcase />}
-        actions={
-          <div className="flex items-center gap-2">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
+        <PageHeader
+          title="Jobs"
+          count={filteredJobs.length}
+          actions={
+            <div className="flex items-center gap-2">
             {/* Segmented control — Leads / Hot Jobs / List. */}
             <div className="flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
               <button
@@ -258,11 +258,10 @@ const Jobs = () => {
               Add Job
             </Button>
           </div>
-        }
-      />
-      
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          }
+        />
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="relative max-w-md flex-1 min-w-[220px]">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
@@ -430,19 +429,9 @@ const Jobs = () => {
                     <td className="px-4 py-3.5 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
                     <td className="px-4 py-3.5">
                       <div className="flex flex-col items-start gap-1">
-                        <span className={cn(
-                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                          jobStatusMeta(job.status)?.pillClass ?? 'bg-gray-100 text-gray-600',
-                        )}>
-                          {jobStatusLabel(job.status)}
-                        </span>
+                        <StatusBadge kind="job" value={job.status} />
                         {job.status === 'lead' && (
-                          <span className={cn(
-                            'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
-                            leadStageMeta((job as any).lead_stage || 'new')?.pillClass ?? 'bg-gray-100 text-gray-600',
-                          )}>
-                            {leadStageLabel((job as any).lead_stage)}
-                          </span>
+                          <StatusBadge kind="lead-stage" value={(job as any).lead_stage} />
                         )}
                       </div>
                     </td>

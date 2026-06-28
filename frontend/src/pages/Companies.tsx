@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { useCompanies } from '@/hooks/useData';
@@ -129,21 +129,19 @@ const Companies = () => {
 
   return (
     <MainLayout>
-      <PageHeader
-        title="Companies"
-        description="Manage your client companies and target accounts."
-        eyebrow="Accounts"
-        icon={<Building />}
-        actions={
-          <Button variant="gold" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add Company
-          </Button>
-        }
-      />
-
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
-        <div className="flex flex-wrap items-center gap-3 mb-6">
+        <PageHeader
+          title="Companies"
+          count={filteredCompanies.length}
+          actions={
+            <Button variant="gold" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add Company
+            </Button>
+          }
+        />
+
+        <div className="mt-6 flex flex-wrap items-center gap-3 mb-6">
           <div className="relative flex-1 min-w-[16rem] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input

@@ -15,6 +15,7 @@ import { PicklistEditSection } from '@/components/shared/PicklistEditSection';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { FieldEditDialog } from '@/components/jobs/FieldEditDialog';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
+import { StatusBadge } from '@/components/shared/StatusBadge';
 import JobMatchesList from '@/components/jobs/JobMatchesList';
 import { CreateBdSequenceDialog } from '@/components/jobs/CreateBdSequenceDialog';
 import { useJob, useContacts, useJobSendOuts, useCompanies, useJobFunctions } from '@/hooks/useData';
@@ -794,21 +795,20 @@ const JobDetail = () => {
         }
         title={job.title}
         badges={
-          <>
-            {/* Status pill */}
-            <span className={cn(
-              'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border',
-              jobStatusMeta(job.status)?.pillClass ?? 'bg-muted text-muted-foreground border-border',
-            )}>
-              {jobStatusLabel(job.status)}
-            </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* Status pill — shared StatusBadge (lib/jobStatus colors) */}
+            <StatusBadge kind="job" value={job.status} />
+            {/* Lead sub-stage — only meaningful while status==='lead' */}
+            {job.status === 'lead' && (
+              <StatusBadge kind="lead-stage" value={(job as any).lead_stage} />
+            )}
             {/* Priority badge — gold treatment */}
             {(job as any).priority && (job as any).priority !== 'normal' && (
               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gold/15 text-gold-deep text-[10px] font-semibold uppercase tracking-wider border border-gold/30">
                 <Martini className="h-2.5 w-2.5 fill-current" /> {(job as any).priority}
               </span>
             )}
-          </>
+          </div>
         }
         subtitle={
           <>

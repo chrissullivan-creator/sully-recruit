@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -399,11 +399,10 @@ const Candidates = () => {
 
   return (
     <MainLayout>
+      <div className="px-8 pt-6">
       <PageHeader
         title="Candidates"
-        description="Track candidates through interview stages across all jobs."
-        eyebrow="Pipeline"
-        icon={<Users />}
+        count={totalCount}
         actions={
           <div className="flex items-center gap-2">
             <div className="flex items-center border border-border rounded-lg overflow-hidden">
@@ -449,7 +448,8 @@ const Candidates = () => {
           </div>
         }
       />
-      
+      </div>
+
       <div className="flex flex-1 overflow-hidden">
         {/* ── Filter Sidebar ─────────────────────────────────────────────── */}
         {filterSidebarOpen && (

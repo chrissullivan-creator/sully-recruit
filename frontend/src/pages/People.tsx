@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageHeader } from '@/components/layout/PageHeader';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,7 +15,6 @@ import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
   MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase, Upload,
-  Contact,
 } from 'lucide-react';
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
@@ -280,11 +279,10 @@ const People = () => {
 
   return (
     <MainLayout>
+      <div className="px-8 pt-6">
       <PageHeader
         title="People"
-        eyebrow="Network"
-        icon={<Contact />}
-        description="Everyone in your network — candidates, clients, and the people who are both."
+        count={total}
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => navigate('/people/import')} className="gap-1.5">
@@ -339,6 +337,7 @@ const People = () => {
           </div>
         }
       />
+      </div>
 
       <div className="p-8">
         {/* Tabs — segmented control */}

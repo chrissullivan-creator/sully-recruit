@@ -16,8 +16,11 @@ import {
   Building, Briefcase, FileText, Upload,
   Loader2, ExternalLink, Edit, Check, X, User, Users,
   FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Martini,
-  Rss,
+  Rss, Mail, Phone, Send,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { JobPostingsTab } from '@/components/companies/JobPostingsTab';
 import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
@@ -420,7 +423,7 @@ const CompanyDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('candidates')
-        .select('id, full_name, first_name, last_name, title, current_title, email, status, roles')
+        .select('id, full_name, first_name, last_name, title, current_title, email, phone, status, roles')
         .eq('company_id', id!)
         .contains('roles', ['client'])
         .order('created_at', { ascending: false })
@@ -530,6 +533,40 @@ const CompanyDetail = () => {
             {company.company_type}
           </Badge>
         )}
+        contactActions={
+          (() => {
+            // Reach out to the company's primary (most recent) client contact —
+            // Email / Call. Disabled when that contact has no email/phone.
+            const primary = (contacts as any[])[0];
+            const mailto = primary?.email as string | undefined;
+            const phone = primary?.phone as string | undefined;
+            if (!primary) return null;
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="gold" size="sm">
+                    <Send className="h-3.5 w-3.5 mr-1" /> Reach out
+                    <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <p className="px-2 py-1.5 text-[11px] text-muted-foreground truncate">
+                    {primary.full_name || `${primary.first_name ?? ''} ${primary.last_name ?? ''}`.trim() || 'Primary contact'}
+                  </p>
+                  <DropdownMenuItem disabled={!mailto} onClick={() => { if (mailto) window.location.href = `mailto:${mailto}`; }}>
+                    <Mail className="h-3.5 w-3.5 mr-2" /> Email
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={!phone} onClick={() => { if (phone) window.location.href = `tel:${phone}`; }}>
+                    <Phone className="h-3.5 w-3.5 mr-2" /> Call
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate(`/contacts/${primary.id}`)}>
+                    <User className="h-3.5 w-3.5 mr-2" /> View contact
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            );
+          })()
+        }
       />
 
       <div className="px-8 pt-5">
