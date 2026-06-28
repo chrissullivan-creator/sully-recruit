@@ -18,7 +18,7 @@ import {
   Search, Mail, MessageSquare, Linkedin, Phone, Users,
   UserCheck, Send, Loader2, MoreVertical, Check,
   ChevronRight, Circle, CheckCircle2, AlertCircle, MapPin,
-  Building, Link as LinkIcon, UserPlus, ArrowLeft, ArrowRight,
+  Building, Link as LinkIcon, Unlink as UnlinkIcon, UserPlus, ArrowLeft, ArrowRight,
   PenSquare, Plus, Paperclip, X as XIcon, Trash2, UserRound,
   CheckSquare, Square, MailOpen, Archive, Rows3, Rows2,
   Star, Clock as ClockIcon, Bell, Sun, CalendarClock,
@@ -392,6 +392,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
   // "Link or Add Record" add-UI disappears immediately instead of lingering
   // until the thread query refetches and resolves the linked entity.
   const [justLinked, setJustLinked] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
   // Clear the optimistic flag whenever we switch threads.
   useEffect(() => { setJustLinked(false); }, [thread?.id]);
 
@@ -473,6 +474,37 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
       setLinkResults([]);
     }
     setLinking(false);
+  };
+
+  // Undo a mis-tag: detach this conversation (and its messages) from the
+  // currently-linked person so the panel returns to the "Link or Add Record"
+  // state and you can pick the correct record. Does NOT delete the person —
+  // only the conversation↔person link is cleared.
+  const handleUnlink = async () => {
+    if (!thread) return;
+    const linkedName = (entity as any)?.full_name || thread.candidate_name || thread.contact_name || 'this record';
+    if (!window.confirm(`Unlink this conversation from ${linkedName}? The messages will return to "unlinked" so you can attach the correct person.`)) return;
+    setUnlinking(true);
+    const { error } = await supabase
+      .from('conversations')
+      .update({ candidate_id: null, contact_id: null })
+      .eq('id', thread.id);
+    if (error) {
+      toast.error('Failed to unlink: ' + error.message);
+    } else {
+      // Detach the messages too (re-linking later backfills them). needs_link
+      // flags the thread back into the inbox "Other"/unlinked surfaces.
+      await supabase
+        .from('messages')
+        .update({ candidate_id: null, contact_id: null, needs_link: true } as any)
+        .eq('conversation_id', thread.id);
+      toast.success('Unlinked — now pick the correct record');
+      setJustLinked(false);
+      setLinkSearch('');
+      setLinkResults([]);
+      invalidateCommsScope(queryClient);
+    }
+    setUnlinking(false);
   };
 
   if (!thread) return null;
@@ -559,6 +591,16 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
                 </Button>
               </Link>
             )}
+            {/* Escape hatch for a mis-tag: detach this thread so you can attach
+                the right person. */}
+            <button
+              onClick={handleUnlink}
+              disabled={unlinking}
+              className="w-full flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground hover:text-destructive transition-colors py-1 disabled:opacity-50"
+            >
+              {unlinking ? <Loader2 className="h-3 w-3 animate-spin" /> : <UnlinkIcon className="h-3 w-3" />}
+              Wrong person? Unlink &amp; re-add
+            </button>
           </div>
         ) : (isLinked || justLinked) ? (
           // Linked, but the entity row hasn't loaded back yet (or we just
