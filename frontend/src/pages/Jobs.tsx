@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -56,7 +56,19 @@ const HOT_COLUMNS: BoardColumn[] = [
 
 const Jobs = () => {
   const navigate = useNavigate();
-  const [view, setView] = useState<'leads' | 'jobs' | 'list'>('jobs');
+  // View is URL-driven so the sidebar sub-items (Leads / Hot Jobs / List) deep-link
+  // here. Hot Jobs is the param-less default.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const view: 'leads' | 'jobs' | 'list' =
+    viewParam === 'leads' ? 'leads' : viewParam === 'list' ? 'list' : 'jobs';
+  const setView = (v: 'leads' | 'jobs' | 'list') => {
+    setSearchParams((prev) => {
+      if (v === 'jobs') prev.delete('view');
+      else prev.set('view', v);
+      return prev;
+    });
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
