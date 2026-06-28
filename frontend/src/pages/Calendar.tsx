@@ -332,7 +332,7 @@ function EventCard({
         className={cn(
           'w-full text-left rounded-lg border px-2 py-1.5 text-[11px] leading-tight transition-colors',
           completed
-            ? 'bg-muted/40 border-card-border text-muted-foreground line-through hover:bg-muted/60'
+            ? 'bg-muted/40 border-card-border text-muted-foreground hover:bg-muted/60'
             : 'bg-primary/5 border-primary/20 text-foreground hover:bg-primary/10 hover:border-primary/40',
         )}
       >
@@ -358,7 +358,7 @@ function EventCard({
         {end && <p className="text-[10px] text-muted-foreground tabular-nums">{format(end, 'h:mm a')}</p>}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium', completed && 'line-through text-muted-foreground')}>
+        <p className={cn('text-sm font-medium', completed && 'text-muted-foreground')}>
           {task.title.replace(/^📅\s*/, '')}
         </p>
         {task.description && (

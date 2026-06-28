@@ -235,7 +235,11 @@ export function Sidebar() {
               : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
           )}
         >
-          <Link to={item.href} className="flex flex-1 items-center gap-3 py-2 min-w-0">
+          <Link
+            to={item.href}
+            onClick={() => { if (hasChildren) setExpanded((prev) => new Set(prev).add(item.name)); }}
+            className="flex flex-1 items-center gap-3 py-2 min-w-0"
+          >
             <item.icon className={cn(
               'h-[18px] w-[18px] shrink-0 transition-colors',
               active ? 'text-sidebar-primary' : 'text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80',
