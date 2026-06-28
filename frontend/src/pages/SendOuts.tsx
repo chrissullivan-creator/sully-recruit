@@ -4,8 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Download, ChevronDown, ChevronUp, LayoutGrid, BarChart3, List } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, type DragStartEvent, type DragEndEvent, type DragOverEvent,
@@ -19,6 +20,8 @@ import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
 import { KpiTiles } from '@/components/send-outs/KpiTiles';
 import { FilterBar, type SendOutsFilters } from '@/components/send-outs/FilterBar';
 import { StageTable } from '@/components/send-outs/StageTable';
+import { SendOutsAnalytics } from '@/components/send-outs/SendOutsAnalytics';
+import { AllSendOutsTable } from '@/components/send-outs/AllSendOutsTable';
 import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { AddCandidateModal } from '@/components/candidate/AddCandidateModal';
 import { BulkActionBar } from '@/components/send-outs/BulkActionBar';
@@ -61,6 +64,19 @@ export default function SendOuts() {
   const { data: profiles = [] } = useProfiles();
   const recruiters = profiles.map((p: any) => ({ id: p.id, full_name: p.full_name, email: p.email }));
 
+  // Top-level tab: absent ⇒ pipeline. Sidebar deep-links to ?tab=analytics / ?tab=all.
+  const tabParam = searchParams.get('tab');
+  const tab: 'pipeline' | 'analytics' | 'all' =
+    tabParam === 'analytics' ? 'analytics' : tabParam === 'all' ? 'all' : 'pipeline';
+  const setTab = (next: 'pipeline' | 'analytics' | 'all') => {
+    setSearchParams((prev) => {
+      const sp = new URLSearchParams(prev);
+      if (next === 'pipeline') sp.delete('tab');
+      else sp.set('tab', next);
+      return sp;
+    });
+  };
+
   const [filters, setFilters] = useState<SendOutsFilters>(() => readFiltersFromUrl(searchParams));
   const [openStages, setOpenStages] = useState<Set<CanonicalStage>>(new Set(CANONICAL_PIPELINE.slice(0, 5).map((s) => s.key)));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -99,6 +115,8 @@ export default function SendOuts() {
     const next = writeFiltersToUrl(filters);
     const stageParam = searchParams.get('stage');
     if (stageParam) next.set('stage', stageParam);
+    const curTab = searchParams.get('tab');
+    if (curTab) next.set('tab', curTab);
     setSearchParams(next, { replace: true });
   }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -286,10 +304,12 @@ export default function SendOuts() {
         description="Every active send-out across the team — drag to advance, click to open."
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
-              {allOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              {allOpen ? 'Collapse all' : 'Expand all'}
-            </Button>
+            {tab === 'pipeline' && (
+              <Button variant="outline" size="sm" onClick={allOpen ? collapseAll : expandAll} className="gap-1">
+                {allOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {allOpen ? 'Collapse all' : 'Expand all'}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1">
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
@@ -298,10 +318,38 @@ export default function SendOuts() {
             </Button>
           </div>
         }
-      />
+      >
+        <div className="inline-flex items-center gap-1 rounded-2xl border border-card-border bg-card p-1 shadow-sm">
+          {([
+            { key: 'pipeline', label: 'Pipeline', icon: LayoutGrid },
+            { key: 'analytics', label: 'Analytics', icon: BarChart3 },
+            { key: 'all', label: 'All Send Outs', icon: List },
+          ] as const).map((t) => {
+            const Icon = t.icon;
+            const isActive = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </PageHeader>
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-6">
-        <KpiTiles rows={filteredRows} onTileClick={handleTileClick} offerFee={offerFee} />
+        {tab === 'pipeline' && (
+          <KpiTiles rows={filteredRows} onTileClick={handleTileClick} offerFee={offerFee} />
+        )}
 
         <FilterBar
           filters={filters}
@@ -312,6 +360,10 @@ export default function SendOuts() {
 
         {isLoading ? (
           <ListSkeleton rows={5} />
+        ) : tab === 'analytics' ? (
+          <SendOutsAnalytics rows={filteredRows} offerFee={offerFee} />
+        ) : tab === 'all' ? (
+          <AllSendOutsTable rows={filteredRows} onOpen={handleOpenRow} />
         ) : (
           <DndContext
             sensors={sensors}
@@ -350,7 +402,7 @@ export default function SendOuts() {
           </DndContext>
         )}
 
-        {!isLoading && filteredRows.length === 0 && (
+        {!isLoading && tab === 'pipeline' && filteredRows.length === 0 && (
           <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
             <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
             <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>

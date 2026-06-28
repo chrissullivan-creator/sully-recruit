@@ -4,6 +4,7 @@ import { PersonLink, JobLink, CompanyLink } from '@/components/shared/EntityLink
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { CommandCenter } from '@/components/dashboard/CommandCenter';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
@@ -32,6 +33,7 @@ import {
   Briefcase, Users, Calendar, FileText, Target, Mail,
   Plus, User, ChevronDown, ChevronUp,
   Building, Send, Award, XCircle, Filter,
+  LayoutDashboard, GitBranch, ListChecks, Zap, Network,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -149,12 +151,12 @@ const ListPanel = ({
 }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="rounded-2xl border border-card-border bg-card shadow-sm overflow-hidden">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-muted/30 transition-colors"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <span className={cn('flex h-7 w-7 items-center justify-center rounded-lg', accentColor)}>
             {icon}
           </span>
@@ -172,7 +174,7 @@ const ListPanel = ({
         }
       </button>
       {open && (
-        <div className="border-t border-border divide-y divide-border/50">
+        <div className="border-t border-card-border divide-y divide-card-border/60 p-1.5">
           {count === 0
             ? <p className="px-4 py-3 text-sm text-muted-foreground">None {title.toLowerCase()} this period.</p>
             : children
@@ -245,8 +247,10 @@ const Dashboard = () => {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="Workspace"
         title="Dashboard"
         description="Welcome back. Here's what's happening today."
+        icon={<LayoutDashboard />}
         actions={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -260,90 +264,90 @@ const Dashboard = () => {
             </DropdownMenuContent>
           </DropdownMenu>
         }
-      />
-
-      <div className="border-b border-border bg-card/30 px-8 py-3">
+      >
         <SegmentedNav items={[{ label: 'Overview', href: '/' }, { label: 'Today', href: '/today' }]} />
-      </div>
+      </PageHeader>
 
-      <div className="p-8 space-y-8">
+      <div className="p-8 space-y-6">
 
         {/* AI Command Center — the morning intelligence hero */}
         <CommandCenter displayName={displayName} />
 
         {/* ── Pipeline detail (date-range scoped) ───────────────────────── */}
-        <div className="flex items-center gap-2 pt-2">
-          <h2 className="text-base font-semibold text-foreground">Pipeline detail</h2>
-          <span className="text-xs text-muted-foreground">— scoped to the range below</span>
-        </div>
+        <SectionCard
+          icon={<GitBranch className="h-4 w-4" />}
+          title="Pipeline detail"
+          actions={
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <DateRangePicker value={range} onChange={setRange} />
+              <Select value={ownerScope} onValueChange={setOwnerScope}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Filter by user" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Whole Team</SelectItem>
+                  {user?.id && (
+                    <SelectItem value="me">
+                      <span className="flex items-center gap-2">
+                        <PersonAvatar name={displayName} src={recruiterAvatar(user?.email)} size="xs" />
+                        Me ({displayName})
+                      </span>
+                    </SelectItem>
+                  )}
+                  {team.filter((t: any) => t.id !== user?.id).map((t: any) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      <span className="flex items-center gap-2">
+                        <PersonAvatar name={t.full_name || t.email} src={recruiterAvatar(t.email)} size="xs" />
+                        {t.full_name || t.email}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          }
+        >
+          <div className="space-y-6">
+            <p className="text-xs text-muted-foreground">
+              Scoped to {format(range.from, 'MMM d, yyyy')} → {format(range.to, 'MMM d, yyyy')}
+            </p>
 
-        {/* Date range + owner filter */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <DateRangePicker value={range} onChange={setRange} />
-            <Select value={ownerScope} onValueChange={setOwnerScope}>
-              <SelectTrigger className="w-[180px] h-9">
-                <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Filter by user" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Whole Team</SelectItem>
-                {user?.id && (
-                  <SelectItem value="me">
-                    <span className="flex items-center gap-2">
-                      <PersonAvatar name={displayName} src={recruiterAvatar(user?.email)} size="xs" />
-                      Me ({displayName})
-                    </span>
-                  </SelectItem>
-                )}
-                {team.filter((t: any) => t.id !== user?.id).map((t: any) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    <span className="flex items-center gap-2">
-                      <PersonAvatar name={t.full_name || t.email} src={recruiterAvatar(t.email)} size="xs" />
-                      {t.full_name || t.email}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {format(range.from, 'MMM d, yyyy')} → {format(range.to, 'MMM d, yyyy')}
-          </span>
-        </div>
+            {/* Person status (3 cards, click → People filtered by status) */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">People — {range.label}</h3>
+                <span className="text-xs text-muted-foreground">Click any card to drill in</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <MetricCard label="New"         value={isLoading ? '…' : newPeople}  icon={<Users className="h-5 w-5" />}      onClick={() => navigate('/people?status=new')} />
+                <MetricCard label="Reached Out" value={isLoading ? '…' : reachedOut} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/people?status=reached_out')} />
+                <MetricCard label="Engaged"     value={isLoading ? '…' : engaged}    icon={<User className="h-5 w-5" />} highlight onClick={() => navigate('/people?status=engaged')} />
+              </div>
+            </div>
 
-        {/* ── Person status (3 cards, click → People filtered by status) ─ */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-foreground">People — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Click any card to drill in</span>
+            {/* 6-stage pipeline funnel (click → Send Outs by stage) */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Pipeline Funnel — {range.label}</h3>
+                <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
+                <MetricCard label="Send Out"    value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />}   onClick={() => navigate('/send-outs?stage=ready_to_send')} />
+                <MetricCard label="Submission"  value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/send-outs?stage=submitted')} />
+                <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interview')} />
+                <MetricCard label="Offer"       value={isLoading ? '…' : offers}      icon={<Award className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=offer')} />
+                <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=rejected')} />
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <MetricCard label="New"         value={isLoading ? '…' : newPeople}  icon={<Users className="h-5 w-5" />}      onClick={() => navigate('/people?status=new')} />
-            <MetricCard label="Reached Out" value={isLoading ? '…' : reachedOut} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/people?status=reached_out')} />
-            <MetricCard label="Engaged"     value={isLoading ? '…' : engaged}    icon={<User className="h-5 w-5" />} highlight onClick={() => navigate('/people?status=engaged')} />
-          </div>
-        </div>
-
-        {/* ── 6-stage pipeline funnel (click → Send Outs by stage) ─── */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-foreground">Pipeline Funnel — {range.label}</h2>
-            <span className="text-xs text-muted-foreground">Click any stage to open Send Outs</span>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <MetricCard label="Pitch"       value={isLoading ? '…' : pitched}     icon={<Target className="h-5 w-5" />}     onClick={() => navigate('/send-outs?stage=pitch')} />
-            <MetricCard label="Send Out"    value={isLoading ? '…' : sendOuts}    icon={<FileText className="h-5 w-5" />}   onClick={() => navigate('/send-outs?stage=ready_to_send')} />
-            <MetricCard label="Submission"  value={isLoading ? '…' : submissions} icon={<Send className="h-5 w-5" />}       onClick={() => navigate('/send-outs?stage=submitted')} />
-            <MetricCard label="Interview"   value={isLoading ? '…' : interviews}  icon={<Calendar className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=interview')} />
-            <MetricCard label="Offer"       value={isLoading ? '…' : offers}      icon={<Award className="h-5 w-5" />} highlight onClick={() => navigate('/send-outs?stage=offer')} />
-            <MetricCard label="Rejection"   value={isLoading ? '…' : rejections}  icon={<XCircle className="h-5 w-5" />}    onClick={() => navigate('/send-outs?stage=rejected')} />
-          </div>
-        </div>
+        </SectionCard>
 
         {/* ── THE THREE LISTS ───────────────────────────────────────── */}
         <div className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <ListChecks className="h-4 w-4 text-muted-foreground" />
             {range.label} — Detail
           </h2>
 
@@ -412,7 +416,7 @@ const Dashboard = () => {
         <WeekCalendar />
 
         {/* ── Tasks + Activity ───────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           <div className="lg:col-span-2">
             <DashboardTasks />
           </div>
@@ -422,29 +426,23 @@ const Dashboard = () => {
         </div>
 
         {/* ── Quick Actions ──────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 hidden">{/* legacy slot */}</div>
-          <div>
-            <div className="rounded-lg border border-border bg-card p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Quick Actions</h2>
-              <div className="space-y-2">
-                <Button variant="outline" className="w-full justify-start" onClick={() => setAddContactOpen(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                <Button variant="outline" className="w-full justify-start" onClick={() => setAddCandidateOpen(true)}><Users className="h-4 w-4 mr-2" />Add Candidate</Button>
-                <Button variant="outline" className="w-full justify-start" onClick={() => setAddJobOpen(true)}><Briefcase className="h-4 w-4 mr-2" />Add Job</Button>
-                <Button variant="outline" className="w-full justify-start" onClick={handleCreateSequence} disabled={creatingSequence}><Mail className="h-4 w-4 mr-2" />Add Sequence</Button>
-              </div>
-            </div>
+        <SectionCard icon={<Zap className="h-4 w-4" />} title="Quick Actions">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            <Button variant="outline" className="w-full justify-start" onClick={() => setAddContactOpen(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
+            <Button variant="outline" className="w-full justify-start" onClick={() => setAddCandidateOpen(true)}><Users className="h-4 w-4 mr-2" />Add Candidate</Button>
+            <Button variant="outline" className="w-full justify-start" onClick={() => setAddJobOpen(true)}><Briefcase className="h-4 w-4 mr-2" />Add Job</Button>
+            <Button variant="outline" className="w-full justify-start" onClick={handleCreateSequence} disabled={creatingSequence}><Mail className="h-4 w-4 mr-2" />Add Sequence</Button>
           </div>
-        </div>
+        </SectionCard>
 
         {/* ── Job Pipeline ─────────────────────────────────────────── */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Job Pipeline</h2>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>View All Jobs</Button>
-          </div>
+        <SectionCard
+          icon={<Network className="h-4 w-4" />}
+          title="Job Pipeline"
+          actions={<Button variant="ghost" size="sm" onClick={() => navigate('/jobs')}>View All Jobs</Button>}
+        >
           <JobPipeline />
-        </section>
+        </SectionCard>
       </div>
 
       <AddCandidateDialog open={addCandidateOpen} onOpenChange={setAddCandidateOpen} />
