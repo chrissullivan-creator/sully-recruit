@@ -388,6 +388,12 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
   const [createOpen, setCreateOpen] = useState(false);
   // Pre-picked type for one-click add; undefined → wizard asks (pick_type).
   const [createType, setCreateType] = useState<'candidate' | 'contact' | undefined>(undefined);
+  // Optimistic flag: flips true the instant a create/link succeeds so the
+  // "Link or Add Record" add-UI disappears immediately instead of lingering
+  // until the thread query refetches and resolves the linked entity.
+  const [justLinked, setJustLinked] = useState(false);
+  // Clear the optimistic flag whenever we switch threads.
+  useEffect(() => { setJustLinked(false); }, [thread?.id]);
 
   const { data: candidate } = useQuery({
     queryKey: ['candidate', thread?.candidate_id],
@@ -421,7 +427,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
 
   // Extract sender info from inbound messages for pre-filling create forms
   const firstInbound = messages.find(m => m.direction === 'inbound');
-  const senderName = firstInbound?.sender_name || thread?.candidate_name || thread?.contact_name || '';
+  const senderName = firstInbound?.sender_name || thread?.sender_name || thread?.candidate_name || thread?.contact_name || '';
   const senderAddress = firstInbound?.sender_address || '';
   // On LinkedIn channels, sender_address carries the Unipile provider id / URN
   // (not a URL or email). Pass it so the Add Person wizard can look the sender
@@ -461,6 +467,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
       // Backfill messages in this conversation
       await supabase.from('messages').update(update).eq('conversation_id', thread.id).is(entityType === 'candidate' ? 'candidate_id' : 'contact_id', null);
       toast.success(`Linked to ${entityName}`);
+      setJustLinked(true);
       invalidateCommsScope(queryClient);
       setLinkSearch('');
       setLinkResults([]);
@@ -478,7 +485,7 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="p-5 border-b border-border">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-          {isLinked ? 'Linked Record' : 'Link or Add Record'}
+          {(isLinked || justLinked) ? 'Linked Record' : 'Link or Add Record'}
         </h3>
 
         {isLinked && entity ? (
@@ -552,6 +559,14 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
                 </Button>
               </Link>
             )}
+          </div>
+        ) : (isLinked || justLinked) ? (
+          // Linked, but the entity row hasn't loaded back yet (or we just
+          // created/linked it). Show a brief confirmation instead of the
+          // "Link or Add Record" add-UI so it disappears immediately.
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>Linked — refreshing…</span>
           </div>
         ) : (
           <div className="space-y-3">
@@ -668,8 +683,10 @@ export function EntityPanel({ thread, messages }: { thread: InboxThread | null; 
         externalConversationId={thread.external_conversation_id}
         integrationAccountId={thread.integration_account_id}
         senderProviderId={senderProviderId}
+        senderName={senderName}
         initialType={createType}
         onPersonLinked={() => {
+          setJustLinked(true);
           invalidateCommsScope(queryClient);
         }}
       />
@@ -1684,6 +1701,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
           externalConversationId={thread.external_conversation_id}
           integrationAccountId={thread.integration_account_id}
           senderProviderId={thread.channel?.startsWith('linkedin') && !senderAddress.includes('linkedin.com') ? senderAddress : undefined}
+          senderName={senderName}
           initialType={createType}
           onPersonLinked={() => {
             invalidateCommsScope(queryClient);

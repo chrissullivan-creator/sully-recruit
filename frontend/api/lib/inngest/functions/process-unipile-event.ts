@@ -69,6 +69,48 @@ type LinkedinEntityMatch = {
 // don't represent inbound communication we need to log.
 const IGNORED_V2_TYPES = /^(email\.folder\.|email\.account\.|account\.|users\.profile\.|message\.read|chat\.read)/i;
 
+/** Strip HTML tags / decode the few entities Unipile bodies carry. */
+function stripHtml(s: string): string {
+  return s
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Pull the message text out of a Unipile LinkedIn/Recruiter payload. Classic
+ * DMs use `text`, but Recruiter/InMail variants put the body under any of
+ * several keys (and sometimes only as HTML), so probe all of them — matching
+ * the richer extractor in the unipile-webhook edge fn. Returns "" when there's
+ * genuinely no text (e.g. attachment-only / system event).
+ */
+function extractLinkedinBody(messageData: any): string {
+  const raw =
+    messageData.text ??
+    messageData.body ??
+    messageData.content ??
+    messageData.message_text ??
+    messageData.body_html ??
+    messageData.rendered_body ??
+    messageData.text_html ??
+    messageData.inmail_body ??
+    messageData.inmail_text ??
+    messageData.subject ??
+    (typeof messageData.message === "string" ? messageData.message : null) ??
+    messageData.message?.text ??
+    messageData.message?.body ??
+    null;
+  if (!raw) return "";
+  const str = String(raw).trim();
+  if (!str) return "";
+  return str.startsWith("<") ? stripHtml(str) : str;
+}
+
 function getLinkedinSenderProviderId(messageData: any): string | null {
   return messageData.sender_id
     || messageData.sender?.attendee_provider_id
@@ -437,20 +479,31 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   const messageData = event.payload || event.data || event.message || event;
   const senderId = getLinkedinSenderProviderId(messageData);
   const senderProfileUrl = getLinkedinSenderProfileUrl(messageData);
-  const messageBody = messageData.text || messageData.body || "";
+  const messageBody = extractLinkedinBody(messageData);
   const unipileMessageId = messageData.id || messageData.message_id;
   const externalConversationId = messageData.conversation_id || messageData.chat_id;
 
   // Resolve Unipile account_id → our internal integration_accounts.id.
   // Used as part of the UNIQUE key when looking up / inserting conversations
   // so we don't re-create a duplicate row per webhook delivery.
+  //
+  // CRITICAL: LinkedIn (esp. Recruiter/InMail) webhooks now arrive on the v2
+  // envelope carrying the v2 `acc_xxx` id, which lives in the
+  // `unipile_account_id_v2` column — NOT the v1 short id in `unipile_account_id`.
+  // Matching only the v1 column left integration_account_id NULL for every v2
+  // delivery, and because the conversation UNIQUE index is
+  // (integration_account_id, channel, external_conversation_id) and Postgres
+  // treats NULLs as distinct, dedup silently broke → a brand-new (often empty)
+  // conversation row per webhook delivery → "Conversation starting…" / blank
+  // panes in the inbox. Match EITHER column so v1 and v2 both resolve.
   const unipileAccountId = event.account_id || event.payload?.account_id;
   let integrationAccountId: string | null = null;
   if (unipileAccountId) {
     const { data: ia } = await supabase
       .from("integration_accounts")
       .select("id")
-      .eq("unipile_account_id", unipileAccountId)
+      .or(`unipile_account_id.eq.${unipileAccountId},unipile_account_id_v2.eq.${unipileAccountId}`)
+      .limit(1)
       .maybeSingle();
     integrationAccountId = ia?.id ?? null;
   }
@@ -486,13 +539,21 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
   // Previous code looked up by `id` (UUID PK) with a Unipile chat-id string,
   // which never matched → every webhook inserted a fresh row.
   async function findOrCreateConversation(personColumn: "candidate_id" | "contact_id" | null, personId: string | null): Promise<string | null> {
-    if (externalConversationId && integrationAccountId) {
-      const { data: existing } = await supabase
+    // Dedup lookup. When we resolved an integration account, match on the full
+    // unique key. When we DIDN'T (unknown/unmapped account_id), the unique index
+    // can't protect us (NULL iaid is distinct in Postgres), so still look up by
+    // (channel, external_conversation_id) and reuse the earliest row to avoid
+    // piling up duplicate empty conversations for the same chat.
+    if (externalConversationId) {
+      let q = supabase
         .from("conversations")
         .select("id")
         .eq("external_conversation_id", externalConversationId)
-        .eq("integration_account_id", integrationAccountId)
-        .eq("channel", channel)
+        .eq("channel", channel);
+      q = integrationAccountId
+        ? q.eq("integration_account_id", integrationAccountId)
+        : q.is("integration_account_id", null);
+      const { data: existing } = await q
         .order("created_at", { ascending: true })
         .limit(1);
       if (existing && existing.length > 0) return existing[0].id;
