@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,8 @@ import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs, useJobPipelineStages } from '@/hooks/useData';
 import { CompanyLink } from '@/components/shared/EntityLinks';
-import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Martini, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { List, Search, Upload, ListTodo, MoreHorizontal, Briefcase, RefreshCw, Trash2, Eye, Layers, Target, Flame, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VALUES, leadStageMeta, leadStageLabel } from '@/lib/jobStatus';
@@ -56,7 +57,19 @@ const HOT_COLUMNS: BoardColumn[] = [
 
 const Jobs = () => {
   const navigate = useNavigate();
-  const [view, setView] = useState<'leads' | 'jobs' | 'list'>('jobs');
+  // View is URL-driven so the sidebar sub-items (Leads / Hot Jobs / List) deep-link
+  // here. Hot Jobs is the param-less default.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const view: 'leads' | 'jobs' | 'list' =
+    viewParam === 'leads' ? 'leads' : viewParam === 'list' ? 'list' : 'jobs';
+  const setView = (v: 'leads' | 'jobs' | 'list') => {
+    setSearchParams((prev) => {
+      if (v === 'jobs') prev.delete('view');
+      else prev.set('view', v);
+      return prev;
+    });
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -192,17 +205,22 @@ const Jobs = () => {
 
   return (
     <MainLayout>
-      <PageHeader 
-        title="Jobs" 
+      <PageHeader
+        eyebrow="Pipeline"
+        title="Jobs"
         description="Track your active job requisitions through the pipeline."
+        icon={<Briefcase />}
         actions={
           <div className="flex items-center gap-2">
-            <div className="flex items-center border border-border rounded-lg overflow-hidden">
+            {/* Segmented control — Leads / Hot Jobs / List. */}
+            <div className="flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
               <button
                 onClick={() => setView('leads')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
-                  view === 'leads' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                  view === 'leads'
+                    ? 'bg-primary/10 text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                 )}
               >
                 <Target className="h-4 w-4" /> Leads
@@ -210,17 +228,21 @@ const Jobs = () => {
               <button
                 onClick={() => setView('jobs')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-l border-border',
-                  view === 'jobs' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                  view === 'jobs'
+                    ? 'bg-primary/10 text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                 )}
               >
-                <Flame className="h-4 w-4" /> Jobs
+                <Flame className="h-4 w-4" /> Hot Jobs
               </button>
               <button
                 onClick={() => setView('list')}
                 className={cn(
-                  'p-2 transition-colors border-l border-border',
-                  view === 'list' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'flex items-center justify-center rounded-lg p-1.5 transition-colors',
+                  view === 'list'
+                    ? 'bg-primary/10 text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                 )}
                 title="List view"
               >
@@ -242,17 +264,17 @@ const Jobs = () => {
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="relative max-w-md flex-1 min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search jobs…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-10 pl-10 pr-4 rounded-xl border border-card-border bg-card text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
             />
           </div>
           {view === 'list' && (
-            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+            <label className="flex items-center gap-2 rounded-xl border border-card-border bg-card px-3.5 py-2 text-sm text-muted-foreground shadow-sm cursor-pointer select-none">
               <Checkbox checked={showClosed} onCheckedChange={(v) => setShowClosed(!!v)} />
               Show closed (Filled / Closed Lost)
             </label>
@@ -261,7 +283,7 @@ const Jobs = () => {
 
         {/* Bulk action bar — list view, when rows are selected. */}
         {view === 'list' && selectedIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+          <div className="flex items-center gap-3 mb-4 rounded-2xl border border-accent/30 bg-accent/5 px-4 py-2.5 shadow-sm">
             <span className="text-sm font-medium text-foreground">{selectedIds.length} selected</span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -311,9 +333,14 @@ const Jobs = () => {
           />
         ) : view === 'leads' ? (
           <div>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Leads by stage — drag a card to advance it. Convert a lead to a worked job with “Convert to Hot” on its page.
-            </p>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                <Target className="h-3 w-3" /> {leadJobs.length} lead{leadJobs.length === 1 ? '' : 's'}
+              </span>
+              <p className="text-xs text-muted-foreground">
+                Drag a card to advance its stage. Convert a lead to a worked job with “Convert to Hot” on its page.
+              </p>
+            </div>
             {leadJobs.length === 0 ? (
               <EmptyState icon={Target} title="No leads" description="New job leads land here. Add a job as a lead to start working it." />
             ) : (
@@ -327,9 +354,14 @@ const Jobs = () => {
           </div>
         ) : view === 'jobs' ? (
           <div>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Each job sits in the column of its furthest-along candidate. Move candidates through the pipeline to change it.
-            </p>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
+                <Flame className="h-3 w-3" /> {hotJobs.length} active
+              </span>
+              <p className="text-xs text-muted-foreground">
+                Each job sits in the column of its furthest-along candidate. Move candidates through the pipeline to change it.
+              </p>
+            </div>
             {hotJobs.length === 0 ? (
               <EmptyState icon={Flame} title="No active jobs" description="Jobs you’re actively recruiting for appear here, grouped by how far their candidates have progressed." />
             ) : (
@@ -342,6 +374,7 @@ const Jobs = () => {
             )}
           </div>
         ) : (
+          <SectionCard flush bodyClassName="overflow-hidden rounded-2xl">
           <HorizontalTableScroll stickyHeader minWidth={1200}>
             <table className="w-full">
               <thead className="table-header-green sticky top-0 z-20">
@@ -360,21 +393,21 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-border">
                  {filteredJobs.map((job) => (
-                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className={cn('group hover:bg-muted/50 transition-colors cursor-pointer', selectedIds.includes(job.id) && 'bg-accent/5')}>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <tr key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className={cn('group transition-colors cursor-pointer hover:bg-primary/[0.03]', selectedIds.includes(job.id) && 'bg-accent/5')}>
+                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                       <Checkbox checked={selectedIds.includes(job.id)} onCheckedChange={() => toggleSelect(job.id)} aria-label={`Select ${job.title}`} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       {(job as any).job_code ? (
                         <span className="font-mono text-xs font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded">{(job as any).job_code}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm font-medium text-foreground">{job.title}</span>
+                    <td className="px-4 py-3.5">
+                      <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{job.title}</span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                    <td className="px-4 py-3.5 text-sm text-muted-foreground">
                       {(() => {
                         const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
                         const companyDomain = (job.companies as any)?.domain ?? null;
@@ -393,9 +426,9 @@ const Jobs = () => {
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{job.location ?? '-'}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5 text-sm text-muted-foreground">{job.location ?? '-'}</td>
+                    <td className="px-4 py-3.5 text-sm text-muted-foreground">{(job as any).num_openings ?? 1}</td>
+                    <td className="px-4 py-3.5">
                       <div className="flex flex-col items-start gap-1">
                         <span className={cn(
                           'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
@@ -413,10 +446,10 @@ const Jobs = () => {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
+                          <button className="p-1.5 rounded-lg hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
                             <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                           </button>
                         </DropdownMenuTrigger>
@@ -466,6 +499,7 @@ const Jobs = () => {
               </tbody>
             </table>
           </HorizontalTableScroll>
+          </SectionCard>
         )}
       </div>
 

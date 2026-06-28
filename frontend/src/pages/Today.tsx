@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SegmentedNav } from '@/components/layout/SegmentedNav';
-import { Card, CardContent } from '@/components/ui/card';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -118,54 +118,62 @@ export default function Today() {
       <PageHeader
         title="Today"
         description="Joe's morning read on who needs you — ranked by priority."
-      />
-
-      <div className="border-b border-border bg-card/30 px-8 py-3">
+        icon={<Martini />}
+      >
         <SegmentedNav items={[{ label: 'Overview', href: '/' }, { label: 'Today', href: '/today' }]} />
-      </div>
+      </PageHeader>
 
-      <div className="px-4 sm:px-6 pb-10 max-w-3xl mx-auto w-full">
-        {isLoading ? (
-          <div className="text-sm text-muted-foreground py-12 text-center">Loading…</div>
-        ) : briefings.length === 0 ? (
-          <Card className="mt-4">
-            <CardContent className="py-12 text-center">
-              <Martini className="h-8 w-8 mx-auto mb-3 text-emerald/60" />
-              <p className="font-medium">No briefing items right now</p>
-              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                Joe builds a prioritized list each morning of the people who need your
-                attention — warm replies waiting on you, hot leads, and contacts going cold.
-                Items will appear here once proactive briefings are switched on.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-6 mt-2">
-            {grouped.map(({ cat, items }) => (
-              <div key={cat}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant={CATEGORY_META[cat].variant}>{CATEGORY_META[cat].label}</Badge>
-                  <span className="text-xs text-muted-foreground">{items.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {items.map((b) => (
-                    <Card key={b.id} className="group">
-                      <CardContent className="p-3 flex items-start gap-3">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
+        <div className="max-w-3xl mx-auto w-full">
+          {isLoading ? (
+            <SectionCard>
+              <div className="text-sm text-muted-foreground py-12 text-center">Loading…</div>
+            </SectionCard>
+          ) : briefings.length === 0 ? (
+            <SectionCard>
+              <div className="py-12 text-center">
+                <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Martini className="h-6 w-6" />
+                </span>
+                <p className="font-display text-base font-semibold text-foreground">No briefing items right now</p>
+                <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                  Joe builds a prioritized list each morning of the people who need your
+                  attention — warm replies waiting on you, hot leads, and contacts going cold.
+                  Items will appear here once proactive briefings are switched on.
+                </p>
+              </div>
+            </SectionCard>
+          ) : (
+            <div className="space-y-6">
+              {grouped.map(({ cat, items }) => (
+                <div key={cat}>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Badge variant={CATEGORY_META[cat].variant}>{CATEGORY_META[cat].label}</Badge>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {items.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {items.map((b) => (
+                      <div
+                        key={b.id}
+                        className="group rounded-2xl border border-card-border bg-card shadow-sm p-4 flex items-start gap-3 transition-colors hover:border-primary/30"
+                      >
                         <button
                           onClick={() => navigate(entityPath(b))}
                           className="flex-1 text-left min-w-0"
                         >
-                          <div className="font-medium text-sm flex items-center gap-1">
-                            <span className="truncate">{b.headline}</span>
+                          <div className="font-medium text-sm text-foreground flex items-center gap-1">
+                            <span className="truncate group-hover:text-primary transition-colors">{b.headline}</span>
                             <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
                           {b.rationale && (
-                            <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
                               {b.rationale}
                             </div>
                           )}
                         </button>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-0.5 shrink-0">
                           <Button
                             size="xs"
                             variant="ghost"
@@ -191,14 +199,14 @@ export default function Today() {
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </MainLayout>
   );

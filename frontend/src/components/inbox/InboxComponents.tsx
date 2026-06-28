@@ -108,7 +108,7 @@ export function ThreadAvatar({
 // ---------- Date group header ----------
 export function DateGroupHeader({ label }: { label: string }) {
   return (
-    <div className="sticky top-0 z-10 px-3 py-1.5 bg-background/95 backdrop-blur border-b border-border/60">
+    <div className="sticky top-0 z-10 px-3 py-1.5 bg-card/95 backdrop-blur border-b border-card-border">
       <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
@@ -162,7 +162,7 @@ export function ThreadItem({
   return (
     <div
       className={cn(
-        'group w-full text-left border-b border-border/60 hover:bg-muted/40 transition-colors relative cursor-pointer',
+        'group w-full text-left border-b border-card-border hover:bg-muted/40 transition-colors relative cursor-pointer',
         compact ? 'px-3 py-2' : 'px-3 py-3.5',
         isSelected && 'bg-accent/8',
         isChecked && 'bg-accent/12',

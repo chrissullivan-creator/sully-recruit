@@ -149,12 +149,12 @@ function KanbanColumn({
 
   return (
     <div ref={setNodeRef} className={cn(
-      'rounded-lg border bg-white flex flex-col min-h-[180px] transition-all',
+      'rounded-2xl border bg-white flex flex-col min-h-[180px] transition-all',
       isOffer ? 'border-gold/30' : 'border-card-border',
       isOver && 'ring-2 ring-emerald border-emerald shadow-md bg-emerald-light/30',
     )}>
       <div className={cn(
-        'flex items-center justify-between gap-2 px-3 py-2 border-b border-card-border',
+        'flex items-center justify-between gap-2 px-3 py-2.5 rounded-t-2xl border-b border-card-border',
         isOffer ? 'bg-gold-bg' : 'bg-page-bg/40',
       )}>
         <div className="flex items-center gap-2 min-w-0">
@@ -181,7 +181,7 @@ function KanbanColumn({
       <div className="flex-1 p-2 space-y-2">
         {rows.length === 0 ? (
           <div className={cn(
-            'flex items-center justify-center h-24 text-[11px] text-center px-2 rounded border border-dashed',
+            'flex items-center justify-center h-24 text-[11px] text-center px-2 rounded-xl border border-dashed',
             isOver ? 'border-emerald text-emerald font-medium' : 'border-card-border text-muted-foreground/60',
           )}>
             {isOver ? 'Drop here →' : 'No candidates'}
@@ -212,7 +212,7 @@ function KanbanCard({ row, onClick }: { row: KanbanRow; onClick?: (row: KanbanRo
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.4 : 1 }}
       onClick={() => { if (!isDragging) onClick?.(row); }}
-      className={`group rounded-lg border border-card-border bg-white p-2.5 hover:border-emerald/40 transition-colors ${onClick ? 'cursor-pointer' : ''}`}
+      className={`group rounded-xl border border-card-border bg-white p-2.5 hover:border-emerald/40 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-200 ${onClick ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-start gap-2">
         <button

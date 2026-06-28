@@ -62,7 +62,7 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md',
+        'group cursor-pointer rounded-2xl border border-card-border bg-card p-3 transition-all duration-200 hover:border-accent/50 hover:shadow-md hover:-translate-y-0.5',
         isDragging && 'shadow-lg border-accent/50 ring-2 ring-accent/20',
       )}
     >
@@ -70,7 +70,7 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
         <button
           {...attributes}
           {...listeners}
-          className="mt-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground shrink-0"
+          className="mt-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-accent shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
           <GripVertical className="h-3.5 w-3.5" />
@@ -78,9 +78,9 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
         <div className="flex-1 min-w-0" onClick={() => navigate(`/jobs/${job.id}`)}>
           <div className="flex items-center gap-1.5">
             {job.job_code && (
-              <span className="font-mono text-[10px] font-semibold text-accent bg-accent/10 px-1 py-0.5 rounded shrink-0">{job.job_code}</span>
+              <span className="font-mono text-[10px] font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{job.job_code}</span>
             )}
-            <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-1">
+            <h4 className="text-sm font-semibold text-foreground group-hover:text-accent transition-colors line-clamp-1">
               {job.title}
             </h4>
           </div>
@@ -96,7 +96,7 @@ function JobCard({ job, isDragging }: { job: any; isDragging?: boolean }) {
           )}
           {job.status === 'lead' && (
             <span className={cn(
-              'mt-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
+              'mt-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
               leadStageMeta(job.lead_stage || 'new')?.pillClass ?? 'bg-gray-100 text-gray-600',
             )}>
               {leadStageLabel(job.lead_stage)}
@@ -122,20 +122,20 @@ function DroppableColumn({
 
   return (
     <div className="flex flex-col min-w-[280px] max-w-[300px]">
-      <div className={cn("flex items-center justify-between px-3 py-2 rounded-t-lg bg-secondary border border-border border-b-0", stage.headerClass)}>
-        <div className="flex items-center gap-2">
-          <div className={cn('h-2 w-2 rounded-full', stageColor)} />
-          <h3 className="text-sm font-medium text-foreground">{stage.label}</h3>
+      <div className={cn("flex items-center justify-between px-3 py-2.5 rounded-t-2xl bg-muted/40 border border-card-border border-b-0", stage.headerClass)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={cn('h-2 w-2 rounded-full shrink-0', stageColor)} />
+          <h3 className="text-[13px] font-semibold text-foreground truncate">{stage.label}</h3>
         </div>
-        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-card px-1.5 text-xs font-semibold text-muted-foreground tabular-nums">
           {jobs.length}
         </span>
       </div>
       <div
         ref={setNodeRef}
         className={cn(
-          'flex-1 space-y-2 rounded-b-lg border border-border bg-card/30 p-2 min-h-[200px] transition-colors',
-          isOver && 'bg-accent/5 border-accent/30',
+          'flex-1 space-y-2 rounded-b-2xl border border-card-border bg-muted/20 p-2 min-h-[200px] transition-colors',
+          isOver && 'bg-accent/5 border-accent/40',
         )}
       >
         <SortableContext items={jobs.map(j => j.id)} strategy={verticalListSortingStrategy}>
@@ -144,7 +144,7 @@ function DroppableColumn({
           ))}
         </SortableContext>
         {jobs.length === 0 && !isOver && (
-          <div className="flex items-center justify-center h-20 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center h-20 text-sm text-muted-foreground/70">
             No items
           </div>
         )}
@@ -261,8 +261,8 @@ export function JobPipeline() {
       </div>
       <DragOverlay>
         {activeJob ? (
-          <div className="w-[280px] rounded-lg border border-accent/50 bg-card p-3 shadow-xl ring-2 ring-accent/20">
-            <h4 className="text-sm font-medium text-foreground line-clamp-1">{activeJob.title}</h4>
+          <div className="w-[280px] rounded-2xl border border-accent/50 bg-card p-3 shadow-xl ring-2 ring-accent/20">
+            <h4 className="text-sm font-semibold text-foreground line-clamp-1">{activeJob.title}</h4>
             <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
               <Briefcase className="h-3 w-3" />
               {activeJob.company_name ?? (activeJob.companies as any)?.name ?? '-'}

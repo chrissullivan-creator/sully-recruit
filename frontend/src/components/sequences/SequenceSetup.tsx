@@ -6,10 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/shared/SectionCard";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Martini } from "lucide-react";
+import { Martini, Settings2 } from "lucide-react";
 
 export interface SequenceSetupData {
   name: string;
@@ -99,11 +99,8 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sequence Setup</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SectionCard title="Sequence Setup" icon={<Settings2 className="h-4 w-4" />}>
+      <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="name">Sequence Name</Label>
           <Input
@@ -289,7 +286,7 @@ export function SequenceSetup({ data, onChange, onAskJoe }: Props) {
             Ask Joe to Write This Sequence
           </Button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SectionCard>
   );
 }

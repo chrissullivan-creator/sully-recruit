@@ -18,13 +18,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
 import {
-  ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
+  Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User,
   FileText, Loader2, Check, X, ExternalLink,
-  Clock, Search, Calendar, Users, Send,
+  Clock, Search, Users, Send,
   Martini, RefreshCw, Send as SendIcon,
   PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play, MoreHorizontal,
 } from 'lucide-react';
+import { DetailHeader } from '@/components/shared/DetailHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { StatStrip } from '@/components/shared/StatStrip';
+import { AISummaryCard } from '@/components/shared/AISummaryCard';
+import { ActivityTimeline, type TimelineGroup } from '@/components/shared/ActivityTimeline';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -549,7 +555,6 @@ const ContactDetail = () => {
   }
 
   const c = contact as any;
-  const initials = `${contact.first_name?.[0] ?? ''}${contact.last_name?.[0] ?? ''}`;
   const fullName = contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim();
   const companyName = c.company_name || c.companies?.name || '';
   const statusCfg = CONTACT_STATUSES[contact.status ?? ''] ?? CONTACT_STATUSES.new;
@@ -576,20 +581,12 @@ const ContactDetail = () => {
   return (
     <MainLayout>
       {/* Top header bar */}
-      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        {c.avatar_url ? (
-          <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">
-            {initials}
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
+      <DetailHeader
+        onBack={() => navigate(-1)}
+        avatar={<PersonAvatar name={fullName} src={c.avatar_url} size="lg" />}
+        title={fullName}
+        badges={
+          <>
             <Badge variant="secondary" className={cn('text-xs border shrink-0', statusCfg.className)}>
               {statusCfg.label}
             </Badge>
@@ -599,100 +596,106 @@ const ContactDetail = () => {
             {Array.isArray(c.roles) && c.roles.includes('candidate') && (
               <Badge variant="secondary" className="text-xs bg-green-500/10 text-green-600 border-green-500/20 shrink-0">Candidate</Badge>
             )}
-          </div>
-          <p className="text-sm text-muted-foreground truncate">
+          </>
+        }
+        subtitle={
+          <span className="truncate">
             {contact.title ?? ''}{contact.title && companyName ? ' at ' : ''}
             {companyName && (
               <CompanyLink companyId={(c as any).company_id} name={companyName} className="text-muted-foreground" />
             )}
-          </p>
-        </div>
-
-        {/* Social / contact links */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {(() => {
-            // Prefer work_email for client outreach (sequences send to
-            // work_email; personal_email is shown for context). Fall back to
-            // the legacy email column during the migration off it.
-            const mailto = (contact as any).work_email || (contact as any).personal_email || contact.email;
-            return mailto ? (
-              <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
-                <Mail className="h-4 w-4" />
+          </span>
+        }
+        contactActions={
+          <>
+            {(() => {
+              // Prefer work_email for client outreach (sequences send to
+              // work_email; personal_email is shown for context). Fall back to
+              // the legacy email column during the migration off it.
+              const mailto = (contact as any).work_email || (contact as any).personal_email || contact.email;
+              return mailto ? (
+                <a href={`mailto:${mailto}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={mailto}>
+                  <Mail className="h-4 w-4" />
+                </a>
+              ) : null;
+            })()}
+            {contact.phone && (
+              <a href={`tel:${contact.phone}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={contact.phone}>
+                <Phone className="h-4 w-4" />
               </a>
-            ) : null;
-          })()}
-          {contact.phone && (
-            <a href={`tel:${contact.phone}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={contact.phone}>
-              <Phone className="h-4 w-4" />
-            </a>
-          )}
-          {contact.linkedin_url && (
-            <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
-              <Linkedin className="h-4 w-4" />
-            </a>
-          )}
-          {/* Primary actions kept inline; everything else moved into
-              the "More" dropdown so the header stays readable on
-              narrower viewports. */}
-          <button
-            onClick={() => setScheduleMeetingOpen(true)}
-            className="p-2 rounded-lg hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
-            title="Schedule meeting"
-          >
-            <CalendarPlus className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setEnrollOpen(true)}
-            className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="Enroll in sequence"
-          >
-            <Play className="h-4 w-4" />
-          </button>
-          {id && (
-            <EnrichButton
-              peopleIds={[id]}
-              variant="ghost"
-              invalidateKeys={[['contact', id], ['contacts'], ['candidate_work_history', id]]}
-            />
-          )}
+            )}
+            {contact.linkedin_url && (
+              <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title="LinkedIn Profile">
+                <Linkedin className="h-4 w-4" />
+              </a>
+            )}
+          </>
+        }
+        actions={
+          <>
+            {/* Primary actions kept inline; everything else moved into
+                the "More" dropdown so the header stays readable on
+                narrower viewports. */}
+            <button
+              onClick={() => setScheduleMeetingOpen(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors"
+              title="Schedule meeting"
+            >
+              <CalendarPlus className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setEnrollOpen(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors"
+              title="Enroll in sequence"
+            >
+              <Play className="h-4 w-4" />
+            </button>
+            {id && (
+              <EnrichButton
+                peopleIds={[id]}
+                variant="ghost"
+                invalidateKeys={[['contact', id], ['contacts'], ['candidate_work_history', id]]}
+              />
+            )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="More actions"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={handleFetchHistory} disabled={fetchingHistory}>
-                {fetchingHistory ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                ) : (
-                  <History className="h-3.5 w-3.5 mr-2" />
-                )}
-                Fetch History
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setConfirmDelete(true)}
-                className="text-red-600 focus:text-red-600 focus:bg-red-50"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete contact
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-foreground transition-colors"
+                  title="More actions"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={handleFetchHistory} disabled={fetchingHistory}>
+                  {fetchingHistory ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                  ) : (
+                    <History className="h-3.5 w-3.5 mr-2" />
+                  )}
+                  Fetch History
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete contact
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {id && (
-            <PersonRolesMenu
-              personId={id}
-              roles={(contact as any)?.roles}
-              currentType="client"
-              variant="ghost"
-            />
-          )}
-        </div>
-      </div>
+            {id && (
+              <PersonRolesMenu
+                personId={id}
+                roles={(contact as any)?.roles}
+                currentType="client"
+                variant="ghost"
+              />
+            )}
+          </>
+        }
+      />
 
       <ScheduleMeetingDialog
         open={scheduleMeetingOpen}
@@ -736,8 +739,26 @@ const ContactDetail = () => {
         {/* ============ MAIN PANEL (full width) ============ */}
         <div className="flex-1 flex flex-col overflow-hidden">
 
+          {/* Stat strip — relationship KPIs from already-loaded data */}
+          <div className="px-8 pt-6">
+            <StatStrip
+              items={[
+                { label: 'Linked Jobs', value: linkedJobs.length },
+                { label: 'Send Outs', value: sendOuts.length },
+                {
+                  label: 'Placements',
+                  value: (sendOuts as any[]).filter((s: any) => s.stage === 'placed').length,
+                  accent: true,
+                },
+                { label: 'Conversations', value: (conversations as any[]).length },
+                { label: 'Calls', value: (callLogs as any[]).length },
+              ]}
+            />
+          </div>
+
           {/* Contact info section */}
-          <div className="px-8 py-5 border-b border-border">
+          <div className="px-8 py-6 space-y-5">
+            <SectionCard title="Contact Details" icon={<User className="h-4 w-4" />}>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
               <EditableField label="First Name" value={contact.first_name} onSave={v => updateField('first_name', v)} placeholder="First name" />
               <EditableField label="Last Name" value={contact.last_name} onSave={v => updateField('last_name', v)} placeholder="Last name" />
@@ -824,7 +845,7 @@ const ContactDetail = () => {
             </div>
 
             {/* Timestamps */}
-            <div className="flex items-center gap-6 mt-4 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-5 pt-4 border-t border-card-border text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" /> Last Contacted: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '\u2014'}
               </span>
@@ -852,6 +873,7 @@ const ContactDetail = () => {
                 />
               </div>
             )}
+            </SectionCard>
           </div>
 
           {/* ---- Tabs ---- */}
@@ -859,84 +881,75 @@ const ContactDetail = () => {
             {/* Horizontally scrollable strip — same pattern as
                 CandidateDetail. Avoids the wrap/cut-off that 8 tabs
                 trigger on smaller viewports. */}
-            <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <TabsList className="bg-white border border-card-border inline-flex w-max">
-                <TabsTrigger value="joe" className="gap-1.5 snap-start">
-                  <Martini className="h-3.5 w-3.5" /> Joe Says
-                </TabsTrigger>
-                <TabsTrigger value="jobs" className="gap-1.5 snap-start">
-                  <Briefcase className="h-3.5 w-3.5" /> Jobs ({linkedJobs.length})
-                </TabsTrigger>
-                <TabsTrigger value="candidates" className="gap-1.5 snap-start">
-                  <Users className="h-3.5 w-3.5" /> Send Outs ({sendOuts.length})
-                </TabsTrigger>
-                <TabsTrigger value="communications" className="gap-1.5 snap-start">
-                  <MessageSquare className="h-3.5 w-3.5" /> Communications ({(conversations as any[]).length})
-                </TabsTrigger>
-                <TabsTrigger value="meeting-recaps" className="gap-1.5 snap-start">
-                  <PhoneCall className="h-3.5 w-3.5" /> Meeting Recaps
-                </TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5 snap-start">
-                  <History className="h-3.5 w-3.5" /> Activity
-                </TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5 snap-start">
-                  <FileText className="h-3.5 w-3.5" /> Notes
-                </TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5 snap-start">
-                  <Martini className="h-3.5 w-3.5" /> Sizzles
-                </TabsTrigger>
+            <div className="px-8 border-b border-card-border bg-card/40 overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <TabsList className="bg-transparent border-0 rounded-none p-0 h-auto inline-flex w-max gap-1">
+                {[
+                  { value: 'joe', icon: <Martini className="h-3.5 w-3.5" />, label: 'Joe Says' },
+                  { value: 'jobs', icon: <Briefcase className="h-3.5 w-3.5" />, label: `Jobs (${linkedJobs.length})` },
+                  { value: 'candidates', icon: <Users className="h-3.5 w-3.5" />, label: `Send Outs (${sendOuts.length})` },
+                  { value: 'communications', icon: <MessageSquare className="h-3.5 w-3.5" />, label: `Communications (${(conversations as any[]).length})` },
+                  { value: 'meeting-recaps', icon: <PhoneCall className="h-3.5 w-3.5" />, label: 'Meeting Recaps' },
+                  { value: 'activity', icon: <History className="h-3.5 w-3.5" />, label: 'Activity' },
+                  { value: 'notes', icon: <FileText className="h-3.5 w-3.5" />, label: 'Notes' },
+                  { value: 'sizzles', icon: <Martini className="h-3.5 w-3.5" />, label: 'Sizzles' },
+                ].map((t) => (
+                  <TabsTrigger
+                    key={t.value}
+                    value={t.value}
+                    className="gap-1.5 snap-start rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 py-3 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none hover:text-foreground transition-colors"
+                  >
+                    {t.icon} {t.label}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
               {/* ---------- JOE SAYS TAB ---------- */}
-              <TabsContent value="joe" className="px-8 py-5 mt-0">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Martini className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Joe Says</h2>
-                    {c.joe_says_updated_at && (
-                      <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
-                    )}
-                  </div>
-                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
-                    {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                    {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
-                  </Button>
-                </div>
-
-                {generatingJoe ? (
-                  <div className="flex items-center gap-3 py-10 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-sm">Joe is analyzing this contact...</span>
-                  </div>
-                ) : c.joe_says ? (
-                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
-                    {(c.joe_says as string).split('\n').map((line: string, i: number) => {
-                      if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
-                      if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
-                      return line.trim() ? (
-                        <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
-                      ) : <div key={i} className="h-1" />;
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No Joe Says yet</p>
-                    <p className="text-xs text-muted-foreground mb-4">AI brief using notes, communications, and contact history.</p>
-                    <Button variant="gold" size="sm" onClick={generateJoeSays}>
-                      <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
-                    </Button>
-                  </div>
-                )}
+              <TabsContent value="joe" className="px-8 py-6 mt-0 space-y-5">
+                <AISummaryCard
+                  title="Joe Says"
+                  actions={
+                    <>
+                      {c.joe_says_updated_at && (
+                        <span className="text-xs text-muted-foreground hidden sm:inline">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
+                      )}
+                      <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                        {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                        {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
+                      </Button>
+                    </>
+                  }
+                >
+                  {generatingJoe ? (
+                    <div className="flex items-center gap-3 py-6 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span className="text-sm">Joe is analyzing this contact...</span>
+                    </div>
+                  ) : c.joe_says ? (
+                    <div className="space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                      {(c.joe_says as string).split('\n').map((line: string, i: number) => {
+                        if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
+                        if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
+                        return line.trim() ? (
+                          <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
+                        ) : <div key={i} className="h-1" />;
+                      })}
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">No Joe Says yet</p>
+                      <p className="text-xs text-muted-foreground mb-4">AI brief using notes, communications, and contact history.</p>
+                      <Button variant="gold" size="sm" onClick={generateJoeSays}>
+                        <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
+                      </Button>
+                    </div>
+                  )}
+                </AISummaryCard>
 
                 {/* ── Ask Joe Chat ───────────────────────────────────────── */}
-                <div className="mt-6 rounded-xl border border-border">
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30 rounded-t-xl">
-                    <Martini className="h-4 w-4 text-accent" />
-                    <h3 className="text-sm font-semibold">Ask Joe about this contact</h3>
-                  </div>
+                <SectionCard title="Ask Joe about this contact" icon={<Martini className="h-4 w-4 text-accent" />} flush>
                   <div ref={joeChatScrollRef} className="h-64 overflow-y-auto p-4 space-y-3">
                     {joeChatMessages.length === 0 && (
                       <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get relationship context, meeting prep...</p>
@@ -957,7 +970,7 @@ const ContactDetail = () => {
                       </div>
                     )}
                   </div>
-                  <div className="border-t border-border p-3">
+                  <div className="border-t border-card-border p-3">
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -973,15 +986,15 @@ const ContactDetail = () => {
                       </Button>
                     </div>
                   </div>
-                </div>
+                </SectionCard>
               </TabsContent>
 
               {/* ---------- JOBS TAB ---------- */}
-              <TabsContent value="jobs" className="px-8 py-5 mt-0 space-y-5">
+              <TabsContent value="jobs" className="px-8 py-6 mt-0 space-y-5">
 
                 {/* Linked jobs list */}
                 {linkedJobs.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                  <div className="rounded-2xl border border-dashed border-card-border bg-card p-10 text-center">
                     <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No linked jobs</p>
                     <p className="text-xs text-muted-foreground">Link a job below, or jobs connected via send-outs will appear here automatically.</p>
@@ -993,7 +1006,7 @@ const ContactDetail = () => {
                       return (
                         <div
                           key={job.id}
-                          className="flex items-center gap-2 rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
+                          className="flex items-center gap-2 rounded-2xl border border-card-border bg-card shadow-sm p-4 hover:border-primary/30 transition-all"
                         >
                           <button
                             onClick={() => navigate(`/jobs/${job.id}`)}
@@ -1032,8 +1045,7 @@ const ContactDetail = () => {
                 )}
 
                 {/* Add job */}
-                <div className="border-t border-border pt-4 space-y-3">
-                  <Label className="text-sm font-medium">Link a Job</Label>
+                <SectionCard title="Link a Job" icon={<Briefcase className="h-4 w-4" />}>
                   <div className="flex items-center gap-3">
                     <div className="flex-1 relative">
                       {selectedJobId ? (
@@ -1096,13 +1108,13 @@ const ContactDetail = () => {
                       Add
                     </Button>
                   </div>
-                </div>
+                </SectionCard>
               </TabsContent>
 
               {/* ---------- CANDIDATES PITCHED TAB ---------- */}
-              <TabsContent value="candidates" className="px-8 py-5 mt-0">
+              <TabsContent value="candidates" className="px-8 py-6 mt-0">
                 {sendOuts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                  <div className="rounded-2xl border border-dashed border-card-border bg-card p-10 text-center">
                     <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No candidates pitched</p>
                     <p className="text-xs text-muted-foreground">Candidates sent out to this contact will appear here.</p>
@@ -1116,7 +1128,7 @@ const ContactDetail = () => {
                       return (
                         <div
                           key={so.id}
-                          className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 transition-all"
+                          className="rounded-2xl border border-card-border bg-card shadow-sm p-4 hover:border-primary/30 transition-all"
                         >
                           <div className="flex items-center justify-between">
                             <div className="min-w-0 flex-1">
@@ -1155,7 +1167,7 @@ const ContactDetail = () => {
               </TabsContent>
 
               {/* ---------- COMMUNICATIONS TAB ---------- */}
-              <TabsContent value="communications" className="px-8 py-5 mt-0">
+              <TabsContent value="communications" className="px-8 py-6 mt-0">
                 <div className="flex items-center gap-2 mb-5">
                   <Button variant={commFilter === 'all' ? 'secondary' : 'outline'} size="sm" onClick={() => setCommFilter('all')}>All</Button>
                   <Button variant={commFilter === 'email' ? 'secondary' : 'outline'} size="sm" onClick={() => setCommFilter('email')}>
@@ -1170,7 +1182,7 @@ const ContactDetail = () => {
                 </div>
 
                 {filteredConversations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                  <div className="rounded-2xl border border-dashed border-card-border bg-card p-10 text-center">
                     <MessageSquare className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No communications yet</p>
                     <p className="text-xs text-muted-foreground">Email, LinkedIn, and SMS conversations will appear here.</p>
@@ -1184,8 +1196,8 @@ const ContactDetail = () => {
                       );
                       return (
                         <Collapsible key={conv.id}>
-                          <div className="rounded-lg border border-border hover:border-accent/40 transition-all">
-                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
+                          <div className="rounded-2xl border border-card-border bg-card shadow-sm hover:border-primary/30 transition-all">
+                            <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors rounded-2xl">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   {conv.channel === 'email' && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
@@ -1202,7 +1214,7 @@ const ContactDetail = () => {
                               {conv.last_message_preview && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{conv.last_message_preview}</p>}
                             </CollapsibleTrigger>
                             <CollapsibleContent>
-                              <div className="border-t border-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
+                              <div className="border-t border-card-border px-4 py-3 space-y-3 max-h-96 overflow-y-auto">
                                 {messages.map((msg: any) => (
                                   <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
                                     <div className={cn(
@@ -1236,7 +1248,7 @@ const ContactDetail = () => {
               </TabsContent>
 
               {/* ---------- MEETING RECAPS TAB ---------- */}
-              <TabsContent value="meeting-recaps" className="px-8 py-5 mt-0">
+              <TabsContent value="meeting-recaps" className="px-8 py-6 mt-0">
                 <MeetingRecapsTab
                   entityId={id!}
                   entityType="contact"
@@ -1245,11 +1257,8 @@ const ContactDetail = () => {
               </TabsContent>
 
               {/* ---------- ACTIVITY TAB ---------- */}
-              <TabsContent value="activity" className="px-8 py-5 mt-0">
-                <div className="flex items-center gap-2 mb-4">
-                  <History className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Activity Timeline</h2>
-                </div>
+              <TabsContent value="activity" className="px-8 py-6 mt-0">
+                <SectionCard title="Activity Timeline" icon={<History className="h-4 w-4" />}>
                 {(() => {
                   // Build merged timeline from all data sources
                   const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
@@ -1312,34 +1321,31 @@ const ContactDetail = () => {
                     return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
                   }
 
-                  return (
-                    <div className="space-y-3">
-                      {events.map((ev, i) => (
-                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                            {ev.icon}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '\u2014'}
-                              </span>
-                            </div>
-                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
+                  // Group events by day for the shared ActivityTimeline.
+                  const groups: TimelineGroup[] = [];
+                  const byLabel = new Map<string, TimelineGroup>();
+                  events.forEach((ev) => {
+                    const label = ev.date ? format(new Date(ev.date), 'MMM d, yyyy') : '\u2014';
+                    let g = byLabel.get(label);
+                    if (!g) { g = { label, events: [] }; byLabel.set(label, g); groups.push(g); }
+                    g.events.push({
+                      icon: ev.icon,
+                      title: ev.title,
+                      time: ev.date ? format(new Date(ev.date), 'h:mm a') : undefined,
+                      meta: ev.detail || undefined,
+                    });
+                  });
+
+                  return <ActivityTimeline groups={groups} />;
                 })()}
+                </SectionCard>
               </TabsContent>
 
-              <TabsContent value="notes" className="px-8 py-5 mt-0">
+              <TabsContent value="notes" className="px-8 py-6 mt-0">
                 <EntityNotesTab entityType="contact" entityId={id!} placeholder="Add a note about this contact — call summary, hiring preferences, anything the team should see…" />
               </TabsContent>
 
-              <TabsContent value="sizzles" className="px-8 py-5 mt-0">
+              <TabsContent value="sizzles" className="px-8 py-6 mt-0">
                 {(c as any).company_id ? (
                   <SizzlesPanel scope={{ companyId: (c as any).company_id }} />
                 ) : (

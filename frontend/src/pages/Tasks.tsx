@@ -7,13 +7,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 import { PipelineTodoList } from '@/components/tasks/PipelineTodoList';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video, Loader2 } from 'lucide-react';
+import { Plus, Search, ListTodo, CheckCheck, Trash2, Calendar, List, RefreshCw, Video, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { isPast, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
@@ -74,14 +75,14 @@ function CalendarView({ tasks, isAdmin }: { tasks: any[]; isAdmin: boolean }) {
       {/* Month nav */}
       <div className="flex items-center justify-between mb-4">
         <Button variant="ghost" size="sm" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
-          ← Prev
+          <ChevronLeft className="h-4 w-4" />
         </Button>
-        <h3 className="text-sm font-semibold text-foreground">
+        <h3 className="text-sm font-display font-semibold text-foreground">
           {format(currentMonth, 'MMMM yyyy')}
           {isAdmin && <Badge variant="secondary" className="ml-2 text-[9px]">Master Calendar</Badge>}
         </h3>
         <Button variant="ghost" size="sm" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
-          Next →
+          <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
@@ -234,18 +235,18 @@ export default function Tasks() {
 
   return (
     <MainLayout>
-      <PageHeader title="To-Do's" description={`${todoTasks.length} task${todoTasks.length !== 1 ? 's' : ''}${isAdmin ? ' · Master View' : ''}`} actions={
+      <PageHeader title="To-Do's" icon={<ListTodo />} description={`${todoTasks.length} task${todoTasks.length !== 1 ? 's' : ''}${isAdmin ? ' · Master View' : ''}`} actions={
         <div className="flex items-center gap-2">
-          <div className="flex items-center border border-border rounded-lg overflow-hidden">
+          <div className="flex items-center border border-card-border rounded-full overflow-hidden bg-muted/40 p-0.5">
             <button
               onClick={() => setViewTab('list')}
-              className={cn('p-2 transition-colors', viewTab === 'list' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              className={cn('p-1.5 rounded-full transition-colors', viewTab === 'list' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
             >
               <List className="h-4 w-4" />
             </button>
             <button
               onClick={() => setViewTab('calendar')}
-              className={cn('p-2 transition-colors', viewTab === 'calendar' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              className={cn('p-1.5 rounded-full transition-colors', viewTab === 'calendar' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
             >
               <Calendar className="h-4 w-4" />
             </button>
@@ -277,15 +278,13 @@ export default function Tasks() {
             <Plus className="h-4 w-4 mr-1" /> New Task
           </Button>
         </div>
-      } />
-
-      <div className="border-b border-border bg-card/30 px-8 py-3">
+      }>
         <SegmentedNav items={[{ label: 'Calendar', href: '/calendar' }, { label: "To-Do's", href: '/tasks' }, { label: 'Interviews', href: '/interviews' }]} />
-      </div>
+      </PageHeader>
 
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 space-y-4">
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-4">
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-card-border bg-card shadow-sm px-4 py-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Search tasks…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
@@ -315,7 +314,7 @@ export default function Tasks() {
 
         {/* Bulk actions bar */}
         {selectedIds.length > 0 && viewTab === 'list' && (
-          <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+          <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 px-4 py-2.5 shadow-sm">
             <span className="text-sm font-medium text-foreground">{selectedIds.length} selected</span>
             <div className="h-4 w-px bg-border" />
             <Button variant="ghost" size="sm" onClick={handleBulkComplete} disabled={isBusy}>
@@ -333,7 +332,9 @@ export default function Tasks() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground py-8 text-center">Loading tasks…</p>
         ) : viewTab === 'calendar' ? (
-          <CalendarView tasks={filtered} isAdmin={isAdmin} />
+          <SectionCard>
+            <CalendarView tasks={filtered} isAdmin={isAdmin} />
+          </SectionCard>
         ) : (
           <div className="space-y-6">
             {/* Pipeline to-dos: open pitches / send-outs / submissions that need
@@ -341,8 +342,10 @@ export default function Tasks() {
             <PipelineTodoList userId={user?.id} isAdmin={isAdmin} />
 
             {todoTasks.length === 0 ? (
-              <div className="text-center py-12 space-y-2">
-                <ListTodo className="h-10 w-10 mx-auto text-muted-foreground/50" />
+              <div className="rounded-2xl border border-dashed border-card-border bg-card shadow-sm py-12 text-center">
+                <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <ListTodo className="h-6 w-6" />
+                </span>
                 <p className="text-sm text-muted-foreground">No tasks match your filters</p>
               </div>
             ) : (
@@ -352,7 +355,7 @@ export default function Tasks() {
                     checked={selectedIds.length === todoTasks.length && todoTasks.length > 0}
                     onCheckedChange={toggleAll}
                   />
-                  <span className="text-xs text-muted-foreground">Select all</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Select all</span>
                 </div>
                 {todoTasks.map((task) => (
                   <div key={task.id} className="flex items-start gap-2">

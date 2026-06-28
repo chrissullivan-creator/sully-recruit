@@ -150,7 +150,7 @@ const STAGE_COLORS: Record<string, string> = {
   contacted: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   replied: 'bg-green-500/10 text-green-400 border-green-500/20',
   in_review: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  offer: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  offer: 'bg-primary/10 text-primary border-primary/20',
   hired: 'bg-success/10 text-success border-success/20',
   rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
   unknown: 'bg-muted text-muted-foreground border-border',
@@ -871,7 +871,7 @@ export default function SourceProject() {
                 return (
                   <Badge
                     variant="outline"
-                    className="text-[10px] border-emerald-500/30 text-emerald-500 shrink-0"
+                    className="text-[10px] border-primary/30 text-primary shrink-0"
                     title={linked?.title ? `Linked to ${linked.title}` : 'Linked to internal job'}
                   >
                     <Briefcase className="h-3 w-3 mr-1" />
@@ -1207,7 +1207,7 @@ export default function SourceProject() {
                 <a
                   href={resumeView.blobUrl}
                   download={`${resumeView.applicantName.replace(/\s+/g, '_')}_resume${resumeView.contentType.includes('pdf') ? '.pdf' : ''}`}
-                  className="ml-auto text-xs text-emerald hover:underline inline-flex items-center gap-1"
+                  className="ml-auto text-xs text-primary hover:underline inline-flex items-center gap-1"
                 >
                   <Download className="h-3 w-3" />
                   Download
@@ -1375,7 +1375,7 @@ function ApplicantCard({ applicant: a, onDownloadResume, onSave, saving, crmMatc
               <span className="text-xs text-muted-foreground">· {networkLabel}</span>
             )}
             {a.has_resume && (
-              <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">
+              <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
                 Resume
               </Badge>
             )}
@@ -1625,7 +1625,7 @@ function CrmBadge({ match }: { match: CrmMatch }) {
       to={to}
       title={match.full_name ? `In Sully Recruit: ${match.full_name}` : 'Already in Sully Recruit'}
       onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
+      className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors whitespace-nowrap"
     >
       <CheckCircle2 className="h-3 w-3 shrink-0" />
       In CRM · {match.type === 'client' ? 'Client' : 'Candidate'}

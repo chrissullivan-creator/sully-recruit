@@ -150,7 +150,7 @@ function BranchColumn({
   previewMergeVars?: Record<string, string>;
 }) {
   return (
-    <Card className="bg-slate-50/60 border-slate-200">
+    <Card className="rounded-2xl border-card-border bg-page-bg/40 shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -166,18 +166,18 @@ function BranchColumn({
       </CardHeader>
       <CardContent className="space-y-4">
         {branch.steps.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-card-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
             No steps yet. Add a step to get started.
           </div>
         ) : (
           branch.steps.map((step, index) => (
             <div key={step.id} className="space-y-3">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <GitBranch className="h-3.5 w-3.5" />
                 <span>Step {index + 1}</span>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+              <div className="rounded-xl border border-card-border bg-card p-3 space-y-3 shadow-sm">
                 <div className="flex items-center justify-end gap-1">
                   <Button
                     variant="outline"
@@ -348,16 +348,16 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
 
   return (
     <div className="space-y-6">
-      <Card className="border-slate-200 bg-slate-50/40">
+      <Card className="rounded-2xl border-card-border bg-page-bg/40 shadow-sm">
         <CardContent className="py-5">
           <div className="flex flex-col items-center gap-4">
-            <div className="rounded-full border border-slate-300 bg-white px-5 py-2 text-sm font-medium shadow-sm">
+            <div className="rounded-full border border-primary/20 bg-primary/10 px-5 py-2 text-sm font-semibold text-primary shadow-sm">
               Start
             </div>
             <div className="flex items-center gap-3 text-muted-foreground">
-              <div className="h-px w-20 bg-slate-300" />
+              <div className="h-px w-20 bg-card-border" />
               <ArrowRight className="h-4 w-4" />
-              <div className="h-px w-20 bg-slate-300" />
+              <div className="h-px w-20 bg-card-border" />
             </div>
             <div className="text-center text-sm text-muted-foreground">
               Every sequence starts here, then runs your steps in order.
@@ -399,8 +399,8 @@ export function FlowBuilder({ initialBranches, onChange, onAskJoe, previewMergeV
 
       <SequenceWarnings branches={branches} />
 
-      <div className="bg-white/90 backdrop-blur p-3 rounded-md shadow-sm border text-[10px] text-muted-foreground space-y-1">
-        <p className="font-medium text-foreground">Engine rules (automatic):</p>
+      <div className="bg-card p-3.5 rounded-2xl shadow-sm border border-card-border text-[10px] text-muted-foreground space-y-1">
+        <p className="font-semibold text-foreground">Engine rules (automatic):</p>
         <p>&#8226; Any reply on any channel stops the sequence + Joe sentiment</p>
         <p>&#8226; Connection accepted does NOT stop (triggers LinkedIn message)</p>
         <p>&#8226; Calendar booked stops the sequence</p>
@@ -437,8 +437,8 @@ function SchedulePreview({ branches }: { branches: SequenceBranch[] }) {
   });
 
   return (
-    <div className="bg-white/90 backdrop-blur p-3 rounded-md shadow-sm border text-[11px] space-y-1">
-      <p className="font-medium text-foreground">Schedule preview (window-hours, cumulative):</p>
+    <div className="bg-card p-3.5 rounded-2xl shadow-sm border border-card-border text-[11px] space-y-1">
+      <p className="font-semibold text-foreground">Schedule preview (window-hours, cumulative):</p>
       {rows.map((r) => (
         <p key={r.idx} className="text-muted-foreground">
           <span className="font-mono">Step {r.idx}</span>{" "}

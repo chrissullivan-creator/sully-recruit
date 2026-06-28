@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Martini, Send, Loader2, Trash2, UserCheck, Users } from 'lucide-react';
@@ -164,98 +165,108 @@ export default function AskJoe() {
   return (
     <MainLayout>
       <PageHeader
+        icon={<Martini className="text-accent" />}
+        eyebrow="AI Assistant"
         title="Ask Joe"
         description="Natural-language search across people. Ask, refine, follow up."
         actions={
-          <div className="flex items-center gap-2">
-            {messages.length > 0 && (
-              <Button variant="outline" size="sm" onClick={handleClear} className="gap-1.5">
-                <Trash2 className="h-3.5 w-3.5" /> Clear
-              </Button>
-            )}
-          </div>
+          messages.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={handleClear} className="gap-1.5">
+              <Trash2 className="h-3.5 w-3.5" /> Clear
+            </Button>
+          ) : undefined
         }
-      />
+      >
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Search</span>
+          <button
+            onClick={() => setMode('candidate_search')}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+              mode === 'candidate_search'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-card text-muted-foreground border-card-border hover:border-primary',
+            )}
+          >
+            <UserCheck className="h-3 w-3" /> Candidates
+          </button>
+          <button
+            onClick={() => setMode('contact_search')}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+              mode === 'contact_search'
+                ? 'bg-accent text-accent-foreground border-accent'
+                : 'bg-card text-muted-foreground border-card-border hover:border-accent',
+            )}
+          >
+            <Users className="h-3 w-3" /> Contacts
+          </button>
+        </div>
+      </PageHeader>
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] flex flex-col">
-        {/* Mode toggle */}
-        <div className="px-6 lg:px-8 py-3 border-b border-card-border bg-white">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Search</span>
-            <button
-              onClick={() => setMode('candidate_search')}
-              className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                mode === 'candidate_search'
-                  ? 'bg-emerald text-white border-emerald'
-                  : 'bg-white text-muted-foreground border-card-border hover:border-emerald',
-              )}
-            >
-              <UserCheck className="h-3 w-3" /> Candidates
-            </button>
-            <button
-              onClick={() => setMode('contact_search')}
-              className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                mode === 'contact_search'
-                  ? 'bg-gold text-white border-gold'
-                  : 'bg-white text-muted-foreground border-card-border hover:border-gold',
-              )}
-            >
-              <Users className="h-3 w-3" /> Contacts
-            </button>
-          </div>
-        </div>
-
         {/* Conversation */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8">
           {messages.length === 0 ? (
-            <div className="max-w-2xl mx-auto text-center py-10 space-y-6">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gold/10 border border-gold/20 mx-auto">
-                <Martini className="h-7 w-7 text-gold-deep" />
+            <SectionCard className="max-w-2xl mx-auto">
+              <div className="text-center space-y-6 py-6">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 border border-accent/20 mx-auto shadow-sm">
+                  <Martini className="h-8 w-8 text-accent" />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-semibold font-display tracking-tight text-foreground">
+                    What can Joe find for you?
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Joe searches your {mode === 'candidate_search' ? 'candidates' : 'contacts'} using natural language.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => ask(s)}
+                      className="group flex items-start gap-2 rounded-2xl border border-card-border bg-card px-3.5 py-3 text-xs text-foreground shadow-sm transition-all hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5"
+                    >
+                      <Martini className="h-3.5 w-3.5 shrink-0 mt-0.5 text-accent transition-transform group-hover:scale-110" />
+                      <span className="leading-relaxed">{s}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div>
-                <h2 className="text-2xl font-bold font-display text-emerald-dark">What can Joe find for you?</h2>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Joe searches your {mode === 'candidate_search' ? 'candidates' : 'contacts'} using natural language.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => ask(s)}
-                    className="rounded-lg border border-card-border bg-white px-3 py-2 text-xs text-foreground hover:border-emerald/40 hover:bg-emerald-light/30 transition-colors"
-                  >
-                    <Martini className="inline h-3 w-3 text-gold-deep mr-1.5" />
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
+            </SectionCard>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-3">
+            <div className="max-w-3xl mx-auto space-y-4">
               {messages.map((m, i) => (
                 <div
                   key={i}
                   className={cn(
-                    'flex',
+                    'flex items-end gap-2.5',
                     m.role === 'user' ? 'justify-end' : 'justify-start',
                   )}
                 >
+                  {m.role === 'assistant' && (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 border border-accent/20">
+                      <Martini className="h-4 w-4 text-accent" />
+                    </div>
+                  )}
                   <div className={cn(
-                    'max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap',
+                    'max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap shadow-sm',
                     m.role === 'user'
-                      ? 'bg-emerald text-white rounded-br-md'
-                      : 'bg-white border border-card-border text-foreground rounded-bl-md',
+                      ? 'bg-primary text-primary-foreground rounded-br-md'
+                      : 'bg-card border border-card-border text-foreground rounded-bl-md',
                   )}>
                     {m.content || (isLoading && i === messages.length - 1 ? '…' : '')}
                   </div>
                 </div>
               ))}
               {isLoading && messages[messages.length - 1]?.role === 'user' && (
-                <div className="flex justify-start">
-                  <div className="bg-white border border-card-border rounded-2xl rounded-bl-md px-4 py-2.5 text-sm text-muted-foreground italic">
+                <div className="flex items-end gap-2.5 justify-start">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 border border-accent/20">
+                    <Martini className="h-4 w-4 text-accent" />
+                  </div>
+                  <div className="bg-card border border-card-border rounded-2xl rounded-bl-md px-4 py-2.5 text-sm text-muted-foreground italic shadow-sm">
                     <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2 not-italic" />
                     {statusLine || 'Joe is thinking…'}
                   </div>
@@ -277,8 +288,8 @@ export default function AskJoe() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-card-border bg-white px-4 sm:px-6 lg:px-8 py-3">
-          <div className="max-w-3xl mx-auto flex items-center gap-2">
+        <div className="sticky bottom-0 border-t border-card-border bg-page-bg/80 backdrop-blur px-4 sm:px-6 lg:px-8 py-4">
+          <div className="max-w-3xl mx-auto flex items-center gap-2 rounded-2xl border border-card-border bg-card p-1.5 shadow-sm focus-within:border-primary/40 focus-within:shadow-md transition-all">
             <Input
               ref={inputRef}
               value={query}
@@ -286,14 +297,14 @@ export default function AskJoe() {
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(query); } }}
               placeholder={mode === 'candidate_search' ? 'Ask about your candidates…' : 'Ask about your contacts…'}
               disabled={isLoading}
-              className="flex-1 h-10 border-card-border bg-page-bg/50"
+              className="flex-1 h-10 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             />
             <Button
               onClick={() => ask(query)}
               disabled={!query.trim() || isLoading}
               variant="gold"
               size="sm"
-              className="h-10 gap-1.5"
+              className="h-10 gap-1.5 rounded-xl"
             >
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Ask Joe

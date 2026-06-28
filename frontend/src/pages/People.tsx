@@ -1,7 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
@@ -14,6 +15,7 @@ import {
   Search, Mail, Phone, Linkedin, Play, ArrowUpDown, ArrowUp, ArrowDown,
   Loader2, MoreHorizontal, Trash2, AlertCircle, Users2, UserCheck, Users,
   MessageCircle, PhoneCall, RefreshCw, Plus, UserPlus, Briefcase, Upload,
+  Contact,
 } from 'lucide-react';
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { cn } from '@/lib/utils';
@@ -81,11 +83,39 @@ const TAB_CONFIG: { key: PersonTab; label: string }[] = [
   { key: 'applicants', label: 'Applicants'  },
 ];
 
+const TAB_KEYS: PersonTab[] = ['all', 'candidates', 'clients', 'applicants'];
+
 const People = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [tab, setTab] = useState<PersonTab>('all');
+  // Initialize the active tab from the `?tab=` deep-link param (the sidebar
+  // links straight to `?tab=applicants`); fall back to the All tab.
+  const initialTab = (() => {
+    const p = searchParams.get('tab');
+    return p && (TAB_KEYS as string[]).includes(p) ? (p as PersonTab) : 'all';
+  })();
+  const [tab, setTabState] = useState<PersonTab>(initialTab);
+
+  // Keep the URL param in sync when the user switches tabs (and respond to
+  // external param changes, e.g. the sidebar deep-link) without disturbing
+  // any other query params or the rest of the tab state machinery.
+  const setTab = (next: PersonTab) => {
+    setTabState(next);
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev);
+      if (next === 'all') p.delete('tab');
+      else p.set('tab', next);
+      return p;
+    }, { replace: true });
+  };
+  useEffect(() => {
+    const p = searchParams.get('tab');
+    const next = p && (TAB_KEYS as string[]).includes(p) ? (p as PersonTab) : 'all';
+    if (next !== tab) setTabState(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const [sortField, setSortField] = useState<SortField>('updated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -252,6 +282,8 @@ const People = () => {
     <MainLayout>
       <PageHeader
         title="People"
+        eyebrow="Network"
+        icon={<Contact />}
         description="Everyone in your network — candidates, clients, and the people who are both."
         actions={
           <div className="flex items-center gap-2">
@@ -309,25 +341,33 @@ const People = () => {
       />
 
       <div className="p-8">
-        {/* Tabs */}
-        <div className="flex items-center gap-0 mb-5 border-b border-border">
-          {TAB_CONFIG.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                'px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
-                tab === t.key
-                  ? 'border-sidebar-primary text-sidebar-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t.label}
-              <span className={cn('ml-1.5 text-xs tabular-nums', tab === t.key ? 'text-sidebar-primary' : 'text-muted-foreground/60')}>
-                {tabCounts[t.key]}
-              </span>
-            </button>
-          ))}
+        {/* Tabs — segmented control */}
+        <div className="mb-6 inline-flex items-center gap-1 rounded-2xl border border-card-border bg-card p-1 shadow-sm">
+          {TAB_CONFIG.map(t => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                )}
+              >
+                {t.label}
+                <span
+                  className={cn(
+                    'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+                    active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  {tabCounts[t.key]}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {tab === 'applicants' ? (
@@ -335,15 +375,15 @@ const People = () => {
         ) : (
         <>
         {/* Search + page select */}
-        <div className="flex items-center gap-4 mb-5">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <div className="flex flex-wrap items-center gap-3 mb-5">
+          <div className="relative flex-1 min-w-[18rem] max-w-md">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search name, company, title, email..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-11 pl-10 pr-4 rounded-xl border border-card-border bg-card text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
             />
           </div>
           {paginated.length > 0 && (
@@ -355,58 +395,67 @@ const People = () => {
 
         {/* Table */}
         {isLoading ? (
-          <TableSkeleton rows={8} cols={6} />
+          <SectionCard flush>
+            <div className="p-5">
+              <TableSkeleton rows={8} cols={6} />
+            </div>
+          </SectionCard>
         ) : isError ? (
-          <div className="text-center py-16">
-            <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
-            <h3 className="text-lg font-medium mb-1">Failed to load</h3>
-            <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4 mr-1" /> Retry
-            </Button>
-          </div>
+          <SectionCard>
+            <div className="text-center py-16">
+              <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
+              <h3 className="text-lg font-medium mb-1">Failed to load</h3>
+              <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message}</p>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4 mr-1" /> Retry
+              </Button>
+            </div>
+          </SectionCard>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16">
-            <Users2 className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
-            <h3 className="text-lg font-medium mb-1">No people found</h3>
-            <p className="text-sm text-muted-foreground">Try a different filter or search term.</p>
-          </div>
+          <SectionCard>
+            <div className="text-center py-16">
+              <Users2 className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
+              <h3 className="text-lg font-medium mb-1">No people found</h3>
+              <p className="text-sm text-muted-foreground">Try a different filter or search term.</p>
+            </div>
+          </SectionCard>
         ) : (
+          <SectionCard flush>
           <HorizontalTableScroll stickyHeader minWidth={1300}>
             <table className="w-full">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
-                  <th className="w-10 px-4 py-3">
+                  <th className="w-10 px-4 py-3.5">
                     <Checkbox
                       checked={paginated.length > 0 && paginated.every(p => selectedKeys.includes(rowKey(p)))}
                       onCheckedChange={toggleAll}
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('name')}>
                     <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Role</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('title')}>
                     <span className="flex items-center gap-1">Title <SortIcon field="title" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('company')}>
                     <span className="flex items-center gap-1">Company <SortIcon field="company" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastReached')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Contact</th>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('lastReached')}>
                     <span className="flex items-center gap-1">Last Reached <SortIcon field="lastReached" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('lastResponded')}>
                     <span className="flex items-center gap-1">Last Response <SortIcon field="lastResponded" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Channel</th>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Date Added <SortIcon field="created" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
+                  <th className="text-left px-4 py-3.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none transition-colors hover:text-foreground" onClick={() => toggleSort('updated')}>
                     <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
                   </th>
-                  <th className="w-10 px-4 py-3" />
+                  <th className="w-10 px-4 py-3.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -421,23 +470,26 @@ const People = () => {
                   return (
                     <tr
                       key={key}
-                      className="group hover:bg-muted/50 transition-colors cursor-pointer"
+                      className={cn(
+                        'group cursor-pointer transition-colors hover:bg-primary/[0.04]',
+                        selectedKeys.includes(key) && 'bg-primary/[0.06]',
+                      )}
                       onClick={() => handleRowClick(person)}
                     >
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <Checkbox checked={selectedKeys.includes(key)} onCheckedChange={() => toggleSelect(key)} />
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5">
                         <div className="flex items-center gap-3">
                           <PersonAvatar name={displayName} src={person.profile_picture_url ?? person.avatar_url} size="md" />
-                          <span className="text-sm font-medium text-foreground">{displayName}</span>
+                          <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{displayName}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5">
                         <RoleBadges roles={person.roles} sourceTable={person.source_table} />
                       </td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{person.title ?? '—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5 text-sm text-muted-foreground">{person.title ?? '—'}</td>
+                      <td className="px-4 py-3.5">
                         {(person.company_name || person.company_id) ? (
                           <CompanyLink
                             companyId={person.company_id}
@@ -452,7 +504,7 @@ const People = () => {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {person.work_email && (
                             <a href={`mailto:${person.work_email}`} title={`Work: ${person.work_email}`}
@@ -487,22 +539,22 @@ const People = () => {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">
                         {person.last_contacted_at ? new Date(person.last_contacted_at).toLocaleDateString() : '—'}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">
                         {person.last_responded_at ? new Date(person.last_responded_at).toLocaleDateString() : '—'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5">
                         <ChannelBadge channel={person.last_comm_channel} />
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
                         {person.created_at ? format(new Date(person.created_at), 'MMM d, yyyy') : '—'}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
                         {person.updated_at ? format(new Date(person.updated_at), 'MMM d, yyyy') : '—'}
                       </td>
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button className="p-1 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100">
@@ -542,6 +594,7 @@ const People = () => {
               </tbody>
             </table>
           </HorizontalTableScroll>
+          </SectionCard>
         )}
 
         {/* Pagination */}
@@ -549,7 +602,7 @@ const People = () => {
           <div className="flex items-center justify-between mt-4">
             <p className="text-xs text-muted-foreground">
               Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-              {selectedKeys.length > 0 && <span className="ml-2">({selectedKeys.length} selected)</span>}
+              {selectedKeys.length > 0 && <span className="ml-2 font-medium text-primary">({selectedKeys.length} selected)</span>}
             </p>
             <div className="flex items-center gap-1">
               <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>First</Button>

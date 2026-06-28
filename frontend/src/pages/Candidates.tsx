@@ -11,6 +11,8 @@ import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidat
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
 import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import {
   CandidateFilterSidebar,
@@ -397,9 +399,11 @@ const Candidates = () => {
 
   return (
     <MainLayout>
-      <PageHeader 
-        title="Candidates" 
+      <PageHeader
+        title="Candidates"
         description="Track candidates through interview stages across all jobs."
+        eyebrow="Pipeline"
+        icon={<Users />}
         actions={
           <div className="flex items-center gap-2">
             <div className="flex items-center border border-border rounded-lg overflow-hidden">
@@ -486,14 +490,14 @@ const Candidates = () => {
           </Button>
 
           {/* Search bar with Boolean support */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative flex-1 min-w-[16rem] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search candidates… (supports AND, OR, NOT, &quot;quotes&quot;)"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-              className="w-full h-9 pl-10 pr-8 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full h-9 pl-10 pr-8 rounded-xl border border-card-border bg-card text-foreground text-sm placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             {searchQuery && hasBooleanOperators(searchQuery) && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-accent font-medium uppercase tracking-wide">
@@ -599,7 +603,8 @@ const Candidates = () => {
           <CandidatePipeline />
         ) : (
           <>
-          <div className="rounded-lg border border-border overflow-auto max-h-[75vh]">
+          <SectionCard flush>
+          <div className="overflow-auto max-h-[75vh]">
             <table className="w-full min-w-[900px]">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
@@ -609,30 +614,30 @@ const Candidates = () => {
                       onCheckedChange={toggleAll}
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('name')}>
                     <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('title')}>
                     <span className="flex items-center gap-1">Title <SortIcon field="title" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('company')}>
                     <span className="flex items-center gap-1">Company <SortIcon field="company" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
                     <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Owner</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Job</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Owner</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Job</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('updated')}>
                     <span className="flex items-center gap-1">Updated <SortIcon field="updated" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('created')}>
                     <span className="flex items-center gap-1">Added <SortIcon field="created" /></span>
                   </th>
                   <th className="w-10 px-2 py-3"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-card-border">
                 {pageRows.map((candidate) => (
                   <tr key={candidate.id} className="group hover:bg-muted/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -643,13 +648,11 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <div className="flex items-center gap-3">
-                        {(candidate as any).avatar_url ? (
-                          <img src={(candidate as any).avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
-                        ) : (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
-                            {(candidate.first_name?.[0] ?? '')}{(candidate.last_name?.[0] ?? '')}
-                          </div>
-                        )}
+                        <PersonAvatar
+                          name={candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
+                          src={(candidate as any).avatar_url ?? (candidate as any).profile_picture_url}
+                          size="md"
+                        />
                         <span className="text-sm font-medium text-foreground">
                           {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
                         </span>
@@ -673,11 +676,11 @@ const Candidates = () => {
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/candidates/${candidate.id}`)}>
                       <div className="flex items-center gap-1.5">
-                        <span className={cn('stage-badge border', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-border')}>
+                        <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-card-border')}>
                           {STATUS_LABELS[candidate.status] ?? candidate.status.replace(/_/g, ' ')}
                         </span>
                         {(candidate as any).no_answer && (
-                          <span className="stage-badge bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                          <span className="inline-flex items-center rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">
                             no answer
                           </span>
                         )}
@@ -765,6 +768,7 @@ const Candidates = () => {
               </tbody>
             </table>
           </div>
+          </SectionCard>
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-muted-foreground">

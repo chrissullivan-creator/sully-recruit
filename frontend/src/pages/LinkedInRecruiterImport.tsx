@@ -8,6 +8,7 @@ import {
   type Decision,
 } from '@/components/import/ImportMatchReviewDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -385,14 +386,23 @@ export default function LinkedInRecruiterImport() {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="People"
         title="Import from LinkedIn Recruiter"
+        icon={<Linkedin />}
         description="Paste a LinkedIn Recruiter search or pipeline URL, pull the people, then download or import them as candidates or contacts."
       />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 py-6">
-        <div className="max-w-6xl mx-auto space-y-5">
-          {/* ── Search form ── */}
-          <div className="rounded-xl border border-card-border bg-white p-5 space-y-4">
+        <div className="max-w-6xl mx-auto space-y-6">
+          {/* ── Step 1 · Search form ── */}
+          <SectionCard
+            title="Recruiter search"
+            icon={<Search className="h-4 w-4" />}
+            actions={
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">1</span>
+            }
+            bodyClassName="space-y-5"
+          >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Search on behalf of</label>
@@ -446,13 +456,15 @@ export default function LinkedInRecruiterImport() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">LinkedIn Recruiter URL</label>
-              <Textarea
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.linkedin.com/talent/search?..."
-                rows={2}
-                className="font-mono text-xs"
-              />
+              <div className="rounded-2xl border border-card-border bg-page-bg/40 p-2 transition-colors focus-within:border-primary/50">
+                <Textarea
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://www.linkedin.com/talent/search?..."
+                  rows={2}
+                  className="border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0"
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -467,11 +479,18 @@ export default function LinkedInRecruiterImport() {
                 </span>
               )}
             </div>
-          </div>
+          </SectionCard>
 
-          {/* ── Results ── */}
+          {/* ── Step 2 · Results ── */}
           {rows.length > 0 && (
-            <div className="rounded-xl border border-card-border bg-white">
+            <SectionCard
+              title="Review & import"
+              icon={<UserPlus className="h-4 w-4" />}
+              flush
+              actions={
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">2</span>
+              }
+            >
               <div className="flex flex-wrap items-center gap-2 border-b border-card-border p-3">
                 <span className="text-sm font-medium">{importableSelected.length} selected</span>
                 <span className="text-xs text-muted-foreground">· {rows.filter((r) => !r.importable).length} unnamed (CSV only)</span>
@@ -495,7 +514,7 @@ export default function LinkedInRecruiterImport() {
 
               <div className="overflow-x-auto">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="table-header-green">
                     <TableRow>
                       <TableHead className="w-10">
                         <Checkbox checked={allImportableSelected} onCheckedChange={(v) => toggleAll(!!v)} aria-label="Select all" />
@@ -558,7 +577,7 @@ export default function LinkedInRecruiterImport() {
                   </TableBody>
                 </Table>
               </div>
-            </div>
+            </SectionCard>
           )}
         </div>
       </div>

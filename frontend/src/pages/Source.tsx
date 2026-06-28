@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import {
   Loader2, Users, Briefcase, Building2, Calendar, Eye, Martini,
-  Download,
+  Download, Linkedin, ChevronRight, Filter, RefreshCw,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -392,64 +393,94 @@ export default function Source() {
     <MainLayout>
       <PageHeader
         title={`Source${projects.length > 0 ? ` (${projects.length})` : ''}`}
+        eyebrow="Sourcing"
+        icon={<Linkedin />}
         description="Import applicants from LinkedIn Hiring Projects"
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={fetchProjects} disabled={projectsLoading} className="gap-1.5">
+              {projectsLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </Button>
+            {Object.keys(linkedJobs).length > 0 && (
+              <Button
+                variant="gold"
+                size="sm"
+                onClick={runBackfillAll}
+                disabled={backfillingAll || projectsLoading}
+                title="Backfill applicants from every project that's linked to a job"
+                className="gap-1.5"
+              >
+                {backfillingAll
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Download className="h-3.5 w-3.5" />}
+                Backfill all linked
+              </Button>
+            )}
+          </div>
+        }
       />
 
-      {/* Controls bar */}
-      <div className="flex items-center gap-4 mb-6">
-        <Select
-          value={recruiterFilter}
-          onValueChange={(val) => setRecruiterFilter(val as RecruiterFilter)}
-        >
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Filter by recruiter" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Recruiters</SelectItem>
-            <SelectItem value="ashley">Ashley Leichner</SelectItem>
-            <SelectItem value="nancy">Nancy Eberlein</SelectItem>
-            <SelectItem value="chris">Chris Sullivan</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Button variant="outline" size="sm" onClick={fetchProjects} disabled={projectsLoading}>
-          {projectsLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-          Refresh
-        </Button>
-
-        {Object.keys(linkedJobs).length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={runBackfillAll}
-            disabled={backfillingAll || projectsLoading}
-            title="Backfill applicants from every project that's linked to a job"
+      <div className="p-8">
+        {/* Controls bar */}
+        <div className="flex flex-wrap items-center gap-3 mb-5">
+          <Select
+            value={recruiterFilter}
+            onValueChange={(val) => setRecruiterFilter(val as RecruiterFilter)}
           >
-            {backfillingAll
-              ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              : <Download className="h-4 w-4 mr-1" />}
-            Backfill all linked
-          </Button>
+            <SelectTrigger className="w-56 h-11 rounded-xl shadow-sm">
+              <span className="flex items-center gap-2 truncate">
+                <Filter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="Filter by recruiter" />
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Recruiters</SelectItem>
+              <SelectItem value="ashley">Ashley Leichner</SelectItem>
+              <SelectItem value="nancy">Nancy Eberlein</SelectItem>
+              <SelectItem value="chris">Chris Sullivan</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Loading */}
+        {(accountsLoading || projectsLoading) && projects.length === 0 && (
+          <SectionCard>
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" />
+              Loading projects…
+            </div>
+          </SectionCard>
         )}
-      </div>
 
-      {/* Loading */}
-      {(accountsLoading || projectsLoading) && projects.length === 0 && (
-        <div className="flex items-center justify-center py-20 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          Loading projects…
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!accountsLoading && !projectsLoading && projects.length === 0 && (
-        <div className="text-center py-20 text-muted-foreground">
-          No hiring projects found. Make sure your LinkedIn Recruiter accounts are connected.
-        </div>
-      )}
+        {/* Empty state */}
+        {!accountsLoading && !projectsLoading && projects.length === 0 && (
+          <SectionCard>
+            <div className="text-center py-16">
+              <Linkedin className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-1">No hiring projects found</h3>
+              <p className="text-sm text-muted-foreground">
+                Make sure your LinkedIn Recruiter accounts are connected.
+              </p>
+            </div>
+          </SectionCard>
+        )}
 
       {/* Projects list — rich cards modeled after LinkedIn Recruiter's project list */}
-      <div className="space-y-3">
+      {projects.length > 0 && (
+      <SectionCard
+        flush
+        title="Hiring Projects"
+        icon={<Briefcase className="h-4 w-4" />}
+        actions={
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {projects.length} project{projects.length === 1 ? '' : 's'}
+          </span>
+        }
+      >
+      <div className="divide-y divide-card-border">
         {projects.map((project) => {
           const jp = project.job_posting;
           const jpState = jp?.state ? jp.state.toLowerCase() : null;
@@ -464,51 +495,56 @@ export default function Source() {
           const backfill = backfillStatus[project.id];
           const backfillInFlight = backfill && !backfill.done;
           return (
-            <div
-              key={project.id}
-              className="bg-card border border-border rounded-lg hover:border-foreground/20 transition-colors"
-            >
+            <div key={project.id} className="group transition-colors hover:bg-muted/30">
             <button
               onClick={() => openProject(project)}
-              className="w-full text-left p-4 hover:bg-accent/5"
+              className="w-full text-left px-5 py-4"
             >
               {/* Title row */}
               <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-base truncate">{project.title}</div>
-                  {(project.company_name || project.owner_name || createdDate) && (
-                    <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
-                      {project.company_name && (
-                        <span className="inline-flex items-center gap-1">
-                          <Building2 className="h-3 w-3" />
-                          {project.company_name}
-                        </span>
-                      )}
-                      {project.owner_name && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span>Owner: {project.owner_name}</span>
-                        </>
-                      )}
-                      {createdDate && (
-                        <>
-                          <span aria-hidden>·</span>
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Briefcase className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-display font-semibold text-base text-foreground truncate">{project.title}</div>
+                    {(project.company_name || project.owner_name || createdDate) && (
+                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
+                        {project.company_name && (
                           <span className="inline-flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            Created {createdDate}
+                            <Building2 className="h-3 w-3" />
+                            {project.company_name}
                           </span>
-                        </>
-                      )}
-                    </div>
-                  )}
+                        )}
+                        {project.owner_name && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <span>Owner: {project.owner_name}</span>
+                          </>
+                        )}
+                        {createdDate && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <span className="inline-flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              Created {createdDate}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <Badge variant="outline" className="text-[10px] shrink-0">{project.recruiter}</Badge>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className="text-[10px]">{project.recruiter}</Badge>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                </div>
               </div>
 
               {/* Stats row: pipeline count + viewed */}
-              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pl-[3.25rem]">
                 {project.pipeline_count != null && (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
                     <Users className="h-3 w-3" />
                     Pipeline: {project.pipeline_count} candidate{project.pipeline_count === 1 ? '' : 's'}
                   </span>
@@ -520,7 +556,7 @@ export default function Source() {
                   </span>
                 )}
                 {project.has_recommended_matches && (
-                  <span className="inline-flex items-center gap-1 text-emerald-500">
+                  <span className="inline-flex items-center gap-1 text-accent">
                     <Martini className="h-3 w-3" />
                     Recommended matches active
                   </span>
@@ -529,7 +565,7 @@ export default function Source() {
 
               {/* Tagged job posting (if linked on LinkedIn) */}
               {jp && (
-                <div className="mt-2 flex items-center gap-2 text-xs">
+                <div className="mt-2 pl-[3.25rem] flex items-center gap-2 text-xs">
                   <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-muted-foreground">Job</span>
                   {jp.id && <span className="text-muted-foreground">({jp.id}):</span>}
@@ -539,9 +575,9 @@ export default function Source() {
                       variant="outline"
                       className={
                         jpState === 'active'
-                          ? 'text-[10px] border-emerald-500/30 text-emerald-500'
+                          ? 'text-[10px] border-primary/30 text-primary'
                           : jpState === 'closed'
-                          ? 'text-[10px] border-red-500/30 text-red-500'
+                          ? 'text-[10px] border-destructive/30 text-destructive'
                           : 'text-[10px]'
                       }
                     >
@@ -554,9 +590,9 @@ export default function Source() {
 
             {/* Action row — Backfill button (only when linked) + status */}
             {(isLinked || backfill) && (
-              <div className="px-4 py-2 border-t border-border flex items-center gap-3 text-xs">
+              <div className="px-5 pb-3 pl-[4.25rem] flex items-center gap-3 text-xs">
                 {isLinked && (
-                  <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">
+                  <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
                     Linked
                   </Badge>
                 )}
@@ -566,7 +602,7 @@ export default function Source() {
                   </span>
                 )}
                 {isLinked && !lastSourcedAgo && !backfill && (
-                  <span className="text-amber-500">Never synced</span>
+                  <span className="text-accent">Never synced</span>
                 )}
                 {backfill && (
                   <span className="text-muted-foreground">
@@ -594,6 +630,9 @@ export default function Source() {
             </div>
           );
         })}
+      </div>
+      </SectionCard>
+      )}
       </div>
     </MainLayout>
   );

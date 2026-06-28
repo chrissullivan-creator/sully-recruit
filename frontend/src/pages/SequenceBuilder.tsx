@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { mergeVarsFromPerson } from "@/lib/merge-tags";
 import { authHeaders } from "@/lib/api-auth";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Workflow } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SequenceSetup, type SequenceSetupData } from "@/components/sequences/SequenceSetup";
 import { FlowBuilder, type SequenceBranch } from "@/components/sequences/FlowBuilder";
@@ -579,23 +581,14 @@ export default function SequenceBuilder() {
 
   return (
     <MainLayout>
-      <div className="container mx-auto py-6 space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
-              {isEdit ? "Editing sequence" : "New sequence"}
-            </p>
-            <h1 className="text-2xl font-bold truncate">
-              {isEdit
-                ? (setup.name?.trim() || <span className="text-muted-foreground italic">Untitled sequence</span>)
-                : "New Sequence"}
-            </h1>
-            {isEdit && id && (
-              <p className="text-[10px] text-muted-foreground/70 font-mono mt-0.5">id: {id}</p>
-            )}
-          </div>
-        </div>
+      <PageHeader
+        eyebrow={isEdit ? "Editing sequence" : "New sequence"}
+        title={isEdit ? (setup.name?.trim() || "Untitled sequence") : "New Sequence"}
+        description={isEdit && id ? `id: ${id}` : "Set up the cadence, build the flow, then review and activate."}
+        icon={<Workflow />}
+      />
 
+      <div className="px-8 py-6 space-y-6 max-w-5xl">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="setup">1. Setup</TabsTrigger>
@@ -603,7 +596,7 @@ export default function SequenceBuilder() {
           <TabsTrigger value="review">3. Review</TabsTrigger>
         </TabsList>
 
-          <TabsContent value="setup" className="mt-4">
+          <TabsContent value="setup" className="mt-5">
             <div className="max-w-2xl">
               <SequenceSetup data={setup} onChange={setSetup} />
               <div className="mt-4 flex justify-end">
@@ -614,7 +607,7 @@ export default function SequenceBuilder() {
             </div>
           </TabsContent>
 
-          <TabsContent value="flow" className="mt-4">
+          <TabsContent value="flow" className="mt-5">
             <PreviewAsPicker
               audience={setup.audienceType}
               previewVars={previewVars}
@@ -626,11 +619,11 @@ export default function SequenceBuilder() {
               onAskJoe={handleAskJoe}
               previewMergeVars={previewVars ?? undefined}
             />
-            <div className="mt-4 flex justify-between items-center">
+            <div className="mt-5 flex justify-between items-center gap-3 rounded-2xl border border-card-border bg-card px-4 py-3 shadow-sm">
               <Button variant="outline" onClick={() => setActiveTab("setup")}>Back</Button>
-              <div className="text-xs text-muted-foreground">
-                {flattenBranchSteps(branches).length} total step(s),{" "}
-                {flattenBranchSteps(branches).reduce((sum, step) => sum + (step.actions?.length || 0), 0)} total action(s)
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {flattenBranchSteps(branches).length} step(s) ·{" "}
+                {flattenBranchSteps(branches).reduce((sum, step) => sum + (step.actions?.length || 0), 0)} action(s)
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
@@ -641,7 +634,7 @@ export default function SequenceBuilder() {
             </div>
           </TabsContent>
 
-          <TabsContent value="review" className="mt-4">
+          <TabsContent value="review" className="mt-5">
             <div className="max-w-2xl">
               <SequenceReview
                 setup={setup}
@@ -715,9 +708,9 @@ function PreviewAsPicker({
   };
 
   return (
-    <div className="mb-4 rounded-lg border border-card-border bg-page-bg/40 p-3">
+    <div className="mb-5 rounded-2xl border border-card-border bg-card p-3.5 shadow-sm">
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-[11px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-display font-semibold uppercase tracking-wide text-muted-foreground">
           Preview as
         </span>
         {previewVars ? (

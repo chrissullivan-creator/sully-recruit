@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -105,13 +106,14 @@ export default function Trash() {
   return (
     <MainLayout>
       <PageHeader
+        icon={<Trash2 />}
         title="Trash"
         description="Soft-deleted records. Restore within 30 days; after that they're purged automatically."
       />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <Tabs value={tab} onValueChange={(v) => setTab(v as SoftDeletable)}>
-          <TabsList>
+          <TabsList className="mb-4">
             {TABS.map(({ value, label, icon: Icon }) => (
               <TabsTrigger key={value} value={value} className="gap-1.5">
                 <Icon className="h-3.5 w-3.5" /> {label}
@@ -158,32 +160,36 @@ function TrashTable({
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-card-border bg-white p-12 text-center text-sm text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" /> Loading…
-      </div>
+      <SectionCard>
+        <div className="py-12 text-center text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" /> Loading…
+        </div>
+      </SectionCard>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-card-border bg-white p-12 text-center">
-        <Trash2 className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-        <p className="text-sm font-display font-semibold text-emerald-dark">No deleted {label.toLowerCase()}</p>
-        <p className="text-xs text-muted-foreground mt-1">Anything you delete shows up here for 30 days.</p>
-      </div>
+      <SectionCard className="border-dashed">
+        <div className="py-12 text-center">
+          <Trash2 className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
+          <p className="text-sm font-display font-semibold text-foreground">No deleted {label.toLowerCase()}</p>
+          <p className="text-xs text-muted-foreground mt-1">Anything you delete shows up here for 30 days.</p>
+        </div>
+      </SectionCard>
     );
   }
 
   return (
-    <div className="rounded-xl border border-card-border bg-white overflow-hidden">
+    <SectionCard flush>
       <div className="divide-y divide-card-border">
         {rows.map((r) => {
           const left = daysLeft(r.deleted_at);
           const purging = left <= 3;
           return (
-            <div key={r.id} className="px-5 py-3 flex items-center gap-4">
+            <div key={r.id} className="px-5 py-3.5 flex items-center gap-4">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-emerald-dark truncate">{r.primary}</p>
+                <p className="text-sm font-medium text-foreground truncate">{r.primary}</p>
                 {r.secondary && (
                   <p className="text-xs text-muted-foreground truncate">{r.secondary}</p>
                 )}
@@ -220,6 +226,6 @@ function TrashTable({
           );
         })}
       </div>
-    </div>
+    </SectionCard>
   );
 }

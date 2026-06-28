@@ -13,8 +13,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useRef, useEffect } from 'react';
 import {
-  ArrowLeft, Building, Globe, MapPin, Briefcase, FileText, Upload,
-  Loader2, ExternalLink, Edit, Check, X, Linkedin, User, Users, Info, Plus,
+  Building, Briefcase, FileText, Upload,
+  Loader2, ExternalLink, Edit, Check, X, User, Users,
   FolderOpen, ChevronDown, ChevronUp, Percent, DollarSign, Martini,
   Rss,
 } from 'lucide-react';
@@ -22,6 +22,9 @@ import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { JobPostingsTab } from '@/components/companies/JobPostingsTab';
 import { PicklistMultiSelect } from '@/components/shared/PicklistMultiSelect';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
+import { DetailHeader } from '@/components/shared/DetailHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { StatStrip } from '@/components/shared/StatStrip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { invalidateCompanyScope } from '@/lib/invalidate';
@@ -507,296 +510,276 @@ const CompanyDetail = () => {
 
   return (
     <MainLayout>
-      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/companies')}><ArrowLeft className="h-4 w-4" /></Button>
-        <CompanyLogo name={company.name} domain={company.domain} logoUrl={company.logo_url} size="md" />
-        <div className="flex-1">
-          <h1 className="text-lg font-semibold text-foreground">{company.name}</h1>
-          <p className="text-sm text-muted-foreground">
+      <DetailHeader
+        onBack={() => navigate('/companies')}
+        backLabel="Companies"
+        avatar={<CompanyLogo name={company.name} domain={company.domain} logoUrl={company.logo_url} size="lg" rounded="full" />}
+        title={company.name}
+        subtitle={(company.industry || company.location) && (
+          <>
             {company.industry && <span>{company.industry}</span>}
-            {company.industry && company.location && <span> &middot; </span>}
+            {company.industry && company.location && <span className="text-muted-foreground/50">&middot;</span>}
             {company.location && <span>{company.location}</span>}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {company.company_type && (
-            <Badge variant="secondary" className={cn(
-              'text-xs',
-              company.company_type === 'client' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
-            )}>
-              {company.company_type}
-            </Badge>
-          )}
-        </div>
+          </>
+        )}
+        badges={company.company_type && (
+          <Badge variant="secondary" className={cn(
+            'text-xs capitalize',
+            company.company_type === 'client' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+          )}>
+            {company.company_type}
+          </Badge>
+        )}
+      />
+
+      <div className="px-8 pt-5">
+        <StatStrip
+          items={[
+            { label: 'Jobs', value: companyJobs.length },
+            { label: 'Contacts', value: contacts.length },
+            { label: 'Candidates', value: companyCandidates.length },
+            { label: 'Contracts', value: contracts.length },
+            { label: 'Type', value: company.company_type ? <span className="capitalize">{company.company_type}</span> : '—' },
+            { label: 'Added', value: format(new Date(company.created_at), 'MMM d, yyyy'), accent: false },
+          ]}
+        />
       </div>
 
       <div className="flex flex-1 overflow-hidden bg-page-bg">
-        <aside className="w-72 shrink-0 border-r border-card-border bg-white overflow-y-auto">
-          <div className="p-5 space-y-5">
-            <div className="flex flex-col items-center text-center">
-              {(() => {
-                const logoSrc = company.logo_url || (company.domain ? `https://logo.clearbit.com/${company.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}` : null);
-                return logoSrc ? (
-                  <img
-                    src={logoSrc}
-                    alt={company.name}
-                    className="h-14 w-14 rounded-full object-contain bg-white border border-border mb-2"
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent mb-2">
-                    <Building className="h-6 w-6" />
-                  </div>
-                );
-              })()}
-              <div className="flex items-center justify-center gap-4 text-center mt-2">
-                <div>
-                  <p className="text-base font-bold text-foreground">{contacts.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Contacts</p>
-                </div>
-                <div>
-                  <p className="text-base font-bold text-foreground">{companyCandidates.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Candidates</p>
-                </div>
-                <div>
-                  <p className="text-base font-bold text-foreground">{companyJobs.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Jobs</p>
-                </div>
+        <aside className="w-80 shrink-0 overflow-y-auto">
+          <div className="p-6 space-y-5">
+            <SectionCard title="Company Info" icon={<Building className="h-4 w-4" />}>
+              <div className="space-y-3">
+                <EditableField label="Name" value={company.name} onSave={v => updateField('name', v)} />
+                <EditableField label="Industry" value={company.industry} onSave={v => updateField('industry', v)} placeholder="e.g. Financial Services" />
+                <EditableField label="Size" value={company.size} onSave={v => updateField('size', v)} placeholder="e.g. 500-1000" />
+                <EditableField label="Location" value={company.location} onSave={v => updateField('location', v)} placeholder="City, State" />
+                <EditableField label="HQ Location" value={company.hq_location} onSave={v => updateField('hq_location', v)} placeholder="Headquarters" />
               </div>
-            </div>
+            </SectionCard>
 
-            <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Company Info</h3>
-              <EditableField label="Name" value={company.name} onSave={v => updateField('name', v)} />
-              <EditableField label="Industry" value={company.industry} onSave={v => updateField('industry', v)} placeholder="e.g. Financial Services" />
-              <EditableField label="Size" value={company.size} onSave={v => updateField('size', v)} placeholder="e.g. 500-1000" />
-              <EditableField label="Location" value={company.location} onSave={v => updateField('location', v)} placeholder="City, State" />
-              <EditableField label="HQ Location" value={company.hq_location} onSave={v => updateField('hq_location', v)} placeholder="Headquarters" />
-            </div>
+            <SectionCard>
+              <CompanyClassification
+                companyId={id!}
+                industries={(company as any).industries ?? []}
+                strategies={(company as any).strategies ?? []}
+                onSaved={() => {
+                  invalidateCompanyScope(queryClient);
+                  queryClient.invalidateQueries({ queryKey: ['company', id] });
+                }}
+              />
+            </SectionCard>
 
-            <CompanyClassification
-              companyId={id!}
-              industries={(company as any).industries ?? []}
-              strategies={(company as any).strategies ?? []}
-              onSaved={() => {
-                invalidateCompanyScope(queryClient);
-                queryClient.invalidateQueries({ queryKey: ['company', id] });
-              }}
-            />
+            <SectionCard title="Online" icon={<ExternalLink className="h-4 w-4" />}>
+              <div className="space-y-3">
+                <EditableField label="Domain" value={company.domain} onSave={v => updateField('domain', v)} placeholder="company.com" />
+                <EditableField label="Website" value={company.website} onSave={v => updateField('website', v)} placeholder="https://..." />
+                <EditableField label="LinkedIn" value={company.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/company/..." />
+                <EditableField label="Logo URL" value={company.logo_url} onSave={v => updateField('logo_url', v)} placeholder="https://..." />
+              </div>
+            </SectionCard>
 
-            <div className="space-y-3">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Online</h3>
-              <EditableField label="Domain" value={company.domain} onSave={v => updateField('domain', v)} placeholder="company.com" />
-              <EditableField label="Website" value={company.website} onSave={v => updateField('website', v)} placeholder="https://..." />
-              <EditableField label="LinkedIn" value={company.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/company/..." />
-              <EditableField label="Logo URL" value={company.logo_url} onSave={v => updateField('logo_url', v)} placeholder="https://..." />
-            </div>
+            <SectionCard title="Details" icon={<FileText className="h-4 w-4" />}>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Type</Label>
+                  <Select value={company.company_type ?? 'none'} onValueChange={async (val) => {
+                    const newType = val === 'none' ? null : val;
+                    await supabase.from('companies').update({ company_type: newType }).eq('id', id!);
+                    invalidateCompanyScope(queryClient);
+                    toast.success('Type updated');
+                  }}>
+                    <SelectTrigger className="h-8 text-sm w-full"><SelectValue placeholder="Set type..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— None —</SelectItem>
+                      <SelectItem value="client">Client</SelectItem>
+                      <SelectItem value="target">Target</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Type</h3>
-              <Select value={company.company_type ?? 'none'} onValueChange={async (val) => {
-                const newType = val === 'none' ? null : val;
-                await supabase.from('companies').update({ company_type: newType }).eq('id', id!);
-                invalidateCompanyScope(queryClient);
-                toast.success('Type updated');
-              }}>
-                <SelectTrigger className="h-7 text-xs w-full"><SelectValue placeholder="Set type..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— None —</SelectItem>
-                  <SelectItem value="client">Client</SelectItem>
-                  <SelectItem value="target">Target</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <EditableField label="Description" value={company.description} onSave={v => updateField('description', v)} placeholder="About this company..." />
 
-            <EditableField label="Description" value={company.description} onSave={v => updateField('description', v)} placeholder="About this company..." />
-
-            <p className="text-[10px] text-muted-foreground">Added {format(new Date(company.created_at), 'MMM d, yyyy')}</p>
+                <p className="text-[10px] text-muted-foreground pt-1">Added {format(new Date(company.created_at), 'MMM d, yyyy')}</p>
+              </div>
+            </SectionCard>
           </div>
         </aside>
 
         <div className="flex-1 flex flex-col overflow-hidden">
           <Tabs defaultValue="jobs" className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-8 pt-4 border-b border-border">
-              <TabsList className="bg-white border border-card-border">
-                <TabsTrigger value="jobs" className="gap-1.5"><Briefcase className="h-3.5 w-3.5" /> Jobs</TabsTrigger>
-                <TabsTrigger value="contacts" className="gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> Contacts
-                  {contacts.length > 0 && (
-                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{contacts.length}</span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="candidates" className="gap-1.5">
-                  <User className="h-3.5 w-3.5" /> Candidates
-                  {companyCandidates.length > 0 && (
-                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{companyCandidates.length}</span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="contracts" className="gap-1.5">
-                  <FolderOpen className="h-3.5 w-3.5" /> Contracts
-                  {contracts.length > 0 && (
-                    <span className="ml-1 rounded-full bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 font-medium">{contracts.length}</span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="postings" className="gap-1.5"><Rss className="h-3.5 w-3.5" /> Job postings</TabsTrigger>
-                <TabsTrigger value="sizzles" className="gap-1.5"><Martini className="h-3.5 w-3.5" /> Sizzles</TabsTrigger>
+            <div className="px-8 pt-5 border-b border-card-border">
+              <TabsList className="h-auto w-full justify-start gap-1 rounded-none border-0 bg-transparent p-0">
+                {[
+                  { value: 'jobs', label: 'Jobs', icon: Briefcase, count: undefined as number | undefined },
+                  { value: 'contacts', label: 'Contacts', icon: Users, count: contacts.length },
+                  { value: 'candidates', label: 'Candidates', icon: User, count: companyCandidates.length },
+                  { value: 'contracts', label: 'Contracts', icon: FolderOpen, count: contracts.length },
+                  { value: 'postings', label: 'Job postings', icon: Rss, count: undefined },
+                  { value: 'sizzles', label: 'Sizzles', icon: Martini, count: undefined },
+                ].map(({ value, label, icon: Icon, count }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="gap-1.5 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-3 pt-1 text-sm font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none hover:text-foreground"
+                  >
+                    <Icon className="h-3.5 w-3.5" /> {label}
+                    {count !== undefined && count > 0 && (
+                      <span className="ml-1 rounded-full bg-accent/15 text-accent text-[10px] px-1.5 py-0.5 font-semibold">{count}</span>
+                    )}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
               {/* Jobs tab */}
-              <TabsContent value="jobs" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Jobs</h2>
-                  <span className="text-xs text-muted-foreground">({companyJobs.length})</span>
-                </div>
-                {companyJobs.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No jobs yet</p>
-                    <p className="text-xs text-muted-foreground">Jobs linked to this company will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {companyJobs.map((job: any) => (
-                      <div
-                        key={job.id}
-                        className="rounded-lg border border-border bg-secondary/30 p-4 hover:border-accent/40 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/jobs/${job.id}`)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{job.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {job.location && <span>{job.location} &middot; </span>}
-                              {job.created_at && format(new Date(job.created_at), 'MMM d, yyyy')}
-                            </p>
+              <TabsContent value="jobs" className="px-8 py-6 mt-0">
+                <SectionCard title="Jobs" icon={<Briefcase className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{companyJobs.length}</span>}>
+                  {companyJobs.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-card-border p-10 text-center">
+                      <Briefcase className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">No jobs yet</p>
+                      <p className="text-xs text-muted-foreground">Jobs linked to this company will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {companyJobs.map((job: any) => (
+                        <div
+                          key={job.id}
+                          className="rounded-xl border border-card-border bg-card p-4 hover:border-primary/40 hover:shadow-sm cursor-pointer transition-all"
+                          onClick={() => navigate(`/jobs/${job.id}`)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{job.title}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {job.location && <span>{job.location} &middot; </span>}
+                                {job.created_at && format(new Date(job.created_at), 'MMM d, yyyy')}
+                              </p>
+                            </div>
+                            {job.status && (
+                              <Badge variant="secondary" className="text-xs capitalize">{job.status}</Badge>
+                            )}
                           </div>
-                          {job.status && (
-                            <Badge variant="secondary" className="text-xs capitalize">{job.status}</Badge>
-                          )}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
               </TabsContent>
 
               {/* Contacts tab */}
-              <TabsContent value="contacts" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Contacts</h2>
-                  <span className="text-xs text-muted-foreground">({contacts.length})</span>
-                </div>
-                {contacts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No contacts</p>
-                    <p className="text-xs text-muted-foreground">Contacts at this company will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {contacts.map((ct: any) => (
-                      <div
-                        key={ct.id}
-                        className="rounded-lg border border-border bg-secondary/30 p-3 cursor-pointer hover:border-accent/40 transition-colors"
-                        onClick={() => navigate(`/contacts/${ct.id}`)}
-                      >
-                        <p className="text-sm font-medium text-foreground">{ct.full_name || `${ct.first_name ?? ''} ${ct.last_name ?? ''}`.trim() || 'Unknown'}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {ct.title && <span>{ct.title}</span>}
-                          {ct.email && <span className="ml-2">{ct.email}</span>}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <TabsContent value="contacts" className="px-8 py-6 mt-0">
+                <SectionCard title="Contacts" icon={<Users className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{contacts.length}</span>}>
+                  {contacts.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-card-border p-10 text-center">
+                      <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">No contacts</p>
+                      <p className="text-xs text-muted-foreground">Contacts at this company will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {contacts.map((ct: any) => (
+                        <div
+                          key={ct.id}
+                          className="rounded-xl border border-card-border bg-card p-3 cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
+                          onClick={() => navigate(`/contacts/${ct.id}`)}
+                        >
+                          <p className="text-sm font-medium text-foreground">{ct.full_name || `${ct.first_name ?? ''} ${ct.last_name ?? ''}`.trim() || 'Unknown'}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {ct.title && <span>{ct.title}</span>}
+                            {ct.email && <span className="ml-2">{ct.email}</span>}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
               </TabsContent>
 
               {/* Candidates tab */}
-              <TabsContent value="candidates" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Candidates</h2>
-                  <span className="text-xs text-muted-foreground">({companyCandidates.length})</span>
-                </div>
-                {companyCandidates.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <User className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No candidates</p>
-                    <p className="text-xs text-muted-foreground">Candidates working at this company will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {companyCandidates.map((cd: any) => (
-                      <div
-                        key={cd.id}
-                        className="rounded-lg border border-border bg-secondary/30 p-3 cursor-pointer hover:border-accent/40 transition-colors"
-                        onClick={() => navigate(`/candidates/${cd.id}`)}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-foreground">{cd.full_name || `${cd.first_name ?? ''} ${cd.last_name ?? ''}`.trim() || 'Unknown'}</p>
-                          {cd.status && (
-                            <Badge variant="secondary" className="text-[10px] capitalize shrink-0">{cd.status.replace('_', ' ')}</Badge>
-                          )}
+              <TabsContent value="candidates" className="px-8 py-6 mt-0">
+                <SectionCard title="Candidates" icon={<User className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{companyCandidates.length}</span>}>
+                  {companyCandidates.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-card-border p-10 text-center">
+                      <User className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">No candidates</p>
+                      <p className="text-xs text-muted-foreground">Candidates working at this company will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {companyCandidates.map((cd: any) => (
+                        <div
+                          key={cd.id}
+                          className="rounded-xl border border-card-border bg-card p-3 cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
+                          onClick={() => navigate(`/candidates/${cd.id}`)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-foreground">{cd.full_name || `${cd.first_name ?? ''} ${cd.last_name ?? ''}`.trim() || 'Unknown'}</p>
+                            {cd.status && (
+                              <Badge variant="secondary" className="text-[10px] capitalize shrink-0">{cd.status.replace('_', ' ')}</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {cd.current_title && <span>{cd.current_title}</span>}
+                            {cd.email && <span className="ml-2">{cd.email}</span>}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {cd.current_title && <span>{cd.current_title}</span>}
-                          {cd.email && <span className="ml-2">{cd.email}</span>}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
               </TabsContent>
 
               {/* Contracts tab */}
-              <TabsContent value="contracts" className="px-8 py-5 mt-0 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FolderOpen className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Contracts</h2>
-                    <span className="text-xs text-muted-foreground">({contracts.length})</span>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => contractInputRef.current?.click()} disabled={uploadingContract}>
-                    {uploadingContract ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
-                    Upload Contract
-                  </Button>
-                  <input ref={contractInputRef} type="file" accept=".pdf,.doc,.docx,.xlsx,.csv" className="hidden"
-                    onChange={e => { const file = e.target.files?.[0]; if (file) handleContractUpload(file); e.target.value = ''; }} />
-                </div>
-                {contracts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                    <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No contracts yet</p>
-                    <p className="text-xs text-muted-foreground mb-4">Upload contracts, agreements, or SOWs for this company.</p>
-                    <Button variant="outline" size="sm" onClick={() => contractInputRef.current?.click()}>
-                      <Upload className="h-3.5 w-3.5 mr-1" /> Upload Contract
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {contracts.map((ct: any) => (
-                      <ContractCard
-                        key={ct.id}
-                        ct={ct}
-                        downloadUrl={ct.file_path ? signedUrls[ct.file_path] ?? null : null}
-                        onUpdate={updateContract}
-                      />
-                    ))}
-                  </div>
-                )}
+              <TabsContent value="contracts" className="px-8 py-6 mt-0">
+                <SectionCard
+                  title="Contracts"
+                  icon={<FolderOpen className="h-4 w-4" />}
+                  actions={
+                    <>
+                      <span className="text-xs text-muted-foreground tabular-nums">{contracts.length}</span>
+                      <Button variant="outline" size="sm" onClick={() => contractInputRef.current?.click()} disabled={uploadingContract}>
+                        {uploadingContract ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                        Upload Contract
+                      </Button>
+                      <input ref={contractInputRef} type="file" accept=".pdf,.doc,.docx,.xlsx,.csv" className="hidden"
+                        onChange={e => { const file = e.target.files?.[0]; if (file) handleContractUpload(file); e.target.value = ''; }} />
+                    </>
+                  }
+                >
+                  {contracts.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-card-border p-10 text-center">
+                      <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">No contracts yet</p>
+                      <p className="text-xs text-muted-foreground mb-4">Upload contracts, agreements, or SOWs for this company.</p>
+                      <Button variant="outline" size="sm" onClick={() => contractInputRef.current?.click()}>
+                        <Upload className="h-3.5 w-3.5 mr-1" /> Upload Contract
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {contracts.map((ct: any) => (
+                        <ContractCard
+                          key={ct.id}
+                          ct={ct}
+                          downloadUrl={ct.file_path ? signedUrls[ct.file_path] ?? null : null}
+                          onUpdate={updateContract}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
               </TabsContent>
 
               {/* Job postings tab */}
-              <TabsContent value="postings" className="px-8 py-5 mt-0">
+              <TabsContent value="postings" className="px-8 py-6 mt-0">
                 {id && <JobPostingsTab companyId={id} companyName={company.name} />}
               </TabsContent>
 
               {/* Sizzles tab */}
-              <TabsContent value="sizzles" className="px-8 py-5 mt-0">
+              <TabsContent value="sizzles" className="px-8 py-6 mt-0">
                 {id && <SizzlesPanel scope={{ companyId: id }} />}
               </TabsContent>
             </ScrollArea>
@@ -804,7 +787,7 @@ const CompanyDetail = () => {
         </div>
 
         {id && (
-          <div className="w-72 shrink-0 border-l border-border p-4 overflow-y-auto">
+          <div className="w-72 shrink-0 border-l border-card-border p-4 overflow-y-auto">
             <TaskSidebar entityType="company" entityId={id} />
           </div>
         )}

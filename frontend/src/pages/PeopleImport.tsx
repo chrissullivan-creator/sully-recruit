@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -10,7 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { invalidatePersonScope } from '@/lib/invalidate';
 import { toast } from 'sonner';
 import {
-  Upload, FileText, CheckCircle2, XCircle, Loader2, X, ArrowRight,
+  Upload, FileText, CheckCircle2, XCircle, Loader2, X, ArrowRight, Users, ListChecks, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -205,7 +206,9 @@ export default function PeopleImport() {
   return (
     <MainLayout>
       <PageHeader
+        eyebrow="People"
         title="Bulk Resume Import"
+        icon={<Users />}
         description="Drop a folder of resumes — they upload to Storage, the parser auto-creates candidates, and any duplicates land in the Duplicates queue. No clicking through each one."
         actions={
           <Button variant="outline" size="sm" onClick={() => navigate('/people')}>
@@ -214,138 +217,157 @@ export default function PeopleImport() {
         }
       />
 
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-5">
-        <div
-          onDrop={onDrop}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onClick={() => fileInputRef.current?.click()}
-          className={cn(
-            'rounded-xl border-2 border-dashed bg-white py-10 px-6 text-center cursor-pointer transition-colors',
-            dragOver
-              ? 'border-emerald bg-emerald-light/30 text-emerald-dark'
-              : 'border-card-border hover:border-emerald/50',
-          )}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_EXTS.join(',')}
-            onChange={onPick}
-            className="hidden"
-          />
-          <Upload className="h-8 w-8 mx-auto text-emerald mb-3" />
-          <p className="text-sm font-display font-semibold text-emerald-dark">
-            Drop resumes here, or click to choose
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            PDF / DOC / DOCX / TXT · 20 MB each · no cap on count — drop a whole folder
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-card-border bg-page-bg/40 p-3 text-xs text-muted-foreground">
-          <p className="font-medium text-emerald-dark mb-1">How this works</p>
-          <ol className="list-decimal pl-4 space-y-0.5">
-            <li>Files upload to Supabase Storage (resumes bucket)</li>
-            <li>A Postgres trigger registers each file as a pending resume</li>
-            <li>The reconciler (runs every minute) parses with Claude, matches to existing people by email / LinkedIn / name+company</li>
-            <li>If matched → updates the existing candidate with new resume info</li>
-            <li>If not matched → creates a new candidate stub</li>
-            <li>Any near-duplicates land in <span className="font-mono">/duplicates</span> for manual review</li>
-          </ol>
-        </div>
-
-        {total > 0 && (
-          <div className="rounded-lg border border-card-border bg-white p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">Total: <strong className="text-foreground tabular-nums">{total}</strong></span>
-                {completed > 0 && (
-                  <span className="text-emerald">Completed: <strong className="tabular-nums">{completed}</strong></span>
-                )}
-                {queued > 0 && (
-                  <span className="text-amber-700">Parsing: <strong className="tabular-nums">{queued}</strong></span>
-                )}
-                {inFlight > 0 && (
-                  <span className="text-amber-700">Uploading: <strong className="tabular-nums">{inFlight}</strong></span>
-                )}
-                {failed > 0 && (
-                  <span className="text-red-600">Upload failed: <strong className="tabular-nums">{failed}</strong></span>
-                )}
-                {parseFailed > 0 && (
-                  <span className="text-red-600">Parse failed: <strong className="tabular-nums">{parseFailed}</strong></span>
-                )}
-                {pending > 0 && !running && (
-                  <span className="text-muted-foreground">Pending: <strong className="tabular-nums">{pending}</strong></span>
-                )}
+      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          {/* ── Step 1 · Drop files ── */}
+          <SectionCard
+            title="Add resumes"
+            icon={<Upload className="h-4 w-4" />}
+            actions={
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">1</span>
+            }
+          >
+            <div
+              onDrop={onDrop}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'rounded-2xl border-2 border-dashed py-12 px-6 text-center cursor-pointer transition-colors',
+                dragOver
+                  ? 'border-primary bg-primary/5 text-primary'
+                  : 'border-card-border hover:border-primary/50',
+              )}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_EXTS.join(',')}
+                onChange={onPick}
+                className="hidden"
+              />
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Upload className="h-6 w-6" />
               </div>
-              <div className="flex items-center gap-2">
-                {(completed > 0 || queued > 0) && (
-                  <Button variant="outline" size="sm" onClick={clearDone}>Clear completed</Button>
-                )}
-                <Button
-                  variant="gold"
-                  size="sm"
-                  disabled={running || (pending === 0 && failed === 0)}
-                  onClick={startAll}
-                  className="gap-1.5"
-                >
-                  {running
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
-                    : <><Upload className="h-3.5 w-3.5" /> Start{failed > 0 ? ' / Retry failed' : ''}</>}
-                </Button>
-              </div>
+              <p className="font-display text-base font-semibold text-foreground">
+                Drop resumes here, or click to choose
+              </p>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                PDF / DOC / DOCX / TXT · 20 MB each · no cap on count — drop a whole folder
+              </p>
             </div>
-            <Progress value={progressPct} />
-          </div>
-        )}
 
-        {total > 0 && (
-          <div className="rounded-lg border border-card-border bg-white overflow-hidden">
-            <table className="w-full">
-              <thead className="border-b border-card-border bg-page-bg/40">
-                <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-2.5">File</th>
-                  <th className="px-3 py-2.5">Size</th>
-                  <th className="px-3 py-2.5">Status</th>
-                  <th className="px-3 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-card-border">
-                {rows.map((r) => (
-                  <tr key={r.id} className="text-sm hover:bg-page-bg/40">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate" title={r.file.name}>{r.file.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                      {(r.file.size / 1024 / 1024).toFixed(2)} MB
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <StatusBadge status={r.status} error={r.error} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {(r.status === 'pending' || r.status === 'failed') && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => removeRow(r.id)}
-                          title="Remove from queue"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </td>
+            <div className="mt-5 rounded-2xl border border-card-border bg-page-bg/40 p-4 text-xs text-muted-foreground">
+              <p className="mb-2 flex items-center gap-1.5 font-semibold text-foreground">
+                <Sparkles className="h-3.5 w-3.5 text-accent" /> How this works
+              </p>
+              <ol className="list-decimal space-y-1 pl-4">
+                <li>Files upload to Supabase Storage (resumes bucket)</li>
+                <li>A Postgres trigger registers each file as a pending resume</li>
+                <li>The reconciler (runs every minute) parses with Claude, matches to existing people by email / LinkedIn / name+company</li>
+                <li>If matched → updates the existing candidate with new resume info</li>
+                <li>If not matched → creates a new candidate stub</li>
+                <li>Any near-duplicates land in <span className="font-mono">/duplicates</span> for manual review</li>
+              </ol>
+            </div>
+          </SectionCard>
+
+          {/* ── Step 2 · Review queue & upload ── */}
+          {total > 0 && (
+            <SectionCard
+              title="Upload queue"
+              icon={<ListChecks className="h-4 w-4" />}
+              flush
+              actions={
+                <div className="flex items-center gap-2">
+                  {(completed > 0 || queued > 0) && (
+                    <Button variant="outline" size="sm" onClick={clearDone}>Clear completed</Button>
+                  )}
+                  <Button
+                    variant="gold"
+                    size="sm"
+                    disabled={running || (pending === 0 && failed === 0)}
+                    onClick={startAll}
+                    className="gap-1.5"
+                  >
+                    {running
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                      : <><Upload className="h-3.5 w-3.5" /> Start{failed > 0 ? ' / Retry failed' : ''}</>}
+                  </Button>
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">2</span>
+                </div>
+              }
+            >
+              <div className="space-y-3 px-5 py-4">
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="text-muted-foreground">Total: <strong className="text-foreground tabular-nums">{total}</strong></span>
+                  {completed > 0 && (
+                    <span className="text-primary">Completed: <strong className="tabular-nums">{completed}</strong></span>
+                  )}
+                  {queued > 0 && (
+                    <span className="text-amber-700">Parsing: <strong className="tabular-nums">{queued}</strong></span>
+                  )}
+                  {inFlight > 0 && (
+                    <span className="text-amber-700">Uploading: <strong className="tabular-nums">{inFlight}</strong></span>
+                  )}
+                  {failed > 0 && (
+                    <span className="text-red-600">Upload failed: <strong className="tabular-nums">{failed}</strong></span>
+                  )}
+                  {parseFailed > 0 && (
+                    <span className="text-red-600">Parse failed: <strong className="tabular-nums">{parseFailed}</strong></span>
+                  )}
+                  {pending > 0 && !running && (
+                    <span className="text-muted-foreground">Pending: <strong className="tabular-nums">{pending}</strong></span>
+                  )}
+                </div>
+                <Progress value={progressPct} />
+              </div>
+
+              <table className="w-full border-t border-card-border">
+                <thead className="table-header-green">
+                  <tr className="text-left text-[10px] font-display font-semibold uppercase tracking-wider">
+                    <th className="px-4 py-2.5">File</th>
+                    <th className="px-3 py-2.5">Size</th>
+                    <th className="px-3 py-2.5">Status</th>
+                    <th className="px-3 py-2.5"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody className="divide-y divide-card-border">
+                  {rows.map((r) => (
+                    <tr key={r.id} className="text-sm hover:bg-page-bg/40">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="truncate" title={r.file.name}>{r.file.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                        {(r.file.size / 1024 / 1024).toFixed(2)} MB
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <StatusBadge status={r.status} error={r.error} />
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        {(r.status === 'pending' || r.status === 'failed') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => removeRow(r.id)}
+                            title="Remove from queue"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SectionCard>
+          )}
+        </div>
       </div>
     </MainLayout>
   );

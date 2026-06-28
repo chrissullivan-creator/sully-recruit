@@ -110,7 +110,7 @@ export function CandidatePipeline() {
         </p>
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 rounded-full text-xs gap-1.5">
               <Settings2 className="h-3.5 w-3.5" />
               Card Fields
             </Button>
@@ -153,18 +153,18 @@ export function CandidatePipeline() {
                   return (
                     <div
                       onClick={() => navigate(`/candidates/${c.id}`)}
-                      className="group cursor-pointer rounded-lg border border-border bg-card p-3 transition-all duration-150 hover:border-accent/50 hover:shadow-md"
+                      className="group cursor-pointer rounded-2xl border border-card-border bg-card p-3 transition-all duration-200 hover:border-accent/50 hover:shadow-md hover:-translate-y-0.5"
                     >
                       <div className="flex items-start gap-3">
                         {c.avatar_url ? (
-                          <img src={c.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                          <img src={c.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-card-border" />
                         ) : (
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
                             {(c.first_name?.[0] ?? '')}{(c.last_name?.[0] ?? '')}
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-medium text-foreground group-hover:text-accent transition-colors truncate">
+                          <h4 className="text-sm font-semibold text-foreground group-hover:text-accent transition-colors truncate">
                             {c.full_name ?? (`${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '—')}
                           </h4>
                           {visibleFields.has('job') && row.job && (

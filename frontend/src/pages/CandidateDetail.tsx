@@ -2,6 +2,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import DOMPurify from 'dompurify';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { DetailHeader } from '@/components/shared/DetailHeader';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { StatStrip } from '@/components/shared/StatStrip';
+import { AISummaryCard } from '@/components/shared/AISummaryCard';
+import { ActivityTimeline } from '@/components/shared/ActivityTimeline';
+import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -26,11 +32,11 @@ import { toast } from 'sonner';
 import { useState, useEffect, useRef } from 'react';
 import { SentimentChip, ChannelIcon, EditableField, EditableTextarea } from '@/components/candidate-detail/CandidateFields';
 import {
-  ArrowLeft, Mail, Phone, Linkedin, Building, MapPin,
+  Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User, Play,
   FileText, Martini, Loader2, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
-  GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send, Martini,
+  GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send,
   Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download,
 } from 'lucide-react';
 import {
@@ -921,7 +927,6 @@ const CandidateDetail = () => {
   if (isLoading) return <MainLayout><div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div></MainLayout>;
   if (!candidate) return <MainLayout><div className="flex items-center justify-center h-full"><p className="text-muted-foreground">Candidate not found.</p></div></MainLayout>;
 
-  const initials = `${candidate.first_name?.[0] ?? ''}${candidate.last_name?.[0] ?? ''}`;
   const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
   const c = candidate as any;
 
@@ -943,17 +948,14 @@ const CandidateDetail = () => {
 
   return (
     <MainLayout>
-      {/* Top header bar — ContactDetail style */}
-      <div className="flex items-center gap-3 px-8 py-4 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4" /></Button>
-        {c.avatar_url ? (
-          <img src={c.avatar_url} alt={fullName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent shrink-0">{initials}</div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-foreground truncate">{fullName}</h1>
+      {/* Top header bar — shared DetailHeader */}
+      <DetailHeader
+        className="px-2"
+        onBack={() => navigate(-1)}
+        avatar={<PersonAvatar name={fullName} src={c.avatar_url} size="lg" />}
+        title={fullName}
+        badges={
+          <>
             <Badge variant="secondary" className="text-xs shrink-0">{candidate.status === 'back_of_resume' ? 'Back of Resume' : candidate.status === 'reached_out' ? 'Reached Out' : candidate.status?.charAt(0).toUpperCase() + candidate.status?.slice(1)}</Badge>
             {(() => {
               const roles: string[] = c.roles ?? ['candidate'];
@@ -972,44 +974,46 @@ const CandidateDetail = () => {
                 </div>
               );
             })()}
-          </div>
-          <p className="text-sm text-muted-foreground truncate">
+          </>
+        }
+        subtitle={
+          <span className="truncate">
             {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}
             {candidate.current_company && (
               <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
             )}
-          </p>
-        </div>
-
-        {/* Social / contact links */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {(() => {
-            // Prefer personal_email for candidate outreach (sequences send to
-            // personal_email; work_email is shown for context). Fall back to
-            // the legacy email column during the migration off it.
-            const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
-            return mailto ? (
-              <a href={`mailto:${mailto}`} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={mailto}>
-                <Mail className="h-4 w-4" />
+          </span>
+        }
+        contactActions={
+          <>
+            {(() => {
+              // Prefer personal_email for candidate outreach (sequences send to
+              // personal_email; work_email is shown for context). Fall back to
+              // the legacy email column during the migration off it.
+              const mailto = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
+              return mailto ? (
+                <a href={`mailto:${mailto}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title={mailto}>
+                  <Mail className="h-4 w-4" />
+                </a>
+              ) : null;
+            })()}
+            {candidate.phone && (
+              <CallButton
+                phone={candidate.phone}
+                candidateId={candidate.id}
+                iconOnly
+                title={`Call ${candidate.phone} (RingCentral RingOut)`}
+              />
+            )}
+            {candidate.linkedin_url && (
+              <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors" title="LinkedIn Profile">
+                <Linkedin className="h-4 w-4" />
               </a>
-            ) : null;
-          })()}
-          {candidate.phone && (
-            <CallButton
-              phone={candidate.phone}
-              candidateId={candidate.id}
-              iconOnly
-              title={`Call ${candidate.phone} (RingCentral RingOut)`}
-            />
-          )}
-          {candidate.linkedin_url && (
-            <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="LinkedIn Profile">
-              <Linkedin className="h-4 w-4" />
-            </a>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
+            )}
+          </>
+        }
+        actions={
+          <>
           {/* Primary actions inline. Everything else lives behind the
               "More" dropdown to keep the header from overflowing on
               narrower screens. */}
@@ -1108,8 +1112,9 @@ const CandidateDetail = () => {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {showResume && resumeUrl && (
         <div className="border-b border-card-border bg-page-bg/40">
@@ -1135,10 +1140,29 @@ const CandidateDetail = () => {
         {/* ============ MAIN PANEL (full width) ============ */}
         <div className="flex-1 flex flex-col overflow-hidden">
 
+          {/* KPI stat strip — experience & compensation snapshot */}
+          {(() => {
+            const fmtMoney = (n: any) => (n != null && !isNaN(Number(n))
+              ? `$${Math.round(Number(n) / 1000)}K` : '—');
+            const stats = [
+              { label: 'Current Base', value: fmtMoney(c.current_base_comp) },
+              { label: 'Current Bonus', value: fmtMoney(c.current_bonus_comp) },
+              { label: 'Current Total', value: fmtMoney(c.current_total_comp), accent: true },
+              { label: 'Target Total', value: fmtMoney(c.target_total_comp), accent: true },
+            ];
+            return (
+              <div className="px-8 pt-5">
+                <StatStrip items={stats} />
+              </div>
+            );
+          })()}
+
           {/* Contact info grid */}
-          <div className="px-8 py-5 border-b border-border">
-            {canEdit && (
-              <div className="flex justify-end mb-2">
+          <div className="px-8 py-5">
+            <SectionCard
+              title="Contact & Profile"
+              icon={<User className="h-4 w-4" />}
+              actions={canEdit ? (
                 <button
                   onClick={() => setEditingInfo(!editingInfo)}
                   className={cn(
@@ -1151,8 +1175,8 @@ const CandidateDetail = () => {
                   <Edit className="h-3 w-3" />
                   {editingInfo ? 'Done Editing' : 'Edit Info'}
                 </button>
-              </div>
-            )}
+              ) : undefined}
+            >
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
               <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
               <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
@@ -1305,6 +1329,7 @@ const CandidateDetail = () => {
                 </div>
               )}
             </div>
+            </SectionCard>
           </div>
 
           {/* ---- Tabs ---- */}
@@ -1312,40 +1337,53 @@ const CandidateDetail = () => {
             {/* Horizontally scrollable strip — 9 tabs overflow on smaller
                 viewports; scroll-snap + hidden scrollbar give a clean
                 "swipeable" feel without breaking shadcn TabsList layout. */}
-            <div className="px-8 pt-3 border-b border-border overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <TabsList className="bg-white border border-card-border inline-flex w-max">
-                <TabsTrigger value="joe" className="gap-1.5 snap-start"><Martini className="h-3.5 w-3.5" /> Joe Says</TabsTrigger>
-                <TabsTrigger value="background" className="gap-1.5 snap-start"><Briefcase className="h-3.5 w-3.5" /> Background</TabsTrigger>
-                <TabsTrigger value="activity" className="gap-1.5 snap-start"><History className="h-3.5 w-3.5" /> Activity</TabsTrigger>
-                <TabsTrigger value="documents" className="gap-1.5 snap-start"><FolderOpen className="h-3.5 w-3.5" /> Documents</TabsTrigger>
-                <TabsTrigger value="send-outs" className="gap-1.5 snap-start"><Send className="h-3.5 w-3.5" /> Pipeline</TabsTrigger>
-                <TabsTrigger value="notes" className="gap-1.5 snap-start"><FileText className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+            <div className="px-8 border-b border-card-border bg-card/40 overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <TabsList className="h-auto bg-transparent p-0 inline-flex w-max gap-1 rounded-none">
+                {[
+                  { value: 'joe', label: 'Joe Says', icon: Martini },
+                  { value: 'background', label: 'Background', icon: Briefcase },
+                  { value: 'activity', label: 'Activity', icon: History },
+                  { value: 'documents', label: 'Documents', icon: FolderOpen },
+                  { value: 'send-outs', label: 'Pipeline', icon: Send },
+                  { value: 'notes', label: 'Notes', icon: FileText },
+                ].map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <TabsTrigger
+                      key={t.value}
+                      value={t.value}
+                      className="snap-start gap-1.5 rounded-none border-b-2 border-transparent bg-transparent px-3 py-3 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {t.label}
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1">
-              <TabsContent value="joe" className="px-8 py-5 mt-0">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Martini className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Joe Says</h2>
-                    {c.joe_says_updated_at && (
-                      <span className="text-xs text-muted-foreground">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
-                    )}
-                  </div>
-                  <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
-                    {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                    {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
-                  </Button>
-                </div>
-
+              <TabsContent value="joe" className="px-8 py-5 mt-0 space-y-6">
+                <AISummaryCard
+                  title="Joe Says"
+                  actions={
+                    <>
+                      {c.joe_says_updated_at && (
+                        <span className="text-xs text-muted-foreground hidden sm:inline">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
+                      )}
+                      <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                        {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                        {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
+                      </Button>
+                    </>
+                  }
+                >
                 {generatingJoe ? (
-                  <div className="flex items-center gap-3 py-10 text-muted-foreground">
+                  <div className="flex items-center gap-3 py-6 text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span className="text-sm">Joe is analyzing this candidate...</span>
                   </div>
                 ) : c.joe_says ? (
-                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-5 space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                  <div className="space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
                     {(c.joe_says as string).split('\n').map((line: string, i: number) => {
                       if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
                       if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
@@ -1355,7 +1393,7 @@ const CandidateDetail = () => {
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                  <div className="py-6 text-center">
                     <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                     <p className="text-sm font-medium mb-1">No Joe Says yet</p>
                     <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
@@ -1364,13 +1402,10 @@ const CandidateDetail = () => {
                     </Button>
                   </div>
                 )}
+                </AISummaryCard>
 
                 {/* ── Ask Joe Chat ───────────────────────────────────────── */}
-                <div className="mt-6 rounded-xl border border-border">
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/30 rounded-t-xl">
-                    <Martini className="h-4 w-4 text-accent" />
-                    <h3 className="text-sm font-semibold">Ask Joe about this candidate</h3>
-                  </div>
+                <SectionCard title="Ask Joe about this candidate" icon={<Martini className="h-4 w-4 text-accent" />} flush>
                   <div ref={joeChatScrollRef} className="h-64 overflow-y-auto p-4 space-y-3">
                     {joeChatMessages.length === 0 && (
                       <p className="text-xs text-muted-foreground text-center py-8">Ask Joe anything — draft outreach, get comp insights, pitch ideas...</p>
@@ -1407,7 +1442,7 @@ const CandidateDetail = () => {
                       </Button>
                     </div>
                   </div>
-                </div>
+                </SectionCard>
               </TabsContent>
 
               <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
@@ -1438,7 +1473,7 @@ const CandidateDetail = () => {
                         <p className="text-sm text-muted-foreground">No work history recorded.</p>
                       )}
                       {workHistory.map((w: any) => (
-                        <div key={w.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                        <div key={w.id} className="rounded-xl border border-card-border bg-card p-3 space-y-1">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-medium text-foreground">{w.title}</p>
                             {w.is_current && <Badge variant="secondary" className="text-[9px]">Current</Badge>}
@@ -1515,7 +1550,7 @@ const CandidateDetail = () => {
                         <p className="text-sm text-muted-foreground">No education history recorded.</p>
                       )}
                       {education.map((e: any) => (
-                        <div key={e.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
+                        <div key={e.id} className="rounded-xl border border-card-border bg-card p-3 space-y-1">
                           <p className="text-sm font-medium text-foreground">{e.institution}</p>
                           {(e.degree || e.field_of_study) && (
                             <p className="text-xs text-muted-foreground">
@@ -1592,7 +1627,7 @@ const CandidateDetail = () => {
 
               <TabsContent value="activity" className="px-8 py-5 mt-0 space-y-6">
                 {/* Quick-action bar (was its own Communications tab — merged in) */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={() => {
                     const to = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
                     if (to) { window.location.href = `mailto:${to}`; }
@@ -1615,10 +1650,7 @@ const CandidateDetail = () => {
                   }}><MessageSquare className="h-3.5 w-3.5 mr-1" /> SMS</Button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <History className="h-5 w-5 text-accent" />
-                  <h2 className="text-base font-semibold">Activity Timeline</h2>
-                </div>
+                <SectionCard title="Activity Timeline" icon={<History className="h-4 w-4 text-accent" />}>
                 {(() => {
                   // Build merged timeline from all data sources
                   const events: { date: string; icon: React.ReactNode; title: string; detail: string; type: string }[] = [];
@@ -1676,27 +1708,23 @@ const CandidateDetail = () => {
                     return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
                   }
 
-                  return (
-                    <div className="space-y-3">
-                      {events.map((ev, i) => (
-                        <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                            {ev.icon}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-foreground">{ev.title}</p>
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                {ev.date ? format(new Date(ev.date), 'MMM d, yyyy h:mm a') : '—'}
-                              </span>
-                            </div>
-                            {ev.detail && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.detail}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
+                  // Group events by day label for the shared ActivityTimeline.
+                  const groupOrder: string[] = [];
+                  const grouped: Record<string, { label: string; events: any[] }> = {};
+                  for (const ev of events) {
+                    const label = ev.date ? format(new Date(ev.date), 'MMM d, yyyy') : 'Earlier';
+                    if (!grouped[label]) { grouped[label] = { label, events: [] }; groupOrder.push(label); }
+                    grouped[label].events.push({
+                      icon: ev.icon,
+                      title: ev.title,
+                      time: ev.date ? format(new Date(ev.date), 'h:mm a') : undefined,
+                      meta: ev.detail || undefined,
+                    });
+                  }
+
+                  return <ActivityTimeline groups={groupOrder.map((l) => grouped[l])} />;
                 })()}
+                </SectionCard>
 
                 {/* Meeting recaps — was its own tab, now lives under Activity */}
                 <div className="pt-2">
@@ -1709,11 +1737,7 @@ const CandidateDetail = () => {
 
                 {/* Conversation threads — was the body of the Communications
                     tab. Keeps the inline-message drill-down on this page. */}
-                <div className="pt-2 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5 text-accent" />
-                    <h2 className="text-base font-semibold">Conversations</h2>
-                  </div>
+                <SectionCard title="Conversations" icon={<MessageSquare className="h-4 w-4 text-accent" />}>
                   {(conversations as any[]).length === 0 ? (
                     <p className="text-sm text-muted-foreground">No conversations yet.</p>
                   ) : (
@@ -1726,7 +1750,7 @@ const CandidateDetail = () => {
                           ? 'LinkedIn' : conv.channel?.charAt(0).toUpperCase() + conv.channel?.slice(1);
                         return (
                           <Collapsible key={conv.id}>
-                            <div className="rounded-lg border border-border">
+                            <div className="rounded-xl border border-card-border">
                               <CollapsibleTrigger className="w-full text-left p-4 hover:bg-muted/30 transition-colors">
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
@@ -1776,7 +1800,7 @@ const CandidateDetail = () => {
                       })}
                     </div>
                   )}
-                </div>
+                </SectionCard>
               </TabsContent>
 
               {/* ── Documents Tab (Resumes / Formatted / Other) ────────── */}
@@ -1882,7 +1906,7 @@ const CandidateDetail = () => {
                         {candidateResumes.map((r: any) => {
                           const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
-                            <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                            <div key={r.id} className="flex items-center justify-between rounded-xl border border-card-border bg-card p-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 <FileText className="h-4 w-4 text-accent shrink-0" />
                                 <div className="min-w-0">
@@ -1955,7 +1979,7 @@ const CandidateDetail = () => {
                         {formattedResumes.map((r: any) => {
                           const downloadUrl = r.file_path ? signedUrls[r.file_path] : null;
                           return (
-                            <div key={r.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                            <div key={r.id} className="flex items-center justify-between rounded-xl border border-card-border bg-card p-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 <FileText className="h-4 w-4 text-accent shrink-0" />
                                 <div className="min-w-0">
@@ -2022,7 +2046,7 @@ const CandidateDetail = () => {
                         {otherDocs.map((d: any) => {
                           const downloadUrl = d.file_path ? signedUrls[d.file_path] : null;
                           return (
-                            <div key={d.id} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-3">
+                            <div key={d.id} className="flex items-center justify-between rounded-xl border border-card-border bg-card p-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 <FileText className="h-4 w-4 text-accent shrink-0" />
                                 <div className="min-w-0">
@@ -2132,7 +2156,7 @@ const CandidateDetail = () => {
                       const isRejecting = rejectingId === so.id;
                       const isSendOutOwner = so.recruiter_id === user?.id || isAdmin;
                       return (
-                        <div key={so.id} className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+                        <div key={so.id} className="rounded-xl border border-card-border bg-card p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <div className="min-w-0 cursor-pointer" onClick={() => j?.id && navigate(`/jobs/${j.id}`)}>
                               <p className="text-sm font-medium text-foreground hover:text-accent transition-colors">{j?.title ?? 'Unknown Job'}</p>
