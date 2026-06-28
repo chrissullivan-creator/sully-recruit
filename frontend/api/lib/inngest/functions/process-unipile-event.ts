@@ -17,6 +17,7 @@ import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-e
 import { updateLinkedinAccountStatus } from "../../../lib/unipile-linkedin.js";
 import { resolvePerson, type LinkMethod } from "../../identity-resolver.js";
 import { enrichAndRematch } from "../../enrich-linkedin-identity.js";
+import { fetchAndUploadLinkedinAttachments } from "../../linkedin-attachments.js";
 
 /**
  * Process Unipile webhook events (LinkedIn messages, connection updates,
@@ -655,6 +656,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
     }
 
+    // Pull any file attachments (e.g. a résumé sent over InMail) into Storage so
+    // the inbox can render + download them. Best-effort — never blocks the insert.
+    const unlinkedAttachments = await fetchAndUploadLinkedinAttachments(
+      supabase, messageData, conversationId, logger,
+    );
+
     const { error: unlinkedInsertErr } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       candidate_id: null,
@@ -673,6 +680,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
       sender_name: senderName,
       sender_address: senderAddress,
       raw_payload: messageData,
+      attachments: unlinkedAttachments,
       is_read: direction === "outbound",
       needs_link: true,
       link_attempted_at: new Date().toISOString(),
@@ -707,6 +715,12 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     return { action: "skipped", reason: "conversation_create_failed", type: "linkedin_message" };
   }
 
+  // Pull any file attachments (e.g. a résumé) into Storage so the inbox can
+  // render + download them. Best-effort — never blocks the insert.
+  const linkedAttachments = await fetchAndUploadLinkedinAttachments(
+    supabase, messageData, conversationId, logger,
+  );
+
   const { error: linkedInsertErr } = await supabase.from("messages").insert({
     conversation_id: conversationId,
     [entityColumn]: entityId,
@@ -724,6 +738,7 @@ async function processLinkedInMessage(supabase: any, event: any, receivedAt: str
     sender_name: messageData.sender?.attendee_name || messageData.sender_name || null,
     sender_address: senderProfileUrl || senderId,
     raw_payload: messageData,
+    attachments: linkedAttachments,
     is_read: direction === "outbound",
     needs_link: false,
     link_method: linkMethod ? `webhook:${linkMethod}` : null,
