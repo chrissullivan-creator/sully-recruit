@@ -364,6 +364,11 @@ function LinkCallDialog({
         candidate_id: isCandidate ? entityId : null,
         contact_id: isContact ? entityId : null,
       }).eq('id', call.id);
+      // Re-point any AI call note attached to this call so its transcript /
+      // summary follows the (re)tagged person onto their detail page too.
+      await supabase.from('ai_call_notes' as any)
+        .update({ candidate_id: entityId })
+        .eq('call_log_id', call.id);
       if (call.notes) {
         const userId = (await supabase.auth.getUser()).data.user?.id;
         await supabase.from('notes').insert({
@@ -410,7 +415,7 @@ function LinkCallDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-5 w-5" />
-            Link Call to Record
+            Tag call to a person
           </DialogTitle>
         </DialogHeader>
         {call && (
@@ -931,20 +936,19 @@ export function CallsPanel({ embedded = false }: { embedded?: boolean }) {
                       </div>
                     )}
 
-                    {/* Tag to record if not linked */}
-                    {!candidateId && (
-                      <div className="mt-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-xs gap-1"
-                          onClick={(e) => { e.stopPropagation(); setLinkCall(call); }}
-                        >
-                          <UserPlus className="h-3 w-3" />
-                          Tag to Record
-                        </Button>
-                      </div>
-                    )}
+                    {/* Tag / retag the person on this call — always available so a
+                        mis-tagged (or untagged) call can be corrected. */}
+                    <div className="mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs gap-1"
+                        onClick={(e) => { e.stopPropagation(); setLinkCall(call); }}
+                      >
+                        <UserPlus className="h-3 w-3" />
+                        {candidateId ? 'Retag person' : 'Tag to Record'}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
