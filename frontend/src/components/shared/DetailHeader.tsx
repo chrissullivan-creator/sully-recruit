@@ -38,17 +38,21 @@ export function DetailHeader({
           {backLabel}
         </button>
       )}
-      <div className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-4 min-w-0">
+      <div className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-4 min-w-0">
           {avatar && <div className="shrink-0">{avatar}</div>}
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold text-foreground truncate">{title}</h1>
-              {badges}
-            </div>
+          {/* Identity stack — name → role/company/location → tag row, mirroring
+              the design mockup (tags sit on their own line, not beside the name). */}
+          <div className="min-w-0 space-y-1.5">
+            <h1 className="text-2xl font-semibold leading-tight tracking-tight text-foreground">{title}</h1>
             {subtitle && (
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                 {subtitle}
+              </div>
+            )}
+            {badges && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                {badges}
               </div>
             )}
           </div>
