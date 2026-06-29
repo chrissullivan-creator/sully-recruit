@@ -2,8 +2,15 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// The project URL + publishable key are public by design — they ship in the
+// browser bundle and RLS is the security boundary. Hardcode them as the source
+// of truth (with an optional env override) so an unset/misconfigured build env
+// can never white-screen the app with "supabaseUrl is required".
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://xlobevmhzimxjtpiontf.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  'sb_publishable_cs_6WLpIGSD2ez2tVTUkvA_rrtbF5lP';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
