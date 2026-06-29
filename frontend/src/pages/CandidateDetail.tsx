@@ -1407,6 +1407,7 @@ const CandidateDetail = () => {
               <TabsList className="h-auto bg-transparent p-0 inline-flex w-max gap-1 rounded-none">
                 {[
                   { value: 'overview', label: 'Overview', icon: User },
+                  { value: 'background', label: 'Background', icon: Info },
                   { value: 'pipeline', label: 'Pipeline', icon: Send },
                   { value: 'documents', label: 'Documents', icon: FolderOpen },
                   { value: 'history', label: 'History', icon: History },
@@ -1593,12 +1594,12 @@ const CandidateDetail = () => {
                     )}
                   </SectionCard>
                 </div>
+              </TabsContent>
 
-                {/* ── Background (folded into Overview) ─────────────────────
-                    Candidate summary, comp context, work history, education,
-                    picklists + custom fields. Kept here so the redesign's
-                    7-tab IA loses no editing surface. */}
-                <div className="border-t border-card-border pt-2" />
+              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
+                {/* Candidate summary, comp context, work history, education,
+                    picklists + custom fields — the full editing surface, moved
+                    off the Overview so it reads as the clean mockup dashboard. */}
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
