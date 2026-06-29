@@ -116,15 +116,9 @@ const navigation: NavItem[] = [
     ],
   },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
-  {
-    name: 'Admin', href: '/settings', icon: Settings,
-    children: [
-      { name: 'Settings', href: '/settings' },
-      { name: 'Custom Fields', href: '/settings?tab=custom-fields' },
-      { name: 'Data Hygiene', href: '/settings?tab=hygiene' },
-      { name: 'Audit Log', href: '/audit' },
-    ],
-  },
+  // Admin is a single link (no expandable sub-items) — its tools live as tabs
+  // inside Settings (?tab=custom-fields / ?tab=hygiene) and the Audit Log page.
+  { name: 'Admin', href: '/settings', icon: Settings },
 ];
 
 // All the route bases that count toward a nav item being "active" — includes
