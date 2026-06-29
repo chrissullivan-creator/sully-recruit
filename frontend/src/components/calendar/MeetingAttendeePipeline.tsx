@@ -6,10 +6,9 @@ import {
 } from '@/components/ui/select';
 import { FileText, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
-import { SEND_OUT_STAGES } from '@/components/job-detail/SendOutCard';
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import { stageToCanonical } from '@/lib/pipeline';
+import { SEND_OUT_STAGES } from '@/components/job-detail/SendOutCard';
 
 /**
  * Inline pipeline strip for one meeting attendee: their latest résumé +
@@ -102,38 +101,33 @@ export function MeetingAttendeePipeline({ candidateId }: { candidateId: string }
 
       {sendOuts.length > 0 && (
         <div className="space-y-1">
-          {sendOuts.map((so) => {
-            const cfg = SEND_OUT_STAGES.find(s => s.value === so.stage) ?? SEND_OUT_STAGES[0];
-            return (
-              <div
-                key={so.id}
-                className="flex items-center justify-between gap-2 rounded border border-card-border bg-muted/20 px-2 py-1"
+          {sendOuts.map((so) => (
+            <div
+              key={so.id}
+              className="flex items-center justify-between gap-2 rounded border border-card-border bg-muted/20 px-2 py-1"
+            >
+              <span className="text-[11px] truncate min-w-0">
+                {so.job?.title ?? 'Role'}
+                {so.job?.company_name ? ` · ${so.job.company_name}` : ''}
+              </span>
+              <Select
+                value={so.stage ?? 'submitted'}
+                onValueChange={(v) => onStageChange(so.id, v)}
+                disabled={changing === so.id}
               >
-                <span className="text-[11px] truncate min-w-0">
-                  {so.job?.title ?? 'Role'}
-                  {so.job?.company_name ? ` · ${so.job.company_name}` : ''}
-                </span>
-                <Select
-                  value={so.stage ?? 'submitted'}
-                  onValueChange={(v) => onStageChange(so.id, v)}
-                  disabled={changing === so.id}
-                >
-                  <SelectTrigger
-                    className={cn('h-6 w-auto min-w-[100px] border-0 text-[10px] font-medium rounded px-1.5 py-0 gap-1', cfg.color)}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SEND_OUT_STAGES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', s.color)}>{s.label}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            );
-          })}
+                <SelectTrigger className="h-6 w-auto min-w-[110px] border-card-border text-[11px] rounded px-1.5 py-0 gap-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEND_OUT_STAGES.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-[11px]">
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
         </div>
       )}
 
