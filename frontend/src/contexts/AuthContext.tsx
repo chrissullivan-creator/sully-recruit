@@ -19,19 +19,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    // Backstop: never let the app hang on the loading spinner if getSession()
+    // stalls (e.g. a slow token refresh on a flaky network).
+    const timeout = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 5000);
 
-    return () => subscription.unsubscribe();
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (!mounted) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+      })
+      .catch((error) => {
+        // A stale/corrupted refresh token in localStorage makes getSession()
+        // reject. Without this catch, `loading` would stay true forever and
+        // the app would be stuck on the loading spinner.
+        console.error('Failed to restore auth session:', error);
+        if (mounted) {
+          setSession(null);
+          setUser(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, displayName?: string) => {
