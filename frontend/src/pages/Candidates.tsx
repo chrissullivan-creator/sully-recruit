@@ -10,7 +10,6 @@ import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequence
 import { BulkCandidateActionsDialog } from '@/components/candidates/BulkCandidateActionsDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddCandidateDialog } from '@/components/candidates/AddCandidateDialog';
-import { AskJoeSearch } from '@/components/candidates/AskJoeSearch';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { CompanyLink } from '@/components/shared/EntityLinks';
@@ -41,6 +40,7 @@ import { Plus, LayoutGrid, List, Search, Building, Play, ArrowUpDown, ArrowUp, A
 import { cn } from '@/lib/utils';
 import { ResumeDropZone } from '@/components/shared/ResumeDropZone';
 import { DuplicateReviewDialog } from '@/components/candidates/DuplicateReviewDialog';
+import { ActionMenu } from '@/components/shared/ActionMenu';
 import { format } from 'date-fns';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -104,7 +104,6 @@ const Candidates = () => {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [resumeDropOpen, setResumeDropOpen] = useState(false);
-  const [askJoeSearchOpen, setAskJoeSearchOpen] = useState(false);
   const [dedupOpen, setDedupOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -425,26 +424,41 @@ const Candidates = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setAskJoeSearchOpen(true)}>
-              <Martini className="h-4 w-4 mr-1" />
-              Ask Joe
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setResumeDropOpen(true)}>
-              <FileUp className="h-4 w-4 mr-1" />
-              Resume Drop
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setDedupOpen(true)}>
-              <Users className="h-4 w-4 mr-1" />
-              Duplicates
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
-              <Upload className="h-4 w-4 mr-1" />
-              Import CSV
-            </Button>
-            <Button variant="gold" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" />
-              Add Candidate
-            </Button>
+            <ActionMenu
+              label="Add Candidate"
+              leadingIcon={<Plus className="h-4 w-4" />}
+              items={[
+                {
+                  key: 'individual',
+                  label: 'Add individual',
+                  description: 'Create one candidate by hand',
+                  icon: <User />,
+                  onSelect: () => setAddOpen(true),
+                },
+                {
+                  key: 'bulk',
+                  label: 'Bulk add — drop résumés',
+                  description: 'Parse a stack of résumés into candidates',
+                  icon: <FileUp />,
+                  onSelect: () => setResumeDropOpen(true),
+                },
+                {
+                  key: 'csv',
+                  label: 'Import CSV',
+                  description: 'Upload a spreadsheet of candidates',
+                  icon: <Upload />,
+                  onSelect: () => setImportOpen(true),
+                },
+                {
+                  key: 'duplicates',
+                  label: 'Find duplicates',
+                  description: 'Review & merge duplicate candidates',
+                  icon: <Users />,
+                  onSelect: () => setDedupOpen(true),
+                  separatorBefore: true,
+                },
+              ]}
+            />
           </div>
         }
       />
@@ -802,7 +816,6 @@ const Candidates = () => {
       />
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="candidates" />
       <AddCandidateDialog open={addOpen} onOpenChange={setAddOpen} />
-      <AskJoeSearch open={askJoeSearchOpen} onOpenChange={setAskJoeSearchOpen} />
       <ResumeDropZone entityType="candidate" open={resumeDropOpen} onOpenChange={setResumeDropOpen} />
       <DuplicateReviewDialog open={dedupOpen} onOpenChange={setDedupOpen} />
 

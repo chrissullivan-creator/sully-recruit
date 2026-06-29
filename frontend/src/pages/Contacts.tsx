@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
+import { ActionMenu } from '@/components/shared/ActionMenu';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
-import { AskJoeAdvancedSearch } from '@/components/candidates/AskJoeAdvancedSearch';
-import { AskJoeContactSearch } from '@/components/contacts/AskJoeContactSearch';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { useContacts, useJobs } from '@/hooks/useData';
@@ -67,8 +66,6 @@ const Contacts = () => {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [taskPanel, setTaskPanel] = useState<{ id: string; name: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
-  const [contactSearchOpen, setContactSearchOpen] = useState(false);
   const [fetchingHistoryId, setFetchingHistoryId] = useState<string | null>(null);
   const [togglingTagId, setTogglingTagId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -218,12 +215,6 @@ const Contacts = () => {
     }
   };
 
-  // Called by AskJoeContactSearch when user clicks "Enroll X Contacts in Sequence"
-  const handleJoeEnroll = (contactIds: string[]) => {
-    setSelectedIds(contactIds);
-    setEnrollOpen(true);
-  };
-
   return (
     <MainLayout>
       <div className="px-6 pt-6 lg:px-8">
@@ -264,22 +255,26 @@ const Contacts = () => {
                 </AlertDialog>
               </>
             )}
-            <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(true)}>
-              <Martini className="h-4 w-4 mr-1" />
-              Ask Joe — Firm & Title Search
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setContactSearchOpen(true)}>
-              <Martini className="h-4 w-4 mr-1" />
-              Ask Joe — Contacts
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
-              <Upload className="h-4 w-4 mr-1" />
-              Import CSV
-            </Button>
-            <Button variant="gold" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" />
-              Add Contact
-            </Button>
+            <ActionMenu
+              label="Add Contact"
+              leadingIcon={<Plus className="h-4 w-4" />}
+              items={[
+                {
+                  key: 'individual',
+                  label: 'Add individual',
+                  description: 'Create one contact by hand',
+                  icon: <User />,
+                  onSelect: () => setAddOpen(true),
+                },
+                {
+                  key: 'csv',
+                  label: 'Import CSV',
+                  description: 'Upload a spreadsheet of contacts',
+                  icon: <Upload />,
+                  onSelect: () => setImportOpen(true),
+                },
+              ]}
+            />
           </div>
         }
       />
@@ -652,12 +647,6 @@ const Contacts = () => {
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
-      <AskJoeAdvancedSearch open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen} mode="contact_search" />
-      <AskJoeContactSearch
-        open={contactSearchOpen}
-        onOpenChange={setContactSearchOpen}
-        onEnrollContacts={handleJoeEnroll}
-      />
       <EnrollInSequenceDialog
         open={enrollOpen}
         onOpenChange={setEnrollOpen}

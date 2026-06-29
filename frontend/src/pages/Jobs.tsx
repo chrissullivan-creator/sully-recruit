@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { JobStageBoard, type BoardColumn } from '@/components/pipeline/JobStageBoard';
 import { AddJobDialog } from '@/components/jobs/AddJobDialog';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
+import { ActionMenu } from '@/components/shared/ActionMenu';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { useJobs, useJobPipelineStages } from '@/hooks/useData';
 import { CompanyLink } from '@/components/shared/EntityLinks';
@@ -249,14 +250,26 @@ const Jobs = () => {
                 <List className="h-4 w-4" />
               </button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
-              <Upload className="h-4 w-4 mr-1" />
-              Import CSV
-            </Button>
-            <Button variant="gold" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" />
-              Add Job
-            </Button>
+            <ActionMenu
+              label="Add Job"
+              leadingIcon={<Plus className="h-4 w-4" />}
+              items={[
+                {
+                  key: 'individual',
+                  label: 'Add individual',
+                  description: 'Create one job by hand',
+                  icon: <Briefcase />,
+                  onSelect: () => setAddOpen(true),
+                },
+                {
+                  key: 'csv',
+                  label: 'Import CSV',
+                  description: 'Upload a spreadsheet of jobs',
+                  icon: <Upload />,
+                  onSelect: () => setImportOpen(true),
+                },
+              ]}
+            />
           </div>
           }
         />
