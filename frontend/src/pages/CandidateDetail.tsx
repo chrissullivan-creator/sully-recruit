@@ -5,6 +5,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { StatStrip } from '@/components/shared/StatStrip';
+import { SkillsCard } from '@/components/shared/cards/SkillsCard';
+import { NextActionsCard } from '@/components/shared/cards/NextActionsCard';
 import { AISummaryCard } from '@/components/shared/AISummaryCard';
 import { ActivityTimeline } from '@/components/shared/ActivityTimeline';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
@@ -1509,42 +1511,88 @@ const CandidateDetail = () => {
                   </div>
                 </SectionCard>
 
-                {/* Job matches (Overview) — top match for the assigned job */}
-                {candidateJobMatch && (
+                {/* ── Overview dashboard grid (mockup IA) ─────────────────────
+                    Skills · Next actions · Résumé · Job match, wired to the
+                    candidate's existing data. The deeper editing surfaces
+                    (background, work history, education) stay below for now. */}
+                <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4 items-start">
+                  <SkillsCard
+                    title="Skills & focus"
+                    skills={[
+                      ...(((c.departments as string[]) ?? [])),
+                      ...(((c.products as string[]) ?? [])),
+                    ].filter(Boolean).slice(0, 14).map((t) => ({ label: t }))}
+                    emptyLabel="No focus areas on file"
+                  />
+
+                  <NextActionsCard
+                    items={candidateTasks.slice(0, 6).map((t) => ({
+                      id: t.id,
+                      title: t.title,
+                      meta: t.due_date ? `Due ${format(new Date(t.due_date), 'MMM d')}` : undefined,
+                      done: t.status === 'completed' || !!t.completed_at,
+                    }))}
+                    emptyLabel="No tasks queued"
+                  />
+
+                  <SectionCard title="Résumé" icon={<FileText className="h-4 w-4" />}>
+                    {resumeUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex h-24 items-center justify-center rounded-lg border border-card-border bg-muted/30">
+                          <FileText className="h-8 w-8 text-muted-foreground/50" />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <a href={resumeUrl} target="_blank" rel="noreferrer">
+                            <Button variant="gold" size="sm"><ExternalLink className="h-3.5 w-3.5 mr-1" /> Open</Button>
+                          </a>
+                          <a href={resumeUrl} download target="_blank" rel="noreferrer">
+                            <Button variant="outline" size="sm"><Download className="h-3.5 w-3.5 mr-1" /> Download</Button>
+                          </a>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="py-6 text-center text-sm text-muted-foreground">No résumé on file</p>
+                    )}
+                  </SectionCard>
+
                   <SectionCard title="Job match" icon={<Briefcase className="h-4 w-4" />}>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-2xl font-bold tabular-nums text-foreground">
-                          {(candidateJobMatch as any).overall_score}%
-                        </span>
-                        {(candidateJobMatch as any).tier && (
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold capitalize text-muted-foreground">
-                            {(candidateJobMatch as any).tier}
+                    {candidateJobMatch ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-bold tabular-nums text-foreground">
+                            {(candidateJobMatch as any).overall_score}%
                           </span>
+                          {(candidateJobMatch as any).tier && (
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold capitalize text-muted-foreground">
+                              {(candidateJobMatch as any).tier}
+                            </span>
+                          )}
+                        </div>
+                        {(candidateJobMatch as any).reasoning && (
+                          <p className="text-sm text-foreground/90">{(candidateJobMatch as any).reasoning}</p>
+                        )}
+                        {Array.isArray((candidateJobMatch as any).strengths) && (candidateJobMatch as any).strengths.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Strengths</p>
+                            <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
+                              {(candidateJobMatch as any).strengths.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {Array.isArray((candidateJobMatch as any).concerns) && (candidateJobMatch as any).concerns.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Concerns</p>
+                            <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
+                              {(candidateJobMatch as any).concerns.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </div>
                         )}
                       </div>
-                      {(candidateJobMatch as any).reasoning && (
-                        <p className="text-sm text-foreground/90">{(candidateJobMatch as any).reasoning}</p>
-                      )}
-                      {Array.isArray((candidateJobMatch as any).strengths) && (candidateJobMatch as any).strengths.length > 0 && (
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Strengths</p>
-                          <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
-                            {(candidateJobMatch as any).strengths.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
-                          </ul>
-                        </div>
-                      )}
-                      {Array.isArray((candidateJobMatch as any).concerns) && (candidateJobMatch as any).concerns.length > 0 && (
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Concerns</p>
-                          <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
-                            {(candidateJobMatch as any).concerns.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
+                    ) : (
+                      <p className="py-6 text-center text-sm text-muted-foreground">No job match yet</p>
+                    )}
                   </SectionCard>
-                )}
+                </div>
 
                 {/* ── Background (folded into Overview) ─────────────────────
                     Candidate summary, comp context, work history, education,
