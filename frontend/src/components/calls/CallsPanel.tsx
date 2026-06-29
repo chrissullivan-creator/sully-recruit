@@ -357,13 +357,14 @@ function LinkCallDialog({
     try {
       const isCandidate = entityType === 'candidate';
       const isContact = entityType === 'contact';
-      await supabase.from('call_logs' as any).update({
+      const { error: linkErr } = await supabase.from('call_logs' as any).update({
         linked_entity_type: entityType,
         linked_entity_id: entityId,
         linked_entity_name: entityName,
         candidate_id: isCandidate ? entityId : null,
         contact_id: isContact ? entityId : null,
       }).eq('id', call.id);
+      if (linkErr) throw linkErr;
       // Re-point any AI call note attached to this call so its transcript /
       // summary follows the (re)tagged person onto their detail page too.
       await supabase.from('ai_call_notes' as any)
