@@ -604,14 +604,36 @@ const ContactDetail = () => {
             );
           })()
         }
-        subtitle={
-          <span className="truncate">
-            {contact.title ?? ''}{contact.title && companyName ? ' at ' : ''}
-            {companyName && (
-              <CompanyLink companyId={(c as any).company_id} name={companyName} className="text-muted-foreground" />
-            )}
-          </span>
-        }
+        subtitle={(() => {
+          const email = (contact as any).work_email || (contact as any).personal_email || contact.email;
+          const phone = (contact as any).mobile_phone || contact.phone;
+          return (
+            <>
+              <span>
+                {contact.title ?? ''}{contact.title && companyName ? ' at ' : ''}
+                {companyName && (
+                  <CompanyLink companyId={(c as any).company_id} name={companyName} className="text-muted-foreground" />
+                )}
+              </span>
+              {phone && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 hover:text-foreground">
+                    <Phone className="h-3.5 w-3.5" /> {phone}
+                  </a>
+                </>
+              )}
+              {email && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <a href={`mailto:${email}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 hover:text-foreground">
+                    <Mail className="h-3.5 w-3.5" /> {email}
+                  </a>
+                </>
+              )}
+            </>
+          );
+        })()}
         contactActions={
           (() => {
             // Consolidated "Reach out" — Email / SMS / LinkedIn / Call.

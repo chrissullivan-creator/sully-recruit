@@ -1021,14 +1021,36 @@ const CandidateDetail = () => {
             );
           })()
         }
-        subtitle={
-          <span className="truncate">
-            {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}
-            {candidate.current_company && (
-              <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
-            )}
-          </span>
-        }
+        subtitle={(() => {
+          const email = (candidate as any).personal_email || (candidate as any).work_email || (candidate as any).primary_email;
+          const phone = (candidate as any).mobile_phone || candidate.phone;
+          return (
+            <>
+              <span>
+                {candidate.current_title ?? ''}{candidate.current_title && candidate.current_company ? ' at ' : ''}
+                {candidate.current_company && (
+                  <CompanyLink companyId={(candidate as any).company_id} name={candidate.current_company} className="text-muted-foreground" />
+                )}
+              </span>
+              {phone && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 hover:text-foreground">
+                    <Phone className="h-3.5 w-3.5" /> {phone}
+                  </a>
+                </>
+              )}
+              {email && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <a href={`mailto:${email}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 hover:text-foreground">
+                    <Mail className="h-3.5 w-3.5" /> {email}
+                  </a>
+                </>
+              )}
+            </>
+          );
+        })()}
         contactActions={
           (() => {
             // Consolidated "Reach out" — Email / SMS / LinkedIn message / InMail
