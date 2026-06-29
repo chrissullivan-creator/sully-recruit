@@ -1213,8 +1213,10 @@ const CandidateDetail = () => {
             const stats = [
               { label: 'Current Base', value: fmtMoney(c.current_base_comp) },
               { label: 'Current Bonus', value: fmtMoney(c.current_bonus_comp) },
-              { label: 'Current Total', value: fmtMoney(c.current_total_comp), accent: true },
+              { label: 'Current Total', value: fmtMoney(c.current_total_comp) },
               { label: 'Target Total', value: fmtMoney(c.target_total_comp), accent: true },
+              { label: 'Notice', value: c.notice_period || '—' },
+              { label: 'Work Auth', value: c.work_authorization || c.visa_status || '—' },
             ];
             return (
               <div className="px-8 pt-5">
@@ -1431,46 +1433,152 @@ const CandidateDetail = () => {
 
             <ScrollArea className="flex-1">
               <TabsContent value="overview" className="px-8 py-5 mt-0 space-y-6">
-                <AISummaryCard
-                  title="Joe Says"
-                  actions={
-                    <>
-                      {c.joe_says_updated_at && (
-                        <span className="text-xs text-muted-foreground hidden sm:inline">Updated {format(new Date(c.joe_says_updated_at), 'MMM d, h:mm a')}</span>
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-4 items-start">
+                  {/* Col 1 — AI Summary + Skills */}
+                  <div className="space-y-5">
+                    <AISummaryCard
+                      title="AI Summary"
+                      actions={
+                        <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
+                          {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                          {c.joe_says ? 'Regenerate' : 'Generate'}
+                        </Button>
+                      }
+                    >
+                      {generatingJoe ? (
+                        <div className="flex items-center gap-3 py-6 text-muted-foreground">
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          <span className="text-sm">Joe is analyzing this candidate...</span>
+                        </div>
+                      ) : c.joe_says ? (
+                        <div className="space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
+                          {(c.joe_says as string).split('\n').map((line: string, i: number) => {
+                            if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
+                            if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
+                            return line.trim() ? (
+                              <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
+                            ) : <div key={i} className="h-1" />;
+                          })}
+                        </div>
+                      ) : (
+                        <div className="py-6 text-center">
+                          <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                          <p className="text-sm font-medium mb-1">No summary yet</p>
+                          <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
+                          <Button variant="gold" size="sm" onClick={generateJoeSays}>
+                            <Martini className="h-3.5 w-3.5 mr-1" /> Generate
+                          </Button>
+                        </div>
                       )}
-                      <Button variant="gold-outline" size="sm" onClick={generateJoeSays} disabled={generatingJoe}>
-                        {generatingJoe ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                        {c.joe_says ? 'Regenerate' : 'Generate Joe Says'}
-                      </Button>
-                    </>
-                  }
-                >
-                {generatingJoe ? (
-                  <div className="flex items-center gap-3 py-6 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-sm">Joe is analyzing this candidate...</span>
+                    </AISummaryCard>
+
+                    <SectionCard title="Skills">
+                      {(() => {
+                        const tags = [
+                          ...(((c.departments as string[]) ?? [])),
+                          ...(((c.products as string[]) ?? [])),
+                        ].filter(Boolean).slice(0, 6);
+                        return tags.length ? (
+                          <div className="space-y-2.5">
+                            {tags.map((t, i) => (
+                              <div key={t}>
+                                <div className="mb-1 text-xs text-foreground">{t}</div>
+                                <div className="h-1.5 rounded-full bg-muted">
+                                  <div className="h-1.5 rounded-full bg-primary" style={{ width: `${Math.max(45, 92 - i * 9)}%` }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="py-4 text-center text-sm text-muted-foreground">No focus areas on file</p>
+                        );
+                      })()}
+                    </SectionCard>
                   </div>
-                ) : c.joe_says ? (
-                  <div className="space-y-1 prose prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-headings:text-sm prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground">
-                    {(c.joe_says as string).split('\n').map((line: string, i: number) => {
-                      if (line.startsWith('## ')) return <h3 key={i} className="text-sm font-semibold text-foreground mt-3 mb-1">{line.replace('## ', '')}</h3>;
-                      if (line.startsWith('- ')) return <p key={i} className="text-sm leading-relaxed text-foreground pl-3">{line}</p>;
-                      return line.trim() ? (
-                        <p key={i} className="text-sm leading-relaxed text-foreground">{line}</p>
-                      ) : <div key={i} className="h-1" />;
-                    })}
+
+                  {/* Col 2 — Recent Activity */}
+                  <SectionCard title="Recent Activity" actions={<button onClick={() => setActiveTab('history')} className="text-xs font-medium text-primary">View all</button>}>
+                    {(() => {
+                      const items = (notes as any[]).slice(0, 6).map((n: any) => ({
+                        title: String(n.content ?? n.note ?? n.body ?? 'Note').slice(0, 90),
+                        time: n.created_at ? format(new Date(n.created_at), 'MMM d, h:mm a') : '',
+                      }));
+                      return items.length ? (
+                        <div className="space-y-3 border-l border-card-border pl-3">
+                          {items.map((a, i) => (
+                            <div key={i} className="relative">
+                              <span className={cn('absolute -left-[18px] top-1.5 h-2 w-2 rounded-full', i === 0 ? 'bg-primary' : 'bg-muted-foreground/40')} />
+                              <p className="text-sm text-foreground">{a.title}</p>
+                              {a.time && <p className="text-xs text-muted-foreground">{a.time}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="py-6 text-center text-sm text-muted-foreground">No recent activity</p>
+                      );
+                    })()}
+                  </SectionCard>
+
+                  {/* Col 3 — Résumé */}
+                  <SectionCard title="Résumé" icon={<FileText className="h-4 w-4" />}>
+                    {resumeUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex h-40 items-center justify-center rounded-lg border border-card-border bg-muted/30">
+                          <FileText className="h-10 w-10 text-muted-foreground/40" />
+                        </div>
+                        <a href={resumeUrl} target="_blank" rel="noreferrer" className="block">
+                          <Button variant="gold" className="w-full"><ExternalLink className="h-3.5 w-3.5 mr-1" /> Open Résumé</Button>
+                        </a>
+                        <a href={resumeUrl} download target="_blank" rel="noreferrer" className="block">
+                          <Button variant="outline" className="w-full"><Download className="h-3.5 w-3.5 mr-1" /> Download</Button>
+                        </a>
+                      </div>
+                    ) : (
+                      <p className="py-6 text-center text-sm text-muted-foreground">No résumé on file</p>
+                    )}
+                  </SectionCard>
+
+                  {/* Col 4 — Job Matches + Next Actions */}
+                  <div className="space-y-5">
+                    <SectionCard title="Job Matches" icon={<Briefcase className="h-4 w-4" />}>
+                      {candidateJobMatch ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl font-bold tabular-nums text-foreground">
+                              {(candidateJobMatch as any).overall_score}%
+                            </span>
+                            {(candidateJobMatch as any).tier && (
+                              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold capitalize text-muted-foreground">
+                                {(candidateJobMatch as any).tier}
+                              </span>
+                            )}
+                          </div>
+                          {(candidateJobMatch as any).reasoning && (
+                            <p className="text-sm text-foreground/90">{(candidateJobMatch as any).reasoning}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="py-6 text-center text-sm text-muted-foreground">No job match yet</p>
+                      )}
+                    </SectionCard>
+
+                    <NextActionsCard
+                      items={candidateTasks.slice(0, 6).map((t) => ({
+                        id: t.id,
+                        title: t.title,
+                        meta: t.due_date ? `Due ${format(new Date(t.due_date), 'MMM d')}` : undefined,
+                        done: t.status === 'completed' || !!t.completed_at,
+                      }))}
+                      emptyLabel="No tasks queued"
+                    />
                   </div>
-                ) : (
-                  <div className="py-6 text-center">
-                    <Martini className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">No Joe Says yet</p>
-                    <p className="text-xs text-muted-foreground mb-4">AI brief using resume, notes, communications, and sequence history.</p>
-                    <Button variant="gold" size="sm" onClick={generateJoeSays}>
-                      <Martini className="h-3.5 w-3.5 mr-1" /> Generate Joe Says
-                    </Button>
-                  </div>
-                )}
-                </AISummaryCard>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
+                {/* Candidate summary, comp context, work history, education,
+                    picklists + custom fields — the full editing surface, moved
+                    off the Overview so it reads as the clean mockup dashboard. */}
 
                 {/* ── Ask Joe Chat ───────────────────────────────────────── */}
                 <SectionCard title="Ask Joe about this candidate" icon={<Martini className="h-4 w-4 text-accent" />} flush>
@@ -1512,94 +1620,6 @@ const CandidateDetail = () => {
                   </div>
                 </SectionCard>
 
-                {/* ── Overview dashboard grid (mockup IA) ─────────────────────
-                    Skills · Next actions · Résumé · Job match, wired to the
-                    candidate's existing data. The deeper editing surfaces
-                    (background, work history, education) stay below for now. */}
-                <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4 items-start">
-                  <SkillsCard
-                    title="Skills & focus"
-                    skills={[
-                      ...(((c.departments as string[]) ?? [])),
-                      ...(((c.products as string[]) ?? [])),
-                    ].filter(Boolean).slice(0, 14).map((t) => ({ label: t }))}
-                    emptyLabel="No focus areas on file"
-                  />
-
-                  <NextActionsCard
-                    items={candidateTasks.slice(0, 6).map((t) => ({
-                      id: t.id,
-                      title: t.title,
-                      meta: t.due_date ? `Due ${format(new Date(t.due_date), 'MMM d')}` : undefined,
-                      done: t.status === 'completed' || !!t.completed_at,
-                    }))}
-                    emptyLabel="No tasks queued"
-                  />
-
-                  <SectionCard title="Résumé" icon={<FileText className="h-4 w-4" />}>
-                    {resumeUrl ? (
-                      <div className="space-y-3">
-                        <div className="flex h-24 items-center justify-center rounded-lg border border-card-border bg-muted/30">
-                          <FileText className="h-8 w-8 text-muted-foreground/50" />
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <a href={resumeUrl} target="_blank" rel="noreferrer">
-                            <Button variant="gold" size="sm"><ExternalLink className="h-3.5 w-3.5 mr-1" /> Open</Button>
-                          </a>
-                          <a href={resumeUrl} download target="_blank" rel="noreferrer">
-                            <Button variant="outline" size="sm"><Download className="h-3.5 w-3.5 mr-1" /> Download</Button>
-                          </a>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="py-6 text-center text-sm text-muted-foreground">No résumé on file</p>
-                    )}
-                  </SectionCard>
-
-                  <SectionCard title="Job match" icon={<Briefcase className="h-4 w-4" />}>
-                    {candidateJobMatch ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl font-bold tabular-nums text-foreground">
-                            {(candidateJobMatch as any).overall_score}%
-                          </span>
-                          {(candidateJobMatch as any).tier && (
-                            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold capitalize text-muted-foreground">
-                              {(candidateJobMatch as any).tier}
-                            </span>
-                          )}
-                        </div>
-                        {(candidateJobMatch as any).reasoning && (
-                          <p className="text-sm text-foreground/90">{(candidateJobMatch as any).reasoning}</p>
-                        )}
-                        {Array.isArray((candidateJobMatch as any).strengths) && (candidateJobMatch as any).strengths.length > 0 && (
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Strengths</p>
-                            <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
-                              {(candidateJobMatch as any).strengths.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                        {Array.isArray((candidateJobMatch as any).concerns) && (candidateJobMatch as any).concerns.length > 0 && (
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Concerns</p>
-                            <ul className="mt-1 list-disc pl-4 text-sm text-foreground/90">
-                              {(candidateJobMatch as any).concerns.slice(0, 5).map((s: string, i: number) => <li key={i}>{s}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="py-6 text-center text-sm text-muted-foreground">No job match yet</p>
-                    )}
-                  </SectionCard>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="background" className="px-8 py-5 mt-0 space-y-6">
-                {/* Candidate summary, comp context, work history, education,
-                    picklists + custom fields — the full editing surface, moved
-                    off the Overview so it reads as the clean mockup dashboard. */}
                 <EditableTextarea label="Candidate Summary" value={c.candidate_summary} onSave={v => updateField('candidate_summary', v)} placeholder="General background and career overview..." rows={5} />
                 <EditableTextarea label="Back of Resume Notes" value={c.back_of_resume_notes} onSave={v => updateField('back_of_resume_notes', v)} placeholder="Products, business lines, divisions, function, motivations from phone screen..." rows={6} />
                 <EditableTextarea label="Reason for Leaving / Job Change History" value={c.reason_for_leaving} onSave={v => updateField('reason_for_leaving', v)} placeholder="Why they're looking and pattern of moves..." rows={3} />
