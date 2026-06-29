@@ -54,6 +54,7 @@ export interface SendOutRow {
     id: string;
     title: string | null;
     company_name: string | null;
+    company: { domain: string | null; logo_url: string | null } | null;
   } | null;
 }
 
@@ -71,7 +72,7 @@ export function useSendOuts() {
           total_comp_min, total_comp_max, right_to_work, additional_notes,
           candidate_job_id, submission_email,
           candidate:people!candidate_id(id, full_name, first_name, last_name, current_title, current_company, target_total_comp, target_base_comp, avatar_url, last_contacted_at, owner_user_id, type),
-          job:jobs(id, title, company_name)
+          job:jobs(id, title, company_name, company:companies(domain, logo_url))
         `)
         .is('deleted_at', null)
         .order('updated_at', { ascending: false, nullsFirst: false })

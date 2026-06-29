@@ -165,11 +165,11 @@ function KanbanCard({
       {row.job?.title && (
         <div className="mt-2.5 rounded-lg bg-muted/40 px-2 py-1.5">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Submitting for</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="flex items-start gap-1.5 mt-0.5">
             {row.job.company_name
-              ? <CompanyLogo name={row.job.company_name} size="xs" />
-              : <Building2 className="h-3.5 w-3.5 text-muted-foreground" />}
-            <span className="text-[12px] font-medium text-foreground truncate">{row.job.title}</span>
+              ? <CompanyLogo name={row.job.company_name} domain={row.job.company?.domain} logoUrl={row.job.company?.logo_url} size="xs" className="mt-0.5" />
+              : <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />}
+            <span className="min-w-0 text-[12px] font-medium leading-snug text-foreground line-clamp-2 break-words">{row.job.title}</span>
           </div>
         </div>
       )}
