@@ -642,7 +642,13 @@ const ContactDetail = () => {
             const phone = (contact as any).mobile_phone || contact.phone;
             const linkedinUrl = contact.linkedin_url as string | undefined;
             return (
-              <DropdownMenu>
+              <>
+                {linkedinUrl && (
+                  <Button variant="outline" size="sm" className="px-2" onClick={() => window.open(linkedinUrl!, '_blank')} title="View LinkedIn profile">
+                    <Linkedin className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="gold" size="sm">
                     <Send className="h-3.5 w-3.5 mr-1" /> Reach out
@@ -664,6 +670,7 @@ const ContactDetail = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              </>
             );
           })()
         }
