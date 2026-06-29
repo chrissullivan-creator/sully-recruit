@@ -898,7 +898,7 @@ const ContactDetail = () => {
             <div className="px-8 border-b border-card-border bg-card/40 overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <TabsList className="bg-transparent border-0 rounded-none p-0 h-auto inline-flex w-max gap-1">
                 {[
-                  { value: 'joe', icon: <Martini className="h-3.5 w-3.5" />, label: 'Joe Says' },
+                  { value: 'joe', icon: <Martini className="h-3.5 w-3.5" />, label: 'Overview' },
                   { value: 'jobs', icon: <Briefcase className="h-3.5 w-3.5" />, label: `Jobs (${linkedJobs.length})` },
                   { value: 'candidates', icon: <Users className="h-3.5 w-3.5" />, label: `Send Outs (${sendOuts.length})` },
                   { value: 'communications', icon: <MessageSquare className="h-3.5 w-3.5" />, label: `Communications (${(conversations as any[]).length})` },
