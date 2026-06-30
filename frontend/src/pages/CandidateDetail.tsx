@@ -1047,6 +1047,36 @@ const CandidateDetail = () => {
                 {roles.includes('candidate') && <span className={chip}>Candidate</span>}
                 {roles.includes('client') && <span className={chip}>Client</span>}
                 {functionTags.map((t, i) => <span key={i} className={chip}>{t}</span>)}
+                {/* Owner (Screener) — assign right from the header */}
+                <span className="inline-flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Owner</span>
+                  <SearchableSelect
+                    options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
+                    value={(candidate as any).owner_user_id ?? ''}
+                    onChange={(val) => {
+                      const newOwnerId = val || null;
+                      if (newOwnerId && newOwnerId !== user?.id) {
+                        setPendingOwnerId(newOwnerId);
+                      } else {
+                        (async () => {
+                          try {
+                            const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
+                            if (error) { toast.error('Failed to update owner'); return; }
+                            queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                            queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                            toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Failed to update owner');
+                          }
+                        })();
+                      }
+                    }}
+                    placeholder="Assign…"
+                    searchPlaceholder="Search team…"
+                    clearLabel="— Unassigned —"
+                    className="h-7 text-xs w-36"
+                  />
+                </span>
               </div>
             );
           })()
@@ -1662,39 +1692,6 @@ const CandidateDetail = () => {
                     </CollapsibleContent>
                   </Collapsible>
                 </div>
-
-                {/* ── Assignment (owner / screener) ──────────────────────── */}
-                <SectionCard title="Assignment" icon={<User className="h-4 w-4" />}>
-                  <div className="space-y-1 max-w-xs">
-                    <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                    <SearchableSelect
-                      options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
-                      value={(candidate as any).owner_user_id ?? ''}
-                      onChange={(val) => {
-                        const newOwnerId = val || null;
-                        if (newOwnerId && newOwnerId !== user?.id) {
-                          setPendingOwnerId(newOwnerId);
-                        } else {
-                          (async () => {
-                            try {
-                              const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
-                              if (error) { toast.error('Failed to update owner'); return; }
-                              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                              queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                              toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                            } catch (err: any) {
-                              toast.error(err?.message || 'Failed to update owner');
-                            }
-                          })();
-                        }
-                      }}
-                      placeholder="Assign owner…"
-                      searchPlaceholder="Search team…"
-                      clearLabel="— Unassigned —"
-                      className="h-8 text-xs w-full"
-                    />
-                  </div>
-                </SectionCard>
 
                 {id && (
                   <PicklistEditSection
