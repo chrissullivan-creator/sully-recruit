@@ -23,7 +23,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 // Sidebar deep-links pass ?filter=clients|targets; map them to the page's
-// existing All/Clients/Targets filter state (which keys on company_type).
+// existing All/Clients/Targets filter state (which keys on company_status).
 const URL_TO_FILTER: Record<string, string> = { clients: 'client', targets: 'target' };
 const FILTER_TO_URL: Record<string, string> = { client: 'clients', target: 'targets' };
 
@@ -79,7 +79,7 @@ const Companies = () => {
 
   const handleQuickTypeChange = async (companyId: string, newType: string) => {
     try {
-      const { error } = await supabase.from('companies').update({ company_type: newType }).eq('id', companyId);
+      const { error } = await supabase.from('companies').update({ company_status: newType }).eq('id', companyId);
       if (error) throw new Error(error.message);
       toast.success(`Company type updated to ${newType}`);
       invalidateCompanyScope(queryClient);
@@ -121,7 +121,7 @@ const Companies = () => {
   };
 
   const filteredCompanies = companies.filter((company) => {
-    const matchesFilter = filter === 'all' || company.company_type === filter;
+    const matchesFilter = filter === 'all' || company.company_status === filter;
     const matchesSearch = company.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (company.domain ?? '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesSearch;
@@ -223,17 +223,17 @@ const Companies = () => {
                     />
                     <div className="min-w-0">
                       <h3 className="text-sm font-semibold text-foreground truncate">{company.name}</h3>
-                      <p className="text-xs text-muted-foreground truncate">{company.industry || company.company_type || '-'}</p>
+                      <p className="text-xs text-muted-foreground truncate">{company.industry || company.company_status || '-'}</p>
                     </div>
                   </div>
-                  {company.company_type && (
+                  {company.company_status && (
                     <span className={cn(
                       'shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                      company.company_type === 'client'
+                      company.company_status === 'client'
                         ? 'bg-success/10 text-success border-success/20'
                         : 'bg-accent/10 text-accent border-accent/20'
                     )}>
-                      {company.company_type}
+                      {company.company_status}
                     </span>
                   )}
                 </div>
@@ -274,10 +274,10 @@ const Companies = () => {
                       <DropdownMenuSeparator />
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger>
-                          <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Type
+                          <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Relationship
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
-                          {['client', 'target'].filter(t => t !== company.company_type).map(t => (
+                          {['client', 'target'].filter(t => t !== company.company_status).map(t => (
                             <DropdownMenuItem key={t} onClick={() => handleQuickTypeChange(company.id, t)}>
                               {t.charAt(0).toUpperCase() + t.slice(1)}
                             </DropdownMenuItem>

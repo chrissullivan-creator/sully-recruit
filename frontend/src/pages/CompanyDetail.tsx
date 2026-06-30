@@ -523,12 +523,12 @@ const CompanyDetail = () => {
             {company.location && <span>{company.location}</span>}
           </>
         )}
-        badges={company.company_type && (
+        badges={company.company_status && (
           <Badge variant="secondary" className={cn(
             'text-xs capitalize',
-            company.company_type === 'client' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+            company.company_status === 'client' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
           )}>
-            {company.company_type}
+            {company.company_status}
           </Badge>
         )}
         contactActions={
@@ -574,7 +574,7 @@ const CompanyDetail = () => {
             { label: 'Contacts', value: contacts.length },
             { label: 'Candidates', value: companyCandidates.length },
             { label: 'Contracts', value: contracts.length },
-            { label: 'Type', value: company.company_type ? <span className="capitalize">{company.company_type}</span> : '—' },
+            { label: 'Relationship', value: company.company_status ? <span className="capitalize">{company.company_status}</span> : '—' },
             { label: 'Added', value: format(new Date(company.created_at), 'MMM d, yyyy'), accent: false },
           ]}
         />
@@ -617,14 +617,14 @@ const CompanyDetail = () => {
             <SectionCard title="Details" icon={<FileText className="h-4 w-4" />}>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Type</Label>
-                  <Select value={company.company_type ?? 'none'} onValueChange={async (val) => {
+                  <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Relationship</Label>
+                  <Select value={company.company_status ?? 'none'} onValueChange={async (val) => {
                     const newType = val === 'none' ? null : val;
-                    await supabase.from('companies').update({ company_type: newType }).eq('id', id!);
+                    await supabase.from('companies').update({ company_status: newType }).eq('id', id!);
                     invalidateCompanyScope(queryClient);
-                    toast.success('Type updated');
+                    toast.success('Relationship updated');
                   }}>
-                    <SelectTrigger className="h-8 text-sm w-full"><SelectValue placeholder="Set type..." /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm w-full"><SelectValue placeholder="Set relationship..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">— None —</SelectItem>
                       <SelectItem value="client">Client</SelectItem>

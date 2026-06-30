@@ -347,9 +347,8 @@ const TOOLS = [
       type: "object",
       properties: {
         name: { type: "string" },
-        company_type: { type: "string", description: "Firm type, e.g. Hedge Fund, Asset Manager, Investment Bank, Private Equity, Fintech." },
-        company_status: { type: "string", description: "target | client (default target)." },
-        industry: { type: "string" },
+        company_status: { type: "string", description: "Relationship: target | client (default target)." },
+        industry: { type: "string", description: "Sector, e.g. Hedge Fund, Asset Management, Investment Bank, Private Equity, Fintech." },
         location: { type: "string" },
         hq_location: { type: "string" },
         domain: { type: "string" },
@@ -362,7 +361,7 @@ const TOOLS = [
   },
   {
     name: "update_company",
-    description: "Edit a company's fields by id (name, company_type, company_status, industry, location, hq_location, domain, website, linkedin_url, description).",
+    description: "Edit a company's fields by id (name, company_status, industry, location, hq_location, domain, website, linkedin_url, description).",
     inputSchema: { type: "object", properties: { id: { type: "string" }, fields: { type: "object" } }, required: ["id", "fields"] },
   },
   {
@@ -455,7 +454,7 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
       if (["all", "company"].includes(entity)) {
         const { data, error } = await sb
           .from("companies")
-          .select("id, name, company_type, industry, location, domain")
+          .select("id, name, company_status, industry, location, domain")
           .is("deleted_at", null)
           .ilike("name", `%${q}%`)
           .limit(limit);
@@ -522,7 +521,7 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
     case "get_company": {
       let cq = sb
         .from("companies")
-        .select("id, name, company_type, industry, size, location, hq_location, domain, website, description")
+        .select("id, name, company_status, industry, size, location, hq_location, domain, website, description")
         .limit(1);
       if (args.id) cq = cq.eq("id", args.id);
       else if (args.name) cq = cq.ilike("name", sanitize(args.name));
@@ -867,7 +866,6 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
       if ((existing as any)?.id) return { id: (existing as any).id, name: (existing as any).name, duplicate: true };
       const payload: any = {
         name,
-        company_type: args.company_type ?? null,
         company_status: args.company_status ?? "target",
         industry: args.industry ?? null,
         location: args.location ?? null,
@@ -885,7 +883,7 @@ async function runTool(sb: SupabaseClient, actor: Actor, name: string, args: Rec
     case "update_company": {
       if (!args.id) throw new Error("id required");
       const fields = (args.fields ?? {}) as Record<string, any>;
-      const allow = ["name", "company_type", "company_status", "industry", "location", "hq_location", "domain", "website", "linkedin_url", "description"];
+      const allow = ["name", "company_status", "industry", "location", "hq_location", "domain", "website", "linkedin_url", "description"];
       const patch: any = {};
       for (const k of allow) if (k in fields && fields[k] !== undefined) patch[k] = fields[k];
       if (!Object.keys(patch).length) throw new Error("No updatable fields provided");

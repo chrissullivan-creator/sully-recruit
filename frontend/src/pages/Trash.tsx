@@ -41,7 +41,7 @@ function useTrash(table: SoftDeletable) {
       let select = 'id, deleted_at, deleted_by_user_id';
       if (table === 'people')    select += ', full_name, first_name, last_name, email, type, current_title, current_company';
       if (table === 'jobs')      select += ', title, company_name, status';
-      if (table === 'companies') select += ', name, industry, company_type';
+      if (table === 'companies') select += ', name, industry, company_status';
       if (table === 'send_outs') select += ', stage, candidate_id, job_id';
       const { data, error } = await supabase
         .from(table)
@@ -71,7 +71,7 @@ function useTrash(table: SoftDeletable) {
           return {
             id: r.id, deleted_at: r.deleted_at, deleted_by_user_id: r.deleted_by_user_id,
             primary: r.name || r.id.slice(0, 8),
-            secondary: [r.industry, r.company_type].filter(Boolean).join(' · '),
+            secondary: [r.industry, r.company_status].filter(Boolean).join(' · '),
           };
         }
         return {

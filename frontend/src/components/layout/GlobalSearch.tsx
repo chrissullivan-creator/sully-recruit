@@ -44,7 +44,7 @@ function useGlobalSearch(query: string) {
           .limit(6),
         supabase
           .from('companies')
-          .select('id, name, industry, company_type, domain, logo_url')
+          .select('id, name, industry, company_status, domain, logo_url')
           .or(`name.ilike.${q},industry.ilike.${q}`)
           .limit(6),
       ]);
@@ -83,7 +83,7 @@ function useGlobalSearch(query: string) {
           type: 'company',
           id: c.id,
           primary: c.name || 'Unnamed',
-          secondary: [c.industry, c.company_type].filter(Boolean).join(' · '),
+          secondary: [c.industry, c.company_status].filter(Boolean).join(' · '),
           href: `/companies/${c.id}`,
           logoName: c.name || null,
           logoDomain: (c as any).domain || null,

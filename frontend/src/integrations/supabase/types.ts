@@ -1332,7 +1332,6 @@ export type Database = {
           apollo_company_enriched_at: string | null
           apollo_company_status: string | null
           company_status: string | null
-          company_type: string | null
           created_at: string
           deleted_at: string | null
           deleted_by_user_id: string | null
@@ -1355,7 +1354,6 @@ export type Database = {
           apollo_company_enriched_at?: string | null
           apollo_company_status?: string | null
           company_status?: string | null
-          company_type?: string | null
           created_at?: string
           deleted_at?: string | null
           deleted_by_user_id?: string | null
@@ -1378,7 +1376,6 @@ export type Database = {
           apollo_company_enriched_at?: string | null
           apollo_company_status?: string | null
           company_status?: string | null
-          company_type?: string | null
           created_at?: string
           deleted_at?: string | null
           deleted_by_user_id?: string | null

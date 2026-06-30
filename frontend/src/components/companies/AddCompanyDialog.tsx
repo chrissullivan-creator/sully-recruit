@@ -22,7 +22,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    name: '', domain: '', location: '', linkedin_url: '', company_type: 'none',
+    name: '', domain: '', location: '', linkedin_url: '', company_status: 'none',
   });
   const [industries, setIndustries] = useState<string[]>([]);
   const [strategies, setStrategies] = useState<string[]>([]);
@@ -39,7 +39,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
         domain: form.domain.trim() || null,
         location: form.location.trim() || null,
         linkedin_url: form.linkedin_url.trim() || null,
-        company_type: form.company_type === 'none' ? null : form.company_type,
+        company_status: form.company_status === 'none' ? null : form.company_status,
         industries: industries.length ? industries : null,
         // Strategy only applies to hedge funds.
         strategies: showStrategy && strategies.length ? strategies : null,
@@ -47,7 +47,7 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
       if (error) throw error;
       invalidateCompanyScope(queryClient);
       toast.success('Company created');
-      setForm({ name: '', domain: '', location: '', linkedin_url: '', company_type: 'none' });
+      setForm({ name: '', domain: '', location: '', linkedin_url: '', company_status: 'none' });
       setIndustries([]);
       setStrategies([]);
       onOpenChange(false);
@@ -100,8 +100,8 @@ export function AddCompanyDialog({ open, onOpenChange }: Props) {
               <Input value={form.domain} onChange={(e) => update('domain', e.target.value)} placeholder="e.g. acme.com" />
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={form.company_type} onValueChange={(v) => update('company_type', v)}>
+              <Label>Relationship</Label>
+              <Select value={form.company_status} onValueChange={(v) => update('company_status', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No type</SelectItem>
