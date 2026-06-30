@@ -23,6 +23,29 @@ export function daysInStage(row: SendOutRow): number {
   return daysSince(row.updated_at ?? row.created_at) ?? 0;
 }
 
+/** Business days after which a submitted send-out should be chased again. */
+export const SUBMISSION_FOLLOWUP_BIZ_DAYS = 4;
+
+/**
+ * Whole business days (Mon–Fri) elapsed since a timestamp (null-safe). Weekends
+ * don't count, so a Friday submission isn't already "4 days stale" by Tuesday.
+ */
+export function businessDaysSince(ts: string | null | undefined): number | null {
+  if (!ts) return null;
+  const start = new Date(ts);
+  if (Number.isNaN(start.getTime())) return null;
+  const cur = new Date(start); cur.setHours(0, 0, 0, 0);
+  const end = new Date();      end.setHours(0, 0, 0, 0);
+  if (cur >= end) return 0;
+  let count = 0;
+  while (cur < end) {
+    cur.setDate(cur.getDate() + 1);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
 /**
  * True when an active-stage card has had no touch in FOLLOWUP_DAYS — i.e. it's
  * been sitting in Send Out / Submission / Pitch / Interview with no answer.

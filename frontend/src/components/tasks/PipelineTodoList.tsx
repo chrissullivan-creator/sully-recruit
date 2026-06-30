@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Loader2, Send, Inbox, FileCheck, MoreHorizontal, XCircle, AlertCircle } from 'lucide-react';
+import { ArrowRight, Loader2, Send, Inbox, FileCheck, MoreHorizontal, XCircle, AlertCircle, BellRing, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { moveStage } from '@/lib/mutations/move-stage';
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import { canonicalConfig, nextStage, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
+import { businessDaysSince, SUBMISSION_FOLLOWUP_BIZ_DAYS } from '@/lib/send-out-insights';
 import { invalidateTaskScope } from '@/lib/invalidate';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,8 @@ type SendOutRow = {
   job_id: string;
   recruiter_id: string | null;
   created_at: string;
+  sent_to_client_at: string | null;
+  last_follow_up_at: string | null;
   candidates: { full_name: string | null } | null;
   jobs: { title: string | null; company_name: string | null } | null;
 };
@@ -65,6 +68,14 @@ function ageLabel(days: number): string {
   return `${Math.floor(days)}d`;
 }
 
+/** A submitted send-out is due for a client chase 4 business days after its
+ *  last follow-up (seeded to the submission date). */
+function isFollowUpDue(row: SendOutRow): boolean {
+  if (stageToCanonical(row.stage) !== 'submitted') return false;
+  const b = businessDaysSince(row.last_follow_up_at ?? row.sent_to_client_at ?? row.created_at);
+  return b != null && b >= SUBMISSION_FOLLOWUP_BIZ_DAYS;
+}
+
 /**
  * Pipeline-shaped to-dos surfaced inside the To-Do's page.
  *
@@ -101,6 +112,7 @@ export function PipelineTodoList({
         .from('send_outs')
         .select(`
           id, stage, candidate_id, candidate_job_id, job_id, recruiter_id, created_at,
+          sent_to_client_at, last_follow_up_at,
           candidates:candidate_id ( full_name ),
           jobs:job_id ( title, company_name )
         `)
@@ -137,9 +149,9 @@ export function PipelineTodoList({
   for (const stage of STAGES) {
     const threshold = STALE_DAYS[stage];
     buckets[stage].sort((a, b) => {
-      const aStuck = ageInDays(a.created_at) >= threshold;
-      const bStuck = ageInDays(b.created_at) >= threshold;
-      if (aStuck !== bStuck) return aStuck ? -1 : 1;
+      const aHot = ageInDays(a.created_at) >= threshold || isFollowUpDue(a);
+      const bHot = ageInDays(b.created_at) >= threshold || isFollowUpDue(b);
+      if (aHot !== bHot) return aHot ? -1 : 1;
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
   }
@@ -214,6 +226,25 @@ export function PipelineTodoList({
     }
   };
 
+  // Log a follow-up touch on a submission — resets the 4-business-day reminder
+  // clock to now() so the to-do clears until the next cycle is due.
+  const logFollowUp = async (row: SendOutRow) => {
+    setBusyId(row.id);
+    try {
+      const { error } = await supabase
+        .from('send_outs')
+        .update({ last_follow_up_at: new Date().toISOString() } as any)
+        .eq('id', row.id);
+      if (error) throw error;
+      toast.success('Follow-up logged');
+      invalidate();
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not log follow-up');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="max-w-3xl space-y-4">
       <div className="flex items-baseline justify-between">
@@ -250,12 +281,19 @@ export function PipelineTodoList({
                 const busy = busyId === row.id;
                 const days = ageInDays(row.created_at);
                 const stuck = days >= threshold;
+                // Submission follow-up: due 4 business days after the last
+                // follow-up (seeded to the submission date).
+                const isSubmitted = stage === 'submitted';
+                const bizSinceFollowUp = isSubmitted
+                  ? businessDaysSince(row.last_follow_up_at ?? row.sent_to_client_at ?? row.created_at)
+                  : null;
+                const followUpDue = bizSinceFollowUp != null && bizSinceFollowUp >= SUBMISSION_FOLLOWUP_BIZ_DAYS;
                 return (
                   <li
                     key={row.id}
                     className={cn(
                       'flex items-center gap-3 rounded-md border bg-card px-3 py-2 hover:bg-muted/30 transition-colors',
-                      stuck ? 'border-warning/40' : 'border-border/60',
+                      stuck || followUpDue ? 'border-warning/40' : 'border-border/60',
                     )}
                   >
                     <div className={cn('h-2 w-2 rounded-full shrink-0', cfg.dotColor)} />
@@ -284,9 +322,36 @@ export function PipelineTodoList({
                             <AlertCircle className="h-2.5 w-2.5" /> stuck
                           </span>
                         )}
+                        {followUpDue && (
+                          <span className="text-[10px] text-amber-600 font-medium flex items-center gap-0.5">
+                            <BellRing className="h-2.5 w-2.5" /> follow-up due
+                          </span>
+                        )}
+                        {isSubmitted && !followUpDue && row.last_follow_up_at && (
+                          <span className="text-[10px] text-muted-foreground">
+                            followed up {ageLabel(ageInDays(row.last_follow_up_at))} ago
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {isSubmitted && (
+                        <Button
+                          size="sm"
+                          variant={followUpDue ? 'default' : 'outline'}
+                          onClick={() => logFollowUp(row)}
+                          disabled={busy}
+                          className="h-7 text-xs"
+                          title="Set the follow-up date to now"
+                        >
+                          {busy ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <Check className="h-3 w-3 mr-1" />
+                          )}
+                          Log follow-up
+                        </Button>
+                      )}
                       {next && (
                         <Button
                           size="sm"

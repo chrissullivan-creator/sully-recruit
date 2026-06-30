@@ -42,7 +42,12 @@ export async function moveStage(input: MoveStageInput): Promise<{ ok: boolean; e
   const { sendOutId, candidateJobId, fromStage, toStage, triggerSource = 'manual', entityId, entityType = 'send_out', withdrawnReason, rejectedByParty, interviewRound, note } = input;
 
   const stageSpecificPatch: Record<string, any> = {};
-  if (toStage === 'submitted')          stageSpecificPatch.sent_to_client_at = new Date().toISOString();
+  if (toStage === 'submitted') {
+    stageSpecificPatch.sent_to_client_at = new Date().toISOString();
+    // Start the follow-up clock on submission — the To-Do's page reminds the
+    // recruiter to chase the client 4 business days after this.
+    stageSpecificPatch.last_follow_up_at = new Date().toISOString();
+  }
   else if (toStage === 'interview')     stageSpecificPatch.interview_at      = new Date().toISOString();
   else if (toStage === 'offer')         stageSpecificPatch.offer_at          = new Date().toISOString();
   else if (toStage === 'placed')        stageSpecificPatch.placed_at         = new Date().toISOString();
