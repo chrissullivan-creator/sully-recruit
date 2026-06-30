@@ -646,7 +646,7 @@ export function AddPersonWizard({
             and lets wide match rows overflow past the dialog — clipping the
             right-hand "Connect & Update" button so it can't be clicked. Forcing
             block layout constrains rows to the viewport width so truncate works. */}
-        <ScrollArea className="flex-1 -mx-6 px-6 [&_[data-radix-scroll-area-viewport]>div]:!block">
+        <ScrollArea className="flex-1 min-h-0 -mx-6 px-6 [&_[data-radix-scroll-area-viewport]>div]:!block">
           {/* ── STEP: Pick Type ──────────────────────────────────────── */}
           {step === 'pick_type' && (
             <div className="flex gap-3 py-4">
