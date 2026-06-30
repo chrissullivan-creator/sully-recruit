@@ -51,15 +51,22 @@ const linkedinSlug = (s: string) =>
 
 async function scan(supabase: any, req: VercelRequest, res: VercelResponse) {
   const limit = Math.min(Math.max(Number(req.body?.limit) || 50, 1), 200);
+  // Optional channel filter (e.g. "linkedin_recruiter" for the InMail bulk-add).
+  const channel = typeof req.body?.channel === "string" ? req.body.channel : "";
+  // When true, also return unlinked rows that had NO confident match, carrying
+  // the sender identity so the caller can offer "create new" (InMail bulk-add).
+  const includeUnmatched = req.body?.include_unmatched === true;
 
   // Unlinked conversations (no CRM person on either side).
-  const { data: convs, error } = await supabase
+  let q = supabase
     .from("conversations")
     .select("id, channel, integration_account_id, last_message_at")
     .is("candidate_id", null)
     .is("contact_id", null)
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(limit);
+  if (channel) q = q.eq("channel", channel);
+  const { data: convs, error } = await q;
   if (error) throw error;
 
   const conversations = (convs as any[]) ?? [];
@@ -80,7 +87,7 @@ async function scan(supabase: any, req: VercelRequest, res: VercelResponse) {
       const senderName = (msg?.sender_name ?? "").trim();
       const addr = (msg?.sender_address ?? "").trim();
       if (!senderName && !isEmail(addr)) {
-        return { conversation_id: c.id, channel: c.channel, sender_name: senderName || null, best: null };
+        return { conversation_id: c.id, channel: c.channel, sender_name: senderName || null, sender_address: addr || null, best: null };
       }
 
       const matches = await findPersonMatches(supabase, {
@@ -110,15 +117,20 @@ async function scan(supabase: any, req: VercelRequest, res: VercelResponse) {
         conversation_id: c.id,
         channel: c.channel,
         sender_name: senderName || null,
+        sender_address: addr || null,
         best,
       };
     }),
   );
 
-  return res.status(200).json({
-    scanned: conversations.length,
-    proposals: proposals.filter((p) => p.best), // only actionable rows
-  });
+  // Default (reconcile): only confident link proposals. With include_unmatched
+  // (InMail bulk-add): also no-match rows that have a usable sender name, so the
+  // caller can offer "create new" for them.
+  const filtered = includeUnmatched
+    ? proposals.filter((p) => p.best || p.sender_name)
+    : proposals.filter((p) => p.best);
+
+  return res.status(200).json({ scanned: conversations.length, proposals: filtered });
 }
 
 async function apply(supabase: any, req: VercelRequest, res: VercelResponse) {

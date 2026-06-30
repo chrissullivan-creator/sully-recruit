@@ -38,6 +38,7 @@ import { UnknownPersonBadge } from '@/components/inbox/UnknownPersonBadge';
 import { AddPersonWizard } from '@/components/inbox/AddPersonWizard';
 import { InboxSidebar, type InboxView, type InboxChannel } from '@/components/inbox/InboxSidebar';
 import { ReconcileUnknownDialog } from '@/components/inbox/ReconcileUnknownDialog';
+import { BulkInMailAddDialog } from '@/components/inbox/BulkInMailAddDialog';
 import { CallsPanel } from '@/components/calls/CallsPanel';
 import { RecruiterContextStrip } from '@/components/inbox/RecruiterContextStrip';
 import { EmailMessageCard } from '@/components/inbox/EmailMessageCard';
@@ -66,6 +67,7 @@ export default function Inbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [bulkInMailOpen, setBulkInMailOpen] = useState(false);
 
   // URL-synced state for sidebar nav: ?tab=all|focused|other &view=unread|archive|... &channel=email|...
   // "All" is the default (no ?tab) so unlinked recruiter InMails — which land
@@ -419,6 +421,7 @@ export default function Inbox() {
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
       <ReconcileUnknownDialog open={reconcileOpen} onOpenChange={setReconcileOpen} />
+      <BulkInMailAddDialog open={bulkInMailOpen} onOpenChange={setBulkInMailOpen} />
 
       <div className="flex flex-col" style={{ height: 'calc(100vh - 7rem)' }}>
         <div className="flex flex-1 min-h-0">
@@ -566,6 +569,24 @@ export default function Inbox() {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-xs">
                   Match unknown senders to existing people
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {channel === 'recruiter' && (tab === 'other' || tab === 'all') && !callsActive && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setBulkInMailOpen(true)}
+                    className="h-7 w-7 shrink-0 rounded-lg text-muted-foreground hover:text-accent"
+                    aria-label="Bulk add unknown InMail senders"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Bulk add InMail senders — match or create
                 </TooltipContent>
               </Tooltip>
             )}
