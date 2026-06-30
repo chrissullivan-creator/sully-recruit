@@ -463,8 +463,12 @@ export default function Inbox() {
           </div>
         ) : (
         <>
-        {/* Thread list */}
-        <div className="w-80 border-r border-card-border flex flex-col bg-card">
+        {/* Thread list — full-width on mobile; hidden when a thread is open
+            (single-pane flow). Fixed 320px rail from lg up. */}
+        <div className={cn(
+          'w-full lg:w-80 border-r border-card-border flex-col bg-card',
+          selectedId ? 'hidden lg:flex' : 'flex',
+        )}>
           {/* Search + Density toggle + Compose */}
           <div className="p-3 border-b border-card-border flex gap-2">
             <div className="relative flex-1">
@@ -761,9 +765,21 @@ export default function Inbox() {
           </ScrollArea>
         </div>
 
-        {/* Right: Message pane */}
-        <div className="flex-1 min-w-0">
-          <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
+        {/* Right: Message pane — full-screen on mobile when a thread is open
+            (with a back button); always visible from lg up. */}
+        <div className={cn(
+          'flex-1 min-w-0 flex-col',
+          selectedId ? 'flex' : 'hidden lg:flex',
+        )}>
+          <button
+            onClick={() => setSelectedId(null)}
+            className="lg:hidden flex items-center gap-1.5 px-4 h-11 border-b border-card-border text-sm font-medium text-muted-foreground hover:text-foreground bg-card shrink-0"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to inbox
+          </button>
+          <div className="flex-1 min-h-0">
+            <MessagePane threadId={selectedId} onDeleted={() => setSelectedId(null)} />
+          </div>
         </div>
         </>
         )}

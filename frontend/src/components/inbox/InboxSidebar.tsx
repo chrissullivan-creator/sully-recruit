@@ -118,7 +118,7 @@ export function InboxSidebar({
   };
 
   return (
-    <aside className="w-52 shrink-0 border-r border-border/60 bg-muted/20 flex flex-col">
+    <aside className="hidden lg:flex w-52 shrink-0 border-r border-border/60 bg-muted/20 flex-col">
       <div className="flex-1 overflow-y-auto py-3 text-sm">
         {/* Viewing Inbox — per-user scope */}
         <SectionLabel>Viewing Inbox</SectionLabel>
