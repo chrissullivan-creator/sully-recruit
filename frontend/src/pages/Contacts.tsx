@@ -29,6 +29,49 @@ import {
 import { CompanyLink } from '@/components/shared/EntityLinks';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { Badge } from '@/components/ui/badge';
+import {
+  ContactFilterSidebar,
+  DEFAULT_CONTACT_FILTERS,
+  getActiveContactFilterCount,
+  getActiveContactFilterChips,
+  clearContactFilterByKey,
+  type ContactFilters,
+  type SavedContactSearch,
+} from '@/components/contacts/ContactFilterSidebar';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useAuth } from '@/contexts/AuthContext';
+import { SlidersHorizontal, X } from 'lucide-react';
+
+const STATUS_LABELS: Record<string, string> = {
+  new: 'New',
+  reached_out: 'Reached Out',
+  engaged: 'Engaged',
+};
+const STATUS_OPTIONS = [
+  { value: 'new', label: 'New' },
+  { value: 'reached_out', label: 'Reached Out' },
+  { value: 'engaged', label: 'Engaged' },
+];
+
+// Saved searches persisted to localStorage (separate key from candidates).
+const SAVED_CONTACT_SEARCHES_KEY = 'sully-recruit-saved-contact-searches';
+function loadSavedContactSearches(): SavedContactSearch[] {
+  try {
+    const raw = localStorage.getItem(SAVED_CONTACT_SEARCHES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function persistSavedContactSearches(searches: SavedContactSearch[]) {
+  localStorage.setItem(SAVED_CONTACT_SEARCHES_KEY, JSON.stringify(searches));
+}
+
+// "On or before" date bounds should include the whole selected day.
+function endOfDay(d: Date): Date {
+  const e = new Date(d);
+  e.setHours(23, 59, 59, 999);
+  return e;
+}
 
 const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   interested:       { label: 'Interested',       bg: 'bg-primary',        text: 'text-white' },
@@ -56,9 +99,12 @@ type ContactSortDir = 'asc' | 'desc';
 const Contacts = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { data: profiles = [] } = useProfiles();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'client_only' | 'also_candidate'>('all');
+  const [filters, setFilters] = useState<ContactFilters>(DEFAULT_CONTACT_FILTERS);
+  const [filterSidebarOpen, setFilterSidebarOpen] = useState(false);
+  const [savedSearches, setSavedSearches] = useState<SavedContactSearch[]>(loadSavedContactSearches);
   const [sortField, setSortField] = useState<ContactSortField>('updated');
   const [sortDir, setSortDir] = useState<ContactSortDir>('desc');
   const [importOpen, setImportOpen] = useState(false);
@@ -103,14 +149,50 @@ const Contacts = () => {
         ((contact as any).work_email ?? '').toLowerCase().includes(q) ||
         ((contact as any).personal_email ?? '').toLowerCase().includes(q) ||
         secondary.some((e) => (e ?? '').toLowerCase().includes(q));
-      const matchesFilter = filter === 'all' || contact.status === filter;
+      const matchesStatus = filters.status === 'all' || contact.status === filters.status;
+
       const roles: string[] = (contact as any).roles ?? ['client'];
       const matchesRole =
-        roleFilter === 'all' ? true :
-        roleFilter === 'client_only' ? (roles.includes('client') && !roles.includes('candidate')) :
-        roleFilter === 'also_candidate' ? (roles.includes('candidate')) :
+        filters.role === 'all' ? true :
+        filters.role === 'client_only' ? (roles.includes('client') && !roles.includes('candidate')) :
+        filters.role === 'also_candidate' ? (roles.includes('candidate')) :
         true;
-      return matchesSearch && matchesFilter && matchesRole;
+
+      // Owner
+      const ownerId = (contact as any).owner_user_id;
+      const matchesOwner =
+        filters.owner === 'all' ? true :
+        filters.owner === 'mine' ? ownerId === user?.id :
+        ownerId === filters.owner;
+
+      // Company / Title (partial, case-insensitive)
+      const companyText = ((contact as any).company_name || (contact.companies as any)?.name || '').toLowerCase();
+      const matchesCompany = !filters.company || companyText.includes(filters.company.toLowerCase());
+      const matchesTitle = !filters.title || (contact.title ?? '').toLowerCase().includes(filters.title.toLowerCase());
+
+      // Last sentiment / channel
+      const matchesSentiment = filters.sentiment === 'all' || (contact as any).last_sequence_sentiment === filters.sentiment;
+      const matchesChannel = filters.channel === 'all' || (contact as any).last_comm_channel === filters.channel;
+
+      // Last reached out — before/after (uses the view's last_reached_out_at)
+      const reachedAt = (contact as any).last_reached_out_at ? new Date((contact as any).last_reached_out_at) : null;
+      const matchesReachedFrom = !filters.lastReachedFrom || (reachedAt && reachedAt >= filters.lastReachedFrom);
+      const matchesReachedTo = !filters.lastReachedTo || (reachedAt && reachedAt <= endOfDay(filters.lastReachedTo));
+
+      // Last response — before/after
+      const respondedAt = (contact as any).last_responded_at ? new Date((contact as any).last_responded_at) : null;
+      const matchesRespondedFrom = !filters.lastRespondedFrom || (respondedAt && respondedAt >= filters.lastRespondedFrom);
+      const matchesRespondedTo = !filters.lastRespondedTo || (respondedAt && respondedAt <= endOfDay(filters.lastRespondedTo));
+
+      // Date added
+      const createdAt = (contact as any).created_at ? new Date((contact as any).created_at) : null;
+      const matchesAddedFrom = !filters.dateAddedFrom || (createdAt && createdAt >= filters.dateAddedFrom);
+      const matchesAddedTo = !filters.dateAddedTo || (createdAt && createdAt <= endOfDay(filters.dateAddedTo));
+
+      return matchesSearch && matchesStatus && matchesRole && matchesOwner &&
+        matchesCompany && matchesTitle && matchesSentiment && matchesChannel &&
+        matchesReachedFrom && matchesReachedTo && matchesRespondedFrom && matchesRespondedTo &&
+        matchesAddedFrom && matchesAddedTo;
     });
 
     list.sort((a, b) => {
@@ -151,14 +233,43 @@ const Contacts = () => {
     });
 
     return list;
-  }, [contacts, searchQuery, filter, sortField, sortDir]);
+  }, [contacts, searchQuery, filters, sortField, sortDir, user?.id]);
 
   // Reset page when filters change
   const totalPages = Math.ceil(filteredContacts.length / PAGE_SIZE);
   const paginatedContacts = filteredContacts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset to page 1 when search or filter changes
-  useEffect(() => { setPage(1); }, [searchQuery, filter, roleFilter]);
+  useEffect(() => { setPage(1); }, [searchQuery, filters]);
+
+  // Saved-search handlers (localStorage-backed)
+  const handleSaveSearch = (name: string) => {
+    const newSearch: SavedContactSearch = {
+      id: `cs-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name,
+      filters: { ...filters },
+      searchQuery,
+      created_at: new Date().toISOString(),
+    };
+    const updated = [newSearch, ...savedSearches];
+    setSavedSearches(updated);
+    persistSavedContactSearches(updated);
+    toast.success(`Saved search "${name}"`);
+  };
+  const handleLoadSearch = (search: SavedContactSearch) => {
+    setFilters(search.filters);
+    setSearchQuery(search.searchQuery);
+    setPage(1);
+    toast.success(`Loaded "${search.name}"`);
+  };
+  const handleDeleteSearch = (id: string) => {
+    const updated = savedSearches.filter((s) => s.id !== id);
+    setSavedSearches(updated);
+    persistSavedContactSearches(updated);
+  };
+
+  const activeFilterCount = getActiveContactFilterCount(filters);
+  const filterChips = getActiveContactFilterChips(filters, STATUS_LABELS, profiles);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -280,8 +391,41 @@ const Contacts = () => {
       />
       </div>
 
-      <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
-        <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Filter Sidebar ─────────────────────────────────────────────── */}
+        {filterSidebarOpen && (
+          <ContactFilterSidebar
+            filters={filters}
+            onFiltersChange={(f) => { setFilters(f); setPage(1); }}
+            onClose={() => setFilterSidebarOpen(false)}
+            statusOptions={STATUS_OPTIONS}
+            profiles={profiles}
+            savedSearches={savedSearches}
+            onSaveSearch={handleSaveSearch}
+            onLoadSearch={handleLoadSearch}
+            onDeleteSearch={handleDeleteSearch}
+            searchQuery={searchQuery}
+          />
+        )}
+
+        <div className="flex-1 overflow-y-auto bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Filter toggle */}
+          <Button
+            variant={filterSidebarOpen ? 'secondary' : 'outline'}
+            size="sm"
+            className="h-10 gap-1.5"
+            onClick={() => setFilterSidebarOpen(!filterSidebarOpen)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="ml-0.5 text-[10px] h-5 px-1.5 bg-accent/10 text-accent">
+                {activeFilterCount}
+              </Badge>
+            )}
+          </Button>
+
           <div className="relative flex-1 min-w-[16rem] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
@@ -291,39 +435,6 @@ const Contacts = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-xl border border-card-border bg-card text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
-          </div>
-
-          <div className="inline-flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
-            {([['all', 'All'], ['active', 'Active'], ['inactive', 'Inactive']] as const).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setFilter(value)}
-                className={cn(
-                  'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                  filter === value
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="inline-flex items-center gap-1 rounded-xl border border-card-border bg-card p-1 shadow-sm">
-            {([['all', 'All'], ['client_only', 'Client only'], ['also_candidate', 'Also a Candidate']] as const).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setRoleFilter(value)}
-                className={cn(
-                  'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                  roleFilter === value
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
-                )}
-              >
-                {label}
-              </button>
-            ))}
           </div>
 
           {paginatedContacts.length > 0 && !paginatedContacts.every((c) => selectedIds.includes(c.id)) && (
@@ -339,6 +450,29 @@ const Contacts = () => {
           )}
         </div>
 
+        {/* ── Active Filter Chips ──────────────────────────────────────── */}
+        {filterChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 mb-4">
+            {filterChips.map((chip) => (
+              <Badge
+                key={chip.key}
+                variant="secondary"
+                className="text-xs gap-1 pr-1 cursor-pointer hover:bg-destructive/10 transition-colors"
+                onClick={() => { setFilters(clearContactFilterByKey(filters, chip.key)); setPage(1); }}
+              >
+                {chip.label}
+                <X className="h-3 w-3" />
+              </Badge>
+            ))}
+            <button
+              className="text-[10px] text-muted-foreground hover:text-foreground ml-1 transition-colors"
+              onClick={() => { setFilters(DEFAULT_CONTACT_FILTERS); setPage(1); }}
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
             <Loader2 className="h-5 w-5 animate-spin" /> Loading contacts…
@@ -352,7 +486,7 @@ const Contacts = () => {
               <RefreshCw className="h-4 w-4 mr-1" /> Retry
             </Button>
           </div>
-        ) : filteredContacts.length === 0 && !searchQuery && filter === 'all' ? (
+        ) : filteredContacts.length === 0 && !searchQuery && activeFilterCount === 0 ? (
           <div className="text-center py-16">
             <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-1">No contacts yet</h3>
@@ -576,9 +710,9 @@ const Contacts = () => {
                               <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Status
                             </DropdownMenuSubTrigger>
                             <DropdownMenuSubContent>
-                              {['active', 'inactive'].filter(s => s !== contact.status).map(s => (
+                              {['new', 'reached_out', 'engaged'].filter(s => s !== contact.status).map(s => (
                                 <DropdownMenuItem key={s} onClick={() => handleQuickStatusChange(contact.id, s)}>
-                                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                                  {STATUS_LABELS[s] ?? s}
                                 </DropdownMenuItem>
                               ))}
                             </DropdownMenuSubContent>
@@ -644,6 +778,7 @@ const Contacts = () => {
             </div>
           </div>
         )}
+        </div>
       </div>
       <CsvImportDialog open={importOpen} onOpenChange={setImportOpen} entityType="contacts" />
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />

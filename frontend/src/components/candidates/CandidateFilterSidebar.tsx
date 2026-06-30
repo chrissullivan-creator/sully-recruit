@@ -37,6 +37,10 @@ export interface CandidateFilters {
   dateAddedFrom: Date | undefined;
   dateAddedTo: Date | undefined;
   lastActivityFrom: Date | undefined;
+  lastReachedFrom: Date | undefined;   // reached out on/after
+  lastReachedTo: Date | undefined;     // reached out on/before
+  lastRespondedFrom: Date | undefined; // responded on/after
+  lastRespondedTo: Date | undefined;   // responded on/before
 }
 
 export const DEFAULT_FILTERS: CandidateFilters = {
@@ -56,6 +60,10 @@ export const DEFAULT_FILTERS: CandidateFilters = {
   dateAddedFrom: undefined,
   dateAddedTo: undefined,
   lastActivityFrom: undefined,
+  lastReachedFrom: undefined,
+  lastReachedTo: undefined,
+  lastRespondedFrom: undefined,
+  lastRespondedTo: undefined,
 };
 
 export interface SavedSearch {
@@ -80,6 +88,10 @@ export function getActiveFilterCount(filters: CandidateFilters): number {
   if (filters.dateAddedFrom) count++;
   if (filters.dateAddedTo) count++;
   if (filters.lastActivityFrom) count++;
+  if (filters.lastReachedFrom) count++;
+  if (filters.lastReachedTo) count++;
+  if (filters.lastRespondedFrom) count++;
+  if (filters.lastRespondedTo) count++;
   return count;
 }
 
@@ -109,6 +121,10 @@ export function getActiveFilterChips(filters: CandidateFilters, statusLabels: Re
   if (filters.dateAddedFrom) chips.push({ key: 'dateAddedFrom', label: `Added after: ${format(filters.dateAddedFrom, 'MMM d, yyyy')}` });
   if (filters.dateAddedTo) chips.push({ key: 'dateAddedTo', label: `Added before: ${format(filters.dateAddedTo, 'MMM d, yyyy')}` });
   if (filters.lastActivityFrom) chips.push({ key: 'lastActivityFrom', label: `Active since: ${format(filters.lastActivityFrom, 'MMM d, yyyy')}` });
+  if (filters.lastReachedFrom) chips.push({ key: 'lastReachedFrom', label: `Reached after: ${format(filters.lastReachedFrom, 'MMM d, yyyy')}` });
+  if (filters.lastReachedTo) chips.push({ key: 'lastReachedTo', label: `Reached before: ${format(filters.lastReachedTo, 'MMM d, yyyy')}` });
+  if (filters.lastRespondedFrom) chips.push({ key: 'lastRespondedFrom', label: `Responded after: ${format(filters.lastRespondedFrom, 'MMM d, yyyy')}` });
+  if (filters.lastRespondedTo) chips.push({ key: 'lastRespondedTo', label: `Responded before: ${format(filters.lastRespondedTo, 'MMM d, yyyy')}` });
   return chips;
 }
 
@@ -127,6 +143,10 @@ export function clearFilterByKey(filters: CandidateFilters, key: string): Candid
     case 'dateAddedFrom': f.dateAddedFrom = undefined; break;
     case 'dateAddedTo': f.dateAddedTo = undefined; break;
     case 'lastActivityFrom': f.lastActivityFrom = undefined; break;
+    case 'lastReachedFrom': f.lastReachedFrom = undefined; break;
+    case 'lastReachedTo': f.lastReachedTo = undefined; break;
+    case 'lastRespondedFrom': f.lastRespondedFrom = undefined; break;
+    case 'lastRespondedTo': f.lastRespondedTo = undefined; break;
   }
   return f;
 }
@@ -555,6 +575,38 @@ export function CandidateFilterSidebar({
               date={filters.lastActivityFrom}
               onSelect={(d) => update({ lastActivityFrom: d })}
             />
+          </FilterSection>
+
+          {/* ── Last Reached Out ───────────────────────────────────────── */}
+          <FilterSection title="Last Reached Out">
+            <div className="space-y-2">
+              <DatePickerField
+                label="On or after"
+                date={filters.lastReachedFrom}
+                onSelect={(d) => update({ lastReachedFrom: d })}
+              />
+              <DatePickerField
+                label="On or before"
+                date={filters.lastReachedTo}
+                onSelect={(d) => update({ lastReachedTo: d })}
+              />
+            </div>
+          </FilterSection>
+
+          {/* ── Last Response ──────────────────────────────────────────── */}
+          <FilterSection title="Last Response">
+            <div className="space-y-2">
+              <DatePickerField
+                label="On or after"
+                date={filters.lastRespondedFrom}
+                onSelect={(d) => update({ lastRespondedFrom: d })}
+              />
+              <DatePickerField
+                label="On or before"
+                date={filters.lastRespondedTo}
+                onSelect={(d) => update({ lastRespondedTo: d })}
+              />
+            </div>
           </FilterSection>
         </div>
       </ScrollArea>

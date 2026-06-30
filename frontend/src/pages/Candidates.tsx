@@ -86,6 +86,13 @@ function persistSavedSearches(searches: SavedSearch[]) {
   localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
 }
 
+// "On or before" date bounds should include the whole selected day.
+function endOfDay(d: Date): Date {
+  const e = new Date(d);
+  e.setHours(23, 59, 59, 999);
+  return e;
+}
+
 const Candidates = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -125,7 +132,8 @@ const Candidates = () => {
       f.location || f.skills.length || f.title || f.company ||
       (f.jobTag && f.jobTag !== 'all') ||
       (f.workAuthorization && f.workAuthorization !== 'all') ||
-      f.dateAddedFrom || f.dateAddedTo || f.lastActivityFrom
+      f.dateAddedFrom || f.dateAddedTo || f.lastActivityFrom ||
+      f.lastReachedFrom || f.lastReachedTo || f.lastRespondedFrom || f.lastRespondedTo
     );
   }, [filters]);
   const clientMode = filterSidebarOpen || hasBooleanOperators(searchQuery) || advancedFilterActive;
@@ -288,9 +296,20 @@ const Candidates = () => {
       const updatedDate = (c as any).updated_at ? new Date((c as any).updated_at) : createdDate;
       const matchesLastActivity = !filters.lastActivityFrom || updatedDate >= filters.lastActivityFrom;
 
+      // Last reached out — before/after (candidates store this as last_contacted_at)
+      const reachedAt = (c as any).last_contacted_at ? new Date((c as any).last_contacted_at) : null;
+      const matchesReachedFrom = !filters.lastReachedFrom || (reachedAt && reachedAt >= filters.lastReachedFrom);
+      const matchesReachedTo = !filters.lastReachedTo || (reachedAt && reachedAt <= endOfDay(filters.lastReachedTo));
+
+      // Last response — before/after
+      const respondedAt = (c as any).last_responded_at ? new Date((c as any).last_responded_at) : null;
+      const matchesRespondedFrom = !filters.lastRespondedFrom || (respondedAt && respondedAt >= filters.lastRespondedFrom);
+      const matchesRespondedTo = !filters.lastRespondedTo || (respondedAt && respondedAt <= endOfDay(filters.lastRespondedTo));
+
       return matchesSearch && matchesStatus && matchesJobTag && matchesOwner &&
         matchesLocation && matchesTitle && matchesCompany && matchesSkills &&
-        matchesWorkAuth && matchesDateFrom && matchesDateTo && matchesLastActivity;
+        matchesWorkAuth && matchesDateFrom && matchesDateTo && matchesLastActivity &&
+        matchesReachedFrom && matchesReachedTo && matchesRespondedFrom && matchesRespondedTo;
     });
 
     list.sort((a, b) => {
