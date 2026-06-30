@@ -31,6 +31,20 @@ import { StatStrip } from '@/components/shared/StatStrip';
 import { AISummaryCard } from '@/components/shared/AISummaryCard';
 import { ActivityTimeline, type TimelineGroup } from '@/components/shared/ActivityTimeline';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
+import { EditPersonDialog, type EditField } from '@/components/shared/EditPersonDialog';
+import { ContactPanel } from '@/components/shared/ContactPanel';
+
+// Every editable contact field, surfaced in the single Edit modal.
+const CONTACT_EDIT_FIELDS: EditField[] = [
+  { key: 'first_name', label: 'First name', section: 'Identity' },
+  { key: 'last_name', label: 'Last name', section: 'Identity' },
+  { key: 'title', label: 'Title', section: 'Identity' },
+  { key: 'linkedin_url', label: 'LinkedIn URL', section: 'Identity', full: true },
+  { key: 'work_email', label: 'Work email', type: 'email', section: 'Contact' },
+  { key: 'personal_email', label: 'Personal email', type: 'email', section: 'Contact' },
+  { key: 'phone', label: 'Phone', section: 'Contact' },
+  { key: 'mobile_phone', label: 'Mobile', section: 'Contact' },
+];
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -322,6 +336,7 @@ const ContactDetail = () => {
   const [removingJobId, setRemovingJobId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const handleFetchHistory = async () => {
@@ -680,6 +695,13 @@ const ContactDetail = () => {
                 the "More" dropdown so the header stays readable on
                 narrower viewports. */}
             <button
+              onClick={() => setEditOpen(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors"
+              title="Edit contact"
+            >
+              <Edit className="h-4 w-4" />
+            </button>
+            <button
               onClick={() => setScheduleMeetingOpen(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full border border-card-border bg-card text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors"
               title="Schedule meeting"
@@ -738,6 +760,19 @@ const ContactDetail = () => {
             )}
           </>
         }
+      />
+
+      <EditPersonDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        personId={id!}
+        initial={contact as any}
+        fields={CONTACT_EDIT_FIELDS}
+        title="Edit contact"
+        onSaved={() => {
+          invalidatePersonScope(queryClient);
+          queryClient.invalidateQueries({ queryKey: ['contact', id] });
+        }}
       />
 
       <ScheduleMeetingDialog
@@ -950,6 +985,10 @@ const ContactDetail = () => {
             <ScrollArea className="flex-1">
               {/* ---------- JOE SAYS TAB ---------- */}
               <TabsContent value="joe" className="px-8 py-6 mt-0 space-y-5">
+                <ContactPanel
+                  person={contact}
+                  actions={<button onClick={() => setEditOpen(true)} className="text-xs font-medium text-primary">Edit</button>}
+                />
                 <AISummaryCard
                   title="Joe Says"
                   actions={
