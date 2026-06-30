@@ -496,7 +496,8 @@ const Contacts = () => {
             </Button>
           </div>
         ) : (
-          <HorizontalTableScroll stickyHeader minWidth={1300} className="rounded-2xl border-card-border shadow-sm">
+          <>
+          <HorizontalTableScroll stickyHeader minWidth={1300} className="hidden md:block rounded-2xl border-card-border shadow-sm">
             <table className="w-full">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
@@ -761,6 +762,45 @@ const Contacts = () => {
               </tbody>
             </table>
           </HorizontalTableScroll>
+          {/* Mobile: stacked cards instead of the wide table. */}
+          <div className="md:hidden rounded-2xl border border-card-border shadow-sm overflow-hidden divide-y divide-card-border bg-card">
+            {paginatedContacts.map((contact) => {
+              const companyName = (contact as any).company_name || (contact.companies as any)?.name || '';
+              const name = contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`;
+              return (
+                <div
+                  key={contact.id}
+                  className="flex items-center gap-3 px-4 py-3 active:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/contacts/${contact.id}`)}
+                >
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={selectedIds.includes(contact.id)} onCheckedChange={() => toggleSelect(contact.id)} />
+                  </div>
+                  <PersonAvatar name={name} src={(contact as any).profile_picture_url ?? (contact as any).avatar_url} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{[contact.title, companyName].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
+                  <span className={cn(
+                    'shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide capitalize',
+                    contact.status === 'engaged' || contact.status === 'active'
+                      ? 'bg-success/10 text-success border-success/20'
+                      : contact.status === 'reached_out'
+                      ? 'bg-warning/15 text-warning border-warning/20'
+                      : contact.status === 'new'
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'bg-muted text-muted-foreground border-card-border',
+                  )}>
+                    {contact.status}
+                  </span>
+                </div>
+              );
+            })}
+            {paginatedContacts.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No contacts match your filters.</div>
+            )}
+          </div>
+          </>
         )}
 
         {totalPages > 1 && (
