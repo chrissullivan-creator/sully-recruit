@@ -47,6 +47,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { CandidateSourceTab } from '@/components/source/SourceTabs';
+import { PersonInterviewsTab } from '@/components/interviews/PersonInterviewsTab';
+import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
@@ -1326,6 +1328,7 @@ const CandidateDetail = () => {
                   { value: 'overview', label: 'Overview', icon: User },
                   { value: 'background', label: 'Background', icon: Info },
                   { value: 'pipeline', label: 'Pipeline', icon: Send },
+                  { value: 'interviews', label: 'Interviews', icon: Calendar },
                   { value: 'documents', label: 'Documents', icon: FolderOpen },
                   { value: 'history', label: 'History', icon: History },
                   { value: 'communication', label: 'Communication', icon: MessageSquare },
@@ -2290,6 +2293,16 @@ const CandidateDetail = () => {
                             </div>
                           </div>
 
+                          {/* Interview rounds — completed / scheduled / to-schedule. */}
+                          {canonicalStage === 'interview' && (
+                            <InterviewStageStrip
+                              sendOutId={so.id}
+                              candidateId={id}
+                              jobId={j?.id}
+                              onOpen={(iid) => navigate(`/interviews?interview=${iid}`)}
+                            />
+                          )}
+
                           {/* Stage selector — only visible to the recruiter who created this send out */}
                           {!isRejected && !isRejecting && isSendOutOwner && (
                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2362,6 +2375,12 @@ const CandidateDetail = () => {
                     })}
                   </div>
                 )}
+              </TabsContent>
+
+              <TabsContent value="interviews" className="px-8 py-5 mt-0 space-y-6">
+                <SectionCard title="Interviews">
+                  <PersonInterviewsTab candidateId={id} />
+                </SectionCard>
               </TabsContent>
 
               <TabsContent value="notes" className="px-8 py-5 mt-0 space-y-6">

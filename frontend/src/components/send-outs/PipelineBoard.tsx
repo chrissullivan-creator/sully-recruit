@@ -5,8 +5,9 @@ import { cn } from '@/lib/utils';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { type SendOutRow, formatComp, formatCompRange } from '@/lib/queries/send-outs';
-import { CANONICAL_PIPELINE, canonicalConfig, nextStage, type CanonicalStage } from '@/lib/pipeline';
+import { CANONICAL_PIPELINE, canonicalConfig, nextStage, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { daysInStage, needsFollowUp } from '@/lib/send-out-insights';
+import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
 
 // Columns shown on the board (Rejected/withdrawn is excluded — it lives in the
 // All Send Outs tab). Subtitles mirror the product mockup.
@@ -190,6 +191,17 @@ function KanbanCard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Interview rounds — which are completed / scheduled / to-schedule.
+          Only shown once the card reaches the Interview stage. */}
+      {stageToCanonical(row.stage) === 'interview' && (
+        <InterviewStageStrip
+          sendOutId={row.id}
+          candidateId={row.candidate_id}
+          jobId={row.job_id}
+          className="mt-2"
+        />
       )}
 
       {/* Footer chips */}

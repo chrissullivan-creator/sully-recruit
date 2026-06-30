@@ -16,6 +16,7 @@ import {
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { stageToCanonical } from '@/lib/pipeline';
+import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
 import { invalidateSendOutScope } from '@/lib/invalidate';
 import { formatComp, formatCompRange } from '@/lib/queries/send-outs';
 
@@ -369,6 +370,14 @@ export const SendOutTableRow = ({ sendOut, contacts, index }: { sendOut: any; co
             ))}
           </SelectContent>
         </Select>
+        {stageToCanonical(sendOut.stage) === 'interview' && (
+          <InterviewStageStrip
+            sendOutId={sendOut.id}
+            candidateId={sendOut.candidate_id}
+            jobId={sendOut.job_id}
+            className="mt-1.5 max-w-[220px]"
+          />
+        )}
         <WithdrawnReasonDialog
           open={rejectOpen}
           onOpenChange={(v) => { setRejectOpen(v); if (!v) setPendingRejectStage(null); }}

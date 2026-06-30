@@ -23,10 +23,11 @@ import {
   FileText, Loader2, Check, X, ExternalLink,
   Clock, Search, Users, Send, ChevronDown,
   Martini, RefreshCw, Send as SendIcon,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Play, MoreHorizontal,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Calendar, Play, MoreHorizontal,
 } from 'lucide-react';
 import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
+import { PersonInterviewsTab } from '@/components/interviews/PersonInterviewsTab';
 import { StatStrip } from '@/components/shared/StatStrip';
 import { AISummaryCard } from '@/components/shared/AISummaryCard';
 import { ActivityTimeline, type TimelineGroup } from '@/components/shared/ActivityTimeline';
@@ -903,6 +904,7 @@ const ContactDetail = () => {
                   { value: 'joe', icon: <Martini className="h-3.5 w-3.5" />, label: 'Overview' },
                   { value: 'jobs', icon: <Briefcase className="h-3.5 w-3.5" />, label: `Jobs (${linkedJobs.length})` },
                   { value: 'candidates', icon: <Users className="h-3.5 w-3.5" />, label: `Send Outs (${sendOuts.length})` },
+                  { value: 'interviews', icon: <Calendar className="h-3.5 w-3.5" />, label: 'Interviews' },
                   { value: 'communications', icon: <MessageSquare className="h-3.5 w-3.5" />, label: `Communications (${(conversations as any[]).length})` },
                   { value: 'meeting-recaps', icon: <PhoneCall className="h-3.5 w-3.5" />, label: 'Meeting Recaps' },
                   { value: 'activity', icon: <History className="h-3.5 w-3.5" />, label: 'Activity' },
@@ -1184,6 +1186,19 @@ const ContactDetail = () => {
                     })}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* ---------- INTERVIEWS TAB ---------- */}
+              <TabsContent value="interviews" className="px-8 py-6 mt-0">
+                <SectionCard title="Interviews" icon={<Calendar className="h-4 w-4" />}>
+                  {(c as any).company_id ? (
+                    <PersonInterviewsTab companyId={(c as any).company_id} showCandidate />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Link this contact to a company to see interviews across its open roles.
+                    </p>
+                  )}
+                </SectionCard>
               </TabsContent>
 
               {/* ---------- COMMUNICATIONS TAB ---------- */}
