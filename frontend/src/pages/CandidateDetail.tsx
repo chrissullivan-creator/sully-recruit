@@ -1303,9 +1303,10 @@ const CandidateDetail = () => {
               { label: 'Current Base', value: fmtMoney(c.current_base_comp) },
               { label: 'Current Bonus', value: fmtMoney(c.current_bonus_comp) },
               { label: 'Current Total', value: fmtMoney(c.current_total_comp) },
-              { label: 'Target Total', value: fmtMoney(c.target_total_comp), accent: true },
-              { label: 'Notice', value: c.notice_period || '—' },
-              { label: 'Work Auth', value: c.work_authorization || c.visa_status || '—' },
+              { label: 'Expected Base', value: fmtMoney(c.target_base_comp), accent: true },
+              { label: 'Expected Bonus', value: fmtMoney(c.target_bonus_comp), accent: true },
+              { label: 'Expected Total', value: fmtMoney(c.target_total_comp), accent: true },
+              { label: 'Visa', value: c.work_authorization || c.visa_status || '—' },
             ];
             return (
               <div className="px-8 pt-5">

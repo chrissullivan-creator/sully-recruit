@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { supabase } from '@/integrations/supabase/client';
 import { moveStage } from '@/lib/mutations/move-stage';
+import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import { canonicalConfig, nextStage, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { invalidateTaskScope } from '@/lib/invalidate';
 import { toast } from 'sonner';
@@ -91,6 +92,7 @@ export function PipelineTodoList({
 }) {
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [withdrawRow, setWithdrawRow] = useState<SendOutRow | null>(null);
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['pipeline-todos', isAdmin ? 'all' : userId],
@@ -182,7 +184,11 @@ export function PipelineTodoList({
     }
   };
 
-  const handleWithdraw = async (row: SendOutRow) => {
+  // Reject = move to terminal 'withdrawn', but always capture who drove it +
+  // why via WithdrawnReasonDialog (no silent withdraws).
+  const confirmWithdraw = async (party: string, reason: string) => {
+    const row = withdrawRow;
+    if (!row) return;
     const canon = stageToCanonical(row.stage);
     if (!canon) return;
     setBusyId(row.id);
@@ -194,12 +200,15 @@ export function PipelineTodoList({
         toStage: 'withdrawn',
         triggerSource: 'todos',
         entityId: row.candidate_id,
+        rejectedByParty: party,
+        withdrawnReason: reason,
       });
-      if (!result.ok) throw new Error(result.error || 'Withdraw failed');
-      toast.success('Marked withdrawn');
+      if (!result.ok) throw new Error(result.error || 'Reject failed');
+      toast.success('Marked rejected');
       invalidate();
+      setWithdrawRow(null);
     } catch (err: any) {
-      toast.error(err?.message || 'Withdraw failed');
+      toast.error(err?.message || 'Reject failed');
     } finally {
       setBusyId(null);
     }
@@ -310,9 +319,9 @@ export function PipelineTodoList({
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
-                            onClick={() => handleWithdraw(row)}
+                            onClick={() => setWithdrawRow(row)}
                           >
-                            <XCircle className="h-3 w-3 mr-1.5" /> Mark withdrawn
+                            <XCircle className="h-3 w-3 mr-1.5" /> Mark rejected
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -326,6 +335,14 @@ export function PipelineTodoList({
       })}
 
       <div className="border-t border-border/40 pt-2" />
+
+      <WithdrawnReasonDialog
+        open={!!withdrawRow}
+        onOpenChange={(v) => { if (!v) setWithdrawRow(null); }}
+        candidateName={withdrawRow?.candidates?.full_name ?? undefined}
+        jobTitle={withdrawRow?.jobs?.title ?? undefined}
+        onConfirm={confirmWithdraw}
+      />
     </div>
   );
 }
