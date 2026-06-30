@@ -28,6 +28,8 @@ const DELAY_OPTIONS = Array.from({ length: 13 }, (_, i) => i * 10);
 
 const MERGE_TAGS = [
   "{{first_name}}", "{{last_name}}", "{{company}}", "{{title}}", "{{job_name}}", "{{sender_name}}",
+  // Renders "Yes, we are an approved vendor!" only for recipients at a client firm.
+  "{{approved_vendor_line}}",
 ];
 
 interface SequenceStepCardProps {

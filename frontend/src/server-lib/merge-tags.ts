@@ -2,8 +2,14 @@
  * Merge-tag resolution and email body formatting.
  *
  * Supported tags: {{first_name}}, {{last_name}}, {{full_name}},
- * {{email}}, {{title}}, {{company}}, {{company_name}}
+ * {{email}}, {{title}}, {{company}}, {{company_name}},
+ * {{approved_vendor_line}} — renders "Yes, we are an approved vendor!" only
+ * when the recipient works at a client firm (company_status = 'client'),
+ * else empty. Authors opt in by placing the token in the message.
  */
+
+/** Text inserted by {{approved_vendor_line}} for recipients at a client firm. */
+export const APPROVED_VENDOR_LINE = "Yes, we are an approved vendor!";
 
 /** HTML-escape a string to prevent XSS when embedded in email HTML. */
 function escapeHtml(s: string): string {
@@ -26,8 +32,8 @@ export async function resolveMergeTags(
   const table = entityType === "candidate" ? "candidates" : "contacts";
   const fields =
     entityType === "candidate"
-      ? "first_name, last_name, full_name, email, current_title, current_company"
-      : "first_name, last_name, full_name, email, title, company_name";
+      ? "first_name, last_name, full_name, email, current_title, current_company, company_id"
+      : "first_name, last_name, full_name, email, title, company_name, company_id";
 
   const { data: entity } = await supabase
     .from(table)
@@ -36,6 +42,17 @@ export async function resolveMergeTags(
     .single();
 
   if (!entity) return {};
+
+  // Approved-vendor line: only when the recipient's company is a client firm.
+  let approvedVendorLine = "";
+  if (entity.company_id) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("company_status")
+      .eq("id", entity.company_id)
+      .maybeSingle();
+    if (company?.company_status === "client") approvedVendorLine = APPROVED_VENDOR_LINE;
+  }
 
   return {
     first_name: escapeHtml(entity.first_name ?? ""),
@@ -48,6 +65,7 @@ export async function resolveMergeTags(
     title: escapeHtml(entity.current_title ?? entity.title ?? ""),
     company: escapeHtml(entity.current_company ?? entity.company_name ?? ""),
     company_name: escapeHtml(entity.current_company ?? entity.company_name ?? ""),
+    approved_vendor_line: escapeHtml(approvedVendorLine),
   };
 }
 

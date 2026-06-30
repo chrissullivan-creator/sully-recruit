@@ -12,8 +12,11 @@
  *
  * Supported tags: {{first_name}} {{last_name}} {{full_name}}
  *                 {{email}} {{title}} {{company}} {{company_name}}
- *                 {{job_name}} {{sender_name}}
+ *                 {{job_name}} {{sender_name}} {{approved_vendor_line}}
  */
+
+/** Keep in sync with APPROVED_VENDOR_LINE in server-lib/merge-tags.ts. */
+export const APPROVED_VENDOR_LINE = "Yes, we are an approved vendor!";
 
 export type PersonRow = {
   id?: string;
@@ -25,6 +28,7 @@ export type PersonRow = {
   current_company?: string | null;
   title?: string | null;          // contacts table uses `title`
   company_name?: string | null;   // contacts table uses `company_name`
+  company_status?: string | null; // 'client' → approved-vendor line renders
 };
 
 function escapeHtml(s: string): string {
@@ -54,6 +58,7 @@ export function mergeVarsFromPerson(
     company_name: escapeHtml(p.current_company ?? p.company_name ?? ""),
     job_name: escapeHtml(extras.jobName ?? ""),
     sender_name: escapeHtml(extras.senderName ?? ""),
+    approved_vendor_line: escapeHtml(p.company_status === "client" ? APPROVED_VENDOR_LINE : ""),
   };
 }
 

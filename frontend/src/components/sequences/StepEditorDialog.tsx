@@ -7,6 +7,8 @@ import { Martini, Loader2, Mail, Linkedin, MessageSquare, Phone } from "lucide-r
 
 const MERGE_TAGS = [
   "{{first_name}}", "{{last_name}}", "{{company}}", "{{title}}", "{{job_name}}", "{{sender_name}}",
+  // Renders "Yes, we are an approved vendor!" only for recipients at a client firm.
+  "{{approved_vendor_line}}",
 ];
 
 const CHANNEL_INFO: Record<string, { label: string; icon: typeof Mail; color: string }> = {
