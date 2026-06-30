@@ -185,11 +185,12 @@ export default function SendOuts() {
       setPendingWithdrawal({ row, source });
       return;
     }
-    // Pitch / send out / submitted captures a stage-move note and
-    // pre-fills with the prior pitch note so it carries through. We
-    // only intercept on the FIRST call (note === undefined); the
-    // dialog confirm path passes `note` and skips this branch.
-    if (note === undefined && (target === 'pitch' || target === 'ready_to_send' || target === 'submitted')) {
+    // Pitch / submitted captures a stage-move note and pre-fills with the
+    // prior pitch note so it carries through. We only intercept on the FIRST
+    // call (note === undefined); the dialog confirm path passes `note` and
+    // skips this branch. The Send Out transition is handled differently — it
+    // opens the rich drawer (comp + notes) after the move, below.
+    if (note === undefined && (target === 'pitch' || target === 'submitted')) {
       const prior = target === 'pitch' ? null : await fetchLatestStageMoveNote(row.id);
       setPendingNotedMove({ row, target, source, initialNote: prior });
       return;
@@ -220,6 +221,12 @@ export default function SendOuts() {
     }
     toast.success(`Moved to ${canonicalConfig(target).label}`);
     queryClient.invalidateQueries({ queryKey: ['dashboard_metrics'] });
+    // Moving into Send Out opens the rich drawer (comp + notes + Ask Joe
+    // submit) — the same window you get clicking a send-out person — so the
+    // recruiter preps the submission right after the move.
+    if (target === 'ready_to_send') {
+      setDrawerRow({ ...row, stage: 'ready_to_send' });
+    }
   };
 
   const handleOpenRow = (row: SendOutRow) => setDrawerRow(row);

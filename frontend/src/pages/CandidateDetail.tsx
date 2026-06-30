@@ -41,7 +41,7 @@ import {
   FileText, Martini, Loader2, X, ExternalLink, RefreshCw,
   DollarSign, ChevronDown, ChevronUp, PhoneCall, MessageCircle, Clock, Volume2, PhoneIncoming, PhoneOutgoing,
   GraduationCap, Upload, Plus, Info, FolderOpen, Trash2, Send,
-  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download,
+  Search, Calendar, Merge, CalendarPlus, StickyNote, Mailbox, MoreHorizontal, Download, Maximize2,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -50,6 +50,7 @@ import { CandidateSourceTab } from '@/components/source/SourceTabs';
 import { PersonInterviewsTab } from '@/components/interviews/PersonInterviewsTab';
 import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
 import { CompHistoryTab } from '@/components/candidate/CompHistoryTab';
+import { CandidateDrawer } from '@/components/candidate/CandidateDrawer';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
@@ -452,6 +453,9 @@ const CandidateDetail = () => {
   const meetings = candidateTasks.filter((t: Task) => t.task_type === 'meeting');
   const [editingMeeting, setEditingMeeting] = useState<Task | null>(null);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  // Send-out opened in the rich drawer (comp + notes), same window as the
+  // Send Outs page. Row is shaped from the candidate-detail send-out + page candidate.
+  const [drawerSendOut, setDrawerSendOut] = useState<any>(null);
 
   const { data: sendOuts = [] } = useQuery({
     queryKey: ['candidate_send_outs', id],
@@ -2295,6 +2299,14 @@ const CandidateDetail = () => {
                               <Button
                                 variant="ghost" size="icon"
                                 className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                title="Open send-out (comp + notes)"
+                                onClick={() => setDrawerSendOut({ ...so, job: so.jobs, candidate: c })}
+                              >
+                                <Maximize2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
                                 title="View / add notes"
                                 onClick={() => setEditingNotesFor({
                                   id: so.id,
@@ -2694,6 +2706,12 @@ const CandidateDetail = () => {
         open={createTaskOpen}
         onOpenChange={setCreateTaskOpen}
         defaultLinks={id ? [{ entity_type: 'candidate', entity_id: id }] : []}
+      />
+
+      <CandidateDrawer
+        row={drawerSendOut}
+        onClose={() => setDrawerSendOut(null)}
+        invalidateKeys={[['candidate_send_outs', id], ['candidate', id]]}
       />
     </MainLayout>
   );
