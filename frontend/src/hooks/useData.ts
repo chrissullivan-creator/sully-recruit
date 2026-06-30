@@ -168,7 +168,7 @@ export function useCandidate(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('people')
-        .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id')
+        .select('*, work_email, personal_email, mobile_phone, roles, linked_contact_id, company:companies(company_status, name)')
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;

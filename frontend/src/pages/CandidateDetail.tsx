@@ -76,6 +76,7 @@ import { softDelete } from '@/lib/softDelete';
 import { PersonRolesMenu } from '@/components/candidates/PersonRolesMenu';
 import { EditPersonDialog, type EditField } from '@/components/shared/EditPersonDialog';
 import { ContactPanel } from '@/components/shared/ContactPanel';
+import { ClientFirmBadge } from '@/components/shared/ClientFirmBadge';
 
 // Every editable candidate field, surfaced in the single Edit modal.
 const CANDIDATE_EDIT_FIELDS: EditField[] = [
@@ -1046,6 +1047,7 @@ const CandidateDetail = () => {
                 {statusLabel && <span className={chip}>{statusLabel}</span>}
                 {roles.includes('candidate') && <span className={chip}>Candidate</span>}
                 {roles.includes('client') && <span className={chip}>Client</span>}
+                <ClientFirmBadge companyStatus={(candidate as any).company?.company_status} />
                 {functionTags.map((t, i) => <span key={i} className={chip}>{t}</span>)}
                 {/* Owner (Screener) — assign right from the header */}
                 <span className="inline-flex items-center gap-1.5 shrink-0">

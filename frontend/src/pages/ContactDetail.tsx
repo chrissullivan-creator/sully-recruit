@@ -33,6 +33,7 @@ import { ActivityTimeline, type TimelineGroup } from '@/components/shared/Activi
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { EditPersonDialog, type EditField } from '@/components/shared/EditPersonDialog';
 import { ContactPanel } from '@/components/shared/ContactPanel';
+import { ClientFirmBadge } from '@/components/shared/ClientFirmBadge';
 
 // Every editable contact field, surfaced in the single Edit modal.
 const CONTACT_EDIT_FIELDS: EditField[] = [
@@ -614,6 +615,7 @@ const ContactDetail = () => {
                 <span className={chip}>{statusCfg.label}</span>
                 {roles.includes('client') && <span className={chip}>Client</span>}
                 {roles.includes('candidate') && <span className={chip}>Candidate</span>}
+                <ClientFirmBadge companyStatus={(c as any).companies?.company_status} />
                 {functionTags.map((t, i) => <span key={i} className={chip}>{t}</span>)}
               </div>
             );
