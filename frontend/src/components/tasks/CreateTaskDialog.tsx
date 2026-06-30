@@ -26,6 +26,10 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   defaultLinks?: { entity_type: string; entity_id: string }[];
   defaultMode?: 'task' | 'meeting';
+  /** Pre-select the assignee (e.g. the candidate's owning recruiter). */
+  defaultAssignedTo?: string;
+  /** Pre-fill the title (e.g. "Missing info: …"). */
+  defaultTitle?: string;
 }
 
 type EntityType = 'candidate' | 'job' | 'contact' | 'company';
@@ -72,7 +76,7 @@ const TIMEZONES = [
   { value: 'Asia/Tokyo', label: 'Tokyo' },
 ];
 
-export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode = 'task' }: Props) {
+export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode = 'task', defaultAssignedTo, defaultTitle }: Props) {
   const { user } = useAuth();
   const createTask = useCreateTask();
   const { data: profiles = [] } = useProfiles();
@@ -106,8 +110,8 @@ export function CreateTaskDialog({ open, onOpenChange, defaultLinks, defaultMode
     if (open) {
       setMode(defaultMode);
       setForm({
-        title: '', description: '', due_date: new Date(), start_time: '09:00', end_time: '09:30',
-        timezone: 'America/Chicago', assigned_to: '', reminder: '30m', task_subtype: 'Follow Up',
+        title: defaultTitle ?? '', description: '', due_date: new Date(), start_time: '09:00', end_time: '09:30',
+        timezone: 'America/Chicago', assigned_to: defaultAssignedTo ?? '', reminder: '30m', task_subtype: 'Follow Up',
         location: '', meeting_url: '', meeting_provider: '', no_calendar_invites: false, create_followup: false,
       });
       setLinks(defaultLinks?.map(l => ({ ...l, label: '' })) || []);

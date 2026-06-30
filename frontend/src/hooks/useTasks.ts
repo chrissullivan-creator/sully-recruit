@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { invalidateTaskScope } from '@/lib/invalidate';
+import { authHeaders } from '@/lib/api-auth';
 
 export interface Task {
   id: string;
@@ -211,7 +212,8 @@ export function useCreateTask() {
         await supabase.from('meeting_attendees').insert(attendeeRows as any);
       }
 
-      // Notify assigned user
+      // Notify assigned user — in-app notification + (best-effort) an email
+      // alert from the creator's mailbox so they're told who/what/about whom.
       if (payload.assigned_to && payload.assigned_to !== userId) {
         await supabase.from('notifications').insert({
           user_id: payload.assigned_to,
@@ -221,6 +223,15 @@ export function useCreateTask() {
           entity_type: 'task',
           entity_id: task.id,
         } as any);
+        try {
+          await fetch('/api/notify-task-assignment', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ taskId: task.id }),
+          });
+        } catch {
+          // Non-blocking: the in-app notification already reached them.
+        }
       }
 
       return task;

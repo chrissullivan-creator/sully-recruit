@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import {
   Mail, Phone, MessageSquare, Linkedin, ArrowLeft, ArrowRight, ExternalLink,
   Clock, Briefcase, DollarSign, Trash2, Martini, Download, CalendarPlus,
-  Gift, XCircle, FileText, Repeat,
+  Gift, XCircle, FileText, Repeat, ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -31,6 +31,7 @@ import { softDelete } from '@/lib/softDelete';
 import { WithdrawnReasonDialog } from '@/components/send-outs/WithdrawnReasonDialog';
 import { OfferDialog } from '@/components/send-outs/OfferDialog';
 import { InterviewDetail } from '@/components/interviews/InterviewDetail';
+import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog';
 
 interface CandidateDrawerProps {
   row: SendOutRow | null;
@@ -73,6 +74,7 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
   // Stage-action dialogs (Submission / Interview).
   const [rejectOpen, setRejectOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
+  const [todoOpen, setTodoOpen] = useState(false);
   const [interviewId, setInterviewId] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string>('');
@@ -507,6 +509,17 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
                       <XCircle className="h-3.5 w-3.5" /> Reject
                     </Button>
 
+                    {/* Flag missing info → a to-do for the candidate's recruiter,
+                        tagged to the candidate + job. Emails the assignee when
+                        it's assigned to someone other than the creator. */}
+                    <Button
+                      variant="outline" size="sm"
+                      className="gap-1 border-info/40 text-info hover:bg-info/5"
+                      onClick={() => setTodoOpen(true)}
+                    >
+                      <ClipboardList className="h-3.5 w-3.5" /> Create to-do
+                    </Button>
+
                     {stage === 'submitted' && (
                       <Button variant="gold" size="sm" className="gap-1" disabled={actionBusy} onClick={() => goToInterview(true)}>
                         <CalendarPlus className="h-3.5 w-3.5" /> Move to Interview
@@ -682,6 +695,19 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
         open={!!interviewId}
         onOpenChange={(v) => { if (!v) setInterviewId(null); }}
         onNavigate={(iid) => setInterviewId(iid)}
+      />
+
+      {/* Create-to-do for missing candidate info — pre-assigned to the
+          candidate's owning recruiter and tagged to the candidate + job. */}
+      <CreateTaskDialog
+        open={todoOpen}
+        onOpenChange={setTodoOpen}
+        defaultAssignedTo={(c as any)?.owner_user_id ?? undefined}
+        defaultTitle={c ? `Missing info: ${name}` : undefined}
+        defaultLinks={[
+          ...(c?.id ? [{ entity_type: 'candidate', entity_id: c.id }] : []),
+          ...(j?.id ? [{ entity_type: 'job', entity_id: j.id }] : []),
+        ]}
       />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
