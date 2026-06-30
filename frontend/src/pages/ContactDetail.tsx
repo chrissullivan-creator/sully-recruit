@@ -834,14 +834,12 @@ const ContactDetail = () => {
             />
           </div>
 
-          {/* Contact info section */}
+          {/* Company + classification — the editable bits not covered by the
+              header, Contact panel, or the Edit modal. The old read-only field
+              grid + timestamps were removed (now redundant). */}
           <div className="px-8 py-6 space-y-5">
-            <SectionCard title="Contact Details" icon={<User className="h-4 w-4" />}>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-              <EditableField label="First Name" value={contact.first_name} onSave={v => updateField('first_name', v)} placeholder="First name" />
-              <EditableField label="Last Name" value={contact.last_name} onSave={v => updateField('last_name', v)} placeholder="Last name" />
-              <EditableField label="Title" value={contact.title} onSave={v => updateField('title', v)} placeholder="e.g. VP, Talent Acquisition" />
-              <EditableField label="Phone" value={contact.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" />
+            <SectionCard title="Details" icon={<User className="h-4 w-4" />}>
+            <div className="max-w-md">
               <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0 space-y-1">
                   <Label className="text-xs text-muted-foreground">Company</Label>
@@ -872,68 +870,6 @@ const ContactDetail = () => {
                   </button>
                 )}
               </div>
-              <EditableField label="LinkedIn URL" value={contact.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." />
-              <EditableField label="Address" value={c.address} onSave={v => updateField('address', v)} placeholder="Street address" />
-              <EditableField label="City" value={c.city} onSave={v => updateField('city', v)} placeholder="City" />
-              <EditableField label="State" value={c.state} onSave={v => updateField('state', v)} placeholder="State / Province" />
-              <EditableField label="Country" value={c.country} onSave={v => updateField('country', v)} placeholder="Country" />
-              <EditableField label="Postal Code" value={c.postal_code} onSave={v => updateField('postal_code', v)} placeholder="Zip / Postal code" />
-              <EditableField
-                label={
-                  <span className="inline-flex items-center gap-2">
-                    Work Email
-                    <EmailBounceBadge
-                      emailInvalid={(contact as any).email_invalid}
-                      reason={(contact as any).email_invalid_reason}
-                      invalidatedAt={(contact as any).email_invalid_at}
-                    />
-                    <OutOfOfficeBadge oooUntil={(contact as any).ooo_until} />
-                  </span>
-                }
-                value={c.work_email}
-                onSave={v => updateField('work_email', v)}
-                type="email"
-                placeholder="work@firm.com"
-              />
-              <EditableField
-                label={
-                  <span className="inline-flex items-center gap-2">
-                    Personal Email
-                    <EmailBounceBadge
-                      emailInvalid={(contact as any).email_invalid}
-                      reason={(contact as any).email_invalid_reason}
-                      invalidatedAt={(contact as any).email_invalid_at}
-                    />
-                  </span>
-                }
-                value={c.personal_email}
-                onSave={v => updateField('personal_email', v)}
-                type="email"
-                placeholder="personal@gmail.com"
-              />
-              <EditableField
-                label="Mobile Phone"
-                value={c.mobile_phone}
-                onSave={async v => {
-                  await updateField('mobile_phone', v);
-                  if (v) await updateField('phone', v);
-                }}
-                placeholder="+1 (212) 555-0000"
-              />
-            </div>
-
-            {/* Timestamps */}
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-5 pt-4 border-t border-card-border text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" /> Last Contacted: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '\u2014'}
-              </span>
-              <span className="flex items-center gap-1">
-                <Send className="h-3 w-3" /> Last Reached Out: {c.last_reached_out_at ? format(new Date(c.last_reached_out_at), 'MMM d, yyyy') : '\u2014'}
-              </span>
-              <span className="flex items-center gap-1">
-                <MessageSquare className="h-3 w-3" /> Last Response: {c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '\u2014'}
-              </span>
-              <span>Created {format(new Date(contact.created_at), 'MMM d, yyyy')}</span>
             </div>
 
             {/* Department / Products — saved to the underlying people row */}
