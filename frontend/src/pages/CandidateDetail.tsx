@@ -74,6 +74,37 @@ import {
 } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
 import { PersonRolesMenu } from '@/components/candidates/PersonRolesMenu';
+import { EditPersonDialog, type EditField } from '@/components/shared/EditPersonDialog';
+import { ContactPanel } from '@/components/shared/ContactPanel';
+
+// Every editable candidate field, surfaced in the single Edit modal.
+const CANDIDATE_EDIT_FIELDS: EditField[] = [
+  { key: 'first_name', label: 'First name', section: 'Identity' },
+  { key: 'last_name', label: 'Last name', section: 'Identity' },
+  { key: 'current_title', label: 'Title', section: 'Identity' },
+  { key: 'current_company', label: 'Company', section: 'Identity' },
+  { key: 'location_text', label: 'Location', section: 'Identity' },
+  { key: 'linkedin_url', label: 'LinkedIn URL', section: 'Identity', full: true },
+  { key: 'work_email', label: 'Work email', type: 'email', section: 'Contact' },
+  { key: 'personal_email', label: 'Personal email', type: 'email', section: 'Contact' },
+  { key: 'phone', label: 'Phone', section: 'Contact' },
+  { key: 'mobile_phone', label: 'Mobile', section: 'Contact' },
+  { key: 'current_base_comp', label: 'Current base', type: 'number', section: 'Compensation' },
+  { key: 'current_bonus_comp', label: 'Current bonus', type: 'number', section: 'Compensation' },
+  { key: 'current_total_comp', label: 'Current total', type: 'number', section: 'Compensation' },
+  { key: 'target_base_comp', label: 'Target base', type: 'number', section: 'Compensation' },
+  { key: 'target_total_comp', label: 'Target total', type: 'number', section: 'Compensation' },
+  { key: 'comp_notes', label: 'Comp notes', section: 'Compensation', full: true },
+  { key: 'work_authorization', label: 'Work authorization', section: 'Profile' },
+  { key: 'notice_period', label: 'Notice period', section: 'Profile' },
+  { key: 'relocation_preference', label: 'Relocation', section: 'Profile' },
+  { key: 'target_locations', label: 'Target locations', section: 'Profile' },
+  { key: 'target_roles', label: 'Target roles', section: 'Profile' },
+  { key: 'candidate_summary', label: 'Candidate summary', type: 'textarea', section: 'Background' },
+  { key: 'back_of_resume_notes', label: 'Back of resume notes', type: 'textarea', section: 'Background' },
+  { key: 'reason_for_leaving', label: 'Reason for leaving', type: 'textarea', section: 'Background' },
+  { key: 'fun_facts', label: 'Fun facts', type: 'textarea', section: 'Background' },
+];
 
 // Pipeline chip strip — derives from the canonical pipeline
 // (frontend/src/lib/pipeline.ts) so this UI never drifts from the
@@ -280,6 +311,7 @@ const CandidateDetail = () => {
   const [uploadingOtherDoc, setUploadingOtherDoc] = useState(false);
   const [docFolder, setDocFolder] = useState<'resumes' | 'formatted' | 'other'>('resumes');
   const [editingInfo, setEditingInfo] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const otherDocInputRef = useRef<HTMLInputElement>(null);
 
   // Send Out management state
@@ -1106,7 +1138,7 @@ const CandidateDetail = () => {
             <Button
               variant={editingInfo ? 'gold-outline' : 'outline'}
               size="sm"
-              onClick={() => setEditingInfo(!editingInfo)}
+              onClick={() => setEditOpen(true)}
               title={editingInfo ? 'Finish editing' : 'Edit fields inline'}
             >
               <Edit className="h-3.5 w-3.5 mr-1" />{editingInfo ? 'Done' : 'Edit'}
@@ -1261,7 +1293,7 @@ const CandidateDetail = () => {
               icon={<User className="h-4 w-4" />}
               actions={canEdit ? (
                 <button
-                  onClick={() => setEditingInfo(!editingInfo)}
+                  onClick={() => setEditOpen(true)}
                   className={cn(
                     'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
                     editingInfo
@@ -1463,8 +1495,12 @@ const CandidateDetail = () => {
             <ScrollArea className="flex-1">
               <TabsContent value="overview" className="px-8 py-5 mt-0 space-y-6">
                 <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-4 items-start">
-                  {/* Col 1 — AI Summary + Skills */}
+                  {/* Col 1 — Contact + AI Summary + Skills */}
                   <div className="space-y-5">
+                    <ContactPanel
+                      person={candidate}
+                      actions={canEdit ? <button onClick={() => setEditOpen(true)} className="text-xs font-medium text-primary">Edit</button> : undefined}
+                    />
                     <AISummaryCard
                       title="AI Summary"
                       actions={
@@ -2725,6 +2761,17 @@ const CandidateDetail = () => {
       />
 
       {candidate && (
+        <>
+        <EditPersonDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          personId={id!}
+          initial={candidate as any}
+          fields={CANDIDATE_EDIT_FIELDS}
+          title="Edit candidate"
+          onSaved={() => { invalidatePersonScope(queryClient); queryClient.invalidateQueries({ queryKey: ['candidate', id] }); }}
+        />
+
         <MergeCandidateDialog
           open={mergeOpen}
           onOpenChange={setMergeOpen}
@@ -2737,6 +2784,7 @@ const CandidateDetail = () => {
             current_company: candidate.current_company,
           }}
         />
+        </>
       )}
 
       {/* Edit meeting dialog */}
