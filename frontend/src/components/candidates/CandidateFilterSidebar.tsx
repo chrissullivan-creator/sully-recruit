@@ -258,7 +258,11 @@ export function CandidateFilterSidebar({
     : [];
 
   return (
-    <div className="w-72 border-r border-border bg-background flex flex-col h-full">
+    <>
+    {/* Below lg the panel overlays the list (tap-to-close backdrop) instead of
+        squeezing it into a narrow column. */}
+    <div className="lg:hidden fixed inset-0 z-30 bg-black/40" onClick={onClose} aria-hidden />
+    <div className="fixed inset-y-0 left-0 z-40 flex h-full w-72 max-w-[85vw] flex-col border-r border-border bg-background lg:static lg:z-auto lg:max-w-none">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-2">
@@ -646,6 +650,7 @@ export function CandidateFilterSidebar({
         )}
       </div>
     </div>
+    </>
   );
 }
 

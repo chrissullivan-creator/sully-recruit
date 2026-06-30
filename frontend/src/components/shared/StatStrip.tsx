@@ -20,10 +20,13 @@ export interface StatItem {
 export function StatStrip({ items, className }: { items: StatItem[]; className?: string }) {
   return (
     <div className={cn(
-      'grid divide-x divide-card-border rounded-2xl border border-card-border bg-card shadow-sm',
+      // Mobile: wrap into a 2/3-col grid so 6 KPIs stay readable at phone
+      // width. Desktop (lg+): the even N-column strip on a single row.
+      'grid grid-cols-2 sm:grid-cols-3 divide-x divide-y lg:divide-y-0 divide-card-border overflow-hidden rounded-2xl border border-card-border bg-card shadow-sm',
+      'lg:grid-cols-[repeat(var(--stat-cols),minmax(0,1fr))]',
       className,
     )}
-      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      style={{ ['--stat-cols' as any]: items.length }}
     >
       {items.map((it, i) => {
         const interactive = !!it.onClick;
