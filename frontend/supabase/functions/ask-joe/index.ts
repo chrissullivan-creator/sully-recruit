@@ -68,13 +68,14 @@ const TOOLS = [
   {
     name: "search_people",
     description:
-      "Semantic + keyword search across candidates and clients. Combines vector search over resume_embeddings (candidates) and joe_says_embedding briefs (either type) with keyword fallback. Returns id, name, current title/company, status, similarity score, and a brief excerpt.",
+      "Semantic + keyword search across candidates. Combines vector search over resume_embeddings + joe_says briefs with an overlap-ranked keyword search that scores candidates by how many of the query's attributes match across their title, current company, location, target roles/locations, products, and departments — so multi-attribute asks like \"executive director at Morgan Stanley in research\" or \"interest rates middle office candidates\" return the people matching the MOST attributes first. Returns id, name, title/company, status, match score, and a brief excerpt. Pass the full natural-language ask as `query` (the tool extracts the meaningful terms itself — don't pre-strip it).",
     input_schema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Natural-language description of who to find." },
+        query: { type: "string", description: "The full natural-language description of who to find (e.g. 'ED at Morgan Stanley in research with a resume'). Include company, title, desk/product, location — the tool ranks by how many match." },
         role: { type: "string", enum: ["candidate", "client"], description: "Restrict to candidates or clients only. Omit to search both." },
         status: { type: "string", enum: ["new", "reached_out", "engaged"], description: "Restrict to a specific status." },
+        has_resume: { type: "boolean", description: "When true, only return candidates we have a resume on file for. Set this when the user asks for people 'with a resume'." },
         limit: { type: "number", description: "Max results (1-20). Default 10." },
       },
       required: ["query"],
@@ -342,6 +343,39 @@ function statusFromToolCall(name: string, input: any): string {
 
 // ─── Tool implementations ────────────────────────────────────────────────
 
+// Words that carry no search signal — generic verbs, fillers, and role/meta
+// words handled by other params (role / has_resume). Stripped before the
+// overlap search so "show me an executive director from morgan stanley" keys on
+// {executive, director, morgan, stanley}, not {show, from, that}.
+const SEARCH_STOPWORDS = new Set([
+  "show", "me", "find", "get", "who", "whom", "that", "this", "these", "those",
+  "works", "work", "working", "with", "and", "has", "have", "had", "from", "the",
+  "for", "are", "was", "were", "our", "your", "you", "but", "list", "give", "need",
+  "want", "looking", "look", "someone", "anyone", "people", "person", "candidate",
+  "candidates", "client", "clients", "contact", "contacts", "resume", "resumes",
+  "cv", "profile", "any", "all", "please", "can", "does", "currently", "current",
+  "experience", "experienced", "years", "year", "background", "based", "about",
+  "their", "they", "them", "his", "her", "into", "out", "good", "great", "best",
+  "top", "some", "more", "most", "show me",
+]);
+
+/** Pull the meaningful search terms out of a natural-language query: lowercase,
+ *  split on non-alphanumerics, drop stopwords + sub-3-char tokens, dedupe, cap. */
+function extractTerms(query: string): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const raw of query.toLowerCase().split(/[^a-z0-9&+]+/)) {
+    const t = raw.trim();
+    if (t.length < 3) continue;
+    if (SEARCH_STOPWORDS.has(t)) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    terms.push(t);
+    if (terms.length >= 8) break;
+  }
+  return terms;
+}
+
 async function toolSearchPeople(supabase: any, input: any): Promise<string> {
   const query = String(input?.query ?? "").slice(0, 500);
   const role = input?.role === "candidate" || input?.role === "client" ? input.role : null;
@@ -384,18 +418,29 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
     }
   }
 
-  const keywords = query.split(/\s+/).filter((k) => k.length >= 3).slice(0, 4);
-  if (keywords.length) {
-    const orFilter = keywords
-      .map((k) => `full_name.ilike.%${k}%,current_title.ilike.%${k}%,current_company.ilike.%${k}%`)
-      .join(",");
-    let q = supabase.from("candidates").select("id").or(orFilter);
-    if (role) q = q.contains("roles", [role]);
-    if (status) q = q.eq("status", status);
-    q = q.limit(limit * 2);
-    const { data } = await q;
+  // Overlap-ranked keyword search (candidates): rank by how many query terms hit
+  // the candidate's title / company / location / target roles+locations /
+  // products / departments, so multi-attribute asks surface the people matching
+  // the MOST attributes first — the old OR-with-4-word-cap missed them entirely.
+  const terms = extractTerms(query);
+  const wantResume = input?.has_resume === true || /\b(resume|resumes|cv)\b/i.test(query);
+  if (terms.length && role !== "client") {
+    const { data } = await supabase.rpc("search_people_overlap", {
+      p_terms: terms,
+      p_want_resume: wantResume,
+      p_status: status,
+      p_max_rows: limit * 2,
+    });
+    const denom = Math.max(terms.length, 1);
     for (const r of (data as any[]) ?? []) {
-      if (!idScore.has(r.id)) idScore.set(r.id, { score: 0.25, via: "keyword" });
+      if (!r.id) continue;
+      // Scale into the same band as the embedding similarities (~0.3–0.95) so a
+      // full attribute match ranks at/above a strong semantic hit.
+      const kwScore = 0.4 + 0.55 * (Math.min(Number(r.overlap) || 0, denom) / denom);
+      const prev = idScore.get(r.id);
+      if (!prev || prev.score < kwScore) {
+        idScore.set(r.id, { score: kwScore, via: prev?.via ?? "keyword" });
+      }
     }
   }
 
@@ -408,7 +453,10 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
       "id, full_name, current_title, current_company, location, status, primary_email, mobile_phone, linkedin_url, last_contacted_at, last_responded_at, roles",
     )
     .in("id", ids);
-  if (role) q = q.contains("roles", [role]);
+  // Only narrow by the roles array for client searches — candidates are already
+  // scoped by the candidates view, and ~15% lack the 'candidate' role tag, so
+  // applying it there silently dropped real matches.
+  if (role === "client") q = q.contains("roles", [role]);
   if (status) q = q.eq("status", status);
   const { data: rows } = await q;
 
