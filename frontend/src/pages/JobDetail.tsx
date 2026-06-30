@@ -2,7 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { SizzlesPanel } from '@/components/sizzles/SizzlesPanel';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
-import { CompanyLink } from '@/components/shared/EntityLinks';
+import { CompanyLink, PersonLink } from '@/components/shared/EntityLinks';
 import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { Button } from '@/components/ui/button';
@@ -1062,7 +1062,7 @@ const JobDetail = () => {
                 <div className="space-y-1.5">
                   {(jobContacts as any[]).slice(0, 3).map(jc => (
                     <div key={jc.id} className="text-xs">
-                      <span className="text-foreground font-medium">{jc.contact?.full_name}</span>
+                      <PersonLink id={jc.contact_id} name={jc.contact?.full_name} type="client" className="text-foreground font-medium" />
                       {jc.is_primary && <span className="text-accent ml-1 text-[9px]">★</span>}
                       {jc.contact?.title && <p className="text-muted-foreground truncate">{jc.contact.title}</p>}
                     </div>

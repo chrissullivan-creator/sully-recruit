@@ -8,6 +8,7 @@ import { type SendOutRow, formatComp, formatCompRange } from '@/lib/queries/send
 import { CANONICAL_PIPELINE, canonicalConfig, nextStage, stageToCanonical, type CanonicalStage } from '@/lib/pipeline';
 import { daysInStage, needsFollowUp } from '@/lib/send-out-insights';
 import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
+import { JobLink, CompanyLink } from '@/components/shared/EntityLinks';
 
 // Columns shown on the board (Rejected/withdrawn is excluded — it lives in the
 // All Send Outs tab). Subtitles mirror the product mockup.
@@ -184,9 +185,20 @@ function KanbanCard({
               ? <CompanyLogo name={row.job.company_name} domain={row.job.company?.domain} logoUrl={row.job.company?.logo_url} size="xs" className="mt-0.5" />
               : <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />}
             <div className="min-w-0">
-              <span className="block text-[12px] font-medium leading-snug text-foreground line-clamp-2 break-words">{row.job.title}</span>
+              <JobLink
+                id={row.job_id}
+                title={row.job.title}
+                stopPropagation
+                className="block text-[12px] font-medium leading-snug text-foreground line-clamp-2 break-words"
+              />
               {row.job.company_name && (
-                <span className="block text-[11px] text-muted-foreground truncate">{row.job.company_name}</span>
+                <CompanyLink
+                  name={row.job.company_name}
+                  domain={row.job.company?.domain}
+                  logoUrl={row.job.company?.logo_url}
+                  stopPropagation
+                  className="block text-[11px] text-muted-foreground truncate"
+                />
               )}
             </div>
           </div>

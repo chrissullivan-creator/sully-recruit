@@ -4,6 +4,7 @@ import { CalendarClock, Briefcase, Loader2, ChevronRight, Check } from 'lucide-r
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { InterviewDetail } from '@/components/interviews/InterviewDetail';
+import { PersonLink, JobLink, CompanyLink } from '@/components/shared/EntityLinks';
 import {
   useCandidateInterviews,
   useCompanyInterviews,
@@ -85,9 +86,11 @@ function PersonInterviewRow({
   const job = iv.jobs;
 
   return (
-    <button
+    <div
       onClick={onOpen}
-      className="group w-full rounded-2xl border border-card-border bg-card p-3.5 text-left shadow-sm transition-all hover:border-primary/30 hover:bg-muted/30"
+      role="button"
+      tabIndex={0}
+      className="group w-full cursor-pointer rounded-2xl border border-card-border bg-card p-3.5 text-left shadow-sm transition-all hover:border-primary/30 hover:bg-muted/30"
     >
       <div className="flex items-center gap-3">
         <div className={cn(
@@ -107,7 +110,12 @@ function PersonInterviewRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             {showCandidate && iv.candidate?.full_name && (
-              <span className="text-sm font-medium text-foreground truncate">{iv.candidate.full_name}</span>
+              <PersonLink
+                id={iv.candidate_id}
+                name={iv.candidate.full_name}
+                stopPropagation
+                className="text-sm font-medium text-foreground truncate"
+              />
             )}
             <Badge variant="secondary" className="text-[9px]">Round {iv.round ?? 1}</Badge>
             {iv.interview_type && <span className="text-[11px] text-muted-foreground capitalize">{iv.interview_type.replace(/_/g, ' ')}</span>}
@@ -117,8 +125,11 @@ function PersonInterviewRow({
           </div>
           {job?.title && (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1"><Briefcase className="h-3 w-3" /> {job.title}</span>
-              {job.company_name && <> · {job.company_name}</>}
+              <span className="inline-flex items-center gap-1">
+                <Briefcase className="h-3 w-3" />
+                <JobLink id={iv.job_id} title={job.title} stopPropagation className="text-muted-foreground" />
+              </span>
+              {job.company_name && <> · <CompanyLink name={job.company_name} stopPropagation className="text-muted-foreground" /></>}
             </p>
           )}
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -128,6 +139,6 @@ function PersonInterviewRow({
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-    </button>
+    </div>
   );
 }
