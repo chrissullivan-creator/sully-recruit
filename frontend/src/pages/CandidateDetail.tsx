@@ -49,6 +49,7 @@ import {
 import { CandidateSourceTab } from '@/components/source/SourceTabs';
 import { PersonInterviewsTab } from '@/components/interviews/PersonInterviewsTab';
 import { InterviewStageStrip } from '@/components/interviews/InterviewStageStrip';
+import { CompHistoryTab } from '@/components/candidate/CompHistoryTab';
 import { EntityNotesTab } from '@/components/shared/EntityNotesTab';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
 import { SendOutNotesDialog } from '@/components/send-outs/SendOutNotesDialog';
@@ -1327,6 +1328,7 @@ const CandidateDetail = () => {
                 {[
                   { value: 'overview', label: 'Overview', icon: User },
                   { value: 'background', label: 'Background', icon: Info },
+                  { value: 'comp', label: 'Comp History', icon: DollarSign },
                   { value: 'pipeline', label: 'Pipeline', icon: Send },
                   { value: 'interviews', label: 'Interviews', icon: Calendar },
                   { value: 'documents', label: 'Documents', icon: FolderOpen },
@@ -1719,6 +1721,23 @@ const CandidateDetail = () => {
                     invalidateKeys={[['candidate', id]]}
                   />
                 )}
+              </TabsContent>
+
+              <TabsContent value="comp" className="px-8 py-5 mt-0 space-y-6">
+                <SectionCard title="Compensation History" icon={<DollarSign className="h-4 w-4" />}>
+                  <CompHistoryTab
+                    personId={id!}
+                    prefill={{
+                      current_base_comp: c.current_base_comp,
+                      current_bonus_comp: c.current_bonus_comp,
+                      current_total_comp: c.current_total_comp,
+                      target_base_comp: c.target_base_comp,
+                      target_bonus_comp: c.target_bonus_comp,
+                      target_total_comp: c.target_total_comp,
+                    }}
+                    onProfileUpdated={() => queryClient.invalidateQueries({ queryKey: ['candidate', id] })}
+                  />
+                </SectionCard>
               </TabsContent>
 
               <TabsContent value="communication" className="px-8 py-5 mt-0 space-y-6">
