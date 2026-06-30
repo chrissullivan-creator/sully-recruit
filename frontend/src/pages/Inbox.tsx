@@ -421,7 +421,12 @@ export default function Inbox() {
 
       <ComposeMessageDialog open={composeOpen} onOpenChange={setComposeOpen} />
       <ReconcileUnknownDialog open={reconcileOpen} onOpenChange={setReconcileOpen} />
-      <BulkInMailAddDialog open={bulkInMailOpen} onOpenChange={setBulkInMailOpen} />
+      <BulkInMailAddDialog
+        open={bulkInMailOpen}
+        onOpenChange={setBulkInMailOpen}
+        threads={filtered.filter((t) => checkedIds.has(t.id))}
+        onApplied={() => setCheckedIds(new Set())}
+      />
 
       <div className="flex flex-col" style={{ height: 'calc(100vh - 7rem)' }}>
         <div className="flex flex-1 min-h-0">
@@ -572,21 +577,21 @@ export default function Inbox() {
                 </TooltipContent>
               </Tooltip>
             )}
-            {channel === 'recruiter' && (tab === 'other' || tab === 'all') && !callsActive && (
+            {channel === 'recruiter' && checkedIds.size > 0 && !callsActive && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => setBulkInMailOpen(true)}
-                    className="h-7 w-7 shrink-0 rounded-lg text-muted-foreground hover:text-accent"
-                    aria-label="Bulk add unknown InMail senders"
+                    className="h-7 w-7 shrink-0 rounded-lg text-accent hover:text-accent"
+                    aria-label="Bulk add the selected InMail senders"
                   >
                     <UserPlus className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-xs">
-                  Bulk add InMail senders — match or create
+                  Bulk add the {checkedIds.size} selected sender{checkedIds.size === 1 ? '' : 's'} — match or create
                 </TooltipContent>
               </Tooltip>
             )}

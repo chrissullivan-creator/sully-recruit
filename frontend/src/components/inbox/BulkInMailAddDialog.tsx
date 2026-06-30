@@ -7,16 +7,22 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { invalidateCommsScope } from '@/lib/invalidate';
+import { invalidateCommsScope, invalidatePersonScope } from '@/lib/invalidate';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Loader2, CheckSquare, Square, Target, UserCheck, Users, UserPlus, Link2 } from 'lucide-react';
 
-interface Proposal {
-  conversation_id: string;
-  channel: string;
-  sender_name: string | null;
-  sender_address: string | null;
+/** A selected inbox thread (the checked rows the user is bulk-adding). */
+export interface BulkThread {
+  id: string;
+  sender_name?: string | null;
+  candidate_id?: string | null;
+  contact_id?: string | null;
+}
+
+interface Plan {
+  thread_id: string;
+  name: string;
   best: {
     id: string;
     type: 'candidate' | 'contact';
@@ -24,67 +30,95 @@ interface Proposal {
     title?: string | null;
     company?: string | null;
     confidence: 'high' | 'medium' | 'low';
-    matched_on?: string[];
   } | null;
 }
 
-const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-const isLinkedin = (s: string) => /linkedin\.com\/in\//i.test(s);
-
 /**
- * Bulk add for unknown InMail senders. Scans unlinked InMail (recruiter)
- * conversations, fuzzy-matches each sender to the CRM, and in one pass:
- *   • high/medium confidence match → links the thread to that person
- *   • no match → creates a brand-new person (candidate or client) + links
- * Matched links reuse /api/inbox/reconcile-unknown; creates reuse /api/add-person
- * (which dedupes, links the conversation, and caches the provider id).
+ * Bulk add the SELECTED InMail senders. For each checked thread we match the
+ * sender (by name) against the CRM and, in one pass:
+ *   • high/medium confidence → link the thread to that existing person
+ *   • no confident match → create a new person (candidate or client) + link
+ * Reuses /api/match-people, /api/update-person (link) and /api/add-person
+ * (create + link), the same contracts the per-thread Add wizard uses.
  */
 export function BulkInMailAddDialog({
   open,
   onOpenChange,
+  threads,
+  defaultType = 'candidate',
+  onApplied,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  threads: BulkThread[];
+  defaultType?: 'candidate' | 'client';
+  onApplied?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [scanned, setScanned] = useState(0);
-  const [createType, setCreateType] = useState<'candidate' | 'client'>('candidate');
+  const [createType, setCreateType] = useState<'candidate' | 'client'>(defaultType);
 
   const token = async () => (await supabase.auth.getSession()).data.session?.access_token || '';
 
-  const scan = useCallback(async () => {
+  // Only act on threads that aren't already linked and have a usable name.
+  const actionable = threads.filter(
+    (t) => !t.candidate_id && !t.contact_id && (t.sender_name ?? '').trim(),
+  );
+
+  const match = useCallback(async () => {
+    if (!actionable.length) { setPlans([]); return; }
     setLoading(true);
     try {
-      const res = await fetch('/api/inbox/reconcile-unknown', {
+      const res = await fetch('/api/match-people', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` },
-        body: JSON.stringify({ mode: 'scan', channel: 'linkedin_recruiter', include_unmatched: true, limit: 100 }),
+        body: JSON.stringify({
+          people: actionable.map((t) => ({ key: t.id, name: (t.sender_name ?? '').trim(), type: 'candidate' })),
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const props: Proposal[] = data.proposals ?? [];
-      setProposals(props);
-      setScanned(data.scanned ?? props.length);
-      // Pre-check everything actionable — match-or-create in one sweep.
-      setSelected(new Set(props.map((p) => p.conversation_id)));
+      const matchMap: Record<string, any[]> = data.matches ?? {};
+      const next: Plan[] = actionable.map((t) => {
+        const top = (matchMap[t.id] ?? [])[0];
+        const strong = top && (top.confidence === 'high' || top.confidence === 'medium');
+        return {
+          thread_id: t.id,
+          name: (t.sender_name ?? '').trim(),
+          best: strong
+            ? {
+                id: top.id,
+                type: top.type,
+                name: top.full_name || `${top.first_name ?? ''} ${top.last_name ?? ''}`.trim(),
+                title: top.title,
+                company: top.company,
+                confidence: top.confidence,
+              }
+            : null,
+        };
+      });
+      setPlans(next);
+      setSelected(new Set(next.map((p) => p.thread_id)));
     } catch (err) {
-      toast.error('Scan failed: ' + (err instanceof Error ? err.message : String(err)));
+      toast.error('Match failed: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threads]);
 
   useEffect(() => {
     if (open) {
-      setProposals([]);
+      setPlans([]);
       setSelected(new Set());
-      scan();
+      setCreateType(defaultType);
+      match();
     }
-  }, [open, scan]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -93,79 +127,68 @@ export function BulkInMailAddDialog({
     setSelected(next);
   };
 
-  const matched = proposals.filter((p) => p.best);
-  const unmatched = proposals.filter((p) => !p.best && p.sender_name);
-  const linkCount = matched.filter((p) => selected.has(p.conversation_id)).length;
-  const createCount = unmatched.filter((p) => selected.has(p.conversation_id)).length;
+  const matched = plans.filter((p) => p.best);
+  const unmatched = plans.filter((p) => !p.best);
+  const linkCount = matched.filter((p) => selected.has(p.thread_id)).length;
+  const createCount = unmatched.filter((p) => selected.has(p.thread_id)).length;
 
   const apply = async () => {
-    if (linkCount + createCount === 0) {
-      toast.info('Nothing selected');
-      return;
-    }
+    if (linkCount + createCount === 0) { toast.info('Nothing selected'); return; }
     setApplying(true);
-    let linked = 0;
-    let created = 0;
+    let linked = 0, created = 0;
     const errors: string[] = [];
     try {
-      // 1) Link the confident matches in one reconcile call.
-      const linkActions = matched
-        .filter((p) => selected.has(p.conversation_id))
-        .map((p) => ({ conversation_id: p.conversation_id, person_id: p.best!.id, type: p.best!.type }));
-      if (linkActions.length) {
-        const res = await fetch('/api/inbox/reconcile-unknown', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` },
-          body: JSON.stringify({ mode: 'apply', actions: linkActions }),
-        });
-        if (!res.ok) throw new Error(`Link HTTP ${res.status}`);
-        const data = await res.json();
-        linked = data.linked ?? 0;
-        if (Array.isArray(data.errors)) errors.push(...data.errors);
-      }
-
-      // 2) Create the no-match senders (+ link their thread) via add-person.
-      const toCreate = unmatched.filter((p) => selected.has(p.conversation_id));
       const authHeader = `Bearer ${await token()}`;
       const results = await Promise.all(
-        toCreate.map(async (p) => {
-          const name = (p.sender_name ?? '').trim();
-          const parts = name.split(/\s+/).filter(Boolean);
-          const addr = (p.sender_address ?? '').trim();
-          const data: Record<string, any> = {
-            first_name: parts[0] ?? name,
-            last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
-          };
-          if (isEmail(addr)) data.email = addr;
-          if (isLinkedin(addr)) data.linkedin_url = addr;
-          try {
-            const res = await fetch('/api/add-person', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-              body: JSON.stringify({
-                type: createType,
-                data,
-                conversation_id: p.conversation_id,
-                // InMail sender_address is a LinkedIn provider id, not an email.
-                provider_id: addr && !isEmail(addr) ? addr : undefined,
-              }),
-            });
-            if (!res.ok) { errors.push(`${name}: HTTP ${res.status}`); return false; }
-            return true;
-          } catch (e: any) {
-            errors.push(`${name}: ${e?.message || 'failed'}`);
-            return false;
-          }
-        }),
+        plans
+          .filter((p) => selected.has(p.thread_id))
+          .map(async (p) => {
+            try {
+              if (p.best) {
+                // Link the thread to the matched person (no field overwrite).
+                const res = await fetch('/api/update-person', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+                  body: JSON.stringify({
+                    person_id: p.best.id,
+                    type: p.best.type,
+                    data: {},
+                    conversation_id: p.thread_id,
+                  }),
+                });
+                if (!res.ok) { errors.push(`${p.name}: link HTTP ${res.status}`); return null; }
+                return 'linked';
+              }
+              // Create a new person from the sender name + link the thread.
+              const parts = p.name.split(/\s+/).filter(Boolean);
+              const res = await fetch('/api/add-person', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+                body: JSON.stringify({
+                  type: createType,
+                  data: { first_name: parts[0] ?? p.name, last_name: parts.length > 1 ? parts.slice(1).join(' ') : '' },
+                  conversation_id: p.thread_id,
+                }),
+              });
+              if (!res.ok) { errors.push(`${p.name}: create HTTP ${res.status}`); return null; }
+              return 'created';
+            } catch (e: any) {
+              errors.push(`${p.name}: ${e?.message || 'failed'}`);
+              return null;
+            }
+          }),
       );
-      created = results.filter(Boolean).length;
+      linked = results.filter((r) => r === 'linked').length;
+      created = results.filter((r) => r === 'created').length;
 
       const bits: string[] = [];
       if (linked) bits.push(`linked ${linked}`);
       if (created) bits.push(`created ${created}`);
-      toast.success(bits.length ? `Done — ${bits.join(', ')}.` : 'Nothing to apply.');
+      toast.success(bits.length ? `Done — ${bits.join(', ')}.` : 'Nothing applied.');
       if (errors.length) toast.error(`${errors.length} failed`);
+      invalidatePersonScope(queryClient);
       invalidateCommsScope(queryClient);
+      onApplied?.();
       onOpenChange(false);
     } catch (err) {
       toast.error('Apply failed: ' + (err instanceof Error ? err.message : String(err)));
@@ -174,8 +197,8 @@ export function BulkInMailAddDialog({
     }
   };
 
-  const Row = ({ p }: { p: Proposal }) => {
-    const checked = selected.has(p.conversation_id);
+  const Row = ({ p }: { p: Plan }) => {
+    const checked = selected.has(p.thread_id);
     const b = p.best;
     const confClass = b
       ? b.confidence === 'high'
@@ -184,37 +207,25 @@ export function BulkInMailAddDialog({
       : '';
     return (
       <button
-        onClick={() => toggle(p.conversation_id)}
+        onClick={() => toggle(p.thread_id)}
         className={cn(
           'w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
           checked ? 'border-accent/40 bg-accent/5' : 'border-border hover:bg-muted/40',
         )}
       >
-        {checked ? (
-          <CheckSquare className="h-4 w-4 text-accent shrink-0" />
-        ) : (
-          <Square className="h-4 w-4 text-muted-foreground shrink-0" />
-        )}
+        {checked ? <CheckSquare className="h-4 w-4 text-accent shrink-0" /> : <Square className="h-4 w-4 text-muted-foreground shrink-0" />}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 text-sm">
-            <span className="font-medium text-foreground truncate">{p.sender_name || 'Unknown sender'}</span>
+            <span className="font-medium text-foreground truncate">{p.name || 'Unknown sender'}</span>
             <span className="text-muted-foreground">→</span>
             {b ? (
               <>
-                {b.type === 'candidate' ? (
-                  <UserCheck className="h-3.5 w-3.5 text-success shrink-0" />
-                ) : (
-                  <Users className="h-3.5 w-3.5 text-info shrink-0" />
-                )}
+                {b.type === 'candidate' ? <UserCheck className="h-3.5 w-3.5 text-success shrink-0" /> : <Users className="h-3.5 w-3.5 text-info shrink-0" />}
                 <span className="font-medium text-foreground truncate">{b.name}</span>
-                <Badge variant="outline" className={cn('text-[9px] uppercase shrink-0 capitalize', confClass)}>
-                  {b.confidence}
-                </Badge>
+                <Badge variant="outline" className={cn('text-[9px] uppercase shrink-0 capitalize', confClass)}>{b.confidence}</Badge>
               </>
             ) : (
-              <span className="inline-flex items-center gap-1 text-xs text-accent">
-                <UserPlus className="h-3.5 w-3.5" /> New {createType}
-              </span>
+              <span className="inline-flex items-center gap-1 text-xs text-accent"><UserPlus className="h-3.5 w-3.5" /> New {createType}</span>
             )}
           </div>
           {b && (b.title || b.company) && (
@@ -225,21 +236,23 @@ export function BulkInMailAddDialog({
     );
   };
 
+  const alreadyLinked = threads.length - actionable.length;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Target className="h-5 w-5 text-accent" />
-            Bulk add InMail senders
+            Bulk add {actionable.length} selected sender{actionable.length === 1 ? '' : 's'}
           </DialogTitle>
           <DialogDescription>
-            We matched each unknown InMail sender to your CRM. High/medium matches link to the
-            existing person; the rest are created new. Review and apply in one pass.
+            Each selected InMail sender is matched to your CRM by name. High/medium matches link
+            to the existing person; the rest are created new.
+            {alreadyLinked > 0 && ` (${alreadyLinked} already linked — skipped.)`}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Create-as type for the no-match rows */}
         {!loading && unmatched.length > 0 && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Create new as:</span>
@@ -248,10 +261,7 @@ export function BulkInMailAddDialog({
                 <button
                   key={t}
                   onClick={() => setCreateType(t)}
-                  className={cn(
-                    'rounded-md px-2.5 py-1 font-medium capitalize transition-colors',
-                    createType === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-                  )}
+                  className={cn('rounded-md px-2.5 py-1 font-medium capitalize transition-colors', createType === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
                 >
                   {t}
                 </button>
@@ -264,11 +274,13 @@ export function BulkInMailAddDialog({
           {loading ? (
             <div className="flex flex-col items-center py-16 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-accent" />
-              <p className="text-sm text-muted-foreground">Scanning unlinked InMail conversations…</p>
+              <p className="text-sm text-muted-foreground">Matching selected senders…</p>
             </div>
-          ) : proposals.length === 0 ? (
+          ) : plans.length === 0 ? (
             <div className="py-16 text-center text-sm text-muted-foreground">
-              No unlinked InMail senders found{scanned ? ` across ${scanned} conversations` : ''}.
+              {threads.length === 0
+                ? 'No threads selected. Tick the senders you want to add, then try again.'
+                : 'The selected threads are already linked or have no sender name.'}
             </div>
           ) : (
             <div className="py-3 space-y-4">
@@ -277,7 +289,7 @@ export function BulkInMailAddDialog({
                   <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     <Link2 className="h-3 w-3" /> Link to existing ({matched.length})
                   </p>
-                  {matched.map((p) => <Row key={p.conversation_id} p={p} />)}
+                  {matched.map((p) => <Row key={p.thread_id} p={p} />)}
                 </div>
               )}
               {unmatched.length > 0 && (
@@ -285,7 +297,7 @@ export function BulkInMailAddDialog({
                   <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     <UserPlus className="h-3 w-3" /> Create new ({unmatched.length})
                   </p>
-                  {unmatched.map((p) => <Row key={p.conversation_id} p={p} />)}
+                  {unmatched.map((p) => <Row key={p.thread_id} p={p} />)}
                 </div>
               )}
             </div>
@@ -294,16 +306,9 @@ export function BulkInMailAddDialog({
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>Cancel</Button>
-          <Button
-            variant="gold"
-            onClick={apply}
-            disabled={applying || loading || linkCount + createCount === 0}
-            className="gap-1.5"
-          >
+          <Button variant="gold" onClick={apply} disabled={applying || loading || linkCount + createCount === 0} className="gap-1.5">
             {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {linkCount + createCount > 0
-              ? `Link ${linkCount} · Create ${createCount}`
-              : 'Apply'}
+            {linkCount + createCount > 0 ? `Link ${linkCount} · Create ${createCount}` : 'Apply'}
           </Button>
         </DialogFooter>
       </DialogContent>
