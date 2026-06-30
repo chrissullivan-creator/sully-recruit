@@ -18,11 +18,16 @@ export interface BulkThread {
   sender_name?: string | null;
   candidate_id?: string | null;
   contact_id?: string | null;
+  // Used to pull the sender's full LinkedIn profile when creating them new.
+  external_conversation_id?: string | null;
+  integration_account_id?: string | null;
 }
 
 interface Plan {
   thread_id: string;
   name: string;
+  chat_id: string | null;
+  integration_account_id: string | null;
   best: {
     id: string;
     type: 'candidate' | 'contact';
@@ -88,6 +93,8 @@ export function BulkInMailAddDialog({
         return {
           thread_id: t.id,
           name: (t.sender_name ?? '').trim(),
+          chat_id: t.external_conversation_id ?? null,
+          integration_account_id: t.integration_account_id ?? null,
           best: strong
             ? {
                 id: top.id,
@@ -159,16 +166,44 @@ export function BulkInMailAddDialog({
                 if (!res.ok) { errors.push(`${p.name}: link HTTP ${res.status}`); return null; }
                 return 'linked';
               }
-              // Create a new person from the sender name + link the thread.
+              // Pull as much of the sender's LinkedIn profile as Unipile can
+              // resolve (chat sender object → direct profile, or a name search)
+              // so the new person isn't just a bare name.
               const parts = p.name.split(/\s+/).filter(Boolean);
+              const data: Record<string, any> = {
+                first_name: parts[0] ?? p.name,
+                last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
+              };
+              let providerId: string | undefined;
+              try {
+                const lr = await fetch('/api/lookup-linkedin', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+                  body: JSON.stringify({
+                    name: p.name,
+                    chat_id: p.chat_id || undefined,
+                    integration_account_id: p.integration_account_id || undefined,
+                  }),
+                });
+                if (lr.ok) {
+                  const prof = await lr.json();
+                  if (prof.first_name) data.first_name = prof.first_name;
+                  if (prof.last_name) data.last_name = prof.last_name;
+                  if (prof.title) data.title = prof.title;
+                  if (prof.company_name) data.company = prof.company_name; // add-person reads data.company
+                  if (prof.location) data.location = prof.location;
+                  if (prof.photo) data.photo = prof.photo;
+                  if (prof.linkedin_url) data.linkedin_url = prof.linkedin_url;
+                  if (prof.email) data.email = prof.email;
+                  if (prof.phone) data.phone = prof.phone;
+                  if (prof.provider_id) providerId = prof.provider_id;
+                }
+              } catch { /* enrichment is best-effort — still create the person */ }
+
               const res = await fetch('/api/add-person', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-                body: JSON.stringify({
-                  type: createType,
-                  data: { first_name: parts[0] ?? p.name, last_name: parts.length > 1 ? parts.slice(1).join(' ') : '' },
-                  conversation_id: p.thread_id,
-                }),
+                body: JSON.stringify({ type: createType, data, conversation_id: p.thread_id, provider_id: providerId }),
               });
               if (!res.ok) { errors.push(`${p.name}: create HTTP ${res.status}`); return null; }
               return 'created';
