@@ -6,8 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { TaskSidebar } from '@/components/tasks/TaskSidebar';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -669,7 +667,9 @@ const CompanyDetail = () => {
               </TabsList>
             </div>
 
-            <ScrollArea className="flex-1">
+            {/* Plain overflow-auto (not ScrollArea) so wide tab content —
+                e.g. the contacts/candidates tables — scrolls horizontally. */}
+            <div className="flex-1 overflow-auto">
               {/* Jobs tab */}
               <TabsContent value="jobs" className="px-8 py-6 mt-0">
                 <SectionCard title="Jobs" icon={<Briefcase className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{companyJobs.length}</span>}>
@@ -819,15 +819,9 @@ const CompanyDetail = () => {
               <TabsContent value="sizzles" className="px-8 py-6 mt-0">
                 {id && <SizzlesPanel scope={{ companyId: id }} />}
               </TabsContent>
-            </ScrollArea>
+            </div>
           </Tabs>
         </div>
-
-        {id && (
-          <div className="w-72 shrink-0 border-l border-card-border p-4 overflow-y-auto">
-            <TaskSidebar entityType="company" entityId={id} />
-          </div>
-        )}
       </div>
     </MainLayout>
   );

@@ -81,7 +81,7 @@ import { ContactPanel } from '@/components/shared/ContactPanel';
 const CANDIDATE_EDIT_FIELDS: EditField[] = [
   { key: 'first_name', label: 'First name', section: 'Identity' },
   { key: 'last_name', label: 'Last name', section: 'Identity' },
-  { key: 'current_title', label: 'Title', section: 'Identity' },
+  { key: 'current_title', label: 'Title / Headline', type: 'textarea', section: 'Identity' },
   { key: 'current_company', label: 'Company', section: 'Identity' },
   { key: 'location_text', label: 'Location', section: 'Identity' },
   { key: 'linkedin_url', label: 'LinkedIn URL', section: 'Identity', full: true },
