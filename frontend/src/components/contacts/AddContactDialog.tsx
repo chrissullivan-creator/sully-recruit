@@ -80,8 +80,10 @@ export function AddContactDialog({ open, onOpenChange, jobId, defaultCompanyId, 
         // Keep the legacy free-text `department` populated (first selected) for
         // back-compat while the new departments[] array is the source of truth.
         department: departments[0] || null,
-        departments: departments.length ? departments : null,
-        products: products.length ? products : null,
+        // NOT NULL text[] columns (default '{}') — send the array, never null.
+        // Empty is fine: products/departments aren't required to add a person.
+        departments,
+        products,
         company_id: form.company_id || null,
         status: form.status,
         owner_user_id: userId,

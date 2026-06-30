@@ -134,8 +134,10 @@ export function AddCandidateDialog({ open: openProp, onOpenChange, children }: A
             current_company: currentCompany || null,
             linkedin_url: trimmedLinkedin,
             location_text: locationText || null,
-            departments: departments.length ? departments : null,
-            products: products.length ? products : null,
+            // NOT NULL text[] columns (default '{}') — send the array, never
+            // null. Empty is fine: products/departments aren't required to add.
+            departments,
+            products,
             status: 'new',
             owner_user_id: userId,
             // Queue the resolve-unipile-ids cron (v2 lookup) to populate

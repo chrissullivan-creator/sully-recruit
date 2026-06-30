@@ -341,8 +341,9 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
         job_function_id: form.job_function_id || null,
         job_code: jobCode,
         num_openings: form.num_openings || 1,
-        departments: form.departments.length ? form.departments : null,
-        products: form.products.length ? form.products : null,
+        // NOT NULL text[] columns (default '{}') — send the array, never null.
+        departments: form.departments,
+        products: form.products,
       };
       // Attach the chosen contact (single-job path only) — set jobs.contact_id
       // up front so it lands in one insert, then mirror it into job_contacts.
@@ -420,8 +421,9 @@ export function AddJobDialog({ open, onOpenChange }: Props) {
           job_function_id: j.job_function_id || null,
           job_code: jobCode,
           num_openings: j.num_openings || 1,
-          departments: j.departments.length ? j.departments : null,
-          products: j.products.length ? j.products : null,
+          // NOT NULL text[] columns (default '{}') — send the array, never null.
+          departments: j.departments,
+          products: j.products,
         });
       }
       const { error } = await supabase.from('jobs').insert(inserts);
