@@ -145,6 +145,27 @@ export async function extractMessageIntel(
   }
 }
 
+/**
+ * Parse a free-text comp phrase the model extracted ("150k", "$150,000",
+ * "1.5m", "mid-100s base") into a number of dollars, or null when it can't.
+ * The people.*_comp + compensation_history.*_comp columns are numeric, so the
+ * raw phrase can't be written directly — the exact wording is preserved in the
+ * note / comp_notes instead. A bare number under 1000 is read as thousands
+ * (comp context: "150" means 150k).
+ */
+export function parseComp(raw?: string | null): number | null {
+  if (!raw) return null;
+  const s = String(raw).toLowerCase().replace(/[$,\s]/g, "");
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(k|m)?/);
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  if (Number.isNaN(n)) return null;
+  if (m[2] === "m") n *= 1_000_000;
+  else if (m[2] === "k") n *= 1_000;
+  else if (n < 1000) n *= 1_000;
+  return Math.round(n);
+}
+
 // Sentiment values the DB accepts (reply_sentiment_sentiment_check). Clamp the
 // model's output to this set so an off-vocab hallucination can't fail the insert.
 const ALLOWED_SENTIMENTS = new Set([
@@ -228,10 +249,16 @@ export async function applyExtractedIntel(
     if (fields.current_title) updates.current_title = fields.current_title;
     if (fields.current_company) updates.current_company = fields.current_company;
     if (fields.reason_for_looking) updates.reason_for_leaving = fields.reason_for_looking;
-    if (fields.current_base_comp) updates.current_base_comp = fields.current_base_comp;
-    if (fields.current_total_comp) updates.current_total_comp = fields.current_total_comp;
-    if (fields.target_base_comp) updates.target_base_comp = fields.target_base_comp;
-    if (fields.target_total_comp) updates.target_total_comp = fields.target_total_comp;
+    // The comp columns are numeric — parse the extracted phrase to a number.
+    // The exact wording is kept in comp_notes / back_of_resume_notes below.
+    const cBase = parseComp(fields.current_base_comp);
+    const cTotal = parseComp(fields.current_total_comp);
+    const tBase = parseComp(fields.target_base_comp);
+    const tTotal = parseComp(fields.target_total_comp);
+    if (cBase != null) updates.current_base_comp = cBase;
+    if (cTotal != null) updates.current_total_comp = cTotal;
+    if (tBase != null) updates.target_base_comp = tBase;
+    if (tTotal != null) updates.target_total_comp = tTotal;
     if (fields.comp_notes) updates.comp_notes = fields.comp_notes;
     if (fields.target_locations) updates.target_locations = fields.target_locations;
     if (fields.target_roles) updates.target_roles = fields.target_roles;
@@ -252,6 +279,48 @@ export async function applyExtractedIntel(
       entityType,
       fieldsUpdated: Object.keys(updates),
     });
+  }
+
+  // Auto-snapshot comp to history whenever a conversation (call / email /
+  // LinkedIn) surfaced comp, attributed to the candidate's owning recruiter, so
+  // the trail of what they said over time builds itself — not just manual
+  // entries. The exact phrasing is preserved in the note.
+  if (entityType === "candidate") {
+    const compMentioned =
+      fields.current_base_comp || fields.current_total_comp ||
+      fields.target_base_comp || fields.target_total_comp || fields.comp_notes;
+    if (compMentioned) {
+      try {
+        const { data: owner } = await supabase
+          .from("people")
+          .select("owner_user_id")
+          .eq("id", entityId)
+          .maybeSingle();
+        const phrases: string[] = [];
+        if (fields.current_base_comp || fields.current_total_comp)
+          phrases.push(`current ${fields.current_base_comp || "?"} base / ${fields.current_total_comp || "?"} total`);
+        if (fields.target_base_comp || fields.target_total_comp)
+          phrases.push(`asking ${fields.target_base_comp || "?"} base / ${fields.target_total_comp || "?"} total`);
+        if (fields.comp_notes) phrases.push(fields.comp_notes);
+        const note = `From ${channel} conversation: ${phrases.join("; ")}`.slice(0, 1000);
+        const { error: snapErr } = await supabase.from("compensation_history").insert({
+          person_id: entityId,
+          current_base_comp: parseComp(fields.current_base_comp),
+          current_total_comp: parseComp(fields.current_total_comp),
+          target_base_comp: parseComp(fields.target_base_comp),
+          target_total_comp: parseComp(fields.target_total_comp),
+          note,
+          created_by: (owner as any)?.owner_user_id ?? null,
+        } as any);
+        if (snapErr) {
+          logger.warn("intel-extraction: comp_history snapshot failed", { entityId, error: snapErr.message });
+        } else {
+          logger.info("intel-extraction: comp_history snapshot written", { entityId, channel });
+        }
+      } catch (err: any) {
+        logger.warn("intel-extraction: comp_history snapshot threw", { entityId, error: err?.message });
+      }
+    }
   }
 
   // Append to back_of_resume_notes (candidates only)

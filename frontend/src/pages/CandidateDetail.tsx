@@ -470,6 +470,23 @@ const CandidateDetail = () => {
     },
   });
 
+  // Newest comp snapshot — drives the top comp strip so the most recent numbers
+  // (auto-filled from a call or entered manually) are what shows on the profile.
+  const { data: latestComp } = useQuery({
+    queryKey: ['comp_history_latest', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('compensation_history' as any)
+        .select('current_base_comp, current_bonus_comp, current_total_comp, target_base_comp, target_bonus_comp, target_total_comp')
+        .eq('person_id', id!)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data as any;
+    },
+  });
+
   // Open the notes dialog (instead of inserting directly) so the
   // recruiter has a chance to capture context — candidate fit, comp
   // expectations, why this role — that follows the candidate into
@@ -1313,13 +1330,17 @@ const CandidateDetail = () => {
           {(() => {
             const fmtMoney = (n: any) => (n != null && !isNaN(Number(n))
               ? `$${Math.round(Number(n) / 1000)}K` : '—');
+            // Reflect the newest comp snapshot when present (per-field, falling
+            // back to the live profile value), so the most recent numbers show.
+            const lc = latestComp as any;
+            const comp = (k: string) => (lc?.[k] != null ? lc[k] : c[k]);
             const stats = [
-              { label: 'Current Base', value: fmtMoney(c.current_base_comp) },
-              { label: 'Current Bonus', value: fmtMoney(c.current_bonus_comp) },
-              { label: 'Current Total', value: fmtMoney(c.current_total_comp) },
-              { label: 'Expected Base', value: fmtMoney(c.target_base_comp), accent: true },
-              { label: 'Expected Bonus', value: fmtMoney(c.target_bonus_comp), accent: true },
-              { label: 'Expected Total', value: fmtMoney(c.target_total_comp), accent: true },
+              { label: 'Current Base', value: fmtMoney(comp('current_base_comp')) },
+              { label: 'Current Bonus', value: fmtMoney(comp('current_bonus_comp')) },
+              { label: 'Current Total', value: fmtMoney(comp('current_total_comp')) },
+              { label: 'Expected Base', value: fmtMoney(comp('target_base_comp')), accent: true },
+              { label: 'Expected Bonus', value: fmtMoney(comp('target_bonus_comp')), accent: true },
+              { label: 'Expected Total', value: fmtMoney(comp('target_total_comp')), accent: true },
               { label: 'Visa', value: c.work_authorization || c.visa_status || '—' },
             ];
             return (

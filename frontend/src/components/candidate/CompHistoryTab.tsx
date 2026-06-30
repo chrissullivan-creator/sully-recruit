@@ -123,6 +123,7 @@ export function CompHistoryTab({
 
       toast.success('Comp snapshot saved');
       queryClient.invalidateQueries({ queryKey: ['comp_history', personId] });
+      queryClient.invalidateQueries({ queryKey: ['comp_history_latest', personId] });
       setAdding(false);
     } catch (e: any) {
       toast.error(e?.message || 'Could not save snapshot');
