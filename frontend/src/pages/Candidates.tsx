@@ -637,7 +637,7 @@ const Candidates = () => {
         ) : (
           <>
           <SectionCard flush>
-          <div className="overflow-auto max-h-[75vh]">
+          <div className="hidden md:block overflow-auto max-h-[75vh]">
             <table className="w-full min-w-[900px]">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
@@ -800,6 +800,46 @@ const Candidates = () => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile: stacked cards instead of the wide table. */}
+          <div className="md:hidden divide-y divide-card-border">
+            {pageRows.map((candidate) => (
+              <div
+                key={candidate.id}
+                className="flex items-center gap-3 px-4 py-3 active:bg-muted/50 transition-colors cursor-pointer"
+                onClick={() => navigate(`/candidates/${candidate.id}`)}
+              >
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={selectedIds.includes(candidate.id)}
+                    onCheckedChange={() => toggleSelect(candidate.id)}
+                  />
+                </div>
+                <PersonAvatar
+                  name={candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
+                  src={(candidate as any).avatar_url ?? (candidate as any).profile_picture_url}
+                  size="sm"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {[candidate.current_title, candidate.current_company].filter(Boolean).join(' · ') || '—'}
+                  </p>
+                </div>
+                <span className={cn(
+                  'shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                  statusColors[candidate.status] ?? 'bg-muted text-muted-foreground border-card-border',
+                )}>
+                  {STATUS_LABELS[candidate.status] ?? candidate.status.replace(/_/g, ' ')}
+                </span>
+              </div>
+            ))}
+            {pageRows.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No candidates match your filters.</div>
+            )}
           </div>
           </SectionCard>
           {totalPages > 1 && (
