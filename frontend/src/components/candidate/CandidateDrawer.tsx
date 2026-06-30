@@ -212,6 +212,8 @@ export function CandidateDrawer({ row, onClose, invalidateKeys = [] }: Candidate
 
   const move = async (target: CanonicalStage, source: string) => {
     if (!row) return;
+    // Rejection is never a silent stage jump — capture who + why first.
+    if (target === 'withdrawn') { setRejectOpen(true); return; }
     const res = await moveStage({
       sendOutId: row.id,
       candidateJobId: (row as any).candidate_job_id ?? null,
