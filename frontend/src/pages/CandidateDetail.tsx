@@ -191,7 +191,6 @@ const CandidateDetail = () => {
   const [showResume, setShowResume] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-  const [compExpanded, setCompExpanded] = useState(false);
   const [workHistoryOpen, setWorkHistoryOpen] = useState(false);
   const [educationOpen, setEducationOpen] = useState(false);
   const [showAddWork, setShowAddWork] = useState(false);
@@ -310,7 +309,6 @@ const CandidateDetail = () => {
   const [uploadingFormatted, setUploadingFormatted] = useState(false);
   const [uploadingOtherDoc, setUploadingOtherDoc] = useState(false);
   const [docFolder, setDocFolder] = useState<'resumes' | 'formatted' | 'other'>('resumes');
-  const [editingInfo, setEditingInfo] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const otherDocInputRef = useRef<HTMLInputElement>(null);
 
@@ -1132,16 +1130,16 @@ const CandidateDetail = () => {
         actions={
           <>
           {/* Reach out (gold) is the single primary, in contactActions. Here:
-              Edit toggles the inline field unlock, Send Out + Enrich are
+              Edit opens the full edit-all modal, Send Out + Enrich are
               secondary, and everything else lives behind the "More" kebab. */}
           {canEdit && (
             <Button
-              variant={editingInfo ? 'gold-outline' : 'outline'}
+              variant="outline"
               size="sm"
               onClick={() => setEditOpen(true)}
-              title={editingInfo ? 'Finish editing' : 'Edit fields inline'}
+              title="Edit details"
             >
-              <Edit className="h-3.5 w-3.5 mr-1" />{editingInfo ? 'Done' : 'Edit'}
+              <Edit className="h-3.5 w-3.5 mr-1" />Edit
             </Button>
           )}
           <Button variant="gold-outline" size="sm" onClick={() => navigate(`/candidates/${id}/sendout`)}>
@@ -1285,181 +1283,6 @@ const CandidateDetail = () => {
               </div>
             );
           })()}
-
-          {/* Contact info grid */}
-          <div className="px-8 py-5">
-            <SectionCard
-              title="Contact & Profile"
-              icon={<User className="h-4 w-4" />}
-              actions={canEdit ? (
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
-                    editingInfo
-                      ? 'bg-accent/15 text-accent'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  )}
-                >
-                  <Edit className="h-3 w-3" />
-                  {editingInfo ? 'Done Editing' : 'Edit Info'}
-                </button>
-              ) : undefined}
-            >
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-              <EditableField label="First Name" value={candidate.first_name} onSave={v => updateField('first_name', v)} disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Last Name" value={candidate.last_name} onSave={v => updateField('last_name', v)} disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Title" value={candidate.current_title} onSave={v => updateField('current_title', v)} placeholder="e.g. VP, Risk" disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Phone" value={candidate.phone} onSave={v => updateField('phone', v)} placeholder="+1 (555) 000-0000" disabled={!canEdit} highlight={editingInfo} />
-              <div className="flex items-end gap-2">
-                <div className="flex-1 min-w-0">
-                  <EditableField label="Company" value={candidate.current_company} onSave={v => updateField('current_company', v)} placeholder="Firm name" disabled={!canEdit} highlight={editingInfo} />
-                </div>
-                {(candidate as any).company_id && (
-                  <button
-                    onClick={() => navigate(`/companies/${(candidate as any).company_id}`)}
-                    title="View company"
-                    className="shrink-0 mb-1 p-1.5 rounded hover:bg-emerald-light text-muted-foreground hover:text-emerald transition-colors"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-              <EditableField label="LinkedIn URL" value={candidate.linkedin_url} onSave={v => updateField('linkedin_url', v)} placeholder="https://linkedin.com/in/..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Location" value={c.location_text} onSave={v => updateField('location_text', v)} placeholder="City, State" disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Work Auth" value={c.work_authorization} onSave={v => updateField('work_authorization', v)} placeholder="Citizen, GC, H1-B..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Relocation" value={c.relocation_preference} onSave={v => updateField('relocation_preference', v)} placeholder="Open, No, NYC only..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Target Locations" value={c.target_locations} onSave={v => updateField('target_locations', v)} placeholder="NYC, Chicago..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField label="Target Roles" value={c.target_roles} onSave={v => updateField('target_roles', v)} placeholder="PM, Quant, Tech..." disabled={!canEdit} highlight={editingInfo} />
-              <EditableField
-                label={
-                  <span className="inline-flex items-center gap-2">
-                    Work Email
-                    <EmailBounceBadge
-                      emailInvalid={(candidate as any).email_invalid}
-                      reason={(candidate as any).email_invalid_reason}
-                      invalidatedAt={(candidate as any).email_invalid_at}
-                    />
-                  </span>
-                }
-                value={c.work_email}
-                onSave={v => updateField('work_email', v)}
-                type="email"
-                placeholder="work@firm.com"
-                disabled={!canEdit}
-                highlight={editingInfo}
-              />
-              <EditableField
-                label={
-                  <span className="inline-flex items-center gap-2">
-                    Personal Email
-                    <EmailBounceBadge
-                      emailInvalid={(candidate as any).email_invalid}
-                      reason={(candidate as any).email_invalid_reason}
-                      invalidatedAt={(candidate as any).email_invalid_at}
-                    />
-                  </span>
-                }
-                value={c.personal_email}
-                onSave={v => updateField('personal_email', v)}
-                type="email"
-                placeholder="personal@gmail.com"
-                disabled={!canEdit}
-                highlight={editingInfo}
-              />
-              <EditableField label="Mobile Phone" value={c.mobile_phone} onSave={async v => {
-                await updateField('mobile_phone', v);
-                // Keep legacy phone in sync
-                if (v) await updateField('phone', v);
-              }} placeholder="+1 (212) 555-0000" disabled={!canEdit} highlight={editingInfo} />
-            </div>
-
-            {/* Compensation — collapsible */}
-            <div className="mt-4">
-              <Collapsible open={compExpanded} onOpenChange={setCompExpanded}>
-                <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
-                  <DollarSign className="h-3 w-3" /> Compensation
-                  {compExpanded ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-3">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-3">
-                    <EditableField label="Current Base" value={c.current_base_comp?.toString()} onSave={v => updateComp('current_base_comp', v)} placeholder="e.g. 200000" disabled={!canEdit} />
-                    <EditableField label="Current Bonus" value={c.current_bonus_comp?.toString()} onSave={v => updateComp('current_bonus_comp', v)} placeholder="e.g. 150000" disabled={!canEdit} />
-                    <EditableField label="Current Total" value={c.current_total_comp?.toString()} onSave={v => updateComp('current_total_comp', v)} placeholder="e.g. 350000" disabled={!canEdit} />
-                    <EditableField label="Target Base" value={c.target_base_comp?.toString()} onSave={v => updateComp('target_base_comp', v)} placeholder="e.g. 250000" disabled={!canEdit} />
-                    <EditableField label="Target Total" value={c.target_total_comp?.toString()} onSave={v => updateComp('target_total_comp', v)} placeholder="e.g. 400000" disabled={!canEdit} />
-                    <EditableField label="Comp Notes" value={c.comp_notes} onSave={v => updateField('comp_notes', v)} placeholder="Deferred comp, RSUs, etc." disabled={!canEdit} />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            </div>
-
-            {/* Timestamps + sentiment row */}
-            <div className="flex items-center gap-6 mt-4 text-xs text-muted-foreground flex-wrap">
-              <span className="flex items-center gap-1">
-                <Send className="h-3 w-3" /> Last Reached Out: {c.last_contacted_at ? format(new Date(c.last_contacted_at), 'MMM d, yyyy') : '—'}
-              </span>
-              <span className="flex items-center gap-1">
-                <MessageSquare className="h-3 w-3" /> Last Response: {c.last_responded_at ? format(new Date(c.last_responded_at), 'MMM d, yyyy') : '—'}
-              </span>
-              {c.last_comm_channel && (
-                <span className="inline-flex items-center gap-1 capitalize">
-                  <ChannelIcon channel={c.last_comm_channel} />
-                  {c.last_comm_channel === 'linkedin' ? 'LinkedIn' : c.last_comm_channel}
-                </span>
-              )}
-              <SentimentChip sentiment={c.last_sequence_sentiment} note={c.last_sequence_sentiment_note} />
-              <OutOfOfficeBadge oooUntil={(candidate as any).ooo_until} />
-              <span>Added {format(new Date(candidate.created_at), 'MMM d, yyyy')}</span>
-            </div>
-
-            {/* Owner + Job assignment row */}
-            <div className="flex items-center gap-4 mt-4 flex-wrap">
-              <div className="space-y-1">
-                <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
-                <SearchableSelect
-                  options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
-                  value={(candidate as any).owner_user_id ?? ''}
-                  onChange={(val) => {
-                    const newOwnerId = val || null;
-                    if (newOwnerId && newOwnerId !== user?.id) {
-                      setPendingOwnerId(newOwnerId);
-                    } else {
-                      (async () => {
-                        try {
-                          const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
-                          if (error) { toast.error('Failed to update owner'); return; }
-                          queryClient.invalidateQueries({ queryKey: ['candidate', id] });
-                          queryClient.invalidateQueries({ queryKey: ['candidates'] });
-                          toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
-                        } catch (err: any) {
-                          toast.error(err?.message || 'Failed to update owner');
-                        }
-                      })();
-                    }
-                  }}
-                  placeholder="Assign owner…"
-                  searchPlaceholder="Search team…"
-                  clearLabel="— Unassigned —"
-                  className="h-7 text-xs w-44"
-                />
-              </div>
-
-              {/* Match score badge */}
-              {candidateJobMatch && (
-                <div className="flex items-center gap-2">
-                  <span className={cn('px-2 py-0.5 rounded text-xs font-bold tabular-nums',
-                    (candidateJobMatch as any).overall_score >= 80 ? 'text-green-400 bg-green-500/15' :
-                    (candidateJobMatch as any).overall_score >= 60 ? 'text-yellow-400 bg-yellow-500/15' :
-                    'text-muted-foreground bg-muted'
-                  )}>
-                    Match: {(candidateJobMatch as any).overall_score}%
-                  </span>
-                </div>
-              )}
-            </div>
-            </SectionCard>
-          </div>
 
           {/* ---- Tabs ---- */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
@@ -1839,6 +1662,39 @@ const CandidateDetail = () => {
                     </CollapsibleContent>
                   </Collapsible>
                 </div>
+
+                {/* ── Assignment (owner / screener) ──────────────────────── */}
+                <SectionCard title="Assignment" icon={<User className="h-4 w-4" />}>
+                  <div className="space-y-1 max-w-xs">
+                    <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Owner (Screener)</Label>
+                    <SearchableSelect
+                      options={profiles.filter(p => p.full_name).map(p => ({ value: p.id, label: p.full_name || '' }))}
+                      value={(candidate as any).owner_user_id ?? ''}
+                      onChange={(val) => {
+                        const newOwnerId = val || null;
+                        if (newOwnerId && newOwnerId !== user?.id) {
+                          setPendingOwnerId(newOwnerId);
+                        } else {
+                          (async () => {
+                            try {
+                              const { error } = await supabase.from('people').update({ owner_user_id: newOwnerId }).eq('id', id!);
+                              if (error) { toast.error('Failed to update owner'); return; }
+                              queryClient.invalidateQueries({ queryKey: ['candidate', id] });
+                              queryClient.invalidateQueries({ queryKey: ['candidates'] });
+                              toast.success(newOwnerId ? 'Owner updated' : 'Owner removed');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Failed to update owner');
+                            }
+                          })();
+                        }
+                      }}
+                      placeholder="Assign owner…"
+                      searchPlaceholder="Search team…"
+                      clearLabel="— Unassigned —"
+                      className="h-8 text-xs w-full"
+                    />
+                  </div>
+                </SectionCard>
 
                 {id && (
                   <PicklistEditSection
