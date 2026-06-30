@@ -4,7 +4,7 @@ import { Plus, ChevronRight, Clock, AlertCircle, Building2, Trash2 } from 'lucid
 import { cn } from '@/lib/utils';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
 import { CompanyLogo } from '@/components/shared/CompanyLogo';
-import { type SendOutRow, formatComp } from '@/lib/queries/send-outs';
+import { type SendOutRow, formatComp, formatCompRange } from '@/lib/queries/send-outs';
 import { CANONICAL_PIPELINE, canonicalConfig, nextStage, type CanonicalStage } from '@/lib/pipeline';
 import { daysInStage, needsFollowUp } from '@/lib/send-out-insights';
 
@@ -22,6 +22,15 @@ const SUBTITLE: Record<string, string> = {
 const DOT: Record<string, string> = {
   pitch: 'bg-stage-warm', ready_to_send: 'bg-yellow-600', submitted: 'bg-purple-600',
   interview: 'bg-info', offer: 'bg-gold', placed: 'bg-emerald',
+};
+// Label for the job block on the card — changes with the row's stage.
+const JOB_LABEL: Record<string, string> = {
+  pitch: 'Submitting for',
+  ready_to_send: 'Submitting for',
+  submitted: 'Submitted to',
+  interview: 'Interviewing for',
+  offer: 'Offered for',
+  placed: 'Placed at',
 };
 
 interface BoardProps {
@@ -122,7 +131,10 @@ function KanbanCard({
   const name = row.candidate?.full_name
     || [row.candidate?.first_name, row.candidate?.last_name].filter(Boolean).join(' ')
     || '—';
-  const comp = formatComp(row.candidate?.target_total_comp ?? row.total_comp_max ?? null);
+  // Submitted comp on the send-out (what we put to the client), not the
+  // candidate's current — base + total ranges.
+  const baseComp = formatCompRange(row.base_comp_min, row.base_comp_max);
+  const totalComp = formatCompRange(row.total_comp_min, row.total_comp_max);
 
   return (
     <div
@@ -161,23 +173,32 @@ function KanbanCard({
         </button>
       </div>
 
-      {/* Submitting for */}
+      {/* Stage-aware job block: Submitting for → Submitted to → Interviewing
+          for → Offered for → Placed at. Title wraps with the company under it. */}
       {row.job?.title && (
         <div className="mt-2.5 rounded-lg bg-muted/40 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Submitting for</p>
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{JOB_LABEL[row.stage] ?? 'Submitting for'}</p>
           <div className="flex items-start gap-1.5 mt-0.5">
             {row.job.company_name
               ? <CompanyLogo name={row.job.company_name} domain={row.job.company?.domain} logoUrl={row.job.company?.logo_url} size="xs" className="mt-0.5" />
               : <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />}
-            <span className="min-w-0 text-[12px] font-medium leading-snug text-foreground line-clamp-2 break-words">{row.job.title}</span>
+            <div className="min-w-0">
+              <span className="block text-[12px] font-medium leading-snug text-foreground line-clamp-2 break-words">{row.job.title}</span>
+              {row.job.company_name && (
+                <span className="block text-[11px] text-muted-foreground truncate">{row.job.company_name}</span>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* Footer chips */}
       <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
-        {comp !== '—' && (
-          <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-foreground">{comp}</span>
+        {baseComp !== '—' && (
+          <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-foreground">Base {baseComp}</span>
+        )}
+        {totalComp !== '—' && (
+          <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-foreground">Total {totalComp}</span>
         )}
         {row.right_to_work && (
           <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground truncate max-w-[120px]">{row.right_to_work}</span>
