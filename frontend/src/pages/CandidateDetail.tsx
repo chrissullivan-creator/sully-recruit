@@ -58,7 +58,6 @@ import { InterviewDetail } from '@/components/interviews/InterviewDetail';
 import { EditSendOutNotesDialog } from '@/components/send-outs/EditSendOutNotesDialog';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { CallButton } from '@/components/shared/CallButton';
-import { fetchLatestStageMoveNote } from '@/lib/queries/send-outs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -601,11 +600,19 @@ const CandidateDetail = () => {
       return;
     }
 
-    // Pitch / send out captures a stage-move note, with the prior pitch
-    // note pre-filled so it carries through.
-    if (canonical === 'pitch' || canonical === 'ready_to_send') {
-      const prior = canonical === 'pitch' ? null : await fetchLatestStageMoveNote(sendOutId);
-      setPendingStageMove({ sendOutId, target: canonical, initialNote: prior });
+    // Send Out: mirror the Send Outs page — persist the move, then open the
+    // rich drawer (comp + notes + Ask Joe submit) instead of the plain note
+    // dialog, so prepping the submission happens in the same window everywhere.
+    if (canonical === 'ready_to_send') {
+      await persistStageUpdate(sendOutId, canonical);
+      const so = sendOuts.find((s) => s.id === sendOutId);
+      if (so) setDrawerSendOut({ ...so, job: so.jobs, candidate: c, stage: canonical });
+      return;
+    }
+
+    // Pitch captures a stage-move note.
+    if (canonical === 'pitch') {
+      setPendingStageMove({ sendOutId, target: canonical, initialNote: null });
       setSendOutNotesOpen(true);
       return;
     }
