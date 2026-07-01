@@ -8,7 +8,7 @@ import {
   getMistralKey,
 } from "../../../../src/server-lib/supabase.js";
 import {
-  looksLikeResume,
+  filenameLooksLikeResume,
   getVoyageEmbedding,
   buildProfileText,
   delay,
@@ -27,7 +27,11 @@ import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
  * Inngest is the only scheduler now.
  */
 export const reparseResumes = inngest.createFunction(
-  { id: "reparse-resumes", name: "Reparse resumes missing raw_text (Inngest)" },
+  // Serialize: this cron fires every minute but rows aren't atomically claimed,
+  // so without a concurrency cap an overrunning run overlaps the next one and
+  // both parse the same résumé (wasted AI spend + racing writes). Mirrors the
+  // reconcile-orphaned-resumes sibling.
+  { id: "reparse-resumes", name: "Reparse resumes missing raw_text (Inngest)", concurrency: [{ limit: 1 }] },
   { cron: "* * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
@@ -50,7 +54,7 @@ export const reparseResumes = inngest.createFunction(
 
     for (const r of unparsedRaw ?? []) {
       const fileName = r.file_name || r.file_path.split("/").pop() || "";
-      if (!looksLikeResume(fileName)) { junkIds.push(r.id); continue; }
+      if (!filenameLooksLikeResume(fileName)) { junkIds.push(r.id); continue; }
       const key = `${r.candidate_id}::${fileName.toLowerCase().trim()}`;
       if (seen.has(key)) { junkIds.push(r.id); continue; }
       seen.add(key);

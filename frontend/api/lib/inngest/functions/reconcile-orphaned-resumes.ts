@@ -16,7 +16,7 @@ import {
 } from "../../../../src/server-lib/match-person-by-email.js";
 import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
 import {
-  looksLikeResume,
+  filenameLooksLikeResume,
   getVoyageEmbedding,
   buildProfileText,
   normalizeEmail,
@@ -224,7 +224,7 @@ export const reconcileOrphanedResumes = inngest.createFunction(
 
     for (const r of unparsed ?? []) {
       const fileName = r.file_name || r.file_path.split("/").pop() || "";
-      if (!looksLikeResume(fileName)) { junkIds.push(r.id); continue; }
+      if (!filenameLooksLikeResume(fileName)) { junkIds.push(r.id); continue; }
       const key = fileName.toLowerCase().trim();
       if (seen.has(key)) { junkIds.push(r.id); continue; }
       seen.add(key);

@@ -356,16 +356,31 @@ async function processResumesInboxEmail(
       continue;
     }
 
-    await inngest.send({
-      name: "ai/resume-ingestion.requested",
-      data: {
+    // Guard the dispatch: a thrown inngest.send would otherwise leave the row
+    // at parsing_status='pending' forever (silent orphan). Stamp it so the
+    // reconcile-orphaned-resumes sweep re-dispatches it.
+    try {
+      await inngest.send({
+        name: "ai/resume-ingestion.requested",
+        data: {
+          resumeId: resumeRow.id,
+          candidateId,
+          filePath: storagePath,
+          fileName,
+        },
+      });
+      created++;
+    } catch (err: any) {
+      logger.error("Resumes inbox: resume-ingestion dispatch failed", {
         resumeId: resumeRow.id,
-        candidateId,
-        filePath: storagePath,
-        fileName,
-      },
-    });
-    created++;
+        error: err?.message,
+      });
+      await supabase
+        .from("resumes")
+        .update({ parsing_status: "ingest_dispatch_failed" })
+        .eq("id", resumeRow.id);
+      skipped++;
+    }
   }
 
   logger.info("Resumes inbox processed", { senderEmail, candidateId, created, skipped });

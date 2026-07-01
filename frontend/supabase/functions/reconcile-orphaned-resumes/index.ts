@@ -41,13 +41,18 @@ Rules:
 - Extract up to 25 most relevant skills
 - current_title and current_company: most recent role only`;
 
+// MIRROR of `filenameLooksLikeResume` in
+// frontend/src/server-lib/resume-parsing.ts — this Deno edge fn can't import
+// from src/, so keep the two JUNK_PATTERNS lists in sync by hand. The brand
+// words `emerald.recruiting` and `fiera` were removed 2026-07-01 (they rejected
+// legitimate Emerald house-formatted candidate résumés — see the src copy).
 const JUNK_PATTERNS = [
   /invoice/i, /receipt/i, /confirmation/i, /waiver/i,
   /order[_\s-]?id/i, /\bform\b/i, /\bsigned\b/i,
   /\bagreement\b/i, /\bcontract\b/i, /offer[_\s-]?letter/i,
   /cover[_\s-]?letter/i, /\breference/i, /\btranscript\b/i,
   /\bdegree\b/i, /\bcertif/i, /\blicense\b/i,
-  /emerald.recruiting/i, /fiera/i, /\bpitch\b/i,
+  /\bpitch\b/i,
   /\bproposal\b/i, /\bpresentation\b/i, /\bmarketing\b/i,
   /^\d{8,}_\d+/, /^[a-f0-9-]{32,}\.pdf$/i,
 ];

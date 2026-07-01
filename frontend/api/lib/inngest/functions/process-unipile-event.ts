@@ -451,7 +451,12 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
       entityId: match.entityId,
       returnDate: oooReturnDate,
     });
-  } else if (intel) {
+  } else {
+    // Any inbound, non-OOO reply stops the sequence — even a terse "Yes"/"Call
+    // me" that's too short (<10 chars) for intel extraction, or a reply where
+    // extraction returned null. Previously this was gated on `intel`, so those
+    // replies silently kept the enrollment active and the person kept getting
+    // sequence steps after they'd already answered.
     const { data: actives } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")
