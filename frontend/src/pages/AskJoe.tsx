@@ -11,6 +11,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { JoeActionCard, type JoeAction } from '@/components/joe/JoeActionCard';
 import { DataErrorState } from '@/components/shared/EmptyState';
 import { getQueryErrorMessage } from '@/lib/queryTimeout';
+import { useAuth } from '@/contexts/AuthContext';
+import {
+  persistJoeActionProposal,
+  updateJoeActionQueueStatus,
+  type JoeActionResolution,
+} from '@/lib/joeActions';
 
 type Mode = 'candidate_search' | 'contact_search';
 type Role = 'user' | 'assistant';
@@ -43,6 +49,7 @@ const SUGGESTIONS = [
 ];
 
 export default function AskJoe() {
+  const { user } = useAuth();
   const [mode, setMode] = useState<Mode>(() => loadChat().mode);
   const [messages, setMessages] = useState<Msg[]>(() => loadChat().messages);
   const [query, setQuery] = useState('');
@@ -53,6 +60,7 @@ export default function AskJoe() {
   const [joeError, setJoeError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const persistedActionIds = useRef<Set<string>>(new Set());
 
   // Persist
   useEffect(() => { saveChat(mode, messages); }, [mode, messages]);
@@ -122,9 +130,17 @@ export default function AskJoe() {
             }
             // Agentic proposal card (only emitted when JOE_AGENTIC_ENABLED).
             if (parsed.action && parsed.action.id) {
+              const action = parsed.action as JoeAction;
               setActions((prev) =>
-                prev.some((a) => a.id === parsed.action.id) ? prev : [...prev, parsed.action as JoeAction],
+                prev.some((a) => a.id === action.id) ? prev : [...prev, action],
               );
+              if (user?.id && !persistedActionIds.current.has(action.id)) {
+                persistedActionIds.current.add(action.id);
+                persistJoeActionProposal(action, user.id).catch((err) => {
+                  persistedActionIds.current.delete(action.id);
+                  toast.error(`Could not save Joe proposal: ${err?.message ?? String(err)}`);
+                });
+              }
               continue;
             }
             const content = parsed.content ?? parsed.choices?.[0]?.delta?.content;
@@ -176,6 +192,19 @@ export default function AskJoe() {
     setJoeError(null);
     setLastFailedPrompt(null);
     inputRef.current?.focus();
+  };
+
+  const resolveAction = async (id: string, resolution: JoeActionResolution = 'dismissed') => {
+    setActions((prev) => prev.filter((x) => x.id !== id));
+    if (!user?.id) return;
+    try {
+      await updateJoeActionQueueStatus(id, resolution, {
+        actor: 'recruiter',
+        note: resolution === 'approved' ? 'Opened review surface from Ask Joe' : undefined,
+      });
+    } catch (err: any) {
+      toast.error(`Could not update Joe queue: ${err?.message ?? String(err)}`);
+    }
   };
 
   return (
@@ -304,7 +333,7 @@ export default function AskJoe() {
                     <JoeActionCard
                       key={a.id}
                       action={a}
-                      onResolve={(id) => setActions((prev) => prev.filter((x) => x.id !== id))}
+                      onResolve={resolveAction}
                     />
                   ))}
                 </div>

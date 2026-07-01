@@ -1,13 +1,18 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Check, X, ExternalLink, Loader2, Wand2 } from 'lucide-react';
-import { enrollPeopleInSequence } from '@/lib/enrollPeople';
+import {
+  executeJoeAction,
+  isInlineExecutableJoeAction,
+  type JoeAction,
+  type JoeActionResolution,
+} from '@/lib/joeActions';
 
 /**
  * Renders an approve/edit/reject card for a Joe-proposed action (Phase 2,
@@ -19,15 +24,7 @@ import { enrollPeopleInSequence } from '@/lib/enrollPeople';
  * confirm — Joe never sends or moves anyone on its own.
  */
 
-export type JoeAction = {
-  id: string;
-  type: 'draft_message' | 'enroll_in_sequence' | 'move_pipeline_stage' | 'create_task' | 'add_note';
-  title: string;
-  preview?: string;
-  params: Record<string, any>;
-  route?: string | null;
-  entity_type?: 'candidate' | 'contact';
-};
+export type { JoeAction } from '@/lib/joeActions';
 
 const TYPE_LABEL: Record<JoeAction['type'], string> = {
   draft_message: 'Draft message',
@@ -40,45 +37,25 @@ const TYPE_LABEL: Record<JoeAction['type'], string> = {
 export function JoeActionCard({
   action,
   onResolve,
+  footerActions,
 }: {
   action: JoeAction;
-  onResolve: (id: string) => void;
+  onResolve: (id: string, resolution?: JoeActionResolution) => void | Promise<void>;
+  footerActions?: ReactNode;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
 
-  const inlineExecutable = action.type === 'add_note' || action.type === 'enroll_in_sequence';
+  const inlineExecutable = isInlineExecutableJoeAction(action);
 
   const approve = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      if (action.type === 'add_note') {
-        const { error } = await supabase.from('notes').insert({
-          entity_type: action.entity_type ?? 'candidate',
-          entity_id: action.params.person_id,
-          note: action.params.note,
-          created_by: user?.id ?? null,
-        } as any);
-        if (error) throw error;
-        toast.success('Note added');
-      } else if (action.type === 'enroll_in_sequence') {
-        const seqId = action.params.sequence_id as string | undefined;
-        const ids = ((action.params.people as any[]) ?? [])
-          .map((p) => p?.person_id)
-          .filter(Boolean);
-        if (!seqId || ids.length === 0) throw new Error('Nothing to enroll');
-        const r = await enrollPeopleInSequence(seqId, ids);
-        const parts: string[] = [];
-        if (r.enrolled) parts.push(`${r.enrolled} enrolled`);
-        if (r.skipped) parts.push(`${r.skipped} already in sequence`);
-        if (r.blocked) parts.push(`${r.blocked} skipped (do-not-contact)`);
-        if (r.unresolved) parts.push(`${r.unresolved} not found`);
-        if (r.initFailed) toast.warning(`${r.initFailed} didn't pre-schedule — re-enroll those`);
-        toast.success(parts.join(' · ') || 'No changes');
-      }
-      onResolve(action.id);
+      const result = await executeJoeAction(action, user?.id ?? null);
+      toast.success(result.summary);
+      await onResolve(action.id, 'done');
     } catch (e: any) {
       toast.error(e?.message ?? 'Could not complete that');
     } finally {
@@ -88,7 +65,7 @@ export function JoeActionCard({
 
   const openToConfirm = () => {
     if (action.route) navigate(action.route);
-    onResolve(action.id);
+    onResolve(action.id, 'approved');
   };
 
   return (
@@ -113,10 +90,11 @@ export function JoeActionCard({
             </Button>
           ) : (
             <Button size="xs" variant="gold" onClick={openToConfirm} disabled={!action.route}>
-              <ExternalLink className="h-3.5 w-3.5" /> Review &amp; confirm
+              <ExternalLink className="h-3.5 w-3.5" /> Review/edit
             </Button>
           )}
-          <Button size="xs" variant="ghost" onClick={() => onResolve(action.id)} disabled={busy}>
+          {footerActions}
+          <Button size="xs" variant="ghost" onClick={() => onResolve(action.id, 'dismissed')} disabled={busy}>
             <X className="h-3.5 w-3.5" /> Dismiss
           </Button>
         </div>

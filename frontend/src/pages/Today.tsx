@@ -7,6 +7,7 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataErrorState } from '@/components/shared/EmptyState';
+import { JoeActionQueue } from '@/components/joe/JoeActionQueue';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { withQueryTimeout } from '@/lib/queryTimeout';
@@ -17,9 +18,9 @@ import { Check, Clock, X, ChevronRight, Martini } from 'lucide-react';
 /**
  * "Today / For You" — Phase 1 of the proactive-Joe roadmap. Renders the
  * per-recruiter morning briefing written by the `joe-daily-brief` Inngest cron
- * into `joe_briefings`. READ-ONLY surface: actions here only update a briefing
- * row's status (done / snooze / dismiss) and link out to the entity — nothing
- * here messages or moves anyone.
+ * into `joe_briefings`. The Joe action queue above it renders proposal cards
+ * that still require human approval before any task, note, enrollment, send, or
+ * stage workflow can move.
  *
  * The cron only writes rows when JOE_PROACTIVE_ENABLED is on, so until the
  * feature is switched on this page shows a friendly empty state.
@@ -127,6 +128,8 @@ export default function Today() {
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8">
         <div className="max-w-3xl mx-auto w-full">
+          <JoeActionQueue ownerUserId={ownerUserId} />
+
           {isLoading ? (
             <SectionCard>
               <div className="text-sm text-muted-foreground py-12 text-center">Loading…</div>
