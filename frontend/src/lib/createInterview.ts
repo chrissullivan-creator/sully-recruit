@@ -34,6 +34,21 @@ export async function createInterview(opts: {
     } as any)
     .select('id')
     .single();
-  if (error) throw error;
+  if (error) {
+    // 23505: a concurrent create raced us to the same (candidate, job, round)
+    // — the uniq_interviews_candidate_job_round index rejected the dupe. Return
+    // the row that won instead of surfacing an error to the user.
+    if ((error as any).code === '23505') {
+      const { data: existing } = await supabase
+        .from('interviews')
+        .select('id')
+        .eq('candidate_id', opts.candidateId)
+        .eq('job_id', opts.jobId)
+        .eq('round', nextRound)
+        .maybeSingle();
+      if (existing) return (existing as any).id;
+    }
+    throw error;
+  }
   return (data as any).id;
 }

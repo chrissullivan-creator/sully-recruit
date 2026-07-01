@@ -49,11 +49,6 @@ export async function ensureInterviewArtifacts(payload: {
 }) {
   if (!isInterviewStage(payload.stage)) return;
 
-  const stage = normalizeInterviewStage(payload.stage);
-  // Default to round 1; callers wanting a specific round should pass it
-  // through and write to send_outs.interview_round directly.
-  const round = 1;
-
   // Pull canonical IDs from the send_out so the interview row can stand alone.
   const [{ data: sendOut }, { data: actor }] = await Promise.all([
     supabase
@@ -70,27 +65,67 @@ export async function ensureInterviewArtifacts(payload: {
   const ownerId     = payload.recruiterId ?? sendOut?.recruiter_id ?? actor.user?.id ?? null;
   const interviewAt = payload.interviewAt ?? sendOut?.interview_at ?? null;
 
-  // Upsert an interviews row for this (send_out, round). We don't have a
-  // dedicated unique index, so do select-then-insert/update by hand.
-  const { data: existing } = await supabase
-    .from('interviews')
-    .select('id, scheduled_at, stage')
-    .eq('send_out_id', payload.sendOutId)
-    .eq('round', round)
-    .maybeSingle();
-
   // interviews.stage is the per-interview lifecycle (to_be_scheduled |
   // scheduled | interview_debrief), NOT the canonical funnel stage.
   const lifecycleStage = interviewAt ? 'scheduled' : 'to_be_scheduled';
 
-  if (existing) {
-    const patch: Record<string, any> = {};
-    if (interviewAt && !existing.scheduled_at) {
-      patch.scheduled_at = interviewAt;
-      patch.stage = 'scheduled';
+  // Idempotency: a stage move must create AT MOST one interview per
+  // (candidate, job). If ANY interview already exists for this pair (round 1
+  // from a prior move, or round 2+ added via createInterview), we update the
+  // latest round's scheduled_at and stop — we never mint a second row. Extra
+  // rounds are created explicitly through `createInterview`, not here.
+  if (candidateId && jobId) {
+    const { data: existing } = await supabase
+      .from('interviews')
+      .select('id, scheduled_at')
+      .eq('candidate_id', candidateId)
+      .eq('job_id', jobId)
+      .order('round', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      if (interviewAt && !existing.scheduled_at) {
+        await supabase.from('interviews')
+          .update({ scheduled_at: interviewAt, stage: 'scheduled' })
+          .eq('id', existing.id);
+      }
+      return;
     }
-    if (Object.keys(patch).length > 0) {
-      await supabase.from('interviews').update(patch).eq('id', existing.id);
+
+    // No interview yet → create round 1. ignoreDuplicates makes a concurrent
+    // stage move a no-op instead of a duplicate (backed by the
+    // uniq_interviews_candidate_job_round index).
+    await supabase.from('interviews').upsert(
+      {
+        send_out_id: payload.sendOutId,
+        candidate_id: candidateId,
+        interviewer_contact_id: contactId,
+        job_id: jobId,
+        owner_id: ownerId,
+        stage: lifecycleStage,
+        round: 1,
+        scheduled_at: interviewAt,
+      },
+      { onConflict: 'candidate_id,job_id,round', ignoreDuplicates: true },
+    );
+    return;
+  }
+
+  // Fallback for interviews without a resolvable candidate+job (rare): keep the
+  // legacy send_out-scoped select-then-insert on round 1.
+  const { data: existing } = await supabase
+    .from('interviews')
+    .select('id, scheduled_at')
+    .eq('send_out_id', payload.sendOutId)
+    .eq('round', 1)
+    .maybeSingle();
+
+  if (existing) {
+    if (interviewAt && !existing.scheduled_at) {
+      await supabase.from('interviews')
+        .update({ scheduled_at: interviewAt, stage: 'scheduled' })
+        .eq('id', existing.id);
     }
     return;
   }
@@ -102,7 +137,7 @@ export async function ensureInterviewArtifacts(payload: {
     job_id: jobId,
     owner_id: ownerId,
     stage: lifecycleStage,
-    round,
+    round: 1,
     scheduled_at: interviewAt,
   });
 }
