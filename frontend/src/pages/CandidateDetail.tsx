@@ -6,7 +6,7 @@ import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { StatStrip } from '@/components/shared/StatStrip';
 import { SkillsCard } from '@/components/shared/cards/SkillsCard';
-import { NextActionsCard } from '@/components/shared/cards/NextActionsCard';
+import { NextActionsCard, type NextAction } from '@/components/shared/cards/NextActionsCard';
 import { AISummaryCard } from '@/components/shared/AISummaryCard';
 import { ActivityTimeline } from '@/components/shared/ActivityTimeline';
 import { PersonAvatar } from '@/components/shared/PersonAvatar';
@@ -1032,6 +1032,48 @@ const CandidateDetail = () => {
 
   const fullName = candidate.full_name ?? `${candidate.first_name ?? ''} ${candidate.last_name ?? ''}`;
   const c = candidate as any;
+  const candidateNextActions: NextAction[] = [];
+  if (c.next_action) {
+    candidateNextActions.push({
+      id: 'joe-next-action',
+      title: c.next_action,
+      meta: 'Joe recommendation',
+      onClick: () => setActiveTab('background'),
+    });
+  }
+  if (!resumeUrl) {
+    candidateNextActions.push({
+      id: 'missing-resume',
+      title: 'Add a resume before submitting',
+      meta: 'Send-out formatting and client submission are stronger with source material',
+      onClick: () => setActiveTab('documents'),
+    });
+  }
+  if ((sendOuts as any[]).length === 0 && openJobs.length > 0) {
+    candidateNextActions.push({
+      id: 'start-pipeline',
+      title: 'Add to a job pipeline',
+      meta: `${openJobs.length} open job${openJobs.length === 1 ? '' : 's'} available`,
+      onClick: () => setActiveTab('pipeline'),
+    });
+  }
+  if ((conversations as any[]).length === 0) {
+    candidateNextActions.push({
+      id: 'first-touch',
+      title: 'Start the first conversation',
+      meta: 'No email, LinkedIn, SMS, or call history is linked yet',
+      onClick: () => setActiveTab('communication'),
+    });
+  }
+  candidateNextActions.push(
+    ...candidateTasks.slice(0, Math.max(0, 6 - candidateNextActions.length)).map((t) => ({
+      id: t.id,
+      title: t.title,
+      meta: t.due_date ? `Due ${format(new Date(t.due_date), 'MMM d')}` : undefined,
+      done: t.status === 'completed' || !!t.completed_at,
+      onClick: () => setActiveTab('todo'),
+    })),
+  );
 
   const filteredNotes = (notes as any[]).filter((n: any) => {
     if (sidebarSearch) {
@@ -1519,12 +1561,7 @@ const CandidateDetail = () => {
                     </SectionCard>
 
                     <NextActionsCard
-                      items={candidateTasks.slice(0, 6).map((t) => ({
-                        id: t.id,
-                        title: t.title,
-                        meta: t.due_date ? `Due ${format(new Date(t.due_date), 'MMM d')}` : undefined,
-                        done: t.status === 'completed' || !!t.completed_at,
-                      }))}
+                      items={candidateNextActions.slice(0, 6)}
                       emptyLabel="No tasks queued"
                     />
                   </div>

@@ -5,6 +5,7 @@ import { CompanyLogo } from '@/components/shared/CompanyLogo';
 import { CompanyLink, PersonLink } from '@/components/shared/EntityLinks';
 import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
+import { NextActionsCard, type NextAction } from '@/components/shared/cards/NextActionsCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -767,6 +768,65 @@ const JobDetail = () => {
 
   const companyName = job.company_name ?? (job.companies as any)?.name ?? null;
   const companyWebsite = (job.companies as any)?.website ?? null;
+  const jobSendOutRows = (sendOuts as any[]) ?? [];
+  const jobNextActions: NextAction[] = [];
+  if (job.status === 'lead') {
+    jobNextActions.push({
+      id: 'convert-hot',
+      title: 'Convert lead to Hot Job',
+      meta: 'Promote it once the desk is ready to actively recruit',
+      onClick: () => saveField('status', 'hot'),
+    });
+  }
+  if ((jobContacts as any[]).length === 0) {
+    jobNextActions.push({
+      id: 'add-contacts',
+      title: 'Add hiring contacts',
+      meta: 'Action continuity starts with the client-side owner and decision makers',
+      onClick: () => {
+        setActiveJobTab('contacts');
+        setAddContactOpen(true);
+      },
+    });
+  }
+  if (!job.description && !(job as any).marketing_description) {
+    jobNextActions.push({
+      id: 'complete-spec',
+      title: 'Complete the job spec',
+      meta: 'Joe matching and outreach perform better with role detail',
+      onClick: () => setActiveJobTab('details'),
+    });
+  }
+  if (jobSendOutRows.length === 0) {
+    jobNextActions.push({
+      id: 'first-candidate',
+      title: 'Add the first candidate',
+      meta: 'Start the flagship match → send-out loop',
+      onClick: () => {
+        setActiveJobTab('send-outs');
+        setAddSendOutOpen(true);
+      },
+    });
+  } else {
+    const submittedCount = jobSendOutRows.filter((row) => stageToCanonical(row.stage) === 'submitted').length;
+    const interviewCount = jobSendOutRows.filter((row) => stageToCanonical(row.stage) === 'interview').length;
+    if (submittedCount > 0 && interviewCount === 0) {
+      jobNextActions.push({
+        id: 'push-submissions',
+        title: 'Push submitted candidates toward interviews',
+        meta: `${submittedCount} submission${submittedCount === 1 ? '' : 's'} waiting for client movement`,
+        onClick: () => focusStage('submitted'),
+      });
+    }
+  }
+  if (!(job as any).marketing_title || !(job as any).marketing_description) {
+    jobNextActions.push({
+      id: 'generate-marketing',
+      title: 'Generate candidate-facing marketing copy',
+      meta: 'Use Joe to turn the internal spec into recruiter-ready positioning',
+      onClick: () => setActiveJobTab('marketing'),
+    });
+  }
 
   const companyLogoUrl = (() => {
     if (!companyWebsite) return null;
@@ -1611,6 +1671,11 @@ const JobDetail = () => {
 
         {/* ── Right rail (sticky) ─────────────────────────── */}
         <aside className="hidden xl:flex w-72 shrink-0 border-l border-card-border bg-page-bg/40 overflow-y-auto p-4 flex-col gap-4">
+          <NextActionsCard
+            title="Next best actions"
+            items={jobNextActions.slice(0, 5)}
+            emptyLabel="Job workflow current"
+          />
           <QuickStats
             jobId={id!}
             compMin={(job as any).comp_min ?? null}
