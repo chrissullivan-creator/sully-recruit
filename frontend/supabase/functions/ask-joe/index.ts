@@ -57,7 +57,7 @@ Valid person statuses: new | reached_out | engaged. Never filter by back_of_resu
 
 You have tools for searching the CRM. Use them whenever the user's question requires a fact about a specific person, job, communication, send-out, note, or company in the database — don't guess from memory. Chain tools when useful (e.g. search_people → get_person_detail → list_recent_communications). For "who are the contacts/people at <company>" questions, use list_company_people (it resolves the company and lists everyone linked to it) rather than search_people. When the question is about what was actually SAID in a message — find/search an email, LinkedIn DM, or Recruiter InMail by its content ("find the InMail mentioning X", "who messaged about the Citadel role") — use search_messages, then chain to get_person_detail on the returned person_id when you need more.
 
-When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people.`;
+When you reference a person or job, include their ID in parentheses so the recruiter can jump to their page. If a search returns no matches, say so plainly — don't invent people. BUT if a tool result contains a "diagnostic" field, the search backend failed (not an empty database) — tell the recruiter search is temporarily broken and briefly relay the diagnostic; never claim "no candidates found" in that case.`;
 
 // Appended only when JOE_AGENTIC_ENABLED is on and the write-tools are loaded.
 const AGENTIC_PROMPT_SUFFIX = `
@@ -314,6 +314,29 @@ async function embedQuery(text: string): Promise<number[] | null> {
   }
 }
 
+/**
+ * Run an RPC but never swallow the error. A Postgres error here (missing
+ * function from an unapplied migration, a renamed column, an RLS denial) used to
+ * surface as an empty `data`, which the search tools then reported as "no
+ * matches" — making a broken migration or an undeployed edge function
+ * indistinguishable from a genuinely empty result. That is exactly why Ask Joe
+ * could "find nothing" for every query with no way to tell why. Log it and hand
+ * the caller the message so it can be reported in the tool's `diagnostic`.
+ */
+async function callRpc(
+  supabase: any,
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<{ data: any[] | null; error: string | null }> {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) {
+    const msg = error.message ?? String(error);
+    console.error(`ask-joe rpc ${fn} failed: ${msg}`);
+    return { data: null, error: `${fn}: ${msg}` };
+  }
+  return { data: (data as any[]) ?? null, error: null };
+}
+
 function statusFromToolCall(name: string, input: any): string {
   switch (name) {
     case "search_people": {
@@ -384,14 +407,20 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
 
   const embedding = await embedQuery(query);
   const idScore = new Map<string, { score: number; via: string; excerpt?: string }>();
+  // Collect the reason each retrieval path contributed nothing so an empty
+  // result set is explainable (broken RPC vs. missing embeddings vs. genuinely
+  // no data) instead of a silent "no matches".
+  const diagnostics: string[] = [];
+  if (!embedding) diagnostics.push("semantic search skipped (no embedding — VOYAGE_API_KEY may be unset)");
 
   if (embedding && (!role || role === "candidate")) {
-    const { data } = await supabase.rpc("match_resume_embeddings", {
+    const { data, error } = await callRpc(supabase, "match_resume_embeddings", {
       query_embedding: embedding,
       match_count: limit * 2,
       min_similarity: 0.3,
     });
-    for (const r of (data as any[]) ?? []) {
+    if (error) diagnostics.push(error);
+    for (const r of data ?? []) {
       if (!r.candidate_id) continue;
       const prev = idScore.get(r.candidate_id);
       if (!prev || prev.score < r.similarity) {
@@ -401,13 +430,14 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
   }
 
   if (embedding) {
-    const { data } = await supabase.rpc("match_people_joe_says", {
+    const { data, error } = await callRpc(supabase, "match_people_joe_says", {
       query_embedding: embedding,
       match_count: limit * 2,
       min_similarity: 0.3,
       role_filter: role,
     });
-    for (const r of (data as any[]) ?? []) {
+    if (error) diagnostics.push(error);
+    for (const r of data ?? []) {
       if (!r.person_id) continue;
       const prev = idScore.get(r.person_id);
       const sim = Number(r.similarity ?? 0);
@@ -422,17 +452,20 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
   // the candidate's title / company / location / target roles+locations /
   // products / departments, so multi-attribute asks surface the people matching
   // the MOST attributes first — the old OR-with-4-word-cap missed them entirely.
+  // This path does NOT need embeddings, so it must keep working even when the
+  // semantic paths are down — it's the safety net for Ask Joe.
   const terms = extractTerms(query);
   const wantResume = input?.has_resume === true || /\b(resume|resumes|cv)\b/i.test(query);
   if (terms.length && role !== "client") {
-    const { data } = await supabase.rpc("search_people_overlap", {
+    const { data, error } = await callRpc(supabase, "search_people_overlap", {
       p_terms: terms,
       p_want_resume: wantResume,
       p_status: status,
       p_max_rows: limit * 2,
     });
+    if (error) diagnostics.push(error);
     const denom = Math.max(terms.length, 1);
-    for (const r of (data as any[]) ?? []) {
+    for (const r of data ?? []) {
       if (!r.id) continue;
       // Scale into the same band as the embedding similarities (~0.3–0.95) so a
       // full attribute match ranks at/above a strong semantic hit.
@@ -442,9 +475,20 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
         idScore.set(r.id, { score: kwScore, via: prev?.via ?? "keyword" });
       }
     }
+  } else if (!terms.length) {
+    diagnostics.push("keyword search skipped (query had no meaningful terms after stopword removal)");
   }
 
-  if (idScore.size === 0) return JSON.stringify({ results: [], note: "no matches" });
+  if (idScore.size === 0) {
+    // Surface WHY nothing came back. If every path errored, that's an
+    // infrastructure problem (unapplied migration / undeployed function /
+    // missing key), not an empty database — say so instead of "no matches".
+    return JSON.stringify(
+      diagnostics.length
+        ? { results: [], note: "no matches", diagnostic: diagnostics }
+        : { results: [], note: "no matches" },
+    );
+  }
 
   const ids = [...idScore.keys()].slice(0, limit * 2);
   let q = supabase
@@ -458,7 +502,11 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
   // applying it there silently dropped real matches.
   if (role === "client") q = q.contains("roles", [role]);
   if (status) q = q.eq("status", status);
-  const { data: rows } = await q;
+  const { data: rows, error: rowsErr } = await q;
+  if (rowsErr) {
+    console.error(`ask-joe candidates fetch failed: ${rowsErr.message}`);
+    return JSON.stringify({ results: [], note: "no matches", diagnostic: [`candidates fetch: ${rowsErr.message}`] });
+  }
 
   const results = ((rows as any[]) ?? [])
     .map((r) => {
@@ -730,12 +778,15 @@ async function toolMatchCandidatesToJob(supabase: any, input: any): Promise<stri
     return JSON.stringify({ job: { id: job.id, title: job.title }, results: [], note: "embedding unavailable" });
   }
   const idScore = new Map<string, { score: number; via: string; excerpt?: string }>();
-  const { data: matches } = await supabase.rpc("match_resume_embeddings", {
+  const { data: matches, error: matchErr } = await callRpc(supabase, "match_resume_embeddings", {
     query_embedding: embedding,
     match_count: limit * 3,
     min_similarity: 0.3,
   });
-  for (const r of (matches as any[]) ?? []) {
+  if (matchErr) {
+    return JSON.stringify({ job: { id: job.id, title: job.title }, results: [], note: "no matches", diagnostic: [matchErr] });
+  }
+  for (const r of matches ?? []) {
     if (!r.candidate_id) continue;
     const prev = idScore.get(r.candidate_id);
     if (!prev || prev.score < r.similarity) {
