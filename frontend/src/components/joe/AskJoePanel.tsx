@@ -3,6 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { X, ArrowUp, Martini, Loader2, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { JoeActionCard } from '@/components/joe/JoeActionCard';
+import {
+  persistJoeActionProposal,
+  updateJoeActionQueueStatus,
+  type JoeAction,
+  type JoeActionResolution,
+} from '@/lib/joeActions';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -28,12 +37,15 @@ const GREETING: Msg = {
  * edge function (same transport as the legacy bubble).
  */
 export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([GREETING]);
+  const [actions, setActions] = useState<JoeAction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const persistedActionIds = useRef<Set<string>>(new Set());
 
   const hasConversation = messages.length > 1;
 
@@ -66,11 +78,13 @@ export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => v
     const timeoutId = setTimeout(() => controller.abort(), 45_000);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ messages: allMessages.map((m) => ({ role: m.role, content: m.content })) }),
         signal: controller.signal,
@@ -98,7 +112,19 @@ export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => v
           if (jsonStr === '[DONE]') { streamDone = true; break; }
           try {
             const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (parsed.action && parsed.action.id) {
+              const action = parsed.action as JoeAction;
+              setActions((prev) => prev.some((a) => a.id === action.id) ? prev : [...prev, action]);
+              if (user?.id && !persistedActionIds.current.has(action.id)) {
+                persistedActionIds.current.add(action.id);
+                persistJoeActionProposal(action, user.id).catch((err) => {
+                  persistedActionIds.current.delete(action.id);
+                  toast.error(`Could not save Joe proposal: ${err?.message ?? String(err)}`);
+                });
+              }
+              continue;
+            }
+            const content = (parsed.content ?? parsed.choices?.[0]?.delta?.content) as string | undefined;
             if (content) {
               assistantSoFar += content;
               const current = assistantSoFar;
@@ -125,7 +151,20 @@ export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => v
       clearTimeout(timeoutId);
       setIsLoading(false);
     }
-  }, [isLoading, messages]);
+  }, [isLoading, messages, user?.id]);
+
+  const resolveAction = useCallback(async (id: string, resolution: JoeActionResolution = 'dismissed') => {
+    setActions((prev) => prev.filter((x) => x.id !== id));
+    if (!user?.id) return;
+    try {
+      await updateJoeActionQueueStatus(id, resolution, {
+        actor: 'recruiter',
+        note: resolution === 'approved' ? 'Opened review surface from global Ask Joe' : undefined,
+      });
+    } catch (err: any) {
+      toast.error(`Could not update Joe queue: ${err?.message ?? String(err)}`);
+    }
+  }, [user?.id]);
 
   if (!open) return null;
 
@@ -192,6 +231,13 @@ export function AskJoePanel({ open, onClose }: { open: boolean; onClose: () => v
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex justify-start">
                 <div className="rounded-2xl bg-muted px-3.5 py-2.5"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+              </div>
+            )}
+            {actions.length > 0 && (
+              <div className="space-y-2">
+                {actions.map((action) => (
+                  <JoeActionCard key={action.id} action={action} onResolve={resolveAction} />
+                ))}
               </div>
             )}
           </div>
