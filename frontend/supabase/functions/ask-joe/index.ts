@@ -407,11 +407,14 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
 
   const embedding = await embedQuery(query);
   const idScore = new Map<string, { score: number; via: string; excerpt?: string }>();
-  // Collect the reason each retrieval path contributed nothing so an empty
-  // result set is explainable (broken RPC vs. missing embeddings vs. genuinely
-  // no data) instead of a silent "no matches".
+  // Two separate buckets so we don't cry wolf. `diagnostics` holds ONLY true
+  // backend failures (RPC / candidates-fetch errors) — the system prompt treats
+  // a `diagnostic` field as an outage and tells the recruiter search is broken.
+  // `explanations` holds benign, non-failure skips (no embedding key, empty
+  // query) that must NOT read as an outage — surfaced as debug detail only.
   const diagnostics: string[] = [];
-  if (!embedding) diagnostics.push("semantic search skipped (no embedding — VOYAGE_API_KEY may be unset)");
+  const explanations: string[] = [];
+  if (!embedding) explanations.push("semantic search skipped (no embedding — VOYAGE_API_KEY may be unset)");
 
   if (embedding && (!role || role === "candidate")) {
     const { data, error } = await callRpc(supabase, "match_resume_embeddings", {
@@ -476,18 +479,18 @@ async function toolSearchPeople(supabase: any, input: any): Promise<string> {
       }
     }
   } else if (!terms.length) {
-    diagnostics.push("keyword search skipped (query had no meaningful terms after stopword removal)");
+    explanations.push("keyword search skipped (query had no meaningful terms after stopword removal)");
   }
 
   if (idScore.size === 0) {
-    // Surface WHY nothing came back. If every path errored, that's an
-    // infrastructure problem (unapplied migration / undeployed function /
-    // missing key), not an empty database — say so instead of "no matches".
-    return JSON.stringify(
-      diagnostics.length
-        ? { results: [], note: "no matches", diagnostic: diagnostics }
-        : { results: [], note: "no matches" },
-    );
+    // Surface WHY nothing came back. `diagnostic` is set ONLY when a real
+    // backend path errored (unapplied migration / undeployed function / RLS) —
+    // the prompt reads that as an outage. Benign skips go in `explanations` as
+    // debug detail so Joe still reports a plain "no matches" for an empty DB.
+    const out: Record<string, unknown> = { results: [], note: "no matches" };
+    if (diagnostics.length) out.diagnostic = diagnostics;
+    if (explanations.length) out.explanations = explanations;
+    return JSON.stringify(out);
   }
 
   const ids = [...idScore.keys()].slice(0, limit * 2);
