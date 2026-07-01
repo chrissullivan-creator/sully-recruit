@@ -27,7 +27,11 @@ import { fetchWithRetry } from "../../../../src/server-lib/fetch-retry.js";
  * Inngest is the only scheduler now.
  */
 export const reparseResumes = inngest.createFunction(
-  { id: "reparse-resumes", name: "Reparse resumes missing raw_text (Inngest)" },
+  // Serialize: this cron fires every minute but rows aren't atomically claimed,
+  // so without a concurrency cap an overrunning run overlaps the next one and
+  // both parse the same résumé (wasted AI spend + racing writes). Mirrors the
+  // reconcile-orphaned-resumes sibling.
+  { id: "reparse-resumes", name: "Reparse resumes missing raw_text (Inngest)", concurrency: [{ limit: 1 }] },
   { cron: "* * * * *" },
   async ({ logger }) => {
     const supabase = getSupabaseAdmin();
