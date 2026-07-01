@@ -35,7 +35,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { invalidateSendOutScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
-import { ListSkeleton } from '@/components/shared/EmptyState';
+import { DataErrorState, ListSkeleton } from '@/components/shared/EmptyState';
 
 function readFiltersFromUrl(sp: URLSearchParams): SendOutsFilters {
   return {
@@ -61,7 +61,7 @@ export default function SendOuts() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: rows = [], isLoading } = useSendOuts();
+  const { data: rows = [], isLoading, isError, error, refetch } = useSendOuts();
   const { data: jobs = [] } = useJobs(true);
   const { data: profiles = [] } = useProfiles();
   const recruiters = profiles.map((p: any) => ({ id: p.id, full_name: p.full_name, email: p.email }));
@@ -336,62 +336,73 @@ export default function SendOuts() {
       </PageHeader>
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-6 lg:p-8 space-y-6">
-        {tab === 'pipeline' && (
-          <PipelineKpiStrip stats={stats} onStageClick={scrollToStage} />
-        )}
-
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          jobs={jobs as any[]}
-          recruiters={recruiters}
-        />
-
-        {isLoading ? (
-          <ListSkeleton rows={5} />
-        ) : tab === 'analytics' ? (
-          <SendOutsAnalytics rows={filteredRows} offerFee={offerFee} />
-        ) : tab === 'all' ? (
-          <AllSendOutsTable rows={filteredRows} onOpen={handleOpenRow} />
+        {isError ? (
+          <DataErrorState
+            title="Send Outs data source unavailable"
+            description="We could not load the send-out pipeline. Stage counts, analytics, and row actions are paused until the data source responds."
+            error={error}
+            onRetry={() => refetch()}
+          />
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={pointerWithin}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            onDragCancel={() => { setActiveDrag(null); setOverStage(null); }}
-          >
-            <PipelineBoard
-              rowsByStage={rowsByStage}
-              overStage={overStage}
-              selectedIds={selectedIds}
-              onToggleSelect={toggleSelect}
-              onOpen={handleOpenRow}
-              onAdvance={handleAdvance}
-              onDelete={(row) => setDeleteRow(row)}
-              onAdd={(stage) => setAddModal({ open: true, stage, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
+          <>
+            {tab === 'pipeline' && (
+              <PipelineKpiStrip stats={stats} onStageClick={scrollToStage} />
+            )}
+
+            <FilterBar
+              filters={filters}
+              onChange={setFilters}
+              jobs={jobs as any[]}
+              recruiters={recruiters}
             />
 
-            <DragOverlay>
-              {activeDrag && (
-                <div className="rounded-lg border border-emerald bg-white shadow-xl px-3 py-2 text-sm font-medium text-emerald-dark">
-                  {activeDrag.candidate?.full_name ?? '—'}
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
-        )}
+            {isLoading ? (
+              <ListSkeleton rows={5} />
+            ) : tab === 'analytics' ? (
+              <SendOutsAnalytics rows={filteredRows} offerFee={offerFee} />
+            ) : tab === 'all' ? (
+              <AllSendOutsTable rows={filteredRows} onOpen={handleOpenRow} />
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={pointerWithin}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+                onDragCancel={() => { setActiveDrag(null); setOverStage(null); }}
+              >
+                <PipelineBoard
+                  rowsByStage={rowsByStage}
+                  overStage={overStage}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onOpen={handleOpenRow}
+                  onAdvance={handleAdvance}
+                  onDelete={(row) => setDeleteRow(row)}
+                  onAdd={(stage) => setAddModal({ open: true, stage, jobId: filters.jobId !== 'all' ? filters.jobId : null })}
+                />
 
-        {!isLoading && tab === 'pipeline' && filteredRows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
-            <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
-            <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>
-          </div>
-        )}
+                <DragOverlay>
+                  {activeDrag && (
+                    <div className="rounded-lg border border-emerald bg-white shadow-xl px-3 py-2 text-sm font-medium text-emerald-dark">
+                      {activeDrag.candidate?.full_name ?? '—'}
+                    </div>
+                  )}
+                </DragOverlay>
+              </DndContext>
+            )}
 
-        {!isLoading && tab === 'pipeline' && filteredRows.length > 0 && (
-          <PipelineSidebars stats={stats} rows={filteredRows} onStageClick={scrollToStage} />
+            {!isLoading && tab === 'pipeline' && filteredRows.length === 0 && (
+              <div className="rounded-xl border border-dashed border-card-border bg-white py-16 text-center">
+                <p className="text-sm font-medium text-foreground">No send-outs match these filters.</p>
+                <p className="text-xs text-muted-foreground mt-1">Clear filters or click "New Send Out" to start one.</p>
+              </div>
+            )}
+
+            {!isLoading && tab === 'pipeline' && filteredRows.length > 0 && (
+              <PipelineSidebars stats={stats} rows={filteredRows} onStageClick={scrollToStage} />
+            )}
+          </>
         )}
       </div>
 

@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { compareSequenceNodes } from '@/components/sequences/sequenceBranches';
 import { progressionRank, stageToCanonical, PROGRESSION, type CanonicalStage } from '@/lib/pipeline';
+import { withQueryTimeout } from '@/lib/queryTimeout';
 
 // Candidates — queries the people table (was renamed from candidates) and filters
 // to type='candidate'. The `candidates` backwards-compat view still exists for
@@ -322,7 +323,7 @@ export function useJobs(includesClosed = false) {
       if (!includesClosed) {
         query = query.not('status', 'in', '("filled","closed_lost")');
       }
-      const { data, error } = await query;
+      const { data, error } = await withQueryTimeout(query, 'Jobs data source');
       if (error) throw error;
       return data;
     },

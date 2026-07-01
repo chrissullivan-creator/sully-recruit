@@ -18,7 +18,7 @@ import { JOB_STATUSES, jobStatusMeta, jobStatusLabel, LEAD_STAGES, LEAD_STAGE_VA
 import { PROGRESSION, canonicalConfig } from '@/lib/pipeline';
 import { invalidateJobScope } from '@/lib/invalidate';
 import { softDelete } from '@/lib/softDelete';
-import { TableSkeleton, EmptyState } from '@/components/shared/EmptyState';
+import { TableSkeleton, EmptyState, DataErrorState } from '@/components/shared/EmptyState';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -83,7 +83,7 @@ const Jobs = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const queryClient = useQueryClient();
-  const { data: jobs = [], isLoading } = useJobs(showClosed);
+  const { data: jobs = [], isLoading, isError, error, refetch } = useJobs(showClosed);
   // Furthest candidate-pipeline stage per job — places each job on the Hot board.
   const { data: pipelineStages = {} } = useJobPipelineStages();
 
@@ -336,6 +336,13 @@ const Jobs = () => {
 
         {isLoading ? (
           <TableSkeleton rows={6} cols={6} />
+        ) : isError ? (
+          <DataErrorState
+            title="Jobs data source unavailable"
+            description="We could not load open jobs from Supabase. Lead, hot job, match, and send-out counts may be stale until the data source responds."
+            error={error}
+            onRetry={() => refetch()}
+          />
         ) : filteredJobs.length === 0 && !searchQuery ? (
           <EmptyState
             icon={Briefcase}
