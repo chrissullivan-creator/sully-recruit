@@ -8,7 +8,7 @@ import {
   getMistralKey,
 } from "../../../../src/server-lib/supabase.js";
 import {
-  looksLikeResume,
+  filenameLooksLikeResume,
   getVoyageEmbedding,
   buildProfileText,
   delay,
@@ -50,7 +50,7 @@ export const reparseResumes = inngest.createFunction(
 
     for (const r of unparsedRaw ?? []) {
       const fileName = r.file_name || r.file_path.split("/").pop() || "";
-      if (!looksLikeResume(fileName)) { junkIds.push(r.id); continue; }
+      if (!filenameLooksLikeResume(fileName)) { junkIds.push(r.id); continue; }
       const key = `${r.candidate_id}::${fileName.toLowerCase().trim()}`;
       if (seen.has(key)) { junkIds.push(r.id); continue; }
       seen.add(key);

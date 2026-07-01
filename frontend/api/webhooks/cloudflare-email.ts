@@ -279,16 +279,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    await inngest.send({
-      name: "ai/resume-ingestion.requested",
-      data: {
+    // Guard the dispatch: if inngest.send throws (network, rate limit), the
+    // resume row already exists at parsing_status='pending' with the file in
+    // storage. Without this catch it would sit there forever, silently
+    // orphaned, while the webhook still returns 200. Stamp it so the
+    // reconcile-orphaned-resumes sweep re-dispatches it.
+    try {
+      await inngest.send({
+        name: "ai/resume-ingestion.requested",
+        data: {
+          resumeId: resumeRow.id,
+          candidateId,
+          filePath: storagePath,
+          fileName,
+        },
+      });
+      created++;
+    } catch (err: any) {
+      console.error("cloudflare-email: resume-ingestion dispatch failed", {
         resumeId: resumeRow.id,
-        candidateId,
-        filePath: storagePath,
-        fileName,
-      },
-    });
-    created++;
+        error: err?.message,
+      });
+      await supabase
+        .from("resumes")
+        .update({ parsing_status: "ingest_dispatch_failed" })
+        .eq("id", resumeRow.id);
+      skipped++;
+    }
   }
 
   return res.status(200).json({

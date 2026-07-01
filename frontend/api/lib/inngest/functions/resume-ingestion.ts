@@ -10,6 +10,7 @@ import {
 import {
   buildProfileText,
   getVoyageEmbedding,
+  textLooksLikeResume,
 } from "../../../../src/server-lib/resume-parsing.js";
 import { classifyEmail, normalizeEmail } from "../../../../src/lib/email-classifier.js";
 import { matchPersonByEmail } from "../../../../src/server-lib/match-person-by-email.js";
@@ -86,7 +87,7 @@ export const resumeIngestion = inngest.createFunction(
 
       const mistralKey = await getMistralKey().catch(() => "");
       const sniffText = await extractResumeText(fileBytes, fileName, { mistralKey });
-      if (!looksLikeResume(sniffText)) {
+      if (!textLooksLikeResume(sniffText)) {
         logger.warn("File does not look like a resume; skipping AI parse", {
           fileName,
           textLength: sniffText.length,
@@ -335,29 +336,6 @@ ${rawText.slice(0, 60000)}`;
   },
 );
 
-/**
- * Cheap pre-AI guard: does this look like a resume?
- *
- * Triggers a soft rejection if the extracted text is too short, missing
- * any email pattern, AND missing all resume-shaped keywords. The bar is
- * intentionally low — false positives waste a few cents of AI tokens,
- * false negatives lose a candidate. So we only reject when *all three*
- * signals are missing.
- */
-function looksLikeResume(rawText: string): boolean {
-  const text = (rawText || "").toLowerCase();
-  if (text.length < 200) return false;
-
-  const hasEmail = /[\w.+-]+@[\w-]+\.[\w.-]+/.test(text);
-  const KEYWORDS = [
-    "experience", "education", "skills", "summary", "objective",
-    "employment", "qualifications", "responsibilities", "achievements",
-    "university", "college", "bachelor", "master", "ph.d", "phd",
-    "linkedin.com/in",
-  ];
-  const hasKeyword = KEYWORDS.some((k) => text.includes(k));
-
-  if (hasEmail && hasKeyword) return true;
-  if (hasEmail || hasKeyword) return true;
-  return false;
-}
+// The pre-AI "does this look like a résumé?" text heuristic now lives in
+// server-lib/resume-parsing.ts as `textLooksLikeResume` (shared with the
+// reparse + reconcile sweeps) — imported above.
