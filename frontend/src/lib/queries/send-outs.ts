@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { withQueryTimeout } from '@/lib/queryTimeout';
 
 // Shape of a row used by the SendOuts page. Joined to candidate + job + recruiter.
 export interface SendOutRow {
@@ -62,7 +63,7 @@ export function useSendOuts() {
   return useQuery({
     queryKey: ['send_outs_list'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await withQueryTimeout(supabase
         .from('send_outs')
         .select(`
           id, candidate_id, job_id, recruiter_id, stage, outcome,
@@ -76,7 +77,7 @@ export function useSendOuts() {
         `)
         .is('deleted_at', null)
         .order('updated_at', { ascending: false, nullsFirst: false })
-        .limit(2000);
+        .limit(2000), 'Send outs data source');
       if (error) throw error;
       return (data ?? []) as unknown as SendOutRow[];
     },

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,8 @@ import { NeedsClassificationList } from '@/components/inbox/NeedsClassificationL
 import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { CallButton } from '@/components/shared/CallButton';
 import { TemplatePickerPopover } from '@/components/templates/TemplatePickerPopover';
+import { DataErrorState } from '@/components/shared/EmptyState';
+import { withQueryTimeout } from '@/lib/queryTimeout';
 import {
   type MessageAttachment, type InboxThread, type Message,
   LINKEDIN_CHANNELS, CHANNEL_ICONS, CHANNEL_LABELS, CHANNEL_COLORS,
@@ -68,6 +70,7 @@ export default function Inbox() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [bulkInMailOpen, setBulkInMailOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // URL-synced state for sidebar nav: ?tab=all|focused|other &view=unread|archive|... &channel=email|...
   // "All" is the default (no ?tab) so unlinked recruiter InMails — which land
@@ -187,7 +190,7 @@ export default function Inbox() {
   // user is viewing a tab that surfaces unknown senders. Returns threads from
   // unknown senders that we don't persist under the Phase 5 storage rule.
   const liveChannel = channel === 'all' ? 'linkedin' : channel;
-  const { data: liveData } = useQuery({
+  const { data: liveData, isError: liveIsError, error: liveError, refetch: refetchLive } = useQuery({
     queryKey: ['inbox_live_threads', liveChannel, scope, memberFilter],
     enabled: (tab === 'other' || tab === 'all') && !!userId,
     staleTime: 60_000,
@@ -201,10 +204,10 @@ export default function Inbox() {
         qs.set('scope', 'team');
         if (memberFilter !== 'all') qs.set('member', memberFilter);
       }
-      const res = await fetch(`/api/inbox/live-threads?${qs.toString()}`, {
+      const res = await withQueryTimeout(fetch(`/api/inbox/live-threads?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return { items: [] };
+      }), 'Live inbox data source');
+      if (!res.ok) throw new Error(`Live inbox request failed (${res.status})`);
       return res.json();
     },
   });
@@ -244,7 +247,7 @@ export default function Inbox() {
     integration_account_id: it.integration_account_id,
   }));
 
-  const { data: allThreads = [], isLoading } = useQuery({
+  const { data: allThreads = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['inbox_threads', scope, memberFilter, scopedAccountIds],
     enabled: scopeReady,
     queryFn: async () => {
@@ -260,7 +263,7 @@ export default function Inbox() {
       if (scopedAccountIds !== null) {
         query = query.in('integration_account_id', scopedAccountIds);
       }
-      const { data, error } = await query;
+      const { data, error } = await withQueryTimeout(query, 'Inbox data source');
       if (error) throw error;
       return data as InboxThread[];
     },
@@ -362,6 +365,14 @@ export default function Inbox() {
   })();
 
   const unreadCount = scoped.filter((t) => !t.is_read && visibleByDefault(t)).length;
+  const selectableThreads = useMemo(
+    () => filtered.filter((t) => !t.id.startsWith('live:')),
+    [filtered],
+  );
+  const selectedThread = useMemo(
+    () => selectableThreads.find((t) => t.id === selectedId) ?? null,
+    [selectableThreads, selectedId],
+  );
 
   // Per-channel unread badges for the rail's Channels section.
   const channelUnread: Partial<Record<InboxChannel, number>> = {
@@ -405,6 +416,54 @@ export default function Inbox() {
     updateThread(t.id, { snoozed_until: wakeAt.toISOString(), status: 'snoozed' });
   const handleUnsnooze = (t: InboxThread) =>
     updateThread(t.id, { snoozed_until: null, status: null });
+
+  useEffect(() => {
+    if (callsActive || view === 'needs_classification' || isLoading || isError) return;
+    const firstId = selectableThreads[0]?.id ?? null;
+    if (!firstId) {
+      if (selectedId) setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !selectableThreads.some((t) => t.id === selectedId)) {
+      setSelectedId(firstId);
+    }
+  }, [callsActive, view, isLoading, isError, selectedId, selectableThreads]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+      if (event.key === '/' && !isTyping) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (isTyping || callsActive || view === 'needs_classification' || selectableThreads.length === 0) return;
+      const currentIndex = Math.max(0, selectableThreads.findIndex((t) => t.id === selectedId));
+      if (event.key === 'j' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSelectedId(selectableThreads[Math.min(currentIndex + 1, selectableThreads.length - 1)].id);
+      } else if (event.key === 'k' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSelectedId(selectableThreads[Math.max(currentIndex - 1, 0)].id);
+      } else if (selectedThread && event.key.toLowerCase() === 'e') {
+        event.preventDefault();
+        handleArchive(selectedThread);
+      } else if (selectedThread && event.key.toLowerCase() === 'u') {
+        event.preventDefault();
+        handleToggleRead(selectedThread);
+      } else if (selectedThread && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        handleToggleFlag(selectedThread);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [callsActive, view, selectableThreads, selectedId, selectedThread]);
 
   return (
     <MainLayout>
@@ -474,6 +533,7 @@ export default function Inbox() {
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
+                ref={searchInputRef}
                 placeholder="Search messages, names..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -683,7 +743,25 @@ export default function Inbox() {
 
           {/* Thread list */}
           <ScrollArea className="flex-1">
-            {view === 'needs_classification' ? (
+            {isError ? (
+              <div className="p-3">
+                <DataErrorState
+                  title="Inbox data source unavailable"
+                  description="We could not load stored conversations from Supabase. Message triage and bulk actions are paused until the data source responds."
+                  error={error}
+                  onRetry={() => refetch()}
+                />
+              </div>
+            ) : liveIsError && (tab === 'other' || tab === 'all') ? (
+              <div className="p-3">
+                <DataErrorState
+                  title="Live inbox unavailable"
+                  description="Stored conversations are available, but live unknown-sender messages could not be fetched from Unipile right now."
+                  error={liveError}
+                  onRetry={() => refetchLive()}
+                />
+              </div>
+            ) : view === 'needs_classification' ? (
               <NeedsClassificationList />
             ) : isLoading ? (
               <div className="flex items-center justify-center py-16">

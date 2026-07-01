@@ -11,6 +11,8 @@ import { format, startOfMonth, endOfMonth, subMonths, startOfYear, parseISO } fr
 import { cn } from '@/lib/utils';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { HorizontalTableScroll } from '@/components/shared/HorizontalTableScroll';
+import { DataErrorState } from '@/components/shared/EmptyState';
+import { withQueryTimeout } from '@/lib/queryTimeout';
 
 type RangeKey = 'this_month' | 'last_month' | 'last_3' | 'ytd';
 
@@ -53,7 +55,7 @@ function useSendOutMetrics(start: Date, end: Date) {
   return useQuery({
     queryKey: ['report_send_outs', start.toISOString(), end.toISOString()],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await withQueryTimeout(supabase
         .from('send_outs')
         .select(`
           id, recruiter_id, job_id, candidate_id, stage, created_at, updated_at,
@@ -62,7 +64,7 @@ function useSendOutMetrics(start: Date, end: Date) {
         `)
         .is('deleted_at', null)
         .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString());
+        .lte('created_at', end.toISOString()), 'Reports data source');
       if (error) throw error;
       return (data ?? []) as unknown as SendOutMetric[];
     },
@@ -80,7 +82,7 @@ function fmtMoney(n: number) {
 export default function Reports() {
   const [range, setRange] = useState<RangeKey>('this_month');
   const { start, end } = useMemo(() => rangeToDates(range), [range]);
-  const { data: rows = [], isLoading } = useSendOutMetrics(start, end);
+  const { data: rows = [], isLoading, isError, error, refetch } = useSendOutMetrics(start, end);
   const { data: profiles = [] } = useProfiles();
 
   const profileById = useMemo(() => {
@@ -121,41 +123,51 @@ export default function Reports() {
       />
 
       <div className="bg-page-bg min-h-[calc(100vh-4rem)] p-8 space-y-6">
-        {/* KPI strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          <KpiCard label="Total Send-outs" value={totals.total.toString()} />
-          <KpiCard label="Submissions" value={totals.sentOut.toString()} />
-          <KpiCard label="Interviews" value={totals.interviews.toString()} />
-          <KpiCard label="Offers" value={totals.offers.toString()} />
-          <KpiCard label="Placements" value={totals.placements.toString()} highlight />
-          <KpiCard label="Placed Fee" value={fmtMoney(totals.placedFee)} highlight />
-          <KpiCard label="Pending (Offer) Fee" value={fmtMoney(totals.offerFee)} />
-        </div>
-
-        {isLoading ? (
-          <SectionCard>
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
-            </div>
-          </SectionCard>
+        {isError ? (
+          <DataErrorState
+            title="Reports data source unavailable"
+            description="We could not load send-out metrics for this date range. Fee, recruiter, client, and month breakdowns are hidden until the data source responds."
+            error={error}
+            onRetry={() => refetch()}
+          />
         ) : (
-          <Tabs defaultValue="recruiter" className="w-full">
-            <TabsList>
-              <TabsTrigger value="recruiter"><Users className="h-3.5 w-3.5 mr-1.5" /> By Recruiter</TabsTrigger>
-              <TabsTrigger value="client"><Building2 className="h-3.5 w-3.5 mr-1.5" /> By Client</TabsTrigger>
-              <TabsTrigger value="month"><CalendarIcon className="h-3.5 w-3.5 mr-1.5" /> By Month</TabsTrigger>
-            </TabsList>
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+              <KpiCard label="Total Send-outs" value={totals.total.toString()} />
+              <KpiCard label="Submissions" value={totals.sentOut.toString()} />
+              <KpiCard label="Interviews" value={totals.interviews.toString()} />
+              <KpiCard label="Offers" value={totals.offers.toString()} />
+              <KpiCard label="Placements" value={totals.placements.toString()} highlight />
+              <KpiCard label="Placed Fee" value={fmtMoney(totals.placedFee)} highlight />
+              <KpiCard label="Pending (Offer) Fee" value={fmtMoney(totals.offerFee)} />
+            </div>
 
-            <TabsContent value="recruiter">
-              <RecruiterTable rows={rows} profileById={profileById} />
-            </TabsContent>
-            <TabsContent value="client">
-              <ClientTable rows={rows} />
-            </TabsContent>
-            <TabsContent value="month">
-              <MonthTable rows={rows} />
-            </TabsContent>
-          </Tabs>
+            {isLoading ? (
+              <SectionCard>
+                <div className="flex items-center justify-center py-16 text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
+                </div>
+              </SectionCard>
+            ) : (
+              <Tabs defaultValue="recruiter" className="w-full">
+                <TabsList>
+                  <TabsTrigger value="recruiter"><Users className="h-3.5 w-3.5 mr-1.5" /> By Recruiter</TabsTrigger>
+                  <TabsTrigger value="client"><Building2 className="h-3.5 w-3.5 mr-1.5" /> By Client</TabsTrigger>
+                  <TabsTrigger value="month"><CalendarIcon className="h-3.5 w-3.5 mr-1.5" /> By Month</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="recruiter">
+                  <RecruiterTable rows={rows} profileById={profileById} />
+                </TabsContent>
+                <TabsContent value="client">
+                  <ClientTable rows={rows} />
+                </TabsContent>
+                <TabsContent value="month">
+                  <MonthTable rows={rows} />
+                </TabsContent>
+              </Tabs>
+            )}
+          </>
         )}
       </div>
     </MainLayout>

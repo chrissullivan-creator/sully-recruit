@@ -6,8 +6,10 @@ import { SegmentedNav } from '@/components/layout/SegmentedNav';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DataErrorState } from '@/components/shared/EmptyState';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { withQueryTimeout } from '@/lib/queryTimeout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Check, Clock, X, ChevronRight, Martini } from 'lucide-react';
@@ -57,18 +59,18 @@ export default function Today() {
   const queryClient = useQueryClient();
   const ownerUserId = user?.id ?? null;
 
-  const { data: briefings = [], isLoading } = useQuery({
+  const { data: briefings = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['joe_briefings', ownerUserId],
     enabled: !!ownerUserId,
     staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await withQueryTimeout((supabase as any)
         .from('joe_briefings')
         .select('id, entity_type, entity_id, category, headline, rationale, score, status')
         .eq('owner_user_id', ownerUserId)
         .eq('status', 'open')
         .order('score', { ascending: false })
-        .limit(50);
+        .limit(50), 'Joe briefing data source');
       if (error) throw error;
       return (data ?? []) as Briefing[];
     },
@@ -129,6 +131,14 @@ export default function Today() {
             <SectionCard>
               <div className="text-sm text-muted-foreground py-12 text-center">Loading…</div>
             </SectionCard>
+          ) : isError ? (
+            <DataErrorState
+              className="mt-4"
+              title="Joe briefing unavailable"
+              description="We could not load today's action queue. No sends, enrollments, or stage moves have run; retry when the data source is available."
+              error={error}
+              onRetry={() => refetch()}
+            />
           ) : briefings.length === 0 ? (
             <SectionCard>
               <div className="py-12 text-center">

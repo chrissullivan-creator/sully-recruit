@@ -1,7 +1,8 @@
 import { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import type { LucideIcon } from 'lucide-react';
+import { AlertTriangle, RefreshCw, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getQueryErrorMessage } from '@/lib/queryTimeout';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -34,6 +35,64 @@ export function EmptyState({ icon: Icon, title, description, action, className, 
         </Button>
       )}
       {children && <div className="mt-3">{children}</div>}
+    </div>
+  );
+}
+
+interface QueryRetryButtonProps {
+  onRetry?: () => void;
+  label?: string;
+  className?: string;
+}
+
+export function QueryRetryButton({ onRetry, label = 'Retry', className }: QueryRetryButtonProps) {
+  if (!onRetry) return null;
+  return (
+    <Button variant="outline" size="sm" onClick={onRetry} className={cn('mt-4 gap-1.5', className)}>
+      <RefreshCw className="h-3.5 w-3.5" />
+      {label}
+    </Button>
+  );
+}
+
+interface DataErrorStateProps {
+  title?: string;
+  description?: string;
+  error?: unknown;
+  onRetry?: () => void;
+  retryLabel?: string;
+  className?: string;
+}
+
+export function DataErrorState({
+  title = 'Data source unavailable',
+  description = 'This page could not load its data. Check system status or try again.',
+  error,
+  onRetry,
+  retryLabel = 'Retry',
+  className,
+}: DataErrorStateProps) {
+  const message = getQueryErrorMessage(error);
+
+  return (
+    <div
+      role="alert"
+      className={cn(
+        'rounded-xl border border-amber-200 bg-amber-50 py-10 px-6 text-center',
+        className,
+      )}
+    >
+      <div className="mx-auto h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center mb-3">
+        <AlertTriangle className="h-5 w-5 text-amber-700" />
+      </div>
+      <p className="text-sm font-display font-semibold text-amber-900">{title}</p>
+      <p className="text-xs text-amber-800/80 mt-1 max-w-md mx-auto">{description}</p>
+      {message && (
+        <p className="text-[11px] text-amber-900/70 mt-2 max-w-md mx-auto truncate" title={message}>
+          {message}
+        </p>
+      )}
+      <QueryRetryButton onRetry={onRetry} label={retryLabel} />
     </div>
   );
 }

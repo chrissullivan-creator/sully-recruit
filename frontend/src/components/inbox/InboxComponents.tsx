@@ -785,6 +785,77 @@ function looksLikeHtml(s: string): boolean {
   return /<\/?(p|div|br|span|a|table|tr|td|th|tbody|thead|ul|ol|li|h[1-6]|strong|em|b|i|u|body|html|head|style|blockquote|font|img|hr|pre|code)\b/i.test(s);
 }
 
+function InboxNextActionStrip({
+  thread,
+  messages,
+  onAddPerson,
+  onFocusReply,
+  onSetFollowUp,
+}: {
+  thread: InboxThread;
+  messages: Message[];
+  onAddPerson: () => void;
+  onFocusReply: () => void;
+  onSetFollowUp: (date: Date) => void;
+}) {
+  const latest = messages[messages.length - 1] ?? null;
+  const latestInbound = latest?.direction === 'inbound';
+  const isUnlinked = !(thread.candidate_id || thread.contact_id);
+  const awaitingReply = !thread.last_inbound_at && !!thread.last_message_at;
+  const nextFollowUp = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 2);
+    onSetFollowUp(date);
+  };
+
+  const primary = isUnlinked
+    ? {
+        icon: UserPlus,
+        label: 'Add person',
+        detail: 'Link this sender so the relationship, replies, and send-out history stay attached.',
+        onClick: onAddPerson,
+      }
+    : latestInbound
+      ? {
+          icon: PenSquare,
+          label: 'Reply',
+          detail: 'Latest activity is inbound. Draft a response while the thread is warm.',
+          onClick: onFocusReply,
+        }
+      : awaitingReply
+        ? {
+            icon: Bell,
+            label: 'Set follow-up',
+            detail: 'You are waiting on them. Add a reminder so the conversation comes back if they stay quiet.',
+            onClick: nextFollowUp,
+          }
+        : {
+            icon: CheckCircle2,
+            label: 'Thread current',
+            detail: 'No immediate action is required. Keep context here for the next touch.',
+            onClick: onFocusReply,
+          };
+  const PrimaryIcon = primary.icon;
+
+  return (
+    <div className="border-b border-border bg-card/70 px-6 py-2.5">
+      <div className="mx-auto flex max-w-3xl items-center gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+          <PrimaryIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-foreground">{primary.label}</p>
+          <p className="truncate text-[11px] text-muted-foreground">{primary.detail}</p>
+        </div>
+        <Button size="xs" variant="outline" onClick={primary.onClick} className="shrink-0 gap-1.5">
+          <PrimaryIcon className="h-3.5 w-3.5" />
+          {primary.label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function MessagePane({ threadId, onDeleted }: { threadId: string | null; onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
@@ -855,6 +926,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: thread, isLoading: threadLoading } = useQuery({
     queryKey: ['inbox_thread', threadId],
@@ -961,6 +1033,13 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
   }, [threadId, thread?.is_read]);
 
   const handlePickFiles = () => fileInputRef.current?.click();
+  const focusComposer = () => {
+    composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    requestAnimationFrame(() => {
+      const editable = composerRef.current?.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      editable?.focus();
+    });
+  };
 
   const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -1406,6 +1485,14 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
           </div>
         )}
 
+        <InboxNextActionStrip
+          thread={thread}
+          messages={messages}
+          onAddPerson={() => { setCreateType(undefined); setCreateDialogOpen(true); }}
+          onFocusReply={focusComposer}
+          onSetFollowUp={handleSetFollowUp}
+        />
+
         {/* Messages scroll */}
         <ScrollArea className="flex-1">
           <div className="p-6">
@@ -1592,7 +1679,7 @@ export function MessagePane({ threadId, onDeleted }: { threadId: string | null; 
         </ScrollArea>
 
         {/* Reply — hidden for call channel */}
-        {thread.channel !== 'call' && <div className="border-t border-border p-4">
+        {thread.channel !== 'call' && <div ref={composerRef} className="border-t border-border p-4">
           <div className="max-w-2xl mx-auto">
             {/* Pending attachments */}
             {pendingAttachments.length > 0 && (

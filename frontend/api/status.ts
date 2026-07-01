@@ -18,6 +18,8 @@ interface CheckResult {
   ok: boolean;
   latency_ms: number | null;
   detail?: string;
+  group?: string;
+  impact?: string;
 }
 
 const TIMEOUT_MS = 4000;
@@ -31,13 +33,18 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function check(name: string, fn: () => Promise<{ ok: boolean; detail?: string }>): Promise<CheckResult> {
+async function check(
+  name: string,
+  group: string,
+  impact: string,
+  fn: () => Promise<{ ok: boolean; detail?: string }>,
+): Promise<CheckResult> {
   const t0 = Date.now();
   try {
     const out = await withTimeout(fn(), TIMEOUT_MS);
-    return { name, ok: out.ok, latency_ms: Date.now() - t0, detail: out.detail };
+    return { name, group, impact, ok: out.ok, latency_ms: Date.now() - t0, detail: out.detail };
   } catch (err: any) {
-    return { name, ok: false, latency_ms: Date.now() - t0, detail: err.message };
+    return { name, group, impact, ok: false, latency_ms: Date.now() - t0, detail: err.message };
   }
 }
 
@@ -51,7 +58,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
 
   // Pull external creds from app_settings — same pattern as the rest of
   // the codebase, no env var sprawl.
-  const { data: settings } = await supabase
+  const { data: settings } = await withTimeout(supabase
     .from("app_settings")
     .select("key, value")
     .in("key", [
@@ -61,18 +68,35 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       "MICROSOFT_GRAPH_CLIENT_SECRET",
       "MICROSOFT_GRAPH_TENANT_ID",
       "ANTHROPIC_API_KEY",
-    ]);
+      "OPENAI_API_KEY",
+    ]), TIMEOUT_MS);
   const cfg = new Map((settings ?? []).map((s: any) => [s.key, s.value]));
 
   const checks: CheckResult[] = await Promise.all([
-    // Postgres — a trivial query against a real table.
-    check("Postgres", async () => {
+    // Supabase Auth — confirms sign-in/admin auth API is reachable.
+    check("Supabase Auth", "Core CRM", "Login, session refresh, and user lookup", async () => {
+      const { error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
+      return { ok: !error, detail: error?.message };
+    }),
+
+    // Supabase Data API — a trivial query against a real table.
+    check("Supabase Data API", "Core CRM", "Jobs, people, companies, send-outs, and reports", async () => {
       const { error } = await supabase.from("app_settings").select("key").limit(1);
       return { ok: !error, detail: error?.message };
     }),
 
+    // Inngest — readiness/config check without emitting an event.
+    check("Inngest", "Automation", "Sequences, Joe briefings, sync jobs, and background processing", async () => {
+      const hasEventKey = Boolean(process.env.INNGEST_EVENT_KEY);
+      const hasSigningKey = Boolean(process.env.INNGEST_SIGNING_KEY);
+      if (!hasEventKey || !hasSigningKey) {
+        return { ok: false, detail: "credentials missing" };
+      }
+      return { ok: true };
+    }),
+
     // Microsoft Graph — token endpoint round-trip.
-    check("Microsoft Graph", async () => {
+    check("Microsoft Graph", "Messaging", "Outlook mail, calendar, and account sync", async () => {
       const tenantId = cfg.get("MICROSOFT_GRAPH_TENANT_ID");
       const clientId = cfg.get("MICROSOFT_GRAPH_CLIENT_ID");
       const clientSecret = cfg.get("MICROSOFT_GRAPH_CLIENT_SECRET");
@@ -97,7 +121,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     // every LinkedIn / messaging / email call goes through v1; the
     // public v2 host is healthy but our v2 app key returns 403 on
     // every LinkedIn endpoint, so a v2 ping isn't a meaningful signal.
-    check("Unipile", async () => {
+    check("Unipile", "Messaging", "LinkedIn, hosted inbox, enrichment, and multichannel sequences", async () => {
       const v1Base = (cfg.get("UNIPILE_BASE_URL") || "").replace(/\/+$/, "")
         || "https://api19.unipile.com:14926/api/v1";
       const apiKey = cfg.get("UNIPILE_API_KEY");
@@ -108,18 +132,18 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };
     }),
 
-    // Anthropic — model list (no token spend).
-    check("Anthropic", async () => {
-      const key = cfg.get("ANTHROPIC_API_KEY");
+    // OpenAI — model list (no token spend).
+    check("OpenAI", "AI", "Ask Joe, AI research, matching, and message drafting", async () => {
+      const key = process.env.OPENAI_API_KEY || cfg.get("OPENAI_API_KEY");
       if (!key) return { ok: false, detail: "credentials missing" };
-      const r = await fetch("https://api.anthropic.com/v1/models", {
-        headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      const r = await fetch("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${key}` },
       });
       return { ok: r.ok, detail: r.ok ? undefined : `HTTP ${r.status}` };
     }),
 
     // RingCentral — auth token endpoint (no SMS spend).
-    check("RingCentral", async () => {
+    check("RingCentral", "Voice", "Calls, RingSense notes, and phone follow-up context", async () => {
       // We don't have an env var for the JWT here; check that at least
       // *one* RC integration_account row has a non-expired token. If not,
       // the user needs to reconnect — that's a real "down" signal.

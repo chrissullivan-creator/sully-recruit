@@ -9,6 +9,8 @@ interface CheckResult {
   ok: boolean;
   latency_ms: number | null;
   detail?: string;
+  group?: string;
+  impact?: string;
 }
 
 interface StatusPayload {
@@ -42,12 +44,23 @@ export default function Status() {
     return () => clearInterval(t);
   }, []);
 
+  const groups = data
+    ? Array.from(
+        data.checks.reduce((map, check) => {
+          const key = check.group ?? 'Services';
+          map.set(key, [...(map.get(key) ?? []), check]);
+          return map;
+        }, new Map<string, CheckResult[]>()),
+      )
+    : [];
+  const degradedCount = data?.checks.filter((c) => !c.ok).length ?? 0;
+
   return (
-    <div className="min-h-screen bg-page-bg flex items-start justify-center pt-20 px-6">
-      <div className="w-full max-w-xl">
+    <div className="min-h-screen bg-page-bg flex items-start justify-center pt-14 px-6 pb-14">
+      <div className="w-full max-w-4xl">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-display font-semibold text-emerald-dark">System status</h1>
+            <h1 className="text-2xl font-display font-semibold text-emerald-dark">Sully Recruit health</h1>
             {data && (
               <p className="text-xs text-muted-foreground mt-1">
                 Last checked {format(new Date(data.checked_at), 'h:mm:ss a')} · auto-refreshes every 30s
@@ -81,35 +94,70 @@ export default function Status() {
               ) : (
                 <XCircle className="h-5 w-5" />
               )}
-              <p className="text-sm font-medium">
-                {data.status === 'ok' ? 'All systems normal' : 'One or more services are degraded'}
-              </p>
+              <div>
+                <p className="text-sm font-medium">
+                  {data.status === 'ok' ? 'All systems normal' : `${degradedCount} service${degradedCount === 1 ? '' : 's'} degraded`}
+                </p>
+                <p className="text-xs opacity-80 mt-0.5">
+                  {data.status === 'ok'
+                    ? 'Login, data, messaging, background work, and AI checks are responding.'
+                    : 'Use the impacted workflow notes below to decide whether to retry, work locally, or wait for the provider.'}
+                </p>
+              </div>
             </div>
 
-            <div className="rounded-xl border border-card-border bg-white overflow-hidden divide-y divide-card-border">
-              {data.checks.map((c) => (
-                <div key={c.name} className="px-5 py-3 flex items-center gap-3">
-                  {c.ok ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-red-600" />
-                  )}
-                  <p className="text-sm font-medium text-foreground flex-1">{c.name}</p>
-                  {c.latency_ms !== null && (
-                    <span className={cn(
-                      'text-xs tabular-nums',
-                      c.latency_ms > 2000 ? 'text-amber-700' : 'text-muted-foreground',
-                    )}>
-                      {c.latency_ms}ms
-                    </span>
-                  )}
-                  {!c.ok && c.detail && (
-                    <span className="text-[11px] text-red-600 truncate max-w-[160px]" title={c.detail}>
-                      {c.detail}
-                    </span>
-                  )}
-                </div>
-              ))}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {groups.map(([group, checks]) => {
+                const groupOk = checks.every((c) => c.ok);
+                return (
+                  <section key={group} className="rounded-xl border border-card-border bg-white overflow-hidden">
+                    <div className="px-5 py-3 border-b border-card-border bg-page-bg/40 flex items-center gap-2">
+                      {groupOk ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-600" />
+                      )}
+                      <h2 className="text-sm font-display font-semibold text-emerald-dark">{group}</h2>
+                      <span className={cn(
+                        'ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium',
+                        groupOk ? 'bg-emerald-light text-emerald-dark' : 'bg-red-50 text-red-700',
+                      )}>
+                        {groupOk ? 'Operational' : 'Needs attention'}
+                      </span>
+                    </div>
+                    <div className="divide-y divide-card-border">
+                      {checks.map((c) => (
+                        <div key={c.name} className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            {c.ok ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald shrink-0" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-red-600 shrink-0" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-foreground">{c.name}</p>
+                              {c.impact && <p className="text-xs text-muted-foreground mt-0.5">{c.impact}</p>}
+                            </div>
+                            {c.latency_ms !== null && (
+                              <span className={cn(
+                                'text-xs tabular-nums shrink-0',
+                                c.latency_ms > 2000 ? 'text-amber-700' : 'text-muted-foreground',
+                              )}>
+                                {c.latency_ms}ms
+                              </span>
+                            )}
+                          </div>
+                          {!c.ok && c.detail && (
+                            <p className="text-[11px] text-red-600 mt-2 truncate" title={c.detail}>
+                              {c.detail}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           </>
         )}

@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { JoeActionCard, type JoeAction } from '@/components/joe/JoeActionCard';
+import { DataErrorState } from '@/components/shared/EmptyState';
+import { getQueryErrorMessage } from '@/lib/queryTimeout';
 
 type Mode = 'candidate_search' | 'contact_search';
 type Role = 'user' | 'assistant';
@@ -47,6 +49,8 @@ export default function AskJoe() {
   const [isLoading, setIsLoading] = useState(false);
   const [statusLine, setStatusLine] = useState<string>('');
   const [actions, setActions] = useState<JoeAction[]>([]);
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  const [joeError, setJoeError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +69,8 @@ export default function AskJoe() {
     setMessages(all);
     setQuery('');
     setIsLoading(true);
+    setJoeError(null);
+    setLastFailedPrompt(null);
 
     let assistantSoFar = '';
     const controller = new AbortController();
@@ -145,8 +151,16 @@ export default function AskJoe() {
     } catch (err: any) {
       const aborted = err?.name === 'AbortError';
       const msg = aborted ? 'Joe timed out. Please try again.' : (err?.message || 'Joe had a problem. Try again.');
+      setJoeError(err instanceof Error ? err : new Error(msg));
+      setLastFailedPrompt(text);
       toast.error(msg);
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${msg}` }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Joe did not complete that request. No sends, enrollments, stage moves, or CRM writes ran.\n\n${msg}`,
+        },
+      ]);
     } finally {
       clearTimeout(timeout);
       setIsLoading(false);
@@ -159,6 +173,8 @@ export default function AskJoe() {
     setMessages([]);
     setActions([]);
     setQuery('');
+    setJoeError(null);
+    setLastFailedPrompt(null);
     inputRef.current?.focus();
   };
 
@@ -271,6 +287,16 @@ export default function AskJoe() {
                     {statusLine || 'Joe is thinking…'}
                   </div>
                 </div>
+              )}
+              {joeError && (
+                <DataErrorState
+                  className="py-6"
+                  title="Ask Joe unavailable"
+                  description="Joe could not finish the request. No proposals were approved, no outreach was sent, and no CRM stages were changed."
+                  error={getQueryErrorMessage(joeError)}
+                  onRetry={lastFailedPrompt ? () => ask(lastFailedPrompt) : undefined}
+                  retryLabel="Retry question"
+                />
               )}
               {actions.length > 0 && (
                 <div className="space-y-2 pt-1">
