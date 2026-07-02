@@ -122,7 +122,7 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
   if (recipientId) {
     const { data: person } = await supabase
       .from("people")
-      .select("type, primary_email, work_email, personal_email, phone, linkedin_url, do_not_contact")
+      .select("type, primary_email, work_email, personal_email, phone, linkedin_url, do_not_contact, email_invalid")
       .eq("id", recipientId)
       .maybeSingle();
 
@@ -135,6 +135,17 @@ export async function runSequenceEnrollmentInit(payload: EnrollmentInitPayload) 
         .eq("id", payload.enrollmentId);
       console.info("[enrollment-init-runner] Skipped — recipient is do_not_contact", { enrollmentId: payload.enrollmentId });
       return { action: "skipped", reason: "do_not_contact" };
+    }
+
+    // Invalid/bounced email addresses should not create a live queue of email
+    // work. Stop early; bounce handlers and the UI keep the reason visible.
+    if (person?.email_invalid) {
+      await supabase
+        .from("sequence_enrollments")
+        .update({ status: "stopped", stop_trigger: "email_invalid_bounced", stop_reason: "email_invalid_bounced", stopped_at: new Date().toISOString() })
+        .eq("id", payload.enrollmentId);
+      console.info("[enrollment-init-runner] Skipped — recipient email is invalid", { enrollmentId: payload.enrollmentId });
+      return { action: "skipped", reason: "email_invalid_bounced" };
     }
 
     if (person) {

@@ -79,6 +79,24 @@ export function useCompanyInterviews(companyId: string | null | undefined) {
   });
 }
 
+/** Interviews across an explicit set of jobs — used for client contacts tied through job_contacts. */
+export function useJobInterviews(jobIds: string[]) {
+  return useQuery({
+    queryKey: ['interviews_jobs', jobIds.slice().sort().join(',')],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('interviews')
+        .select(`${LITE_COLS}, jobs(id, title, company_name), candidate:people!candidate_id(id, full_name)`)
+        .in('job_id', jobIds)
+        .is('cancelled_at', null)
+        .order('scheduled_at', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as InterviewLite[];
+    },
+    enabled: jobIds.length > 0,
+  });
+}
+
 /**
  * Filter a loaded interview set down to one send-out / candidate-job, sorted by
  * round. Prefers matching on send_out_id; falls back to candidate_id + job_id

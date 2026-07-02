@@ -1,6 +1,5 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { CompanyLink, JobLink } from '@/components/shared/EntityLinks';
-import DOMPurify from 'dompurify';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +7,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RichTextEditor } from '@/components/shared/RichTextEditor';
 import { CompanyCombobox } from '@/components/shared/CompanyCombobox';
 import { PicklistEditSection } from '@/components/shared/PicklistEditSection';
 import { useNotes, useJobs, useCompanies } from '@/hooks/useData';
@@ -21,9 +19,10 @@ import {
   Mail, Phone, Linkedin, Building, MapPin,
   Edit, Briefcase, MessageSquare, History, User,
   FileText, Loader2, Check, X, ExternalLink,
-  Clock, Search, Users, Send, ChevronDown,
+  Search, Users, Send, ChevronDown,
   Martini, RefreshCw, Send as SendIcon,
   PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2, CalendarPlus, Calendar, Play, MoreHorizontal,
+  GraduationCap, Link2,
 } from 'lucide-react';
 import { DetailHeader } from '@/components/shared/DetailHeader';
 import { SectionCard } from '@/components/shared/SectionCard';
@@ -48,7 +47,7 @@ const CONTACT_EDIT_FIELDS: EditField[] = [
   { key: 'mobile_phone', label: 'Mobile', section: 'Contact' },
 ];
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { ScheduleMeetingDialog } from '@/components/calendar/ScheduleMeetingDialog';
@@ -243,6 +242,61 @@ const EditableField = ({ label, value, onSave, type = 'text', placeholder }: {
   );
 };
 
+const EditableTextarea = ({ label, value, onSave, placeholder, rows = 3 }: {
+  label: React.ReactNode;
+  value: string | null | undefined;
+  onSave: (v: string) => Promise<void>;
+  placeholder?: string;
+  rows?: number;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(value ?? ''); }, [value]);
+
+  const save = async () => {
+    setSaving(true);
+    await onSave(draft);
+    setSaving(false);
+    setEditing(false);
+  };
+
+  const cancel = () => {
+    setDraft(value ?? '');
+    setEditing(false);
+  };
+
+  return (
+    <div className="group space-y-1.5">
+      <Label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={rows}
+            placeholder={placeholder}
+            className="w-full rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="flex gap-2">
+            <Button variant="gold" size="sm" className="h-7 text-xs" onClick={save} disabled={saving}>
+              {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Save
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="min-h-[4rem] cursor-pointer rounded-md border border-card-border bg-muted/20 px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent/10"
+          onClick={() => setEditing(true)}
+        >
+          {value ? <p className="whitespace-pre-wrap">{value}</p> : <p className="text-muted-foreground italic">{placeholder || 'Add notes...'}</p>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ------------------------------------------------------------------ */
 /*  Status helpers                                                     */
 /* ------------------------------------------------------------------ */
@@ -275,6 +329,7 @@ const COMM_CHANNEL_LABELS: Record<string, string> = {
 const ContactDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
   // Data hooks
@@ -284,6 +339,7 @@ const ContactDetail = () => {
   const { data: sendOuts = [] } = useContactSendOuts(id);
   const { data: linkedJobs = [] } = useContactJobs(id);
   const { data: companies = [] } = useCompanies();
+  const linkedJobIds = (linkedJobs as any[]).map((job) => job.id).filter(Boolean);
 
   // The `contacts` view doesn't expose the new picklist array columns, so read
   // departments/products straight off the underlying `people` row (1:1 by id).
@@ -298,6 +354,34 @@ const ContactDetail = () => {
         .maybeSingle();
       if (error) throw error;
       return data as any;
+    },
+  });
+
+  const { data: workHistory = [] } = useQuery({
+    queryKey: ['candidate_work_history', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_work_history')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('start_date', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const { data: education = [] } = useQuery({
+    queryKey: ['candidate_education', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidate_education')
+        .select('*')
+        .eq('candidate_id', id!)
+        .order('start_year', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return data as any[];
     },
   });
 
@@ -360,6 +444,14 @@ const ContactDetail = () => {
     }
   };
   const [deletingContact, setDeletingContact] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get('edit') !== '1') return;
+    setEditOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('edit');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const handleDeleteContact = async () => {
     if (!id) return;
@@ -736,6 +828,21 @@ const ContactDetail = () => {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                  <Edit className="h-3.5 w-3.5 mr-2" /> Edit client
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => document.getElementById('contact-company-linker')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                  <Building className="h-3.5 w-3.5 mr-2" /> Edit company link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab('jobs')}>
+                  <Link2 className="h-3.5 w-3.5 mr-2" /> Connect job
+                </DropdownMenuItem>
+                {(c as any).company_id && (
+                  <DropdownMenuItem onClick={() => navigate(`/companies/${(c as any).company_id}`)}>
+                    <Building className="h-3.5 w-3.5 mr-2" /> Open company
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleFetchHistory} disabled={fetchingHistory}>
                   {fetchingHistory ? (
                     <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
@@ -744,6 +851,7 @@ const ContactDetail = () => {
                   )}
                   Fetch History
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setConfirmDelete(true)}
                   className="text-red-600 focus:text-red-600 focus:bg-red-50"
@@ -843,7 +951,7 @@ const ContactDetail = () => {
           <div className="px-8 py-6 space-y-5">
             <SectionCard title="Details" icon={<User className="h-4 w-4" />}>
             <div className="max-w-md">
-              <div className="flex items-end gap-2">
+              <div id="contact-company-linker" className="flex items-end gap-2 scroll-mt-24">
                 <div className="flex-1 min-w-0 space-y-1">
                   <Label className="text-xs text-muted-foreground">Company</Label>
                   <CompanyCombobox
@@ -902,6 +1010,7 @@ const ContactDetail = () => {
               <TabsList className="bg-transparent border-0 rounded-none p-0 h-auto inline-flex w-max gap-1">
                 {[
                   { value: 'joe', icon: <Martini className="h-3.5 w-3.5" />, label: 'Overview' },
+                  { value: 'background', icon: <FileText className="h-3.5 w-3.5" />, label: 'Background' },
                   { value: 'jobs', icon: <Briefcase className="h-3.5 w-3.5" />, label: `Jobs (${linkedJobs.length})` },
                   { value: 'candidates', icon: <Users className="h-3.5 w-3.5" />, label: `Send Outs (${sendOuts.length})` },
                   { value: 'interviews', icon: <Calendar className="h-3.5 w-3.5" />, label: 'Interviews' },
@@ -1009,6 +1118,89 @@ const ContactDetail = () => {
                     </div>
                   </div>
                 </SectionCard>
+              </TabsContent>
+
+              {/* ---------- BACKGROUND TAB ---------- */}
+              <TabsContent value="background" className="px-8 py-6 mt-0 space-y-5">
+                <SectionCard
+                  title="Client background"
+                  icon={<FileText className="h-4 w-4" />}
+                  actions={<span className="text-xs text-muted-foreground">Searchable by Joe</span>}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <EditableTextarea
+                      label="Relationship Summary"
+                      value={c.candidate_summary}
+                      onSave={v => updateField('candidate_summary', v)}
+                      placeholder="Hiring style, mandate history, team context, relationship notes..."
+                      rows={5}
+                    />
+                    <EditableTextarea
+                      label="Client Notes"
+                      value={c.back_of_resume_notes}
+                      onSave={v => updateField('back_of_resume_notes', v)}
+                      placeholder="Desk coverage, products, interview preferences, compensation signals..."
+                      rows={5}
+                    />
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Resume parsing, LinkedIn/Unipile enrichment, call notes, and manual edits all feed this person record for Joe context.
+                  </p>
+                </SectionCard>
+
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <SectionCard
+                    title={`Work History (${workHistory.length})`}
+                    icon={<Briefcase className="h-4 w-4" />}
+                  >
+                    {workHistory.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No work history recorded yet.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {workHistory.map((w: any) => (
+                          <div key={w.id} className="rounded-xl border border-card-border bg-card p-3 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground">{w.title || 'Role'}</p>
+                              {w.is_current && <Badge variant="secondary" className="text-[9px]">Current</Badge>}
+                            </div>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Building className="h-3 w-3" /> {w.company_name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {w.start_date ? format(new Date(w.start_date), 'MMM yyyy') : '?'}
+                              {' — '}
+                              {w.is_current ? 'Present' : w.end_date ? format(new Date(w.end_date), 'MMM yyyy') : '?'}
+                            </p>
+                            {w.description && <p className="text-xs text-muted-foreground mt-1">{w.description}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+
+                  <SectionCard
+                    title={`Education (${education.length})`}
+                    icon={<GraduationCap className="h-4 w-4" />}
+                  >
+                    {education.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No education history recorded yet.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {education.map((e: any) => (
+                          <div key={e.id} className="rounded-xl border border-card-border bg-card p-3 space-y-1">
+                            <p className="text-sm font-medium text-foreground">{e.institution}</p>
+                            {(e.degree || e.field_of_study) && (
+                              <p className="text-xs text-muted-foreground">
+                                {e.degree}{e.degree && e.field_of_study ? ' in ' : ''}{e.field_of_study}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground">{e.start_year ?? '?'} — {e.end_year ?? '?'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
               </TabsContent>
 
               {/* ---------- JOBS TAB ---------- */}
@@ -1192,10 +1384,12 @@ const ContactDetail = () => {
               <TabsContent value="interviews" className="px-8 py-6 mt-0">
                 <SectionCard title="Interviews" icon={<Calendar className="h-4 w-4" />}>
                   {(c as any).company_id ? (
-                    <PersonInterviewsTab companyId={(c as any).company_id} showCandidate />
+                    <PersonInterviewsTab companyId={(c as any).company_id} jobIds={linkedJobIds} showCandidate />
+                  ) : linkedJobIds.length > 0 ? (
+                    <PersonInterviewsTab jobIds={linkedJobIds} showCandidate />
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Link this contact to a company to see interviews across its open roles.
+                      Link this contact to a company or job to see interviews and debrief notes.
                     </p>
                   )}
                 </SectionCard>

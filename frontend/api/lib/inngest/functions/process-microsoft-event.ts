@@ -573,15 +573,6 @@ async function processEmailMessage(
     } as any)
     .eq("id", conversationId);
 
-  const table = match.entityType === "candidate" ? "candidates" : "contacts";
-  await supabase
-    .from(table)
-    .update({
-      last_responded_at: receivedAt,
-      last_comm_channel: "email",
-    } as any)
-    .eq("id", match.entityId);
-
   const emailBody = message.body?.content || message.bodyPreview || "";
   let intel: Awaited<ReturnType<typeof extractMessageIntel>> = null;
   if (emailBody.length > 10) {
@@ -667,6 +658,15 @@ async function processEmailMessage(
 
   // Genuine reply → stop active enrollments (existing behaviour). Clear any
   // stale OOO flag too: they're evidently back at their desk.
+  const table = match.entityType === "candidate" ? "candidates" : "contacts";
+  await supabase
+    .from(table)
+    .update({
+      last_responded_at: receivedAt,
+      last_comm_channel: "email",
+    } as any)
+    .eq("id", match.entityId);
+
   const { data: activeEnrollments } = await supabase
     .from("sequence_enrollments")
     .select("*, sequences!inner(*)")

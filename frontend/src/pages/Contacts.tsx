@@ -7,11 +7,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CsvImportDialog } from '@/components/CsvImportDialog';
 import { AddContactDialog } from '@/components/contacts/AddContactDialog';
 import { ActionMenu } from '@/components/shared/ActionMenu';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { EnrollInSequenceDialog } from '@/components/candidates/EnrollInSequenceDialog';
 import { TaskSlidePanel } from '@/components/tasks/TaskSlidePanel';
 import { EnrichButton } from '@/components/shared/EnrichButton';
 import { useContacts, useJobs } from '@/hooks/useData';
-import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Martini, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Search, Building, Phone, Mail, Linkedin, Upload, ListTodo, Play, Martini, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, PhoneCall, History, Loader2, MoreHorizontal, User, Users, RefreshCw, Trash2, AlertCircle, Edit } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -54,6 +55,37 @@ const STATUS_OPTIONS = [
   { value: 'engaged', label: 'Engaged' },
 ];
 
+const NON_ANSWER_SENTIMENTS = new Set(['ooo', 'out_of_office']);
+const DELIVERY_FAILURE_RE = /bounce|bounced|undeliver|not delivered|delivery failed|returned mail|address not found/i;
+
+const getResponseFlag = (contact: any): { label: string; className: string; title?: string } | null => {
+  const sentiment = String(contact.last_sequence_sentiment || '').toLowerCase();
+  const note = String(contact.last_sequence_sentiment_note || contact.email_invalid_reason || '');
+  if (contact.email_invalid || DELIVERY_FAILURE_RE.test(note)) {
+    return {
+      label: 'Email invalid',
+      className: 'bg-destructive/15 text-destructive',
+      title: contact.email_invalid_reason || contact.last_sequence_sentiment_note || 'Delivery failed',
+    };
+  }
+  if (NON_ANSWER_SENTIMENTS.has(sentiment)) {
+    return {
+      label: 'OOO',
+      className: 'bg-warning/15 text-warning',
+      title: contact.last_sequence_sentiment_note || 'Out-of-office auto-reply',
+    };
+  }
+  return null;
+};
+
+const getHumanRespondedAt = (contact: any) => getResponseFlag(contact) ? '' : ((contact as any).last_responded_at || '');
+
+const deriveContactStatus = (contact: any) => {
+  if (getHumanRespondedAt(contact)) return 'engaged';
+  if (contact.last_reached_out_at && (!contact.status || contact.status === 'new')) return 'reached_out';
+  return contact.status || 'new';
+};
+
 // Saved searches persisted to localStorage (separate key from candidates).
 const SAVED_CONTACT_SEARCHES_KEY = 'sully-recruit-saved-contact-searches';
 function loadSavedContactSearches(): SavedContactSearch[] {
@@ -81,6 +113,7 @@ const SENTIMENT_CONFIG: Record<string, { label: string; bg: string; text: string
   negative:         { label: 'Negative',         bg: 'bg-orange-500/10',  text: 'text-orange-600' },
   not_interested:   { label: 'Not Interested',   bg: 'bg-destructive/15', text: 'text-destructive' },
   do_not_contact:   { label: 'Do Not Contact',   bg: 'bg-destructive/25', text: 'text-destructive' },
+  ooo:              { label: 'OOO',              bg: 'bg-warning/15',     text: 'text-warning' },
 };
 
 const ChannelBadge = ({ channel }: { channel?: string | null }) => {
@@ -149,7 +182,8 @@ const Contacts = () => {
         ((contact as any).work_email ?? '').toLowerCase().includes(q) ||
         ((contact as any).personal_email ?? '').toLowerCase().includes(q) ||
         secondary.some((e) => (e ?? '').toLowerCase().includes(q));
-      const matchesStatus = filters.status === 'all' || contact.status === filters.status;
+      const contactStatus = deriveContactStatus(contact);
+      const matchesStatus = filters.status === 'all' || contactStatus === filters.status;
 
       const roles: string[] = (contact as any).roles ?? ['client'];
       const matchesRole =
@@ -180,7 +214,8 @@ const Contacts = () => {
       const matchesReachedTo = !filters.lastReachedTo || (reachedAt && reachedAt <= endOfDay(filters.lastReachedTo));
 
       // Last response — before/after
-      const respondedAt = (contact as any).last_responded_at ? new Date((contact as any).last_responded_at) : null;
+      const humanRespondedAt = getHumanRespondedAt(contact);
+      const respondedAt = humanRespondedAt ? new Date(humanRespondedAt) : null;
       const matchesRespondedFrom = !filters.lastRespondedFrom || (respondedAt && respondedAt >= filters.lastRespondedFrom);
       const matchesRespondedTo = !filters.lastRespondedTo || (respondedAt && respondedAt <= endOfDay(filters.lastRespondedTo));
 
@@ -212,16 +247,16 @@ const Contacts = () => {
           bVal = ((b as any).company_name || (b.companies as any)?.name || '').toLowerCase();
           break;
         case 'status':
-          aVal = a.status || '';
-          bVal = b.status || '';
+          aVal = deriveContactStatus(a);
+          bVal = deriveContactStatus(b);
           break;
         case 'lastReached':
           aVal = (a as any).last_reached_out_at || '';
           bVal = (b as any).last_reached_out_at || '';
           break;
         case 'lastResponded':
-          aVal = (a as any).last_responded_at || '';
-          bVal = (b as any).last_responded_at || '';
+          aVal = getHumanRespondedAt(a);
+          bVal = getHumanRespondedAt(b);
           break;
         case 'updated':
           aVal = (a as any).updated_at || (a as any).created_at || '';
@@ -330,7 +365,7 @@ const Contacts = () => {
     <MainLayout>
       <div className="px-6 pt-6 lg:px-8">
       <PageHeader
-        title="Contacts"
+        title="Clients"
         count={filteredContacts.length}
         actions={
           <div className="flex items-center gap-2">
@@ -367,20 +402,20 @@ const Contacts = () => {
               </>
             )}
             <ActionMenu
-              label="Add Contact"
+              label="Add Client"
               leadingIcon={<Plus className="h-4 w-4" />}
               items={[
                 {
                   key: 'individual',
                   label: 'Add individual',
-                  description: 'Create one contact by hand',
+                  description: 'Create one client contact by hand',
                   icon: <User />,
                   onSelect: () => setAddOpen(true),
                 },
                 {
                   key: 'csv',
                   label: 'Import CSV',
-                  description: 'Upload a spreadsheet of contacts',
+                  description: 'Upload a spreadsheet of client contacts',
                   icon: <Upload />,
                   onSelect: () => setImportOpen(true),
                 },
@@ -430,7 +465,7 @@ const Contacts = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search contacts…"
+              placeholder="Search clients…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-xl border border-card-border bg-card text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -480,8 +515,8 @@ const Contacts = () => {
         ) : isError ? (
           <div className="text-center py-16">
             <AlertCircle className="h-12 w-12 mx-auto text-destructive/40 mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-1">Failed to load contacts</h3>
-            <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message || 'An error occurred while fetching contacts.'}</p>
+            <h3 className="text-lg font-medium text-foreground mb-1">Failed to load clients</h3>
+            <p className="text-sm text-muted-foreground mb-4">{(error as any)?.message || 'An error occurred while fetching clients.'}</p>
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4 mr-1" /> Retry
             </Button>
@@ -489,15 +524,16 @@ const Contacts = () => {
         ) : filteredContacts.length === 0 && !searchQuery && activeFilterCount === 0 ? (
           <div className="text-center py-16">
             <Users className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-1">No contacts yet</h3>
-            <p className="text-sm text-muted-foreground mb-4">Add your first contact or import a CSV to get started.</p>
+            <h3 className="text-lg font-medium text-foreground mb-1">No clients yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">Add your first client contact or import a CSV to get started.</p>
             <Button variant="gold" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Add Contact
+              <Plus className="h-4 w-4 mr-1" /> Add Client
             </Button>
           </div>
         ) : (
           <>
-          <HorizontalTableScroll stickyHeader minWidth={1300} className="hidden md:block rounded-2xl border-card-border shadow-sm">
+          <SectionCard flush>
+          <HorizontalTableScroll stickyHeader minWidth={1300} className="hidden md:block">
             <table className="w-full">
               <thead className="table-header-green sticky top-0 z-20">
                 <tr>
@@ -521,7 +557,7 @@ const Contacts = () => {
             <span className="flex items-center gap-1">Last Reached Out <SortIcon field="lastReached" /></span>
           </th>
           <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('lastResponded')}>
-            <span className="flex items-center gap-1">Last Response <SortIcon field="lastResponded" /></span>
+            <span className="flex items-center gap-1">Last Responded <SortIcon field="lastResponded" /></span>
           </th>
           <th className="text-left px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('status')}>
             <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
@@ -535,7 +571,11 @@ const Contacts = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
-                {paginatedContacts.map((contact) => (
+                {paginatedContacts.map((contact) => {
+                  const displayStatus = deriveContactStatus(contact);
+                  const responseFlag = getResponseFlag(contact);
+                  const humanRespondedAt = getHumanRespondedAt(contact);
+                  return (
                   <tr key={contact.id} className="group hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -628,29 +668,37 @@ const Contacts = () => {
                         : '-'}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {(contact as any).last_responded_at
-                        ? new Date((contact as any).last_responded_at).toLocaleDateString()
-                        : '-'}
+                      {humanRespondedAt ? (
+                        new Date(humanRespondedAt).toLocaleDateString()
+                      ) : responseFlag ? (
+                        <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium', responseFlag.className)} title={responseFlag.title}>
+                          {responseFlag.label}
+                        </span>
+                      ) : '-'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn(
                         'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide capitalize',
-                        contact.status === 'engaged' || contact.status === 'active'
+                        displayStatus === 'engaged' || displayStatus === 'active'
                           ? 'bg-success/10 text-success border-success/20'
-                          : contact.status === 'reached_out'
+                          : displayStatus === 'reached_out'
                           ? 'bg-warning/15 text-warning border-warning/20'
-                          : contact.status === 'new'
+                          : displayStatus === 'new'
                           ? 'bg-primary/10 text-primary border-primary/20'
                           : 'bg-muted text-muted-foreground border-card-border'
                       )}>
-                        {contact.status}
+                        {STATUS_LABELS[displayStatus] ?? displayStatus.replace(/_/g, ' ')}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <ChannelBadge channel={(contact as any).last_comm_channel} />
                     </td>
                     <td className="px-4 py-3">
-                      {(contact as any).last_sequence_sentiment ? (() => {
+                      {responseFlag ? (
+                        <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', responseFlag.className)} title={responseFlag.title}>
+                          {responseFlag.label}
+                        </span>
+                      ) : (contact as any).last_sequence_sentiment ? (() => {
                         const s = (contact as any).last_sequence_sentiment;
                         const cfg = SENTIMENT_CONFIG[s] ?? { label: s.replace(/_/g, ' '), bg: 'bg-muted', text: 'text-muted-foreground' };
                         return (
@@ -673,6 +721,9 @@ const Contacts = () => {
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem onClick={() => navigate(`/contacts/${contact.id}`)}>
                             <User className="h-3.5 w-3.5 mr-2" /> View Profile
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/contacts/${contact.id}?edit=1`)}>
+                            <Edit className="h-3.5 w-3.5 mr-2" /> Edit Client
                           </DropdownMenuItem>
                           {contact.email && (
                             <DropdownMenuItem onClick={() => window.open(`mailto:${contact.email}`)}>
@@ -711,7 +762,7 @@ const Contacts = () => {
                               <RefreshCw className="h-3.5 w-3.5 mr-2" /> Change Status
                             </DropdownMenuSubTrigger>
                             <DropdownMenuSubContent>
-                              {['new', 'reached_out', 'engaged'].filter(s => s !== contact.status).map(s => (
+                              {['new', 'reached_out', 'engaged'].filter(s => s !== displayStatus).map(s => (
                                 <DropdownMenuItem key={s} onClick={() => handleQuickStatusChange(contact.id, s)}>
                                   {STATUS_LABELS[s] ?? s}
                                 </DropdownMenuItem>
@@ -758,15 +809,18 @@ const Contacts = () => {
                       </DropdownMenu>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
           </HorizontalTableScroll>
           {/* Mobile: stacked cards instead of the wide table. */}
-          <div className="md:hidden rounded-2xl border border-card-border shadow-sm overflow-hidden divide-y divide-card-border bg-card">
+          <div className="md:hidden divide-y divide-card-border">
             {paginatedContacts.map((contact) => {
               const companyName = (contact as any).company_name || (contact.companies as any)?.name || '';
               const name = contact.full_name ?? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`;
+              const displayStatus = deriveContactStatus(contact);
+              const responseFlag = getResponseFlag(contact);
               return (
                 <div
                   key={contact.id}
@@ -780,26 +834,32 @@ const Contacts = () => {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground truncate">{name}</p>
                     <p className="text-xs text-muted-foreground truncate">{[contact.title, companyName].filter(Boolean).join(' · ') || '—'}</p>
+                    {responseFlag && (
+                      <span className={cn('mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium', responseFlag.className)} title={responseFlag.title}>
+                        {responseFlag.label}
+                      </span>
+                    )}
                   </div>
                   <span className={cn(
                     'shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide capitalize',
-                    contact.status === 'engaged' || contact.status === 'active'
+                    displayStatus === 'engaged' || displayStatus === 'active'
                       ? 'bg-success/10 text-success border-success/20'
-                      : contact.status === 'reached_out'
+                      : displayStatus === 'reached_out'
                       ? 'bg-warning/15 text-warning border-warning/20'
-                      : contact.status === 'new'
+                      : displayStatus === 'new'
                       ? 'bg-primary/10 text-primary border-primary/20'
                       : 'bg-muted text-muted-foreground border-card-border',
                   )}>
-                    {contact.status}
+                    {STATUS_LABELS[displayStatus] ?? displayStatus.replace(/_/g, ' ')}
                   </span>
                 </div>
               );
             })}
             {paginatedContacts.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No contacts match your filters.</div>
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No clients match your filters.</div>
             )}
           </div>
+          </SectionCard>
           </>
         )}
 
