@@ -1,8 +1,9 @@
-# Recruiter Guide — Resumes & Pipeline
+# Recruiter Guide — Resumes, Clients & Pipeline
 
-A practical walkthrough of the two flows you'll use every day:
+A practical walkthrough of the flows you'll use every day:
 1. **Uploading resumes** so candidates land in the system.
-2. **Moving a candidate through the pipeline** — Pitch → Send Out → Submission → Interview → Offer → Placed.
+2. **Managing clients** so client contacts, companies, interviews, and relationship notes stay usable.
+3. **Moving a candidate through the pipeline** — Pitch → Send Out → Submission → Interview → Offer → Placed.
 
 ---
 
@@ -46,7 +47,23 @@ There are three places you can drop a resume. Pick the one that matches what you
 
 ---
 
-## 2. The pipeline: Pitch → Send Out → Submission
+## 2. Clients: contacts, background, and interview history
+
+The left-nav **Clients** page is the desk view for hiring managers, client contacts, and dual-role people who also appear as candidates.
+
+- Use the row `...` menu to **Edit Client**, open the profile, fetch message history, create tasks, change status, or enroll the client in a sequence.
+- The table shows **Last Reached Out** and **Last Responded** as sortable columns. Out-of-office auto-replies, returned mail, bounces, and not-delivered signals do **not** count as a real response; they show as warning pills so you do not keep emailing a bad/OOO address.
+- Status is still only `New`, `Reached Out`, or `Engaged`. A real human reply moves the client toward **Engaged**; an OOO/bounce does not.
+
+On a client profile:
+
+- Use the top `...` menu to edit the client, jump to the company linker, connect jobs, or open the linked company.
+- The **Background** tab holds editable relationship notes, client notes, work history, and education. Resume parsing, LinkedIn/Unipile enrichment, call notes, and manual edits all feed the same searchable person record for Joe.
+- The **Interviews** tab shows interviews tied through the linked company and linked jobs. Open an interview to see the round detail, prep notes, outcome, and debrief notes.
+
+---
+
+## 3. The pipeline: Pitch → Send Out → Submission
 
 Every job has its own pipeline of candidates. A candidate's position in the pipeline is tracked as a **send_out** row — one per (candidate, job) pairing.
 
@@ -159,10 +176,11 @@ always Chris's).
 ## Daily flow at a glance
 
 1. **Morning** — upload any new resumes from the Candidates page (Flow 1A).
-2. Triage new candidates → drop them into jobs at **Pitch** stage.
-3. As you pitch each candidate, move them to **Send Out**.
-4. When you submit to the client, move to **Submission** *and fill in the Submitted to client card* (base + bonus + RTW). This is what protects your record of what was sent.
-5. As feedback comes in, advance to **Interview** → **Offer** → **Placed**, or move to **Withdrawn** with a reason.
+2. Check **Clients** for replies, OOO/bounce warnings, and client tasks before continuing any sequence.
+3. Triage new candidates → drop them into jobs at **Pitch** stage.
+4. As you pitch each candidate, move them to **Send Out**.
+5. When you submit to the client, move to **Submission** *and fill in the Submitted to client card* (base + bonus + RTW). This is what protects your record of what was sent.
+6. As feedback comes in, advance to **Interview** → **Offer** → **Placed**, or move to **Withdrawn** with a reason.
 
 ---
 
@@ -172,3 +190,4 @@ always Chris's).
 - **Wrong candidate matched on email.** Open the candidate from the parse preview before saving — you can pick "Create new" instead of updating the matched record.
 - **Comp / RTW look wrong on a past submission.** Open that send-out's drawer and edit; the changes save to that send-out's record only.
 - **Need to move a candidate backward.** Use the **Move to** picker in the drawer — the per-row Advance arrow only goes forward.
+- **A sequence keeps skipping a client.** Check the client row for `Email invalid`, `OOO`, or `Do Not Contact`. Invalid email/bounce flags stop future email sequence work until the address is corrected.

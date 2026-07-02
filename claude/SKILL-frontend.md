@@ -12,14 +12,14 @@
 
 ---
 
-## Unified Person Model (Pass 5a, 2026-05-03)
+## Unified Person Model (Pass 6, 2026-05-03)
 
-**Frontend code can keep using `from('contacts')` — it now hits a backwards-compat view, not a real table.** The view + INSTEAD OF triggers redirect reads/writes to `candidates WHERE type='client'`. New code should prefer:
+**Frontend code can keep using `from('contacts')` — it now hits a backwards-compat view, not a real table.** The view + INSTEAD OF triggers redirect reads/writes to `people WHERE type='client'`. New code should prefer:
 
 ```ts
 // Preferred for clients
-supabase.from('candidates').select(...).eq('type', 'client')
-supabase.from('candidates').insert({ type: 'client', ... })
+supabase.from('people').select(...).contains('roles', ['client'])
+supabase.from('people').insert({ roles: ['client'], type: 'client', ... })
 
 // Still works (via view + INSTEAD OF triggers, slightly slower)
 supabase.from('contacts').select(...)
@@ -99,6 +99,21 @@ site-wide.
   first (see the dashboard `SendOutRow`/`CandidateRow` in `Index.tsx`).
 - ⚠️ Don't add a link where the row's click is an **action** (e.g. "add to
   send-outs" pickers) rather than navigation — it would hijack the action.
+
+## Clients surface (#400, 2026-07-02)
+
+- `pages/Contacts.tsx` is user-facing **Clients** now. Keep copy aligned with
+  clients/hiring managers, while the technical route remains `/contacts`.
+- The list uses the same `SectionCard`/table tone as Candidates and keeps
+  sortable **Last Reached Out** / **Last Responded** columns. `last_responded_at`
+  should represent a human answer only; OOO (`last_sequence_sentiment='ooo'`)
+  and delivery failures (`email_invalid`, returned/not-delivered notes) render
+  warning pills and must not promote the displayed status to `Engaged`.
+- Row `...` menu includes **Edit Client** via `/contacts/:id?edit=1`.
+- `pages/ContactDetail.tsx` opens `EditPersonDialog` from `?edit=1`, adds the
+  **Background** tab for editable relationship/client notes plus work history
+  and education, and shows company/job-linked interviews through
+  `PersonInterviewsTab`.
 
 ---
 
@@ -287,6 +302,7 @@ neutral:        gray
 negative:       orange
 not_interested: red
 do_not_contact: dark red
+ooo: amber/warning
 ```
 
 ---
@@ -300,7 +316,7 @@ frontend/src/
     People.tsx              unified people list (candidates + clients)
     Candidates.tsx          candidate list + resume drop
     CandidateDetail.tsx     candidate profile + tabs (custom fields in Background tab)
-    Contacts.tsx / ContactDetail.tsx   client list + profile
+    Contacts.tsx / ContactDetail.tsx   client list + profile (Background tab + linked interviews)
     Companies.tsx / CompanyDetail.tsx
     Jobs.tsx / JobDetail.tsx           Leads board + Hot Jobs board + list
     Interviews.tsx          Planner → Interviews (list + detail slide-over)
