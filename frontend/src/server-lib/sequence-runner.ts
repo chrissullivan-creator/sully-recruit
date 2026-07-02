@@ -240,10 +240,11 @@ export async function runSequenceAction(
     return { action: "skipped", reason: "no_email_on_record" };
   }
   if (action.channel === "email" && entityRow?.email_invalid) {
-    // Hard-bounced previously — don't re-attempt.
+    // Hard-bounced previously — stop the enrollment so later email steps do
+    // not keep surfacing/scheduling for the same bad address.
+    await stopEnrollment(supabase, enrollment, "email_invalid_bounced", undefined, logger);
     await markStepSkipped(supabase, payload.stepLogId, "email_invalid_bounced");
-    await checkSequenceComplete(supabase, enrollment, logger);
-    return { action: "skipped", reason: "email_invalid_bounced" };
+    return { action: "stopped", reason: "email_invalid_bounced" };
   }
   if (action.channel === "sms" && !entityRow?.phone) {
     await markStepSkipped(supabase, payload.stepLogId, "no_phone_on_record");

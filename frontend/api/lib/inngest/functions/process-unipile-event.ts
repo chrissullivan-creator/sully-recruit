@@ -390,12 +390,6 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     logger.warn("Unipile email insert failed", { error: insertErr.message });
   }
 
-  const table = match.entityType === "candidate" ? "candidates" : "contacts";
-  await supabase
-    .from(table)
-    .update({ last_responded_at: receivedAt, last_comm_channel: "email" } as any)
-    .eq("id", match.entityId);
-
   const intel = bodyForSearch.length > 10
     ? await extractMessageIntel(bodyForSearch, subject)
     : null;
@@ -457,6 +451,12 @@ async function processUnipileEmailEvent(supabase: any, event: any, receivedAt: s
     // extraction returned null. Previously this was gated on `intel`, so those
     // replies silently kept the enrollment active and the person kept getting
     // sequence steps after they'd already answered.
+    const table = match.entityType === "candidate" ? "candidates" : "contacts";
+    await supabase
+      .from(table)
+      .update({ last_responded_at: receivedAt, last_comm_channel: "email" } as any)
+      .eq("id", match.entityId);
+
     const { data: actives } = await supabase
       .from("sequence_enrollments")
       .select("*, sequences!inner(*)")

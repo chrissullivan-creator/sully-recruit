@@ -8,6 +8,7 @@ import { PersonLink, JobLink, CompanyLink } from '@/components/shared/EntityLink
 import {
   useCandidateInterviews,
   useCompanyInterviews,
+  useJobInterviews,
   roundStatus,
   type InterviewLite,
 } from '@/lib/queries/interviews';
@@ -20,18 +21,21 @@ import {
 export function PersonInterviewsTab({
   candidateId,
   companyId,
+  jobIds = [],
   showCandidate = false,
 }: {
   candidateId?: string | null;
   companyId?: string | null;
+  jobIds?: string[];
   /** Show the candidate name on each row (client view, where rows span people). */
   showCandidate?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const candidateQ = useCandidateInterviews(candidateId ?? null);
+  const jobQ = useJobInterviews(jobIds);
   const companyQ = useCompanyInterviews(companyId ?? null);
-  const { data: rows = [], isLoading } = candidateId ? candidateQ : companyQ;
+  const { data: rows = [], isLoading } = candidateId ? candidateQ : jobIds.length > 0 ? jobQ : companyQ;
 
   if (isLoading) {
     return (

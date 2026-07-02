@@ -571,7 +571,7 @@ const CompanyDetail = () => {
         <StatStrip
           items={[
             { label: 'Jobs', value: companyJobs.length },
-            { label: 'Contacts', value: contacts.length },
+            { label: 'Clients', value: contacts.length },
             { label: 'Candidates', value: companyCandidates.length },
             { label: 'Contracts', value: contracts.length },
             { label: 'Relationship', value: company.company_status ? <span className="capitalize">{company.company_status}</span> : '—' },
@@ -647,7 +647,7 @@ const CompanyDetail = () => {
               <TabsList className="h-auto w-full justify-start gap-1 rounded-none border-0 bg-transparent p-0">
                 {[
                   { value: 'jobs', label: 'Jobs', icon: Briefcase, count: undefined as number | undefined },
-                  { value: 'contacts', label: 'Contacts', icon: Users, count: contacts.length },
+                  { value: 'contacts', label: 'Clients', icon: Users, count: contacts.length },
                   { value: 'candidates', label: 'Candidates', icon: User, count: companyCandidates.length },
                   { value: 'contracts', label: 'Contracts', icon: FolderOpen, count: contracts.length },
                   { value: 'postings', label: 'Job postings', icon: Rss, count: undefined },
@@ -706,14 +706,14 @@ const CompanyDetail = () => {
                 </SectionCard>
               </TabsContent>
 
-              {/* Contacts tab */}
+              {/* Clients tab */}
               <TabsContent value="contacts" className="px-8 py-6 mt-0">
-                <SectionCard title="Contacts" icon={<Users className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{contacts.length}</span>}>
+                <SectionCard title="Clients" icon={<Users className="h-4 w-4" />} actions={<span className="text-xs text-muted-foreground tabular-nums">{contacts.length}</span>}>
                   {contacts.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-card-border p-10 text-center">
                       <Users className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                      <p className="text-sm font-medium mb-1">No contacts</p>
-                      <p className="text-xs text-muted-foreground">Contacts at this company will appear here.</p>
+                      <p className="text-sm font-medium mb-1">No clients</p>
+                      <p className="text-xs text-muted-foreground">Client contacts at this company will appear here.</p>
                     </div>
                   ) : (
                     <div className="space-y-2">

@@ -227,7 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const validIds = new Set(contacts.map((c) => c.id));
   const requested: string[] = Array.isArray(body.contact_ids) ? body.contact_ids : contacts.map((c) => c.id);
-  const enrollIds = requested.filter((cid) => validIds.has(cid));
+  const enrollIds = [...new Set(requested.filter((cid) => validIds.has(cid)))];
 
   // `jobs` has no owner/recruiter column — the BD sequence is sent by the
   // recruiter running it.
